@@ -1,4 +1,4 @@
-name: Verify HULK SA v0.6.5
+name: Verify HULK SA v0.6.5.1
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  verify-v065:
+  verify-v065-hotfix:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -19,7 +19,7 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Prepare HULK SA v0.6.5 source
+      - name: Prepare HULK SA v0.6.5.1 source
         shell: bash
         run: |
           set -euo pipefail
@@ -36,15 +36,17 @@ jobs:
           base64 --decode .payload/v065/apply_v065_targeted.py.xz.b64 | xz --decompress > /tmp/apply_v065.py
           echo "991eecdf79de0ce0c864e073035fb2fcdce9dce2a7470cce01851702d293475c  /tmp/apply_v065.py" | sha256sum --check
           python3 /tmp/apply_v065.py project
+          python3 .payload/v065/apply_v065_hotfix.py project
 
-          grep -q 'versionName = "0.6.5"' project/app/build.gradle.kts
+          grep -q 'versionName = "0.6.5.1"' project/app/build.gradle.kts
           grep -q 'WAITING_SCHEDULE' project/app/src/main/java/sa/hulksa/player/model/Models.kt
           grep -q 'fun setWifiOnly' project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
           grep -q 'fun setScheduleMode' project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
           grep -q 'fun setConcurrentDownloads' project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
           grep -q 'fun cyclePriority' project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
-          grep -q 'bytesPerSecond' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-          grep -q 'etaSeconds' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'finalizeCompletedFileAfterTransportError' project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
+          grep -q 'الجدولة الآن' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          ! grep -q 'الجدولة  الآن' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 
       - uses: actions/setup-java@v4
         with:
@@ -88,50 +90,50 @@ jobs:
           manifest.write_text(text)
           PY
 
-      - name: Test and build v0.6.5
+      - name: Test and build v0.6.5.1
         id: build
         shell: bash
         run: |
           set +e
           set -o pipefail
           cd project
-          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v065-build.log
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0651-build.log
           STATUS=${PIPESTATUS[0]}
           cd ..
           if [ "$STATUS" -eq 0 ]; then
             echo "success=true" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V065-BUILD_OK" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V0651-BUILD_OK" >> "$GITHUB_OUTPUT"
           else
-            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v065-build.log | head -n 1)"
-            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v065-build.log)"
+            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v0651-build.log | head -n 1)"
+            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v0651-build.log)"
             SAFE="$(printf '%s' "$ERROR" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-180)"
             echo "success=false" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V065-${SAFE}" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V0651-${SAFE}" >> "$GITHUB_OUTPUT"
           fi
           exit 0
 
-      - name: Prepare v0.6.5 APK
+      - name: Prepare v0.6.5.1 APK
         if: steps.build.outputs.success == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p output
-          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.6.5-beta.apk
-          sha256sum output/HULK-SA-v0.6.5-beta.apk | tee output/SHA256.txt
+          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.6.5.1-hotfix-beta.apk
+          sha256sum output/HULK-SA-v0.6.5.1-hotfix-beta.apk | tee output/SHA256.txt
 
-      - name: Upload v0.6.5 APK
+      - name: Upload v0.6.5.1 APK
         if: steps.build.outputs.success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.6.5-beta
+          name: HULK-SA-v0.6.5.1-hotfix-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish v0.6.5 verification marker
+      - name: Publish v0.6.5.1 verification marker
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.marker }}
-          path: v065-build.log
+          path: v0651-build.log
           if-no-files-found: error
           retention-days: 3
