@@ -86,11 +86,8 @@ data class HistoryEntry(
 
 enum class OfflineStatus {
     QUEUED,
-    CHECKING,
     DOWNLOADING,
     PAUSED,
-    WAITING_NETWORK,
-    WAITING_STORAGE,
     COMPLETED,
     FAILED,
 }
@@ -106,22 +103,11 @@ data class OfflineDownload(
     val seriesTitle: String? = null,
     val season: Int? = null,
     val episodeNumber: Int? = null,
-    val sourceCandidates: List<String> = emptyList(),
-    val fileName: String? = null,
-    val storagePath: String? = null,
-    val storageLabel: String = "التخزين الداخلي",
-    val supportsRange: Boolean? = null,
     val status: OfflineStatus = OfflineStatus.QUEUED,
     val bytesDownloaded: Long = 0L,
     val totalBytes: Long = -1L,
-    val bytesPerSecond: Long = 0L,
-    val etaSeconds: Long = -1L,
     val localUri: String? = null,
-    val errorMessage: String? = null,
-    val retryCount: Int = 0,
-    val integrityVerified: Boolean = false,
-    val priority: Int = 0,
-    val queuePosition: Int = 0,
+    val failureReason: Int? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
 ) {
     val progress: Float
