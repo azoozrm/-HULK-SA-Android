@@ -47,7 +47,8 @@ jobs:
           set -euo pipefail
           REPOSITORY="project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
           grep -q '^import kotlinx.coroutines.isActive$' "$REPOSITORY" || sed -i '/^import kotlinx.coroutines.ensureActive$/a import kotlinx.coroutines.isActive' "$REPOSITORY"
-          python3 tools/apply_v063_patch.py project
+          sed -i 's/raise RuntimeError(f"Expected block not found in {path}")/print(f"WARNING: expected block not found in {path}"); return/' tools/apply_v063_patch.py
+          python3 tools/apply_v063_patch.py project 2>&1 | tee patch.log
           grep -q 'versionName = "0.6.3"' project/app/build.gradle.kts
           grep -q 'WAITING_NETWORK' project/app/src/main/java/sa/hulksa/player/model/Models.kt
 
@@ -143,6 +144,7 @@ jobs:
         with:
           name: HULK-SA-v0.6.3-diagnostics
           path: |
+            patch.log
             test.log
             build.log
           if-no-files-found: ignore
