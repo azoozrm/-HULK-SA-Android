@@ -83,10 +83,12 @@ replace_once(
 )
 replace_once(
     main,
-    '''    Row(
+    '''    val shape = RoundedCornerShape(17.dp)
+    Row(
         modifier = Modifier
             .fillMaxWidth()''',
-    '''    Row(
+    '''    val shape = RoundedCornerShape(17.dp)
+    Row(
         modifier = modifier
             .fillMaxWidth()''',
 )
