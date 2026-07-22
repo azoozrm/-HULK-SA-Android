@@ -33,8 +33,52 @@ jobs:
           tar -xJf source.tar.xz -C project
           cp .patches/v0.6.1/DownloadRepository.kt project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
           cp .patches/v0.6.1/Models.kt project/app/src/main/java/sa/hulksa/player/model/Models.kt
-          sed -i 's/versionCode = 10/versionCode = 11/' project/app/build.gradle.kts
-          sed -i 's/versionName = "0.6.0"/versionName = "0.6.1"/' project/app/build.gradle.kts
+          sed -i 's/versionCode = 10/versionCode = 12/' project/app/build.gradle.kts
+          sed -i 's/versionName = "0.6.0"/versionName = "0.6.2"/' project/app/build.gradle.kts
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          s = p.read_text()
+          old = '''    val label = when {
+                  item.status == OfflineStatus.COMPLETED -> formatBytes(item.totalBytes.coerceAtLeast(item.bytesDownloaded))
+                  item.totalBytes > 0L -> "$percent%  •  ${formatBytes(item.bytesDownloaded)} / ${formatBytes(item.totalBytes)}"
+                  item.bytesDownloaded > 0L -> formatBytes(item.bytesDownloaded)
+                  else -> downloadStatusLabel(item.status)
+              }
+              Text(label, color = colors.textMuted, fontSize = 8.sp, maxLines = 1)'''
+          new = '''    val label = when {
+                  item.status == OfflineStatus.FAILED -> downloadFailureLabel(item.failureReason)
+                  item.status == OfflineStatus.COMPLETED -> formatBytes(item.totalBytes.coerceAtLeast(item.bytesDownloaded))
+                  item.totalBytes > 0L -> "$percent%  •  ${formatBytes(item.bytesDownloaded)} / ${formatBytes(item.totalBytes)}"
+                  item.bytesDownloaded > 0L -> formatBytes(item.bytesDownloaded)
+                  else -> downloadStatusLabel(item.status)
+              }
+              Text(label, color = colors.textMuted, fontSize = 8.sp, maxLines = 2)'''
+          if old not in s:
+              raise SystemExit('Download progress block not found')
+          s = s.replace(old, new)
+          marker = 'private fun downloadStatusLabel(status: OfflineStatus): String = when (status) {'
+          helper = '''private fun downloadFailureLabel(reason: Int?): String = when (reason) {
+              401 -> "HTTP 401 • بيانات الدخول مرفوضة"
+              403 -> "HTTP 403 • السيرفر منع التحميل المباشر"
+              404 -> "HTTP 404 • ملف الفيديو غير موجود"
+              416 -> "HTTP 416 • الاستكمال غير مدعوم؛ احذف الملف وأعد المحاولة"
+              in 500..599 -> "HTTP $reason • خادم الفيديو غير متاح مؤقتا"
+              1001 -> "خطأ شبكة • تعذر الاتصال بخادم الفيديو"
+              1002 -> "مساحة التخزين غير كافية"
+              1003 -> "البث HLS (m3u8) • يحتاج محرك تحميل مقاطع"
+              1004 -> "السيرفر لم يرسل بيانات الفيديو"
+              1005 -> "انقطع الاتصال قبل اكتمال الملف"
+              null -> "تعذر التحميل • السبب غير معروف"
+              else -> "HTTP $reason • فشل طلب التحميل"
+          }
+
+          '''
+          if marker not in s:
+              raise SystemExit('Download status marker not found')
+          s = s.replace(marker, helper + marker)
+          p.write_text(s)
+          PY
           test -f project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
 
       - name: Set up Java 17
@@ -94,13 +138,13 @@ jobs:
           APK="project/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           mkdir -p output
-          cp "$APK" output/HULK-SA-v0.6.1-beta.apk
-          sha256sum output/HULK-SA-v0.6.1-beta.apk | tee output/SHA256.txt
+          cp "$APK" output/HULK-SA-v0.6.2-beta.apk
+          sha256sum output/HULK-SA-v0.6.2-beta.apk | tee output/SHA256.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.6.1-beta
+          name: HULK-SA-v0.6.2-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
@@ -109,7 +153,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.6.1-build-log
+          name: HULK-SA-v0.6.2-build-log
           path: build.log
           if-no-files-found: ignore
           retention-days: 7
