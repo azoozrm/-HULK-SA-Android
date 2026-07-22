@@ -21,11 +21,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Restore compact HULK SA source
+      - name: Restore verified HULK SA source
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .payload/lean/source.b64 > source.tar.xz
+          cat \
+            .payload/lean-parts/part-00 \
+            .payload/lean-parts/part-01 \
+            .payload/lean-parts/part-02 \
+            .payload/lean-parts/part-03 \
+            .payload/lean-parts/part-04 \
+            .payload/lean-parts/part-05 \
+            .payload/lean-parts/part-06 \
+            .payload/lean-parts/part-07 \
+            .payload/lean-parts/part-08 \
+            .payload/lean-parts/part-09 > source.b64
+          test "$(wc -c < source.b64)" -eq 49856
+          base64 --decode source.b64 > source.tar.xz
           echo "1e203c251294ed3ba966a8824bfded293d301c61f1c265d71cb34768c469a650  source.tar.xz" | sha256sum --check
           mkdir -p project
           tar -xJf source.tar.xz -C project
