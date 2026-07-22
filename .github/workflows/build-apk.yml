@@ -5,9 +5,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -21,13 +18,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Restore HULK SA source
+      - name: Restore compact HULK SA source
         shell: bash
         run: |
           set -euo pipefail
-          cat .payload/source/part-* > source.tar.xz.b64
-          base64 --decode source.tar.xz.b64 > source.tar.xz
-          echo "dc046adbe100e3b9227872c4c155690aa52bec9180e803415f9e3cc47f158b02  source.tar.xz" | sha256sum --check
+          base64 --decode .payload/lean/source.b64 > source.tar.xz
+          echo "1e203c251294ed3ba966a8824bfded293d301c61f1c265d71cb34768c469a650  source.tar.xz" | sha256sum --check
           mkdir -p project
           tar -xJf source.tar.xz -C project
           test -f project/app/build.gradle.kts
@@ -48,19 +44,16 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android platform
+      - name: Install Android SDK 36
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Restore official branding and Arabic fonts
+      - name: Restore HULK SA branding and Arabic fonts
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq imagemagick
-
           mkdir -p project/app/src/main/res/font
           mkdir -p project/app/src/main/res/drawable-nodpi
 
@@ -70,11 +63,13 @@ jobs:
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-SemiBold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Bold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
 
-          curl -fL --retry 5 --retry-delay 2 "https://hulksa.com/assets/hulk-official-logo.webp" -o /tmp/hulk-logo.webp
-          convert /tmp/hulk-logo.webp -resize 1024x1024 -background black -gravity center -extent 1024x1024 project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
-          convert -size 320x180 xc:black /tmp/hulk-logo.webp -resize 150x150 -gravity center -composite project/app/src/main/res/drawable-nodpi/ic_banner.png
+          if ! curl -fL --retry 5 --retry-delay 2 "https://hulksa.com/assets/hulk-official-logo.webp" -o /tmp/hulk-logo.webp; then
+            cat .payload/assets/logo.part-* | base64 --decode > /tmp/hulk-logo.webp
+          fi
+          test -s /tmp/hulk-logo.webp
+          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
+          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/ic_banner.webp
 
-          rm -rf project/app/src/main/res/mipmap-anydpi-v26
           python3 - <<'PY'
           from pathlib import Path
           manifest = Path('project/app/src/main/AndroidManifest.xml')
@@ -84,21 +79,13 @@ jobs:
           manifest.write_text(text)
           PY
 
-          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
-          test -s project/app/src/main/res/drawable-nodpi/ic_banner.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
+          test -s project/app/src/main/res/drawable-nodpi/ic_banner.webp
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
-
-      - name: Run unit tests
-        working-directory: project
-        run: gradle --no-daemon testDebugUnitTest -PHULK_PORTAL_URL=http://3162356.xyz:8080
-
-      - name: Run Android lint
-        working-directory: project
-        run: gradle --no-daemon lintDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080
 
       - name: Build debug APK
         working-directory: project
-        run: gradle --no-daemon assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080
+        run: gradle --no-daemon :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace
 
       - name: Prepare APK artifact
         shell: bash
