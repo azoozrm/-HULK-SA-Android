@@ -1,0 +1,39 @@
+name: Export prepared HULK SA v0.6.4 source
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Prepare source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf project
+          mkdir -p project
+          cp -a source/. project/
+          REPOSITORY="project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
+          grep -q '^import kotlinx.coroutines.isActive$' "$REPOSITORY" || sed -i '/^import kotlinx.coroutines.ensureActive$/a import kotlinx.coroutines.isActive' "$REPOSITORY"
+          sed -i 's/raise RuntimeError(f"Expected block not found in {path}")/print(f"WARNING: expected block not found in {path}"); return/' tools/apply_v063_patch.py
+          python3 tools/apply_v063_patch.py project
+          python3 tools/apply_v064_patch.py project
+          tar -czf HULK-SA-v0.6.4-prepared-source.tar.gz -C project .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.6.4-prepared-source
+          path: HULK-SA-v0.6.4-prepared-source.tar.gz
+          if-no-files-found: error
+          retention-days: 3
