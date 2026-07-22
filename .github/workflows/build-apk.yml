@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   build:
@@ -43,12 +44,23 @@ jobs:
 
       - name: Apply v0.6.3 download system integration
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           REPOSITORY="project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
           grep -q '^import kotlinx.coroutines.isActive$' "$REPOSITORY" || sed -i '/^import kotlinx.coroutines.ensureActive$/a import kotlinx.coroutines.isActive' "$REPOSITORY"
           sed -i 's/raise RuntimeError(f"Expected block not found in {path}")/print(f"WARNING: expected block not found in {path}"); return/' tools/apply_v063_patch.py
-          python3 tools/apply_v063_patch.py project 2>&1 | tee patch.log
+          python3 tools/apply_v063_patch.py project > patch.log 2>&1
+          PATCH_STATUS=$?
+          cat patch.log
+          if [ "$PATCH_STATUS" -ne 0 ]; then
+            printf '### HULK SA v0.6.3 patch failure\n\n```text\n' > patch-comment.md
+            cat patch.log >> patch-comment.md
+            printf '\n```\n' >> patch-comment.md
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file patch-comment.md || true
+            exit "$PATCH_STATUS"
+          fi
           grep -q 'versionName = "0.6.3"' project/app/build.gradle.kts
           grep -q 'WAITING_NETWORK' project/app/src/main/java/sa/hulksa/player/model/Models.kt
 
