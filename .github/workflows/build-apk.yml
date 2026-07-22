@@ -10,8 +10,7 @@ on:
       - main
 
 permissions:
-  contents: read
-  pull-requests: write
+  contents: write
 
 jobs:
   build:
@@ -23,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
+          persist-credentials: true
 
       - name: Prepare HULK SA source
         shell: bash
@@ -44,8 +44,6 @@ jobs:
 
       - name: Apply v0.6.3 download system integration
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           REPOSITORY="project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
@@ -55,10 +53,15 @@ jobs:
           PATCH_STATUS=$?
           cat patch.log
           if [ "$PATCH_STATUS" -ne 0 ]; then
-            printf '### HULK SA v0.6.3 patch failure\n\n```text\n' > patch-comment.md
-            cat patch.log >> patch-comment.md
-            printf '\n```\n' >> patch-comment.md
-            gh pr comment "${{ github.event.pull_request.number }}" --body-file patch-comment.md || true
+            mkdir -p diagnostics
+            cp patch.log diagnostics/latest-patch.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -f diagnostics/latest-patch.log
+            if ! git diff --cached --quiet; then
+              git commit -m "Record v0.6.3 patch error [skip ci]"
+              git push origin "HEAD:${GITHUB_HEAD_REF}"
+            fi
             exit "$PATCH_STATUS"
           fi
           grep -q 'versionName = "0.6.3"' project/app/build.gradle.kts
