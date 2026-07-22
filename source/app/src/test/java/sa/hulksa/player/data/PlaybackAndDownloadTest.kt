@@ -1,0 +1,66 @@
+package sa.hulksa.player.data
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import sa.hulksa.player.model.AccountInfo
+import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
+import sa.hulksa.player.model.Credentials
+import sa.hulksa.player.model.OfflineDownload
+import sa.hulksa.player.model.PortalConfig
+import sa.hulksa.player.ui.screens.relativeChannelIndex
+
+class PlaybackAndDownloadTest {
+    @Test
+    fun livePlaybackUsesOnlyTheServerPreferredSource() {
+        val session = AuthenticatedSession(
+            portal = PortalConfig("http://example.test:8080", PortalConfig.Source.COMPILED),
+            credentials = Credentials("demo", "secret"),
+            account = AccountInfo("demo", "Active", null, 0, 1, false),
+        )
+        val channel = ContentItem(
+            id = 77,
+            name = "Demo TV",
+            categoryId = "1",
+            type = ContentType.LIVE,
+            posterUrl = null,
+            rating = null,
+            year = null,
+            containerExtension = "ts",
+        )
+
+        val request = XtreamClient().playback(session, channel)
+
+        assertEquals(1, request.candidates.size)
+        assertTrue(request.candidates.single().endsWith("/live/demo/secret/77.ts"))
+    }
+
+    @Test
+    fun nextAndPreviousChannelDirectionsAreNotReversed() {
+        assertEquals(3, relativeChannelIndex(currentIndex = 2, delta = 1, size = 5))
+        assertEquals(1, relativeChannelIndex(currentIndex = 2, delta = -1, size = 5))
+        assertEquals(0, relativeChannelIndex(currentIndex = 4, delta = 1, size = 5))
+        assertEquals(4, relativeChannelIndex(currentIndex = 0, delta = -1, size = 5))
+    }
+
+    @Test
+    fun offlineProgressIsCalculatedAndClamped() {
+        val item = OfflineDownload(
+            downloadId = 1L,
+            historyKey = "MOVIE:1",
+            title = "Demo",
+            posterUrl = null,
+            streamKind = "movie",
+            streamId = 1,
+            extension = "mp4",
+            bytesDownloaded = 75L,
+            totalBytes = 100L,
+        )
+
+        assertEquals(.75f, item.progress, 0.001f)
+        assertEquals(1f, item.copy(bytesDownloaded = 120L).progress, 0.001f)
+        assertEquals(0f, item.copy(totalBytes = -1L).progress, 0.001f)
+    }
+}
