@@ -25,7 +25,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .payload/source/part-* > source.tar.xz.b64
+          cat \
+            .payload/source/part-00 \
+            .payload/source/part-01 \
+            .payload/source/part-02 \
+            .payload/source/part-03 \
+            .payload/source/part-04 \
+            .payload/source/part-05-0 \
+            .payload/source/part-05-1 \
+            .payload/source/part-06 > source.tar.xz.b64
           base64 --decode source.tar.xz.b64 > source.tar.xz
           echo "dc046adbe100e3b9227872c4c155690aa52bec9180e803415f9e3cc47f158b02  source.tar.xz" | sha256sum --check
           mkdir -p project
