@@ -20,8 +20,8 @@ android {
         applicationId = "sa.hulksa.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.6.3"
+        versionCode = 10
+        versionName = "0.6.0"
 
         buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
         buildConfigField("String", "CONFIG_URL", configUrl.get().asBuildConfigString())
