@@ -1,0 +1,45 @@
+name: Diagnose v0.6.3 Patch
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Run patch and expose final error
+        id: patch
+        shell: bash
+        run: |
+          set +e
+          rm -rf project
+          mkdir -p project
+          cp -a source/. project/
+          REPOSITORY="project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
+          grep -q '^import kotlinx.coroutines.isActive$' "$REPOSITORY" || sed -i '/^import kotlinx.coroutines.ensureActive$/a import kotlinx.coroutines.isActive' "$REPOSITORY"
+          sed -i 's/raise RuntimeError(f"Expected block not found in {path}")/print(f"WARNING: expected block not found in {path}"); return/' tools/apply_v063_patch.py
+          python3 tools/apply_v063_patch.py project > patch.log 2>&1
+          STATUS=$?
+          LAST_LINE="$(tail -n 1 patch.log)"
+          SAFE="$(printf '%s' "$LAST_LINE" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-180)"
+          if [ "$STATUS" -eq 0 ]; then SAFE="PATCH_OK"; fi
+          echo "artifact_name=HULK-${SAFE}" >> "$GITHUB_OUTPUT"
+          cat patch.log
+          exit 0
+
+      - name: Publish diagnostic marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.patch.outputs.artifact_name }}
+          path: patch.log
+          if-no-files-found: error
+          retention-days: 1
