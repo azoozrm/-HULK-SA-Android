@@ -1,4 +1,4 @@
-name: Verify HULK SA v0.6.3
+name: Verify HULK SA v0.6.4
 
 on:
   pull_request:
@@ -30,6 +30,8 @@ jobs:
           grep -q '^import kotlinx.coroutines.isActive$' "$REPOSITORY" || sed -i '/^import kotlinx.coroutines.ensureActive$/a import kotlinx.coroutines.isActive' "$REPOSITORY"
           sed -i 's/raise RuntimeError(f"Expected block not found in {path}")/print(f"WARNING: expected block not found in {path}"); return/' tools/apply_v063_patch.py
           python3 tools/apply_v063_patch.py project
+          python3 tools/apply_v064_patch.py project
+          grep -q 'versionName = "0.6.4"' project/app/build.gradle.kts
 
       - uses: actions/setup-java@v4
         with:
@@ -85,13 +87,13 @@ jobs:
           cd ..
           if [ "$STATUS" -eq 0 ]; then
             echo "success=true" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V063-BUILD_OK" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V064-BUILD_OK" >> "$GITHUB_OUTPUT"
           else
             ERROR="$(grep -E '(^e: | error: |FAILURE:)' verification.log | head -n 1)"
             [ -n "$ERROR" ] || ERROR="$(tail -n 1 verification.log)"
             SAFE="$(printf '%s' "$ERROR" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-180)"
             echo "success=false" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V063-${SAFE}" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V064-${SAFE}" >> "$GITHUB_OUTPUT"
           fi
           exit 0
 
@@ -101,14 +103,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output
-          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.6.3-beta.apk
-          sha256sum output/HULK-SA-v0.6.3-beta.apk | tee output/SHA256.txt
+          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.6.4-beta.apk
+          sha256sum output/HULK-SA-v0.6.4-beta.apk | tee output/SHA256.txt
 
       - name: Upload APK
         if: steps.build.outputs.success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.6.3-beta
+          name: HULK-SA-v0.6.4-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
