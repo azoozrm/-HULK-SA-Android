@@ -22,7 +22,7 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Prepare HULK SA v0.7.1 source
+      - name: Prepare stable v0.6.5.1 base
         shell: bash
         run: |
           set -euo pipefail
@@ -41,15 +41,34 @@ jobs:
           python3 /tmp/apply_v065.py project
           python3 .payload/v065/apply_v065_hotfix.py project
 
+      - name: Apply v0.7.0 player base
+        shell: bash
+        run: |
+          set -euo pipefail
           cat .payload/v070/files.part-* | base64 --decode > /tmp/v070-files.tar.gz
           echo "228c3417e8c4d0a6e678b8e09e72738357addc40a0b95202df3918ac24c5cbc9  /tmp/v070-files.tar.gz" | sha256sum --check
           tar -xzf /tmp/v070-files.tar.gz -C project
 
+      - name: Decode verified v0.7.1 patch
+        shell: bash
+        run: |
+          set -euo pipefail
           base64 --decode .payload/v071/player-ux.patch.xz.b64 > /tmp/v071.patch.xz
           echo "e822bb6d3812890f460aa6d5c472e1d5b60dd9b30746b893c562d2e583b2b479  /tmp/v071.patch.xz" | sha256sum --check
           xz --decompress --stdout /tmp/v071.patch.xz > /tmp/v071.patch
-          (cd project && git apply --whitespace=nowarn /tmp/v071.patch)
 
+      - name: Apply v0.7.1 UX and lock fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd project
+          git apply --check /tmp/v071.patch
+          git apply --whitespace=nowarn /tmp/v071.patch
+
+      - name: Verify v0.7.1 source
+        shell: bash
+        run: |
+          set -euo pipefail
           grep -q 'versionName = "0.7.1"' project/app/build.gradle.kts
           grep -q 'fun DetailsNavigationDrawer' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
           grep -q 'HulkTextField' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
