@@ -1,0 +1,145 @@
+name: Build HULK SA v0.9.1.1 Direct Current
+
+on:
+  push:
+    branches:
+      - v0911-direct
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-direct-current:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download exact current v0.9.1 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf project source-artifact.zip source-artifact
+          mkdir -p project source-artifact
+          curl -fL --retry 5 --retry-delay 2 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/8581493204/zip" \
+            -o source-artifact.zip
+          unzip -q source-artifact.zip -d source-artifact
+          tar -xzf source-artifact/HULK-SA-v0.9.1-current-source.tar.gz -C project
+          grep -q 'versionName = "0.9.1"' project/app/build.gradle.kts
+          grep -q 'versionCode = 22' project/app/build.gradle.kts
+
+      - name: Apply only v0.9.1.1 requested fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .payload/v0911-patch/part-* | base64 --decode > /tmp/v0911-direct.patch.gz
+          echo "566ddebe34fc136ae859db5b98032588d835946d1bc8fbbee6fedbf5000a2c9f  /tmp/v0911-direct.patch.gz" | sha256sum --check
+          gzip -dc /tmp/v0911-direct.patch.gz > /tmp/v0911-direct.patch
+          (cd project && patch -p1 --dry-run < /tmp/v0911-direct.patch)
+          (cd project && patch -p1 < /tmp/v0911-direct.patch)
+          grep -q 'versionName = "0.9.1.1"' project/app/build.gradle.kts
+          grep -q 'versionCode = 23' project/app/build.gradle.kts
+          grep -q 'Text("الرئيسية"' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'قائمتي' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'المساحة المتاحة بالجهاز' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'لانك شاهدت' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'left = favoriteRequester; right = channelRequester' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'left = channelRequester; right = playRequester' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'seekBy(SEEK_STEP_MS)' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+          grep -q 'استئناف التحميل' project/app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-read-only: false
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Restore approved HULK SA branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
+          FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Medium.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-SemiBold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Bold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
+          if ! curl -fL --retry 5 --retry-delay 2 "https://hulksa.com/assets/hulk-official-logo.webp" -o /tmp/hulk-logo.webp; then
+            cat .payload/assets/logo.part-* | base64 --decode > /tmp/hulk-logo.webp
+          fi
+          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
+          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('project/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text().replace('@mipmap/ic_launcher_round', '@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher', '@drawable/hulk_sa_logo')
+          manifest.write_text(text)
+          PY
+
+      - name: Test and build v0.9.1.1
+        id: build
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          cd project
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0911-direct-build.log
+          STATUS=${PIPESTATUS[0]}
+          cd ..
+          if [ "$STATUS" -eq 0 ]; then
+            echo "success=true" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V0911-DIRECT-BUILD_OK" >> "$GITHUB_OUTPUT"
+          else
+            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v0911-direct-build.log | head -n 1)"
+            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v0911-direct-build.log)"
+            SAFE="$(printf '%s' "$ERROR" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-160)"
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V0911-DIRECT-${SAFE}" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Prepare APK
+        if: steps.build.outputs.success == 'true'
+        shell: bash
+        run: |
+          mkdir -p output
+          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.1-direct-hotfix-beta.apk
+          sha256sum output/HULK-SA-v0.9.1.1-direct-hotfix-beta.apk | tee output/SHA256.txt
+
+      - name: Upload APK
+        if: steps.build.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.1.1-direct-hotfix
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.marker }}
+          path: v0911-direct-build.log
+          if-no-files-found: error
+          retention-days: 3
