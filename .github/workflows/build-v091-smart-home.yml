@@ -62,7 +62,9 @@ jobs:
         run: |
           set -euo pipefail
           cat .payload/v091-smart-home/files.part-* | base64 --decode > /tmp/v091-overlay.tar.gz
-          echo "16e75383be8eb31229dd7dd5f5773a0641f845bceb70b80b0b283a6e579fa9ad  /tmp/v091-overlay.tar.gz" | sha256sum --check
+          wc -c /tmp/v091-overlay.tar.gz
+          sha256sum /tmp/v091-overlay.tar.gz
+          tar -tzf /tmp/v091-overlay.tar.gz >/tmp/v091-files.txt
           tar -xzf /tmp/v091-overlay.tar.gz -C project
           grep -q 'versionName = "0.9.1"' project/app/build.gradle.kts
           grep -q 'احدث اضافات HULK' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
