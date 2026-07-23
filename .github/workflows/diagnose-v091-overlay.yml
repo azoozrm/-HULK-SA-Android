@@ -19,19 +19,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
-      - name: Inspect overlay
+      - name: Inspect clean overlay
         shell: bash
         run: |
           set +e
           {
             echo '=== payload files ==='
-            wc -c .payload/v091-smart-home/files.part-*
+            wc -c .payload/v091-clean/chunk-*
             echo '=== decode ==='
-            cat .payload/v091-smart-home/files.part-* | base64 --decode > /tmp/v091-overlay.tar.gz
+            cat .payload/v091-clean/chunk-* | base64 --decode > /tmp/v091-overlay.tar.gz
             echo "decode_status=$?"
             echo '=== archive ==='
             wc -c /tmp/v091-overlay.tar.gz
             sha256sum /tmp/v091-overlay.tar.gz
+            echo "16e75383be8eb31229dd7dd5f5773a0641f845bceb70b80b0b283a6e579fa9ad  /tmp/v091-overlay.tar.gz" | sha256sum --check
+            echo "checksum_status=$?"
             gzip -t /tmp/v091-overlay.tar.gz
             echo "gzip_status=$?"
             tar -tzf /tmp/v091-overlay.tar.gz
@@ -40,7 +42,7 @@ jobs:
           exit 0
       - uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v091-overlay-diagnostic
+          name: HULK-SA-v091-clean-overlay-diagnostic
           path: v091-overlay-diagnostic.log
           if-no-files-found: error
           retention-days: 3
