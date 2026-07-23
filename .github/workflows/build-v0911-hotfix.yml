@@ -70,9 +70,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .payload/v0911-hotfix/chunk-* | base64 --decode > /tmp/v0911-hotfix.tar.gz
-          sha256sum /tmp/v0911-hotfix.tar.gz
-          gzip -t /tmp/v0911-hotfix.tar.gz
+          cat .payload/v0911-hotfix-small/chunk-* | base64 --decode > /tmp/v0911-hotfix.tar.gz
+          echo "9ed619ea07667f7ba9ecf411ef09b93cbc8988fe5d3b6dc260ebcecb318b53fb  /tmp/v0911-hotfix.tar.gz" | sha256sum --check
+          tar -tzf /tmp/v0911-hotfix.tar.gz >/tmp/v0911-files.txt
           tar -xzf /tmp/v0911-hotfix.tar.gz -C project
           python3 .payload/v0911-hotfix/fix_live_focus.py project
           grep -q 'versionName = "0.9.1.1"' project/app/build.gradle.kts
