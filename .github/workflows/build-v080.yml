@@ -1,4 +1,4 @@
-name: Build HULK SA v0.8.0 Professional Details
+name: Build HULK SA v0.8.1 Series Progress Seek Hotfix
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  build-v080:
+  build-v081:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -76,24 +76,23 @@ jobs:
           echo "2e6b546d2365ee6f7e511aa8ad34d1ac2d7df98afa54a1748fa3738b195ea86c  /tmp/v080-files.tar.gz" | sha256sum --check
           tar -xzf /tmp/v080-files.tar.gz -C project
 
-      - name: Verify v0.8.0 source
+      - name: Apply v0.8.1 series progress and seek hotfix
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'versionName = "0.8.0"' project/app/build.gradle.kts
-          grep -q 'أعمال مشابهة' project/app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
-          grep -q 'مسلسلات مشابهة' project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
-          grep -q 'استكمال م' project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
+          python3 .payload/v081/apply_v081.py project
+
+      - name: Verify v0.8.1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionName = "0.8.1"' project/app/build.gradle.kts
+          grep -q 'private fun SeekableProgressBar' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+          grep -q 'fun onPlaybackProgress(request: PlaybackRequest' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
+          grep -q 'LaunchedEffect(resumePair?.first?.id)' project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
+          grep -q 'start = if (isTv) 18.dp else 7.dp' project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
           ! grep -q 'DetailsNavigationDrawer' project/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt
           ! grep -q 'KEYCODE_DPAD_RIGHT' project/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt
-
-      - name: Upload assembled v0.8.0 source
-        uses: actions/upload-artifact@v4
-        with:
-          name: HULK-SA-v0.8.0-assembled-source
-          path: project/
-          if-no-files-found: error
-          retention-days: 3
 
       - uses: actions/setup-java@v4
         with:
@@ -137,42 +136,42 @@ jobs:
           manifest.write_text(text)
           PY
 
-      - name: Test and build v0.8.0
+      - name: Test and build v0.8.1
         id: build
         shell: bash
         run: |
           set +e
           set -o pipefail
           cd project
-          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v080-build.log
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v081-build.log
           STATUS=${PIPESTATUS[0]}
           cd ..
           if [ "$STATUS" -eq 0 ]; then
             echo "success=true" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V080-BUILD_OK" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V081-BUILD_OK" >> "$GITHUB_OUTPUT"
           else
-            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v080-build.log | head -n 1)"
-            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v080-build.log)"
+            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v081-build.log | head -n 1)"
+            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v081-build.log)"
             SAFE="$(printf '%s' "$ERROR" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-180)"
             echo "success=false" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V080-${SAFE}" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V081-${SAFE}" >> "$GITHUB_OUTPUT"
           fi
           exit 0
 
-      - name: Prepare v0.8.0 APK
+      - name: Prepare v0.8.1 APK
         if: steps.build.outputs.success == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p output
-          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.8.0-professional-details-beta.apk
-          sha256sum output/HULK-SA-v0.8.0-professional-details-beta.apk | tee output/SHA256.txt
+          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.8.1-series-progress-seek-hotfix-beta.apk
+          sha256sum output/HULK-SA-v0.8.1-series-progress-seek-hotfix-beta.apk | tee output/SHA256.txt
 
-      - name: Upload v0.8.0 APK
+      - name: Upload v0.8.1 APK
         if: steps.build.outputs.success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.8.0-professional-details-beta
+          name: HULK-SA-v0.8.1-series-progress-seek-hotfix-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
@@ -181,6 +180,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.marker }}
-          path: v080-build.log
+          path: v081-build.log
           if-no-files-found: error
           retention-days: 3
