@@ -65,9 +65,13 @@ jobs:
           echo "16e75383be8eb31229dd7dd5f5773a0641f845bceb70b80b0b283a6e579fa9ad  /tmp/v091-overlay.tar.gz" | sha256sum --check
           tar -tzf /tmp/v091-overlay.tar.gz >/tmp/v091-files.txt
           tar -xzf /tmp/v091-overlay.tar.gz -C project
+          SCREEN="project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+          sed -i 's/remembered.itemKey == item.downloadId || (remembered.itemKey.isBlank() && index == rememberedIndex)/remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() \&\& index == rememberedIndex)/' "$SCREEN"
+          sed -i 's/navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId, index)/navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)/' "$SCREEN"
           grep -q 'versionName = "0.9.1"' project/app/build.gradle.kts
-          grep -q 'احدث اضافات HULK' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-          grep -q 'NavigationMemoryStore' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'احدث اضافات HULK' "$SCREEN"
+          grep -q 'item.downloadId.toString()' "$SCREEN"
+          grep -q 'NavigationMemoryStore' "$SCREEN"
           grep -q 'SEEK_STEP_MS' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 
       - uses: actions/setup-java@v4
