@@ -1,0 +1,33 @@
+name: Export uploaded v0.9.1.1 payload
+
+on:
+  push:
+    branches:
+      - v091-smart-home
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - name: Collect payload
+        run: |
+          mkdir -p uploaded
+          cp .payload/v0911-hotfix-small/chunk-* uploaded/
+          sha256sum uploaded/* > uploaded/SHA256.txt
+          git hash-object uploaded/chunk-* > uploaded/GIT_HASHES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0911-uploaded-payload
+          path: uploaded/
+          if-no-files-found: error
+          retention-days: 3
