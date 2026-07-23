@@ -1,0 +1,46 @@
+name: Diagnose HULK SA v0.9.1 Overlay
+
+on:
+  push:
+    branches:
+      - v091-smart-home
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - name: Inspect overlay
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '=== payload files ==='
+            wc -c .payload/v091-smart-home/files.part-*
+            echo '=== decode ==='
+            cat .payload/v091-smart-home/files.part-* | base64 --decode > /tmp/v091-overlay.tar.gz
+            echo "decode_status=$?"
+            echo '=== archive ==='
+            wc -c /tmp/v091-overlay.tar.gz
+            sha256sum /tmp/v091-overlay.tar.gz
+            gzip -t /tmp/v091-overlay.tar.gz
+            echo "gzip_status=$?"
+            tar -tzf /tmp/v091-overlay.tar.gz
+            echo "tar_status=$?"
+          } 2>&1 | tee v091-overlay-diagnostic.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v091-overlay-diagnostic
+          path: v091-overlay-diagnostic.log
+          if-no-files-found: error
+          retention-days: 3
