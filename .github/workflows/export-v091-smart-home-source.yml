@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - v091-smart-home
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -16,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.head_ref || github.ref_name }}
       - name: Prepare verified Smart Home v0.9.0 base
         shell: bash
         run: |
