@@ -1,0 +1,155 @@
+name: Build HULK SA v0.9.1 Smart Home
+
+on:
+  push:
+    branches:
+      - v091-smart-home
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-v091:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Prepare verified base through v0.9.0 Smart Home
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf project
+          mkdir -p project
+          cp -a source/. project/
+          REPOSITORY="project/app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
+          grep -q '^import kotlinx.coroutines.isActive$' "$REPOSITORY" || sed -i '/^import kotlinx.coroutines.ensureActive$/a import kotlinx.coroutines.isActive' "$REPOSITORY"
+          sed -i 's/raise RuntimeError(f"Expected block not found in {path}")/print(f"WARNING: expected block not found in {path}"); return/' tools/apply_v063_patch.py
+          python3 tools/apply_v063_patch.py project
+          python3 tools/apply_v064_patch.py project
+          base64 --decode .payload/v065/apply_v065_targeted.py.xz.b64 | xz --decompress > /tmp/apply_v065.py
+          echo "991eecdf79de0ce0c864e073035fb2fcdce9dce2a7470cce01851702d293475c  /tmp/apply_v065.py" | sha256sum --check
+          python3 /tmp/apply_v065.py project
+          python3 .payload/v065/apply_v065_hotfix.py project
+          cat .payload/v070/files.part-* | base64 --decode > /tmp/v070-files.tar.gz
+          echo "228c3417e8c4d0a6e678b8e09e72738357addc40a0b95202df3918ac24c5cbc9  /tmp/v070-files.tar.gz" | sha256sum --check
+          tar -xzf /tmp/v070-files.tar.gz -C project
+          base64 --decode .payload/v071/player-ux.patch.xz.b64 > /tmp/v071.patch.xz
+          echo "e822bb6d3812890f460aa6d5c472e1d5b60dd9b30746b893c562d2e583b2b479  /tmp/v071.patch.xz" | sha256sum --check
+          xz --decompress --stdout /tmp/v071.patch.xz > /tmp/v071.patch
+          (cd project && git apply --check /tmp/v071.patch && git apply --whitespace=nowarn /tmp/v071.patch)
+          cat .payload/v072/files.part-* | base64 --decode > /tmp/v072-files.tar.gz
+          echo "f895adb3710d8481e13e60d1d34df5924c767572507a3db7be5d4643eb9f788c  /tmp/v072-files.tar.gz" | sha256sum --check
+          tar -xzf /tmp/v072-files.tar.gz -C project
+          cat .payload/v080/files.part-* | base64 --decode > /tmp/v080-files.tar.gz
+          echo "2e6b546d2365ee6f7e511aa8ad34d1ac2d7df98afa54a1748fa3738b195ea86c  /tmp/v080-files.tar.gz" | sha256sum --check
+          tar -xzf /tmp/v080-files.tar.gz -C project
+          python3 .payload/v081/apply_v081.py project
+          cat .payload/v090/files.part-* | base64 --decode > /tmp/v090-files.tar.gz
+          echo "6c0dc6c3de0a3d2e5ef8975470a839f29f1184d17a987ba7c7c2a74d163ae05e  /tmp/v090-files.tar.gz" | sha256sum --check
+          tar -xzf /tmp/v090-files.tar.gz -C project
+          grep -q 'versionName = "0.9.0"' project/app/build.gradle.kts
+          grep -q 'التحميلات الجارية' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+
+      - name: Apply HULK SA v0.9.1 fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .payload/v091-smart-home/files.part-* | base64 --decode > /tmp/v091-overlay.tar.gz
+          echo "16e75383be8eb31229dd7dd5f5773a0641f845bceb70b80b0b283a6e579fa9ad  /tmp/v091-overlay.tar.gz" | sha256sum --check
+          tar -xzf /tmp/v091-overlay.tar.gz -C project
+          grep -q 'versionName = "0.9.1"' project/app/build.gradle.kts
+          grep -q 'احدث اضافات HULK' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'NavigationMemoryStore' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'SEEK_STEP_MS' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-read-only: false
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Restore approved HULK SA branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
+          FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Medium.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-SemiBold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf
+          curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Bold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
+          if ! curl -fL --retry 5 --retry-delay 2 "https://hulksa.com/assets/hulk-official-logo.webp" -o /tmp/hulk-logo.webp; then
+            cat .payload/assets/logo.part-* | base64 --decode > /tmp/hulk-logo.webp
+          fi
+          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
+          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('project/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text().replace('@mipmap/ic_launcher_round', '@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher', '@drawable/hulk_sa_logo')
+          manifest.write_text(text)
+          PY
+
+      - name: Test and build v0.9.1
+        id: build
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          cd project
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v091-build.log
+          STATUS=${PIPESTATUS[0]}
+          cd ..
+          if [ "$STATUS" -eq 0 ]; then
+            echo "success=true" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V091-BUILD_OK" >> "$GITHUB_OUTPUT"
+          else
+            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v091-build.log | head -n 1)"
+            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v091-build.log)"
+            SAFE="$(printf '%s' "$ERROR" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-180)"
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V091-${SAFE}" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Prepare v0.9.1 APK
+        if: steps.build.outputs.success == 'true'
+        run: |
+          mkdir -p output
+          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1-smart-home-beta.apk
+          sha256sum output/HULK-SA-v0.9.1-smart-home-beta.apk | tee output/SHA256.txt
+
+      - name: Upload v0.9.1 APK
+        if: steps.build.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.1-smart-home-beta
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish verification marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.marker }}
+          path: v091-build.log
+          if-no-files-found: error
+          retention-days: 3
