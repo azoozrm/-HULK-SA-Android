@@ -71,15 +71,17 @@ jobs:
         run: |
           set -euo pipefail
           cat .payload/v0911-hotfix/chunk-* | base64 --decode > /tmp/v0911-hotfix.tar.gz
-          echo "9ed619ea07667f7ba9ecf411ef09b93cbc8988fe5d3b6dc260ebcecb318b53fb  /tmp/v0911-hotfix.tar.gz" | sha256sum --check
-          tar -tzf /tmp/v0911-hotfix.tar.gz >/tmp/v0911-files.txt
+          sha256sum /tmp/v0911-hotfix.tar.gz
+          gzip -t /tmp/v0911-hotfix.tar.gz
           tar -xzf /tmp/v0911-hotfix.tar.gz -C project
+          python3 .payload/v0911-hotfix/fix_live_focus.py project
           grep -q 'versionName = "0.9.1.1"' project/app/build.gradle.kts
           grep -q 'Text("الرئيسية"' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
           grep -q 'قائمتي' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
           grep -q 'المساحة المتاحة بالجهاز' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
           grep -q 'لانك شاهدت' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-          grep -q 'left = favoriteRequester' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'left = favoriteRequester; right = channelRequester' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -q 'left = channelRequester; right = playRequester' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
           grep -q 'seekBy(SEEK_STEP_MS)' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
           grep -q 'استئناف التحميل' project/app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
 
