@@ -45,9 +45,10 @@ jobs:
           echo "228c3417e8c4d0a6e678b8e09e72738357addc40a0b95202df3918ac24c5cbc9  /tmp/v070-files.tar.gz" | sha256sum --check
           tar -xzf /tmp/v070-files.tar.gz -C project
 
-          cat .payload/v071/files.part-* | base64 --decode > /tmp/v071-files.tar.gz
-          echo "78aaed9685a1603c6fe1ae7db671644e5b4c6a5b3d55cdef71ed412634806407  /tmp/v071-files.tar.gz" | sha256sum --check
-          tar -xzf /tmp/v071-files.tar.gz -C project
+          base64 --decode .payload/v071/player-ux.patch.xz.b64 > /tmp/v071.patch.xz
+          echo "e822bb6d3812890f460aa6d5c472e1d5b60dd9b30746b893c562d2e583b2b479  /tmp/v071.patch.xz" | sha256sum --check
+          xz --decompress --stdout /tmp/v071.patch.xz > /tmp/v071.patch
+          (cd project && git apply --whitespace=nowarn /tmp/v071.patch)
 
           grep -q 'versionName = "0.7.1"' project/app/build.gradle.kts
           grep -q 'fun DetailsNavigationDrawer' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
