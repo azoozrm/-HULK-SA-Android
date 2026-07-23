@@ -13,6 +13,9 @@ p.write_text(s, encoding="utf-8")
 # Home hero: rotate newest items and exclude the active hero from rows.
 p = root / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
 s = p.read_text(encoding="utf-8")
+if "import kotlinx.coroutines.delay" not in s:
+    anchor = "import coil3.compose.AsyncImage\n"
+    s = s.replace(anchor, anchor + "import kotlinx.coroutines.delay\n", 1)
 start = s.index('    val movies = remember(state.catalogs[ContentType.MOVIE])')
 end = s.index('    val continueWatching =', start)
 replacement = '''    val movies = remember(state.catalogs[ContentType.MOVIE]) { newest(state.catalogs[ContentType.MOVIE]?.items.orEmpty()) }
@@ -23,7 +26,7 @@ replacement = '''    val movies = remember(state.catalogs[ContentType.MOVIE]) { 
             .distinctBy { "${it.type}:${it.id}" }
             .take(8)
     }
-    var featuredIndex by remember(featuredCandidates) { mutableIntStateOf(0) }
+    var featuredIndex by remember(featuredCandidates) { mutableStateOf(0) }
     LaunchedEffect(featuredCandidates) {
         while (featuredCandidates.size > 1) {
             delay(9_000L)
