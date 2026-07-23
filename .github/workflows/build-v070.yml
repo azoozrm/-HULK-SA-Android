@@ -50,6 +50,18 @@ jobs:
           grep -q 'TrackSelectionOverride' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
           grep -q 'ResumePrompt' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 
+      - name: Package prepared v0.7.0 source
+        shell: bash
+        run: tar -czf HULK-SA-v0.7.0-prepared-source.tar.gz -C project .
+
+      - name: Upload prepared v0.7.0 source
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.7.0-prepared-source
+          path: HULK-SA-v0.7.0-prepared-source.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
