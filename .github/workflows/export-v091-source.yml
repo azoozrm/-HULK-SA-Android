@@ -1,0 +1,44 @@
+name: Export v0.9.1 Source
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore compact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .payload/lean/chunk-* > source.tar.xz.b64
+          base64 --decode source.tar.xz.b64 > source.tar.xz
+          mkdir -p project
+          tar -xJf source.tar.xz -C project
+          test -f project/app/build.gradle.kts
+          test -f project/app/src/main/java/sa/hulksa/player/MainActivity.kt
+
+      - name: Package source
+        shell: bash
+        run: |
+          tar -czf HULK-SA-v091-source.tar.gz -C project .
+          sha256sum HULK-SA-v091-source.tar.gz > HULK-SA-v091-source.sha256
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v091-source
+          path: |
+            HULK-SA-v091-source.tar.gz
+            HULK-SA-v091-source.sha256
+          if-no-files-found: error
+          retention-days: 7
