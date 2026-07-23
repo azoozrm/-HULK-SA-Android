@@ -68,10 +68,10 @@ jobs:
       - name: Report v0.7.1 source markers
         shell: bash
         run: |
-          set -euo pipefail
-          grep -n 'versionName' project/app/build.gradle.kts | head -n 2
-          grep -n 'DetailsNavigationDrawer' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt | head -n 2
-          grep -n 'unlockFocus\|resumeFocus\|HulkTextField' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt | head -n 8
+          set -eu
+          grep -n 'versionName' project/app/build.gradle.kts | head -n 2 || true
+          grep -n 'DetailsNavigationDrawer' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt | head -n 2 || true
+          grep -n 'unlockFocus\|resumeFocus\|HulkTextField' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt | head -n 8 || true
 
       - uses: actions/setup-java@v4
         with:
