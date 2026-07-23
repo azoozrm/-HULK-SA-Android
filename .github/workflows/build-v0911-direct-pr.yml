@@ -1,0 +1,59 @@
+name: Verify HULK SA v0.9.1.1 Direct Current
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-direct-current:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-read-only: false
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build directly from current v0.9.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/build-v0911-direct-current.sh
+
+      - name: Upload v0.9.1.1 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.1.1-direct-hotfix
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-V0911-DIRECT-BUILD-LOG
+          path: v0911-direct-build.log
+          if-no-files-found: ignore
+          retention-days: 3
