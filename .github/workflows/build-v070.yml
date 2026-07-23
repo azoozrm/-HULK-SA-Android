@@ -1,4 +1,4 @@
-name: Build HULK SA v0.7.1 Player UX
+name: Build HULK SA v0.7.2 Focus Progress Live Browser
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  build-v071:
+  build-v072:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -73,6 +73,23 @@ jobs:
           grep -n 'DetailsNavigationDrawer' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt | head -n 2 || true
           grep -n 'unlockFocus\|resumeFocus\|HulkTextField' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt | head -n 8 || true
 
+      - name: Apply v0.7.2 focus progress and live browser fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .payload/v072/files.part-* | base64 --decode > /tmp/v072-files.tar.gz
+          echo "f895adb3710d8481e13e60d1d34df5924c767572507a3db7be5d4643eb9f788c  /tmp/v072-files.tar.gz" | sha256sum --check
+          tar -xzf /tmp/v072-files.tar.gz -C project
+
+      - name: Verify v0.7.2 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionName = "0.7.2"' project/app/build.gradle.kts
+          grep -q 'private fun LiveChannelBrowser' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+          grep -q 'استكمال المشاهدة' project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
+          grep -q 'KEYCODE_DPAD_RIGHT' project/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -115,42 +132,42 @@ jobs:
           manifest.write_text(text)
           PY
 
-      - name: Test and build v0.7.1
+      - name: Test and build v0.7.2
         id: build
         shell: bash
         run: |
           set +e
           set -o pipefail
           cd project
-          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v071-build.log
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v072-build.log
           STATUS=${PIPESTATUS[0]}
           cd ..
           if [ "$STATUS" -eq 0 ]; then
             echo "success=true" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V071-BUILD_OK" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V072-BUILD_OK" >> "$GITHUB_OUTPUT"
           else
-            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v071-build.log | head -n 1)"
-            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v071-build.log)"
+            ERROR="$(grep -E '(^e: | error: |FAILURE:)' v072-build.log | head -n 1)"
+            [ -n "$ERROR" ] || ERROR="$(tail -n 1 v072-build.log)"
             SAFE="$(printf '%s' "$ERROR" | sed 's/[^A-Za-z0-9._-]/_/g' | cut -c1-180)"
             echo "success=false" >> "$GITHUB_OUTPUT"
-            echo "marker=HULK-V071-${SAFE}" >> "$GITHUB_OUTPUT"
+            echo "marker=HULK-V072-${SAFE}" >> "$GITHUB_OUTPUT"
           fi
           exit 0
 
-      - name: Prepare v0.7.1 APK
+      - name: Prepare v0.7.2 APK
         if: steps.build.outputs.success == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p output
-          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.7.1-player-ux-hotfix-beta.apk
-          sha256sum output/HULK-SA-v0.7.1-player-ux-hotfix-beta.apk | tee output/SHA256.txt
+          cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.7.2-focus-progress-live-browser-beta.apk
+          sha256sum output/HULK-SA-v0.7.2-focus-progress-live-browser-beta.apk | tee output/SHA256.txt
 
-      - name: Upload v0.7.1 APK
+      - name: Upload v0.7.2 APK
         if: steps.build.outputs.success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.7.1-player-ux-hotfix-beta
+          name: HULK-SA-v0.7.2-focus-progress-live-browser-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
@@ -159,6 +176,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.marker }}
-          path: v071-build.log
+          path: v072-build.log
           if-no-files-found: error
           retention-days: 3
