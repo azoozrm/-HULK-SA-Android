@@ -1,4 +1,4 @@
-name: Build HULK SA v0.9.1.5 Isolated
+name: Build HULK SA v0.9.1.6 Isolated
 
 on:
   pull_request:
@@ -29,21 +29,21 @@ jobs:
       - run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Build current v0.9.1.5
+      - name: Build current v0.9.1.6
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash tools/build-v0912-current.sh
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: HULK-SA-v0.9.1.5-current-beta
+          name: HULK-SA-v0.9.1.6-current-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: HULK-V0915-BUILD-LOG
-          path: v0915-build.log
+          name: HULK-V0916-BUILD-LOG
+          path: v0916-build.log
           if-no-files-found: ignore
           retention-days: 3
