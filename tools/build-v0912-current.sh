@@ -19,10 +19,13 @@ python3 tools/apply-v0914-fixed.py project
 grep -q 'versionName = "0.9.1.4"' project/app/build.gradle.kts
 python3 tools/apply-v0915.py project
 grep -q 'versionName = "0.9.1.5"' project/app/build.gradle.kts
-grep -q 'height(if (isTv) 292.dp else 268.dp)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'Modifier.fillMaxWidth().height(38.dp)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'priorityShortLabel(item.priority)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'الغاء التحميل' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+python3 tools/apply-v0916.py project
+grep -q 'versionName = "0.9.1.6"' project/app/build.gradle.kts
+grep -q 'LaunchedEffect(remembered.rowKey)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+! grep -q 'LaunchedEffect(remembered.rowKey, featured.id)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'personalizedRecommended' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'personalizedLive.take(20)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'قنوات مقترحة لك' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -37,7 +40,7 @@ from pathlib import Path
 p=Path('project/app/src/main/AndroidManifest.xml');t=p.read_text().replace('@mipmap/ic_launcher_round','@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher','@drawable/hulk_sa_logo');p.write_text(t)
 PY
 cd project
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0915-build.log
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0916-build.log
 cd ..
-cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.5-current-beta.apk
-sha256sum output/HULK-SA-v0.9.1.5-current-beta.apk | tee output/SHA256.txt
+cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.6-current-beta.apk
+sha256sum output/HULK-SA-v0.9.1.6-current-beta.apk | tee output/SHA256.txt
