@@ -29,10 +29,10 @@ gzip -dc /tmp/v0918.patch.gz > /tmp/v0918.patch
 (cd project && patch -p1 --dry-run < /tmp/v0918.patch && patch -p1 < /tmp/v0918.patch)
 python3 tools/apply-v0918-fix1.py project
 grep -q 'versionName = "0.9.1.8"' project/app/build.gradle.kts
-grep -q 'class ServerDiagnosticsEngine' project/app/src/main/java/sa/hulksa/player/data/ServerDiagnosticsEngine.kt
-grep -q 'return@withContext ServerDiagnosticsReport' project/app/src/main/java/sa/hulksa/player/data/ServerDiagnosticsEngine.kt
-grep -q 'DiagnosticsCenter' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'fun runDiagnostics' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
+python3 tools/apply-v0919.py project
+grep -q 'versionName = "0.9.1.9"' project/app/build.gradle.kts
+grep -q 'state = settingsListState' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'modifier = Modifier.focusRequester(topRequester)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -47,7 +47,7 @@ from pathlib import Path
 p=Path('project/app/src/main/AndroidManifest.xml');t=p.read_text().replace('@mipmap/ic_launcher_round','@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher','@drawable/hulk_sa_logo');p.write_text(t)
 PY
 cd project
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0918-build.log
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0919-build.log
 cd ..
-cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.8-current-beta.apk
-sha256sum output/HULK-SA-v0.9.1.8-current-beta.apk | tee output/SHA256.txt
+cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.9-current-beta.apk
+sha256sum output/HULK-SA-v0.9.1.9-current-beta.apk | tee output/SHA256.txt
