@@ -1,11 +1,9 @@
-name: Build HULK SA v0.9.1.3 Current
+name: Build HULK SA v0.9.1.3 Isolated
 
 on:
-  push:
+  pull_request:
     branches:
-      - v0912-current
-    paths:
-      - trigger-v0913.txt
+      - v0913-build-base
   workflow_dispatch:
 
 permissions:
@@ -19,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v0912-current
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
