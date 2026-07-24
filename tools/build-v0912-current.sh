@@ -30,7 +30,7 @@ gzip -dc /tmp/v0918.patch.gz > /tmp/v0918.patch
 grep -q 'versionName = "0.9.1.8"' project/app/build.gradle.kts
 grep -q 'class ServerDiagnosticsEngine' project/app/src/main/java/sa/hulksa/player/data/ServerDiagnosticsEngine.kt
 grep -q 'DiagnosticsCenter' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'fun runDiagnostics' project/app/src/main/java/sa/hulksa/player/viewmodel/HulkViewModel.kt
+grep -q 'fun runDiagnostics' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
