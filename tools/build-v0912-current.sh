@@ -11,7 +11,10 @@ echo "566ddebe34fc136ae859db5b98032588d835946d1bc8fbbee6fedbf5000a2c9f  /tmp/v09
 gzip -dc /tmp/v0911-direct.patch.gz > /tmp/v0911-direct.patch
 (cd project && patch -p1 --dry-run < /tmp/v0911-direct.patch && patch -p1 < /tmp/v0911-direct.patch)
 grep -q 'versionName = "0.9.1.1"' project/app/build.gradle.kts
-python3 tools/apply-v0912.py project
+base64 --decode .payload/v0913-patch.b64 > /tmp/v0913.patch.gz
+echo "d99a3df7e4e0fabdd51ae8887460b586b5cb1008adedff91eeae1f1a7b690aa8  /tmp/v0913.patch.gz" | sha256sum --check
+gzip -dc /tmp/v0913.patch.gz > /tmp/v0913.patch
+(cd project && patch -p1 --dry-run < /tmp/v0913.patch && patch -p1 < /tmp/v0913.patch)
 grep -q 'versionName = "0.9.1.3"' project/app/build.gradle.kts
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
