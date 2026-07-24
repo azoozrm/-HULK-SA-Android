@@ -12,7 +12,6 @@ G = gradle.read_text()
 G = G.replace('versionCode = 27', 'versionCode = 28')
 G = G.replace('versionName = "0.9.1.5"', 'versionName = "0.9.1.6"')
 
-# The rotating hero must never reclaim focus after the user has opened the side rail.
 M, focus_count = re.subn(
     r'LaunchedEffect\(remembered\.rowKey,\s*featured\.id\)',
     'LaunchedEffect(remembered.rowKey)',
@@ -148,20 +147,15 @@ home, count = re.subn(
 if count != 1:
     raise SystemExit(f'v0916 recommended row anchor mismatch: {count}')
 
-home, count = re.subn(
-    r'if \(recommended\.isNotEmpty\(\)\) \{\s*item \{ HomeSectionPadding \{ PosterSection\("مقترح لك", "recommended", recommendedRow, recommended,',
+render_pattern = re.compile(
+    r'if \(recommended\.isNotEmpty\(\)\) \{\s*item \{ HomeSectionPadding \{ PosterSection\("مقترح لك", "recommended", recommendedRow, [^,]+,',
+    re.S,
+)
+home, count = render_pattern.subn(
     'if (personalizedRecommended.isNotEmpty()) {\n            item { HomeSectionPadding { PosterSection("مقترح لك", "recommended", recommendedRow, personalizedRecommended,',
     home,
     count=1,
 )
-if count != 1:
-    # Support the fallback wording used by some current-source revisions.
-    home, count = re.subn(
-        r'if \(recommended\.isNotEmpty\(\)\) \{\s*item \{ HomeSectionPadding \{ PosterSection\("مقترح لك", "recommended", recommendedRow, [^,]+,',
-        'if (personalizedRecommended.isNotEmpty()) {\n            item { HomeSectionPadding { PosterSection("مقترح لك", "recommended", recommendedRow, personalizedRecommended,',
-        home,
-        count=1,
-    )
 if count != 1:
     raise SystemExit(f'v0916 recommended rendering anchor mismatch: {count}')
 
