@@ -27,8 +27,10 @@ cat .payload/v0918-patch/part-* | base64 --decode > /tmp/v0918.patch.gz
 echo "f9d233e3d63a2dbc3f03d4d34f8104dc5c4710583312d59d6519f669a290a156  /tmp/v0918.patch.gz" | sha256sum --check
 gzip -dc /tmp/v0918.patch.gz > /tmp/v0918.patch
 (cd project && patch -p1 --dry-run < /tmp/v0918.patch && patch -p1 < /tmp/v0918.patch)
+python3 tools/apply-v0918-fix1.py project
 grep -q 'versionName = "0.9.1.8"' project/app/build.gradle.kts
 grep -q 'class ServerDiagnosticsEngine' project/app/src/main/java/sa/hulksa/player/data/ServerDiagnosticsEngine.kt
+grep -q 'return@withContext ServerDiagnosticsReport' project/app/src/main/java/sa/hulksa/player/data/ServerDiagnosticsEngine.kt
 grep -q 'DiagnosticsCenter' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 grep -q 'fun runDiagnostics' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
