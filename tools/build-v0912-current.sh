@@ -15,9 +15,12 @@ python3 tools/apply-v0912.py project
 grep -q 'versionName = "0.9.1.2"' project/app/build.gradle.kts
 python3 tools/apply-v0913.py project
 grep -q 'versionName = "0.9.1.3"' project/app/build.gradle.kts
-grep -q 'ايقاف التحميل مؤقتا' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'manualSeekTargetMs' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-grep -q 'Alignment.CenterStart' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+python3 tools/apply-v0914.py project
+grep -q 'versionName = "0.9.1.4"' project/app/build.gradle.kts
+grep -q 'LiveInteractionHints' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'height(if (isTv) 232.dp else 222.dp)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'fillMaxHeight(.80f)' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+grep -q 'categoryArtwork' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -32,7 +35,7 @@ from pathlib import Path
 p=Path('project/app/src/main/AndroidManifest.xml');t=p.read_text().replace('@mipmap/ic_launcher_round','@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher','@drawable/hulk_sa_logo');p.write_text(t)
 PY
 cd project
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0913-build.log
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0914-build.log
 cd ..
-cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.3-current-beta.apk
-sha256sum output/HULK-SA-v0.9.1.3-current-beta.apk | tee output/SHA256.txt
+cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.4-current-beta.apk
+sha256sum output/HULK-SA-v0.9.1.4-current-beta.apk | tee output/SHA256.txt
