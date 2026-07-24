@@ -12,7 +12,12 @@ gzip -dc /tmp/v0911-direct.patch.gz > /tmp/v0911-direct.patch
 (cd project && patch -p1 --dry-run < /tmp/v0911-direct.patch && patch -p1 < /tmp/v0911-direct.patch)
 grep -q 'versionName = "0.9.1.1"' project/app/build.gradle.kts
 python3 tools/apply-v0912.py project
+grep -q 'versionName = "0.9.1.2"' project/app/build.gradle.kts
+python3 tools/apply-v0913.py project
 grep -q 'versionName = "0.9.1.3"' project/app/build.gradle.kts
+grep -q 'ايقاف التحميل مؤقتا' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'manualSeekTargetMs' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+grep -q 'Alignment.CenterStart' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
