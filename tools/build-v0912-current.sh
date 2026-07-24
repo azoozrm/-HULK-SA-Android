@@ -37,8 +37,12 @@ python3 tools/apply-v09111.py project
 grep -q 'versionName = "0.9.1.11"' project/app/build.gradle.kts
 python3 tools/apply-v09112.py project
 grep -q 'versionName = "0.9.1.12"' project/app/build.gradle.kts
-grep -q 'معلومات البث' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-grep -q 'محلل البث المباشر' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+python3 tools/apply-v09113.py project
+grep -q 'versionName = "0.9.1.13"' project/app/build.gradle.kts
+! grep -q 'معلومات البث' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+! grep -q 'محلل البث المباشر' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+grep -q 'if (request.isLive)' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+grep -q 'controlsVisible = false' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -53,7 +57,7 @@ from pathlib import Path
 p=Path('project/app/src/main/AndroidManifest.xml');t=p.read_text().replace('@mipmap/ic_launcher_round','@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher','@drawable/hulk_sa_logo');p.write_text(t)
 PY
 cd project
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v09112-build.log
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v09113-build.log
 cd ..
-cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.12-current-beta.apk
-sha256sum output/HULK-SA-v0.9.1.12-current-beta.apk | tee output/SHA256.txt
+cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.13-current-beta.apk
+sha256sum output/HULK-SA-v0.9.1.13-current-beta.apk | tee output/SHA256.txt
