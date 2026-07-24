@@ -118,6 +118,16 @@ private fun LiveCategoryChip(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
+    var selectPressed by remember { mutableStateOf(false) }
+    LaunchedEffect(selectPressed) {
+        if (selectPressed) {
+            delay(650L)
+            if (selectPressed && !remoteLongPressHandled) {
+                remoteLongPressHandled = true
+                onLongClick()
+            }
+        }
+    }
     val shape = RoundedCornerShape(13.dp)
     Row(
         modifier = Modifier
@@ -140,16 +150,11 @@ private fun LiveCategoryChip(
                 val selectKey = event.key == Key.Enter || event.key == Key.DirectionCenter
                 when {
                     selectKey && event.type == KeyEventType.KeyDown -> {
-                        if (
-                            (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
-                            !remoteLongPressHandled
-                        ) {
-                            remoteLongPressHandled = true
-                            onLongClick()
-                        }
+                        selectPressed = true
                         true
                     }
                     selectKey && event.type == KeyEventType.KeyUp -> {
+                        selectPressed = false
                         if (!remoteLongPressHandled) onClick()
                         remoteLongPressHandled = false
                         true
@@ -203,8 +208,7 @@ private fun LiveInteractionHints() {
 M = M[:start] + replacement + M[end:]
 if 'import androidx.compose.foundation.combinedClickable\n' not in M:
     M = M.replace('import androidx.compose.foundation.clickable\n', 'import androidx.compose.foundation.clickable\nimport androidx.compose.foundation.combinedClickable\n', 1)
-if 'import androidx.compose.ui.input.key.nativeKeyEvent\n' not in M:
-    M = M.replace('import androidx.compose.ui.input.key.key\n', 'import androidx.compose.ui.input.key.key\nimport androidx.compose.ui.input.key.nativeKeyEvent\n', 1)
+M = M.replace('import androidx.compose.ui.input.key.nativeKeyEvent\n', '')
 
 P = P.replace('.fillMaxHeight(.84f)\n                .fillMaxWidth(.82f)\n                .offset(x = 22.dp)',
               '.fillMaxHeight(.80f)\n                .fillMaxWidth(.76f)\n                .widthIn(max = 920.dp)', 1)
