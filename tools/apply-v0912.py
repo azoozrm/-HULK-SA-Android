@@ -34,14 +34,13 @@ private fun ReorderableLiveCategoryBar(categories:List<Category>,selectedId:Stri
 '''
 M=M.replace('\n@Composable\nprivate fun FavoriteHint',helper+'\n@Composable\nprivate fun FavoriteHint')
 C=C.replace('outlined: Boolean = false,\n    onFocused: (() -> Unit)? = null,','outlined: Boolean = false,\n    onFocused: (() -> Unit)? = null,\n    onLongClick: (() -> Unit)? = null,')
-C=C.replace('.clickable(enabled = enabled, role = Role.Button, onClick = onClick)','.onPreviewKeyEvent { e -> if(enabled && onLongClick!=null && e.type==KeyEventType.KeyDown && (e.key==Key.Enter||e.key==Key.DirectionCenter) && e.nativeKeyEvent.repeatCount>0){onLongClick();true}else false }\n            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)',1)
+C=C.replace('.clickable(enabled = enabled, role = Role.Button, onClick = onClick)','.onPreviewKeyEvent { e -> if(enabled && onLongClick!=null && e.type==KeyEventType.KeyDown && (e.key==Key.Enter||e.key==Key.DirectionCenter)){onLongClick();true}else false }\n            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)',1)
 
 def add_key_imports(text: str) -> str:
     imports = [
         'import androidx.compose.ui.input.key.Key',
         'import androidx.compose.ui.input.key.KeyEventType',
         'import androidx.compose.ui.input.key.key',
-        'import androidx.compose.ui.input.key.nativeKeyEvent',
         'import androidx.compose.ui.input.key.onPreviewKeyEvent',
         'import androidx.compose.ui.input.key.type',
     ]
