@@ -1,4 +1,4 @@
-name: Build HULK SA v0.9.1.7 Isolated
+name: Export HULK SA v0.9.1.7 Current Source
 
 on:
   pull_request:
@@ -11,39 +11,20 @@ permissions:
   actions: read
 
 jobs:
-  build:
+  export:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.13'
-      - uses: android-actions/setup-android@v3
-      - run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Build current v0.9.1.7
+      - name: Reconstruct current source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash tools/build-v0912-current.sh
+        run: bash tools/export-v0917-source.sh
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: HULK-SA-v0.9.1.7-current-beta
-          path: output/
+          name: HULK-SA-v0.9.1.7-current-source
+          path: export/
           if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: HULK-V0917-BUILD-LOG
-          path: v0917-build.log
-          if-no-files-found: ignore
           retention-days: 3
