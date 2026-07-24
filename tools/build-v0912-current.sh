@@ -23,7 +23,8 @@ python3 tools/apply-v0916.py project
 grep -q 'versionName = "0.9.1.6"' project/app/build.gradle.kts
 grep -q 'LaunchedEffect(remembered.rowKey)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 ! grep -q 'LaunchedEffect(remembered.rowKey, featured.id)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'personalizedRecommended' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'personalizedContentPool' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'val suggested = remember(personalizedContentPool' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 grep -q 'personalizedLive.take(20)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 grep -q 'قنوات مقترحة لك' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
