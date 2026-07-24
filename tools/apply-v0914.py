@@ -203,6 +203,8 @@ private fun LiveInteractionHints() {
 M = M[:start] + replacement + M[end:]
 if 'import androidx.compose.foundation.combinedClickable\n' not in M:
     M = M.replace('import androidx.compose.foundation.clickable\n', 'import androidx.compose.foundation.clickable\nimport androidx.compose.foundation.combinedClickable\n', 1)
+if 'import androidx.compose.ui.input.key.nativeKeyEvent\n' not in M:
+    M = M.replace('import androidx.compose.ui.input.key.key\n', 'import androidx.compose.ui.input.key.key\nimport androidx.compose.ui.input.key.nativeKeyEvent\n', 1)
 
 P = P.replace('.fillMaxHeight(.84f)\n                .fillMaxWidth(.82f)\n                .offset(x = 22.dp)',
               '.fillMaxHeight(.80f)\n                .fillMaxWidth(.76f)\n                .widthIn(max = 920.dp)', 1)
