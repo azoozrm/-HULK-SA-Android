@@ -15,7 +15,7 @@ python3 tools/apply-v0912.py project
 grep -q 'versionName = "0.9.1.2"' project/app/build.gradle.kts
 python3 tools/apply-v0913.py project
 grep -q 'versionName = "0.9.1.3"' project/app/build.gradle.kts
-python3 tools/apply-v0914.py project
+python3 tools/apply-v0914-fixed.py project
 grep -q 'versionName = "0.9.1.4"' project/app/build.gradle.kts
 grep -q 'LiveInteractionHints' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 grep -q 'height(if (isTv) 232.dp else 222.dp)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
