@@ -23,9 +23,14 @@ python3 tools/apply-v0916.py project
 grep -q 'versionName = "0.9.1.6"' project/app/build.gradle.kts
 python3 tools/apply-v0917.py project
 grep -q 'versionName = "0.9.1.7"' project/app/build.gradle.kts
-grep -q 'var seekBarFocused by remember(request)' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-grep -q '!seekBarFocused && manualSeekTargetMs == null' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-grep -q 'onSeekingChanged(state.isFocused)' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+cat .payload/v0918-patch/part-* | base64 --decode > /tmp/v0918.patch.gz
+echo "f9d233e3d63a2dbc3f03d4d34f8104dc5c4710583312d59d6519f669a290a156  /tmp/v0918.patch.gz" | sha256sum --check
+gzip -dc /tmp/v0918.patch.gz > /tmp/v0918.patch
+(cd project && patch -p1 --dry-run < /tmp/v0918.patch && patch -p1 < /tmp/v0918.patch)
+grep -q 'versionName = "0.9.1.8"' project/app/build.gradle.kts
+grep -q 'class ServerDiagnosticsEngine' project/app/src/main/java/sa/hulksa/player/data/ServerDiagnosticsEngine.kt
+grep -q 'DiagnosticsCenter' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+grep -q 'fun runDiagnostics' project/app/src/main/java/sa/hulksa/player/viewmodel/HulkViewModel.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
 curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -40,7 +45,7 @@ from pathlib import Path
 p=Path('project/app/src/main/AndroidManifest.xml');t=p.read_text().replace('@mipmap/ic_launcher_round','@drawable/hulk_sa_logo').replace('@mipmap/ic_launcher','@drawable/hulk_sa_logo');p.write_text(t)
 PY
 cd project
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0917-build.log
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../v0918-build.log
 cd ..
-cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.7-current-beta.apk
-sha256sum output/HULK-SA-v0.9.1.7-current-beta.apk | tee output/SHA256.txt
+cp project/app/build/outputs/apk/debug/app-debug.apk output/HULK-SA-v0.9.1.8-current-beta.apk
+sha256sum output/HULK-SA-v0.9.1.8-current-beta.apk | tee output/SHA256.txt
