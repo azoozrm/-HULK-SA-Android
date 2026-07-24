@@ -1,9 +1,11 @@
-name: Build HULK SA v0.9.1.2 Current
+name: Build HULK SA v0.9.1.3 Current
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - v0912-current
+    paths:
+      - trigger-v0913.txt
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: v0912-current
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,21 +31,21 @@ jobs:
       - run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Build current v0.9.1.2
+      - name: Build current v0.9.1.3
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash tools/build-v0912-current.sh
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: HULK-SA-v0.9.1.2-current-beta
+          name: HULK-SA-v0.9.1.3-current-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: HULK-V0912-BUILD-LOG
-          path: v0912-build.log
+          name: HULK-V0913-BUILD-LOG
+          path: v0913-build.log
           if-no-files-found: ignore
           retention-days: 3
