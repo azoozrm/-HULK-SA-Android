@@ -40,6 +40,17 @@ jobs:
           path: output/
           if-no-files-found: error
           retention-days: 30
+      - name: Pack reconstructed source
+        if: always()
+        run: |
+          if [ -d project ]; then tar -czf HULK-SA-v0.9.1.9-reconstructed-source.tar.gz -C project .; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HULK-SA-v0.9.1.9-reconstructed-source
+          path: HULK-SA-v0.9.1.9-reconstructed-source.tar.gz
+          if-no-files-found: ignore
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
