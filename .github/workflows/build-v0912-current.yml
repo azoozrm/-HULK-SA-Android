@@ -1,4 +1,4 @@
-name: Build HULK SA v0.9.1.11 Isolated
+name: Build HULK SA v0.9.1.12 Isolated
 
 on:
   pull_request:
@@ -29,32 +29,32 @@ jobs:
       - run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Build current v0.9.1.11
+      - name: Build current v0.9.1.12
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash tools/build-v0912-current.sh
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: HULK-SA-v0.9.1.11-current-beta
+          name: HULK-SA-v0.9.1.12-current-beta
           path: output/
           if-no-files-found: error
           retention-days: 30
       - name: Pack reconstructed source
         if: always()
         run: |
-          if [ -d project ]; then tar -czf HULK-SA-v0.9.1.11-reconstructed-source.tar.gz -C project .; fi
+          if [ -d project ]; then tar -czf HULK-SA-v0.9.1.12-reconstructed-source.tar.gz -C project .; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: HULK-SA-v0.9.1.11-reconstructed-source
-          path: HULK-SA-v0.9.1.11-reconstructed-source.tar.gz
+          name: HULK-SA-v0.9.1.12-reconstructed-source
+          path: HULK-SA-v0.9.1.12-reconstructed-source.tar.gz
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: HULK-V09111-BUILD-LOG
-          path: v09111-build.log
+          name: HULK-V09112-BUILD-LOG
+          path: v09112-build.log
           if-no-files-found: ignore
           retention-days: 3
