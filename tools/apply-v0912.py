@@ -23,12 +23,36 @@ P=re.sub(r'\n\s*val count = catalog\?\.items\.orEmpty\(\)\.count \{ it\.category
 P=P.replace('text = "${category.name}  $count",','text = category.name,')
 P=re.sub(r'\n\s*Text\("\$\{visible\.size\}", color = colors\.textMuted, fontSize = 12\.sp\)','',P)
 M=M.replace('CategoryBar(catalog?.categories.orEmpty(), state.selectedCategoryId, onSelectCategory, showFavorites = true, showAll = false)','ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), state.selectedCategoryId, onSelectCategory)')
-helper='''\n@Composable\nprivate fun ReorderableLiveCategoryBar(categories:List<Category>,selectedId:String?,onSelect:(String?)->Unit){\n val context=LocalContext.current;val prefs=remember{context.getSharedPreferences("live_category_order",android.content.Context.MODE_PRIVATE)}\n var ids by remember(categories){mutableStateOf(prefs.getString("ids","").orEmpty().split(',').filter{it.isNotBlank()})};var moving by remember{mutableStateOf<String?>(null)}\n val ordered=remember(categories,ids){val map=categories.associateBy{it.id};(ids.mapNotNull(map::get)+categories.filterNot{it.id in ids}).distinctBy{it.id}}\n fun move(id:String,d:Int){val x=ordered.map{it.id}.toMutableList();val a=x.indexOf(id);val b=(a+d).coerceIn(0,x.lastIndex);if(a>=0&&a!=b){x.add(b,x.removeAt(a));ids=x;prefs.edit().putString("ids",x.joinToString(",")).apply()}}\n LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp),contentPadding=PaddingValues(horizontal=3.dp,vertical=4.dp)){item{FocusButton("★ المفضلة",{onSelect(FAVORITES_CATEGORY_ID)},primary=selectedId==FAVORITES_CATEGORY_ID,compact=true)};items(ordered,key=Category::id){cat->FocusButton(if(moving==cat.id)"↔ ${cat.name}" else cat.name,{if(moving==cat.id)moving=null else onSelect(cat.id)},modifier=Modifier.onPreviewKeyEvent{e->if(e.type!=KeyEventType.KeyDown||moving!=cat.id)false else when(e.key){Key.DirectionLeft->{move(cat.id,1);true};Key.DirectionRight->{move(cat.id,-1);true};Key.Enter,Key.DirectionCenter->{moving=null;true};else->false}},primary=selectedId==cat.id,compact=true,onLongClick={moving=cat.id})}}\n}\n'''
+helper='''\n@Composable
+private fun ReorderableLiveCategoryBar(categories:List<Category>,selectedId:String?,onSelect:(String?)->Unit){
+ val context=LocalContext.current;val prefs=remember{context.getSharedPreferences("live_category_order",android.content.Context.MODE_PRIVATE)}
+ var ids by remember(categories){mutableStateOf(prefs.getString("ids","").orEmpty().split(',').filter{it.isNotBlank()})};var moving by remember{mutableStateOf<String?>(null)}
+ val ordered=remember(categories,ids){val map=categories.associateBy{it.id};(ids.mapNotNull(map::get)+categories.filterNot{it.id in ids}).distinctBy{it.id}}
+ fun move(id:String,d:Int){val x=ordered.map{it.id}.toMutableList();val a=x.indexOf(id);val b=(a+d).coerceIn(0,x.lastIndex);if(a>=0&&a!=b){x.add(b,x.removeAt(a));ids=x;prefs.edit().putString("ids",x.joinToString(",")).apply()}}
+ LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp),contentPadding=PaddingValues(horizontal=3.dp,vertical=4.dp)){item{FocusButton("★ المفضلة",{onSelect(FAVORITES_CATEGORY_ID)},primary=selectedId==FAVORITES_CATEGORY_ID,compact=true)};items(ordered,key=Category::id){cat->FocusButton(if(moving==cat.id)"↔ ${cat.name}" else cat.name,{if(moving==cat.id)moving=null else onSelect(cat.id)},modifier=Modifier.onPreviewKeyEvent{e->if(e.type!=KeyEventType.KeyDown||moving!=cat.id)false else when(e.key){Key.DirectionLeft->{move(cat.id,1);true};Key.DirectionRight->{move(cat.id,-1);true};Key.Enter,Key.DirectionCenter->{moving=null;true};else->false}},primary=selectedId==cat.id,compact=true,onLongClick={moving=cat.id})}}
+}
+'''
 M=M.replace('\n@Composable\nprivate fun FavoriteHint',helper+'\n@Composable\nprivate fun FavoriteHint')
 C=C.replace('outlined: Boolean = false,\n    onFocused: (() -> Unit)? = null,','outlined: Boolean = false,\n    onFocused: (() -> Unit)? = null,\n    onLongClick: (() -> Unit)? = null,')
 C=C.replace('.clickable(enabled = enabled, role = Role.Button, onClick = onClick)','.onPreviewKeyEvent { e -> if(enabled && onLongClick!=null && e.type==KeyEventType.KeyDown && (e.key==Key.Enter||e.key==Key.DirectionCenter) && e.nativeKeyEvent.repeatCount>0){onLongClick();true}else false }\n            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)',1)
-for X,name in [(M,'m'),(C,'c')]:
- if 'import androidx.compose.ui.input.key.Key\n' not in X:X=X.replace('import androidx.compose.ui.input.key.','import androidx.compose.ui.input.key.Key\nimport androidx.compose.ui.input.key.',1)
- if name=='m':M=X
- else:C=X
+
+def add_key_imports(text: str) -> str:
+    imports = [
+        'import androidx.compose.ui.input.key.Key',
+        'import androidx.compose.ui.input.key.KeyEventType',
+        'import androidx.compose.ui.input.key.key',
+        'import androidx.compose.ui.input.key.nativeKeyEvent',
+        'import androidx.compose.ui.input.key.onPreviewKeyEvent',
+        'import androidx.compose.ui.input.key.type',
+    ]
+    anchor = 'import androidx.compose.ui.Modifier\n'
+    missing = [line for line in imports if line + '\n' not in text]
+    if missing:
+        if anchor not in text:
+            raise SystemExit('Modifier import anchor missing')
+        text = text.replace(anchor, anchor + ''.join(line + '\n' for line in missing), 1)
+    return text
+
+M=add_key_imports(M)
+C=add_key_imports(C)
 m.write_text(M);p.write_text(P);c.write_text(C);g.write_text(G)
