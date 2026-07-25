@@ -1,204 +1,112 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import base64
+import gzip
 import sys
 
 root = Path(sys.argv[1])
+gradle = root / "app/build.gradle.kts"
+text = gradle.read_text()
+text = text.replace('versionCode = 36', 'versionCode = 41', 1)
+text = text.replace('versionName = "0.9.1.14"', 'versionName = "0.9.1.19"', 1)
+if 'versionName = "0.9.1.19"' not in text:
+    raise SystemExit('v0.9.1.14 version marker missing')
+gradle.write_text(text)
 
+payload = """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"""
+source = gzip.decompress(base64.b64decode(payload)).decode()
+target = root / "app/src/main/java/sa/hulksa/player/HulkViewModel.kt"
+target.write_text(source)
 
-def rw(rel: str, transform) -> None:
-    path = root / rel
-    text = path.read_text()
-    updated = transform(text)
-    if updated == text:
-        raise SystemExit(f"No change applied to {rel}")
-    path.write_text(updated)
-
-
-def update_gradle(text: str) -> str:
-    text = text.replace('versionCode = 36', 'versionCode = 41', 1)
-    text = text.replace('versionName = "0.9.1.14"', 'versionName = "0.9.1.19"', 1)
-    return text
-
-
-rw('app/build.gradle.kts', update_gradle)
-
-
-def update_view_model(text: str) -> str:
-    fields_anchor = '''    private var diagnosticsJob: Job? = null
-    private var playerReturnScreen = HulkScreen.MAIN
-'''
-    fields_replacement = '''    private var diagnosticsJob: Job? = null
-    private var playerReturnScreen = HulkScreen.MAIN
-    private val selectedCategoryByDestination = mutableMapOf<MainDestination, String?>()
-    private val searchQueryByDestination = mutableMapOf<MainDestination, String>()
-'''
-    if fields_anchor not in text:
-        raise SystemExit('HulkViewModel state-field anchor missing')
-    text = text.replace(fields_anchor, fields_replacement, 1)
-
-    text = text.replace(
-        '                delay(if (hasActive) 1_250L else 5_000L)',
-        '                delay(if (hasActive) 2_000L else 8_000L)',
-        1,
-    )
-
-    old_destination = '''    fun selectDestination(destination: MainDestination) {
-        val selectedType = when (destination) {
-            MainDestination.LIVE -> ContentType.LIVE
-            MainDestination.SERIES -> ContentType.SERIES
-            else -> ContentType.MOVIE
-        }
-        mutableState.update {
-            it.copy(
-                destination = destination,
-                selectedType = selectedType,
-                selectedCategoryId = null,
-                searchQuery = "",
-                errorMessage = null,
-            )
-        }
-        when (destination) {
-            MainDestination.HOME -> {
-                ensureCatalog(ContentType.MOVIE)
-                ensureCatalog(ContentType.SERIES)
-            }
-            MainDestination.LIVE -> ensureCatalog(ContentType.LIVE)
-            MainDestination.MOVIES -> ensureCatalog(ContentType.MOVIE)
-            MainDestination.SERIES -> ensureCatalog(ContentType.SERIES)
-            MainDestination.FAVORITES,
-            MainDestination.SEARCH,
-            -> ContentType.entries.forEach(::ensureCatalog)
-            MainDestination.DOWNLOADS,
-            MainDestination.SETTINGS -> Unit
-        }
-    }
-'''
-    new_destination = '''    fun selectDestination(destination: MainDestination) {
-        val current = mutableState.value
-        if (destination == current.destination) {
-            ensureDestinationCatalogs(destination)
-            return
-        }
-
-        if (current.destination.remembersCatalogFilters()) {
-            selectedCategoryByDestination[current.destination] = current.selectedCategoryId
-            searchQueryByDestination[current.destination] = current.searchQuery
-        }
-
-        val selectedType = destination.contentType()
-        val restoredCategory = if (destination.remembersCatalogFilters()) {
-            selectedCategoryByDestination[destination]
-        } else {
-            null
-        }
-        val restoredQuery = if (destination.remembersCatalogFilters()) {
-            searchQueryByDestination[destination].orEmpty()
-        } else {
-            ""
-        }
-
-        mutableState.update {
-            it.copy(
-                destination = destination,
-                selectedType = selectedType,
-                selectedCategoryId = restoredCategory,
-                searchQuery = restoredQuery,
-                errorMessage = null,
-            )
-        }
-        ensureDestinationCatalogs(destination)
-    }
-
-    private fun MainDestination.contentType(): ContentType = when (this) {
-        MainDestination.LIVE -> ContentType.LIVE
-        MainDestination.SERIES -> ContentType.SERIES
-        else -> ContentType.MOVIE
-    }
-
-    private fun MainDestination.remembersCatalogFilters(): Boolean =
-        this == MainDestination.LIVE || this == MainDestination.MOVIES || this == MainDestination.SERIES
-
-    private fun ensureDestinationCatalogs(destination: MainDestination) {
-        when (destination) {
-            MainDestination.HOME -> {
-                ensureCatalog(ContentType.MOVIE)
-                ensureCatalog(ContentType.SERIES)
-            }
-            MainDestination.LIVE -> ensureCatalog(ContentType.LIVE)
-            MainDestination.MOVIES -> ensureCatalog(ContentType.MOVIE)
-            MainDestination.SERIES -> ensureCatalog(ContentType.SERIES)
-            MainDestination.FAVORITES,
-            MainDestination.SEARCH,
-            -> ContentType.entries.forEach(::ensureCatalog)
-            MainDestination.DOWNLOADS,
-            MainDestination.SETTINGS -> Unit
-        }
-    }
-'''
-    if old_destination not in text:
-        raise SystemExit('selectDestination source block missing')
-    text = text.replace(old_destination, new_destination, 1)
-
-    old_category = '''    fun selectCategory(categoryId: String?) {
-        mutableState.update { it.copy(selectedCategoryId = categoryId) }
-    }
-
-    fun updateSearch(query: String) {
-        mutableState.update { it.copy(searchQuery = query) }
-    }
-'''
-    new_category = '''    fun selectCategory(categoryId: String?) {
-        val destination = mutableState.value.destination
-        if (destination.remembersCatalogFilters()) {
-            selectedCategoryByDestination[destination] = categoryId
-        }
-        mutableState.update { current ->
-            if (current.selectedCategoryId == categoryId) current else current.copy(selectedCategoryId = categoryId)
-        }
-    }
-
-    fun updateSearch(query: String) {
-        val destination = mutableState.value.destination
-        if (destination.remembersCatalogFilters()) {
-            searchQueryByDestination[destination] = query
-        }
-        mutableState.update { current ->
-            if (current.searchQuery == query) current else current.copy(searchQuery = query)
-        }
-    }
-'''
-    if old_category not in text:
-        raise SystemExit('category/search source block missing')
-    text = text.replace(old_category, new_category, 1)
-
-    text = text.replace(
-        '''    fun logout() {
-        repository.logout()
-        session = null
-''',
-        '''    fun logout() {
-        repository.logout()
-        session = null
-        selectedCategoryByDestination.clear()
-        searchQueryByDestination.clear()
-''',
-        1,
-    )
-    text = text.replace(
-        '''                .onSuccess { authenticated ->
-                    session = authenticated
-                    mutableState.update {
-''',
-        '''                .onSuccess { authenticated ->
-                    session = authenticated
-                    selectedCategoryByDestination.clear()
-                    searchQueryByDestination.clear()
-                    mutableState.update {
-''',
-        1,
-    )
-    return text
-
-
-rw('app/src/main/java/sa/hulksa/player/HulkViewModel.kt', update_view_model)
-print('Applied v0.9.1.19 source navigation-memory and low-churn state fixes')
+required = (
+    'selectedCategoryByType',
+    'loadedCatalogs',
+    'homeCatalogs',
+    'compactHomeCatalog',
+    'catalogsForDestination',
+    'HOME_CATALOG_LIMIT = 320',
+)
+written = target.read_text()
+missing = [marker for marker in required if marker not in written]
+if missing:
+    raise SystemExit(f'missing v0.9.1.19 source markers: {missing}')
+print('Applied v0.9.1.19 source navigation memory and Home performance stabilization')
