@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - phase1/v0.9.1.23
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
