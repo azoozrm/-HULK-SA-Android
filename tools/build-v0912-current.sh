@@ -46,8 +46,10 @@ grep -q 'versionName = "0.9.1.19"' project/app/build.gradle.kts
 grep -q 'const val MAX_HISTORY = 100' project/app/src/main/java/sa/hulksa/player/data/UserLibrary.kt
 grep -q 'private fun ContentItem.matchesSearch' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 grep -q 'private fun HistoryEntry.isResumable' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-grep -q 'selectedCategoryByDestination' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
-grep -q 'ensureDestinationCatalogs' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
+grep -q 'selectedCategoryByType' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
+grep -q 'loadedCatalogs' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
+grep -q 'compactHomeCatalog' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
+grep -q 'HOME_CATALOG_LIMIT = 320' project/app/src/main/java/sa/hulksa/player/HulkViewModel.kt
 ! grep -q 'معلومات البث' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 mkdir -p project/app/src/main/res/font project/app/src/main/res/drawable-nodpi
 FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
