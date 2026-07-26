@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 root=Path(sys.argv[1])
 
@@ -16,19 +17,20 @@ def write(path, content):
 
 rep('app/build.gradle.kts','versionCode = 48','versionCode = 49','versionCode')
 rep('app/build.gradle.kts','versionName = "0.9.3.4"','versionName = "0.9.3.5"','versionName')
-manifest='app/src/main/AndroidManifest.xml'
-rep(manifest,'android:banner="@drawable/ic_banner"','android:banner="@drawable/tv_banner"','tv banner')
-rep(manifest,'android:icon="@drawable/hulk_sa_logo"','android:icon="@mipmap/ic_launcher"','launcher icon')
-rep(manifest,'android:roundIcon="@drawable/hulk_sa_logo"','android:roundIcon="@mipmap/ic_launcher_round"','round icon')
-rep(manifest,'''            <intent-filter>
+manifest_path=root/'app/src/main/AndroidManifest.xml'
+manifest=manifest_path.read_text(encoding='utf-8')
+manifest=manifest.replace('android:banner="@drawable/ic_banner"','android:banner="@drawable/tv_banner"')
+manifest=manifest.replace('android:icon="@drawable/hulk_sa_logo"','android:icon="@mipmap/ic_launcher"')
+manifest=manifest.replace('android:roundIcon="@drawable/hulk_sa_logo"','android:roundIcon="@mipmap/ic_launcher_round"')
+# Remove any earlier experimental TV activity, then add exactly one reviewed TV entry.
+manifest=re.sub(r'\n\s*<activity\s+android:name="\.TvMainActivity"[\s\S]*?</activity>\s*', '\n', manifest)
+leanback='''            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
-''','', 'remove leanback from phone activity')
-rep(manifest,'''        </activity>
-    </application>
-''','''        </activity>
-
+'''
+manifest=manifest.replace(leanback,'',1)
+tv_activity='''
         <activity
             android:name=".TvMainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
@@ -40,8 +42,10 @@ rep(manifest,'''        </activity>
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
-    </application>
-''','tv activity')
+'''
+if '</application>' not in manifest: raise SystemExit('missing application close')
+manifest=manifest.replace('    </application>',tv_activity+'    </application>',1)
+manifest_path.write_text(manifest,encoding='utf-8')
 
 write('app/src/main/java/sa/hulksa/player/TvMainActivity.kt','''package sa.hulksa.player
 
