@@ -117,8 +117,8 @@ fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
                 controller.recordTouchInput()
             }
         }
-    }.onPreviewKeyEvent { event ->
-        controller.recordKeyInput(event.nativeKeyEvent.source)
+    }.onPreviewKeyEvent {
+        controller.recordKeyInput(InputDevice.SOURCE_KEYBOARD)
         false
     }
 
