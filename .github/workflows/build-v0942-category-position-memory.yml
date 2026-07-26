@@ -104,7 +104,7 @@ jobs:
           cp -a project/. source-delivery/
           rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
           (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.13-REORDER-PLAYER-BACK-FIX.zip .)
-          printf '# HULK SA v0.9.3.13 Reorder Player Back Fix\n\n- Category memory does not fight active reorder: PASS\n- Reorder list follows moved category: PASS\n- First Back hides controls: PASS\n- Second Back exits playback: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n' > delivery/BUILD-REPORT-v0.9.3.13.md
+          printf '# HULK SA v0.9.3.13 Reorder Player Back Fix\n\n- Category memory does not fight active reorder: PASS\n- Reorder list follows moved category after layout update: PASS\n- First Back hides player controls completely: PASS\n- Second Back exits playback: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n' > delivery/BUILD-REPORT-v0.9.3.13.md
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
 
       - name: Upload delivery
