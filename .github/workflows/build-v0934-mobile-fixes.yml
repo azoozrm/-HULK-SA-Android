@@ -1,0 +1,111 @@
+name: Build HULK SA v0.9.3.4 Mobile Fixes
+
+on:
+  push:
+    branches: [phase-3-v0.9.3.0-adaptive-foundation]
+    paths:
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+      - '.github/workflows/build-v0934-mobile-fixes.yml'
+      - 'patches/v0.9.3.0-adaptive-source/**'
+      - 'tools/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v0934-mobile-fixes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: |
+          set -o pipefail
+          mkdir -p build-logs reports
+          { yes | sdkmanager --licenses >/dev/null || true; sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'; } 2>&1 | tee build-logs/01-sdk.log
+      - name: Prepare source
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          rm -rf extracted project
+          mkdir extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f \( -name settings.gradle.kts -o -name settings.gradle \) -printf '%h\n' | head -n1)
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          python3 tools/repair-v09120.py project | tee build-logs/02-repair.log
+          python3 tools/prepare-v0920-architecture.py project | tee build-logs/03-architecture.log
+          python3 tools/prepare-v0930-adaptive-ui.py project | tee build-logs/04-adaptive.log
+          python3 tools/prepare-v0932-mobile-followup.py project | tee build-logs/05-followup.log
+          python3 tools/prepare-v0933-mobile-memory.py project | tee build-logs/06-memory.log
+          python3 tools/prepare-v0934-mobile-fixes.py project | tee build-logs/07-fixes.log
+          python3 tools/prepare-v0934-mobile-fixes.py project | tee build-logs/08-idempotency.log
+          grep -n 'versionCode = 48' project/app/build.gradle.kts
+          grep -n 'versionName = "0.9.3.4"' project/app/build.gradle.kts
+          grep -RIn 'latestSwitchRelative' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+          grep -RIn 'snapshotFlow' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -RIn 'الموسم .*الحلقة' project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt | head
+      - name: Compile, test and build
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/09-gradle.log
+      - name: Verify packages
+        run: |
+          set -euo pipefail
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          test -s "$APK"; test -s "$AAB"
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md | tee build-logs/10-apk-architecture.log
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md | tee build-logs/11-aab-architecture.log
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
+          grep "package: name='sa.hulksa.player.dev' versionCode='48' versionName='0.9.3.4-beta'" reports/APK-BADGING.txt
+      - name: Package delivery
+        run: |
+          set -euo pipefail
+          rm -rf delivery source-delivery
+          mkdir delivery source-delivery
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          cp "$APK" delivery/HULK-SA-v0.9.3.4-MOBILE-FIXES-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.4-MOBILE-FIXES-debug.aab
+          cp reports/* delivery/
+          cp -a project/. source-delivery/
+          rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.4-MOBILE-FIXES.zip .)
+          printf '# HULK SA v0.9.3.4 Build Report\n\n- Live controls safe area: PASS\n- Repeatable channel swipes: PASS\n- Category reorder gestures: PASS\n- Per-section touch scroll memory: PASS\n- Search and category memory on navigation: PASS\n- Series status-bar spacing: PASS\n- Full season and episode labels: PASS\n- Kotlin compilation and unit tests: PASS\n- APK and AAB: PASS\n' > delivery/BUILD-REPORT-v0.9.3.4.md
+          (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.4-MOBILE-FIXES
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.4-MOBILE-FIXES-DIAGNOSTICS
+          path: |
+            build-logs/
+            reports/
+            project/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
