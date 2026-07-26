@@ -7,6 +7,14 @@ on:
     paths:
       - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
       - '.github/workflows/build-v09120.yml'
+      - 'tools/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+      - '.github/workflows/build-v09120.yml'
+      - 'tools/**'
   workflow_dispatch:
 
 permissions:
@@ -43,13 +51,18 @@ jobs:
       - name: Install Android SDK packages
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          set -o pipefail
+          mkdir -p build-logs
+          {
+            yes | sdkmanager --licenses >/dev/null || true
+            sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          } 2>&1 | tee build-logs/01-sdk-setup.log
 
       - name: Extract official source archive
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p build-logs
           ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
           test -f "$ARCHIVE"
           rm -rf extracted project
@@ -62,30 +75,53 @@ jobs:
           test -n "$ROOT"
           cp -a "$ROOT" project
           echo "PROJECT_ROOT=project" >> "$GITHUB_ENV"
-          sha256sum "$ARCHIVE" | tee archive.sha256
+          sha256sum "$ARCHIVE" | tee archive.sha256 build-logs/02-archive-sha256.log
+          find project -maxdepth 3 -type f | sort | tee build-logs/03-project-tree.log
 
       - name: Verify official version and source markers
         shell: bash
         working-directory: project
         run: |
-          set -euo pipefail
-          grep -RIn 'versionName = "0.9.1.20"' app/build.gradle.kts
-          grep -RIl 'HomeContentSnapshot' app/src/main >/dev/null
-          test -f app/src/main/AndroidManifest.xml
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
+          set -o pipefail
+          {
+            set -e
+            grep -RIn 'versionName = "0.9.1.20"' app/build.gradle.kts
+            grep -RIl 'HomeContentSnapshot' app/src/main >/dev/null
+            test -f app/src/main/AndroidManifest.xml
+            test -f settings.gradle.kts
+            test -f build.gradle.kts
+          } 2>&1 | tee ../build-logs/04-source-verification.log
+
+      - name: Apply narrowly scoped build repairs
+        shell: bash
+        run: |
+          set -o pipefail
+          if [ -f tools/repair-v09120.py ]; then
+            python3 tools/repair-v09120.py project 2>&1 | tee build-logs/05-repairs.log
+          else
+            echo 'No build repair script is present yet.' | tee build-logs/05-repairs.log
+          fi
 
       - name: Clean project
+        shell: bash
         working-directory: project
-        run: gradle --no-daemon clean --stacktrace
-
-      - name: Run unit tests
-        working-directory: project
-        run: gradle --no-daemon testDebugUnitTest --stacktrace
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain clean --stacktrace 2>&1 | tee ../build-logs/06-clean.log
 
       - name: Build debug APK from source
+        shell: bash
         working-directory: project
-        run: gradle --no-daemon :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/07-assemble-debug.log
+
+      - name: Run unit tests
+        shell: bash
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain testDebugUnitTest --stacktrace 2>&1 | tee ../build-logs/08-unit-tests.log
 
       - name: Package complete delivery
         if: success()
@@ -93,8 +129,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp project/app/build/outputs/apk/debug/*.apk delivery/HULK-SA-v0.9.1.20-debug.apk
-          cp 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip' delivery/HULK-SA-Source-v0.9.1.20.zip
+          APK=$(find project/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          test -s "$APK"
+          cp "$APK" delivery/HULK-SA-v0.9.1.20-debug.apk
+
+          rm -rf source-delivery
+          mkdir -p source-delivery
+          cp -a project/. source-delivery/
+          rm -rf source-delivery/.gradle source-delivery/build source-delivery/app/build
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.1.20-fixed.zip .)
+
           {
             echo '# HULK SA v0.9.1.20 Build Report'
             echo
@@ -105,8 +150,8 @@ jobs:
             echo '- Gradle: 8.13'
             echo '- compileSdk: 36'
             echo '- targetSdk: 36'
-            echo '- Unit tests: passed'
             echo '- Debug APK build: passed'
+            echo '- Unit tests: passed'
           } > delivery/BUILD-REPORT-v0.9.1.20.md
           (cd delivery && sha256sum * > SHA256SUMS.txt)
 
@@ -120,13 +165,14 @@ jobs:
           retention-days: 30
 
       - name: Upload build diagnostics
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.1.20-BUILD-FAILURE
+          name: HULK-SA-v0.9.1.20-BUILD-DIAGNOSTICS
           path: |
             archive.sha256
+            build-logs/
             project/app/build/reports/
             project/build/reports/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 14
