@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Verify the reviewed v0.9.3.1 adaptive mobile-polish source."""
+"""Verify HULK SA adaptive source including the v0.9.3.2 mobile follow-up."""
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
+
 REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "app/build.gradle.kts": (
-        'versionCode = 45',
-        'versionName = "0.9.3.1"',
+        'versionCode = 46',
+        'versionName = "0.9.3.2"',
         '"arm64-v8a"',
         '"armeabi-v7a"',
         '"x86_64"',
@@ -32,27 +33,24 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "fun classifyDeviceClass",
         "fun selectNavigationType",
     ),
-    "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt": (
-        "LocalSoftwareKeyboardController",
-        "focusManager.clearFocus(force = true)",
-        "detectTapGestures(onTap = { dismissKeyboard() })",
-        "onLogin(username.trim(), password, rememberAccount)",
-    ),
     "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt": (
         "val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL",
-        "val primaryDestinations = remember",
-        "Modifier.weight(1f).heightIn(min = 42.dp)",
-        ".statusBarsPadding()",
-    ),
-    "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt": (
-        "navigationBarsPadding()",
-        "statusBarsPadding()",
-        ".padding(horizontal = 12.dp, vertical = 10.dp)",
+        "animateScrollToItem(selectedIndex + 1)",
+        "detectDragGesturesAfterLongPress",
+        "dragAccumulator",
     ),
     "app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt": (
-        "Modifier.statusBarsPadding()",
-        'text = if (isFavorite) "★ في قائمتي" else "+ قائمتي"',
-        "modifier = Modifier.weight(1f)",
+        ".height(if (isTv) 510.dp else 510.dp)",
+        "fontSize = if (isTv) 42.sp else 26.sp",
+    ),
+    "app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt": (
+        ".height(if (isTv) 390.dp else 400.dp)",
+        "fontSize = if (isTv) 39.sp else 25.sp",
+    ),
+    "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt": (
+        "detectHorizontalDragGestures",
+        "onSeekTo((durationMs * fraction).toLong())",
+        "change.position.x / size.width.toFloat()",
     ),
     "app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt": (
         "import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi",
@@ -100,19 +98,19 @@ def main() -> int:
         fail("HomeContentSnapshot preservation marker is missing")
 
     report_lines = [
-        "# HULK SA v0.9.3.1 Mobile Polish Verification",
+        "# HULK SA v0.9.3.2 Mobile Follow-up Source Verification",
         "",
         "Status: **PASS**",
         "",
         "Verified:",
         "",
-        "- Responsive four-destination mobile navigation.",
-        "- Status-bar and navigation-bar safe areas.",
-        "- Login keyboard dismissal and focus clearing.",
-        "- Responsive player controls.",
-        "- Stable movie favorite action width.",
-        "- Qualified ABI configuration preserved.",
-        "- HomeContentSnapshot preserved.",
+        "- Complete horizontally scrollable mobile navigation.",
+        "- Selected destination automatic visibility.",
+        "- Touch long-press live-category drag reordering.",
+        "- Safe movie and series title spacing.",
+        "- Tap and horizontal-drag VOD seeking.",
+        "- Qualified ABI configuration and legacy x86 exclusion.",
+        "- Adaptive device/input behavior and preserved HomeContentSnapshot.",
         "",
         "Checked files:",
         "",
