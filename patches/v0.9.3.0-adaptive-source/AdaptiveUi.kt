@@ -15,28 +15,10 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 
-enum class HulkDeviceClass {
-    MOBILE,
-    TABLET,
-    TELEVISION,
-}
-
-enum class HulkWindowWidthClass {
-    COMPACT,
-    MEDIUM,
-    EXPANDED,
-}
-
-enum class HulkInputMode {
-    TOUCH,
-    REMOTE,
-    KEYBOARD,
-}
-
-enum class HulkNavigationType {
-    TOP_BAR,
-    RAIL,
-}
+enum class HulkDeviceClass { MOBILE, TABLET, TELEVISION }
+enum class HulkWindowWidthClass { COMPACT, MEDIUM, EXPANDED }
+enum class HulkInputMode { TOUCH, REMOTE, KEYBOARD }
+enum class HulkNavigationType { TOP_BAR, RAIL }
 
 @Immutable
 data class AdaptiveUiState(
@@ -48,9 +30,7 @@ data class AdaptiveUiState(
     val screenHeightDp: Int,
 ) {
     val isTelevision: Boolean get() = deviceClass == HulkDeviceClass.TELEVISION
-
-    val showFocusHighlights: Boolean
-        get() = shouldShowFocusHighlights(deviceClass, inputMode)
+    val showFocusHighlights: Boolean get() = shouldShowFocusHighlights(deviceClass, inputMode)
 }
 
 @Stable
@@ -80,33 +60,24 @@ val LocalAdaptiveUi = staticCompositionLocalOf {
 }
 
 @Composable
-fun rememberAdaptiveUiState(
-    isTelevisionDevice: Boolean,
-): Pair<AdaptiveUiState, AdaptiveInputController> {
+fun rememberAdaptiveUiState(isTelevisionDevice: Boolean): Pair<AdaptiveUiState, AdaptiveInputController> {
     val configuration = LocalConfiguration.current
     val widthDp = configuration.screenWidthDp.coerceAtLeast(1)
     val heightDp = configuration.screenHeightDp.coerceAtLeast(1)
     val smallestWidthDp = configuration.smallestScreenWidthDp.coerceAtLeast(minOf(widthDp, heightDp))
-    val deviceClass = classifyDeviceClass(
-        isTelevisionDevice = isTelevisionDevice,
-        smallestWidthDp = smallestWidthDp,
-        widthDp = widthDp,
-    )
+    val deviceClass = classifyDeviceClass(isTelevisionDevice, smallestWidthDp, widthDp)
     val windowWidthClass = classifyWindowWidth(widthDp)
     val controller = remember(isTelevisionDevice) {
-        AdaptiveInputController(
-            if (isTelevisionDevice) HulkInputMode.REMOTE else HulkInputMode.TOUCH,
-        )
+        AdaptiveInputController(if (isTelevisionDevice) HulkInputMode.REMOTE else HulkInputMode.TOUCH)
     }
-    val state = AdaptiveUiState(
+    return AdaptiveUiState(
         deviceClass = deviceClass,
         windowWidthClass = windowWidthClass,
         navigationType = selectNavigationType(deviceClass, windowWidthClass),
         inputMode = controller.mode,
         screenWidthDp = widthDp,
         screenHeightDp = heightDp,
-    )
-    return state to controller
+    ) to controller
 }
 
 fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
@@ -117,8 +88,8 @@ fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
                 controller.recordTouchInput()
             }
         }
-    }.onPreviewKeyEvent { event ->
-        controller.recordKeyInput(event.nativeKeyEvent.source)
+    }.onPreviewKeyEvent {
+        controller.recordKeyInput(InputDevice.SOURCE_KEYBOARD)
         false
     }
 
@@ -136,26 +107,17 @@ fun classifyWindowWidth(widthDp: Int): HulkWindowWidthClass = when {
     else -> HulkWindowWidthClass.EXPANDED
 }
 
-fun classifyDeviceClass(
-    isTelevisionDevice: Boolean,
-    smallestWidthDp: Int,
-    widthDp: Int,
-): HulkDeviceClass = when {
+fun classifyDeviceClass(isTelevisionDevice: Boolean, smallestWidthDp: Int, widthDp: Int): HulkDeviceClass = when {
     isTelevisionDevice -> HulkDeviceClass.TELEVISION
     smallestWidthDp >= 600 || widthDp >= 840 -> HulkDeviceClass.TABLET
     else -> HulkDeviceClass.MOBILE
 }
 
-fun selectNavigationType(
-    deviceClass: HulkDeviceClass,
-    windowWidthClass: HulkWindowWidthClass,
-): HulkNavigationType = when {
+fun selectNavigationType(deviceClass: HulkDeviceClass, windowWidthClass: HulkWindowWidthClass): HulkNavigationType = when {
     deviceClass == HulkDeviceClass.TELEVISION -> HulkNavigationType.RAIL
     windowWidthClass == HulkWindowWidthClass.EXPANDED -> HulkNavigationType.RAIL
     else -> HulkNavigationType.TOP_BAR
 }
 
-fun shouldShowFocusHighlights(
-    deviceClass: HulkDeviceClass,
-    inputMode: HulkInputMode,
-): Boolean = deviceClass == HulkDeviceClass.TELEVISION || inputMode != HulkInputMode.TOUCH
+fun shouldShowFocusHighlights(deviceClass: HulkDeviceClass, inputMode: HulkInputMode): Boolean =
+    deviceClass == HulkDeviceClass.TELEVISION || inputMode != HulkInputMode.TOUCH
