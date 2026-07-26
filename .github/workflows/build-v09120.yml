@@ -1,0 +1,132 @@
+name: Build HULK SA v0.9.1.20
+
+on:
+  push:
+    branches:
+      - phase-0-v0.9.1.20-audit
+    paths:
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+      - '.github/workflows/build-v09120.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v09120-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Extract official source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          test -f "$ARCHIVE"
+          rm -rf extracted project
+          mkdir -p extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f -name settings.gradle.kts -printf '%h\n' | head -n 1)
+          if [ -z "$ROOT" ]; then
+            ROOT=$(find extracted -type f -name settings.gradle -printf '%h\n' | head -n 1)
+          fi
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          echo "PROJECT_ROOT=project" >> "$GITHUB_ENV"
+          sha256sum "$ARCHIVE" | tee archive.sha256
+
+      - name: Verify official version and source markers
+        shell: bash
+        working-directory: project
+        run: |
+          set -euo pipefail
+          grep -RIn 'versionName = "0.9.1.20"' app/build.gradle.kts
+          grep -RIl 'HomeContentSnapshot' app/src/main >/dev/null
+          test -f app/src/main/AndroidManifest.xml
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+
+      - name: Clean project
+        working-directory: project
+        run: gradle --no-daemon clean --stacktrace
+
+      - name: Run unit tests
+        working-directory: project
+        run: gradle --no-daemon testDebugUnitTest --stacktrace
+
+      - name: Build debug APK from source
+        working-directory: project
+        run: gradle --no-daemon :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace
+
+      - name: Package complete delivery
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p delivery
+          cp project/app/build/outputs/apk/debug/*.apk delivery/HULK-SA-v0.9.1.20-debug.apk
+          cp 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip' delivery/HULK-SA-Source-v0.9.1.20.zip
+          {
+            echo '# HULK SA v0.9.1.20 Build Report'
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo '- Build source: official v0.9.1.20 source archive'
+            echo '- Java: 17'
+            echo '- Gradle: 8.13'
+            echo '- compileSdk: 36'
+            echo '- targetSdk: 36'
+            echo '- Unit tests: passed'
+            echo '- Debug APK build: passed'
+          } > delivery/BUILD-REPORT-v0.9.1.20.md
+          (cd delivery && sha256sum * > SHA256SUMS.txt)
+
+      - name: Upload complete v0.9.1.20 delivery
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.1.20-COMPLETE
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.1.20-BUILD-FAILURE
+          path: |
+            archive.sha256
+            project/app/build/reports/
+            project/build/reports/
+          if-no-files-found: ignore
+          retention-days: 7
