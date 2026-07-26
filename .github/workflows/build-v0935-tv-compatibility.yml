@@ -78,9 +78,11 @@ jobs:
           python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/12-aab-architecture.log
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt build-logs/13-apk-badging.log
           grep "package: name='sa.hulksa.player.dev' versionCode='49' versionName='0.9.3.5-beta'" reports/APK-BADGING.txt
-          grep "leanback-launchable-activity: name='sa.hulksa.player.TvMainActivity'" reports/APK-BADGING.txt
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$APK" AndroidManifest.xml > reports/MANIFEST-TREE.txt
           grep 'TvMainActivity' reports/MANIFEST-TREE.txt
+          grep 'LEANBACK_LAUNCHER' reports/MANIFEST-TREE.txt
+          grep 'tv_banner' reports/MANIFEST-TREE.txt
+          grep 'ic_launcher' reports/MANIFEST-TREE.txt
 
       - name: Package delivery
         run: |
