@@ -7,10 +7,13 @@ This file is the permanent source of truth for every new ChatGPT conversation an
 - Continue the existing project. Do not restart from scratch.
 - Do not redesign or modify completed work unless fixing a verified defect.
 - Every build must be produced from source code only.
-- Do not rebuild, patch, modify DEX, or repackage an old APK.
+- All future engineering changes must be source changes stored and reviewable in GitHub.
+- APK and AAB files are outputs, test artifacts, and stability references only; they are never the development base.
+- Do not rebuild, patch, modify DEX, edit a compiled APK, or repackage an old APK.
 - APK v0.9.1.19 is only the stability, installation, signing, and behavior reference.
 - Source v0.9.1.20 is the approved development base.
 - Do not modify `main` directly. Work in a dedicated branch, validate, then merge only after approval.
+- Every version must preserve a complete Git history, workflow logs, source package, binaries, reports, changelog, and checksums.
 
 ## Completed work that must be preserved
 
@@ -25,9 +28,9 @@ This file is the permanent source of truth for every new ChatGPT conversation an
 
 1. Inspect and recover the complete v0.9.1.20 source.
 2. Stabilize source build.
-3. Fix installation, update path, signing, and package compatibility.
+3. Fix installation, update path, signing, and package compatibility before the final stable release.
 4. Qualify supported architectures.
-5. Adapt and validate mobile, tablet, and Android TV behavior.
+5. Adapt and validate mobile, tablet, Android TV, Google TV, and TV Box behavior.
 6. Run tests and regression checks.
 7. Publish a stable v1.0.
 8. Begin major new features only after v1.0.
@@ -37,8 +40,11 @@ The first major feature after v1.0 is Multi Profile.
 ## Current verified source facts
 
 - package/applicationId: `sa.hulksa.player`
-- versionName: `0.9.1.20`
-- versionCode: `42`
+- Debug applicationId: `sa.hulksa.player.dev`
+- Stable source base versionName: `0.9.1.20`
+- Stable source base versionCode: `42`
+- Phase 2 engineering versionName: `0.9.2.0`
+- Phase 2 engineering versionCode: `43`
 - compileSdk: `36`
 - targetSdk: `36`
 - minSdk: `23`
@@ -50,9 +56,15 @@ The first major feature after v1.0 is Multi Profile.
 
 Repository: `azoozrm/-HULK-SA-Android`
 
-Current working branch: `phase-0-v0.9.1.20-audit`
+Completed source-build branch:
 
-Relevant commits:
+- `phase-0-v0.9.1.20-audit`
+
+Active architecture branch:
+
+- `phase-2-v0.9.2.0-architecture`
+
+Relevant completed commits:
 
 - Phase 0 audit document: `e92a2eef7f83b0b9672021f82abc98bae67e79fd`
 - Phase 0 audit workflow: `e1193140dc61fe9205d8c28b5ca3946eb3811294`
@@ -61,17 +73,26 @@ Relevant commits:
 - Full Gradle log capture and monitored build workflow: `c2fb77f1aa42084008a37d362b031804a56604d2`
 - First Compose stability-field repair: `8db2c097d98a1903c793d78ff308f57a28dbc8f6`
 - Final Compose/JvmField build repair and successful source build: `fbac81787054f07dd4e996e2e9be55954bfb601a`
+- Successful-build plan update: `9998510ff3e565b256fe7813014ca0c506d48bd5`
+
+Phase 2 commits:
+
+- Source-only v0.9.2.0 architecture preparation: `bcdf646e9bd14c50871ca6277498deedbf0ae60f`
+- APK/AAB ELF architecture verifier: `8714e9f3441e290db23907cd6a49ae6066e98d54`
+- Phase 2 architecture qualification document: `036ccbfb3c7bf98fd2631387607a3e16c5bf928e`
+- Phase 2 source-built APK and AAB workflow: `69044a2a134e4062866b5077386bb311c62ae8eb`
 
 Workflows:
 
 - `.github/workflows/phase0-audit.yml`
 - `.github/workflows/build-v09120.yml`
+- `.github/workflows/build-v0920-architecture.yml`
 
 Open validation PR:
 
 - PR `#18` — `Phase 0 — build and repair HULK SA v0.9.1.20`
 
-## Current build status
+## Verified v0.9.1.20 build status
 
 - Source audit succeeded.
 - `clean` succeeded.
@@ -83,22 +104,37 @@ Open validation PR:
 - Successful workflow run: `30184291495`.
 - GitHub artifact: `HULK-SA-v0.9.1.20-COMPLETE`.
 - APK SHA256: `2d766d539091fce11254e3481d900725be3880898034e80937b53ec2443d4d40`.
-- This APK is a debug-signed engineering build and is not yet the approved stable release.
+- This APK is the accepted Phase 2 source baseline, not the final v1.0 release.
 
-## Current engineering stage
+## Active engineering stage — Phase 2 architecture qualification
 
-Stages 1 and 2 of the mandatory engineering sequence are complete:
+Architecture qualification starts now by project-owner decision. Installation and release-signing compatibility remain mandatory gates before v1.0, but they are not the active implementation task for this phase.
 
-- Complete v0.9.1.20 source recovered and audited.
-- Source build stabilized and verified.
+Phase 2 targets:
 
-The active stage is now stage 3:
+- `arm64-v8a`
+- `armeabi-v7a`
+- `x86_64`
 
-- Compare package name, version code, manifest identity, signing certificate, supported update path, and installation behavior against the stable v0.9.1.19 reference APK.
-- Determine whether v0.9.1.20 can update v0.9.1.19 in place without uninstalling and without losing application data.
-- Do not copy, extract, reuse, or derive a private signing key from the reference APK.
-- If the original signing key is unavailable, document the signing incompatibility and establish an approved source-based release-signing strategy before v1.0.
-- After installation/signing compatibility is resolved or formally documented, continue to architecture qualification.
+The legacy `x86` ABI is excluded.
+
+Required Phase 2 outputs from one exact GitHub source commit:
+
+- Universal debug APK.
+- Debug Android App Bundle.
+- Full prepared source ZIP.
+- APK architecture report.
+- AAB architecture report.
+- ELF machine validation for every native library.
+- Unit-test results.
+- Build logs and diagnostics.
+- Build report.
+- Changelog.
+- SHA256 checksums.
+
+The Phase 2 workflow must fail if an approved ABI is missing, an unapproved ABI is present, a native library has incomplete ABI coverage, or an ELF machine identity does not match its ABI directory.
+
+After Phase 2 passes, continue to the Adaptive UI and input/navigation stages for mobile, tablet, Android TV, Google TV, and TV Box.
 
 ## Release and delivery rule for every approved version
 
@@ -106,14 +142,16 @@ Every approved version must be stored in GitHub and delivered as a complete vers
 
 - Full Android source ZIP.
 - APK built from that exact source commit.
+- Android App Bundle when required by the stage.
 - Release APK when signing is available and approved.
 - Build report.
+- Architecture/device reports required by the stage.
 - Changelog.
 - SHA256 checksums.
 - Git commit and version tag.
 
-A version is not approved merely because an APK was produced. It must have no known blocking defect and must pass the required build, test, installation, signing, and regression checks for its stage.
+A version is not approved merely because an APK was produced. It must have no known blocking defect and must pass the required build, test, installation, signing, architecture, device, and regression checks for its stage.
 
 ## Instruction for a new conversation
 
-Read this file first, inspect the latest commits, workflows, runs, jobs, and logs in the repository, then continue from the current GitHub state. Do not ask the user to re-explain the project and do not restart from scratch.
+Read this file first, inspect the latest commits, workflows, runs, jobs, and logs in the repository, then continue from the current GitHub state. Do not ask the user to re-explain the project, do not restart from scratch, and do not use an APK as the development source.
