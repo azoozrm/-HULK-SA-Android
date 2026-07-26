@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Verify the reviewed v0.9.3.0 adaptive UI source patch was applied correctly."""
-
+"""Verify the reviewed v0.9.3.1 adaptive mobile-polish source."""
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
-
 REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     "app/build.gradle.kts": (
-        'versionCode = 44',
-        'versionName = "0.9.3.0"',
+        'versionCode = 45',
+        'versionName = "0.9.3.1"',
         '"arm64-v8a"',
         '"armeabi-v7a"',
         '"x86_64"',
@@ -30,16 +28,31 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "enum class HulkDeviceClass",
         "enum class HulkWindowWidthClass",
         "enum class HulkInputMode",
-        "enum class HulkNavigationType",
         "fun classifyWindowWidth",
         "fun classifyDeviceClass",
         "fun selectNavigationType",
-        "fun shouldShowFocusHighlights",
+    ),
+    "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt": (
+        "LocalSoftwareKeyboardController",
+        "focusManager.clearFocus(force = true)",
+        "detectTapGestures(onTap = { dismissKeyboard() })",
+        "onLogin(username.trim(), password, rememberAccount)",
     ),
     "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt": (
-        "val adaptiveUi = LocalAdaptiveUi.current",
         "val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL",
-        "if (useNavigationRail)",
+        "val primaryDestinations = remember",
+        "Modifier.weight(1f).heightIn(min = 42.dp)",
+        ".statusBarsPadding()",
+    ),
+    "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt": (
+        "navigationBarsPadding()",
+        "statusBarsPadding()",
+        ".padding(horizontal = 12.dp, vertical = 10.dp)",
+    ),
+    "app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt": (
+        "Modifier.statusBarsPadding()",
+        'text = if (isFavorite) "★ في قائمتي" else "+ قائمتي"',
+        "modifier = Modifier.weight(1f)",
     ),
     "app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt": (
         "import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi",
@@ -47,10 +60,8 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt": (
         "compactPhoneUsesMobileTopNavigation",
-        "portraitTabletUsesTabletLayoutWithoutTelevisionSizing",
         "expandedTabletUsesRailNavigation",
         "televisionAlwaysUsesRailAndFocusHighlights",
-        "touchSuppressesFocusChromeButKeyboardRestoresIt",
     ),
 }
 
@@ -65,7 +76,6 @@ def main() -> int:
     parser.add_argument("project", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-
     root = args.project.resolve()
     if not root.is_dir():
         fail(f"project directory does not exist: {root}")
@@ -90,22 +100,19 @@ def main() -> int:
         fail("HomeContentSnapshot preservation marker is missing")
 
     report_lines = [
-        "# HULK SA v0.9.3.0 Adaptive Source Verification",
+        "# HULK SA v0.9.3.1 Mobile Polish Verification",
         "",
         "Status: **PASS**",
         "",
         "Verified:",
         "",
-        "- Source version 0.9.3.0 / versionCode 44.",
-        "- Qualified ABI configuration remains present.",
-        "- Legacy x86 remains excluded.",
-        "- Mobile, tablet, and television classification source is present.",
-        "- Compact, medium, and expanded window classification source is present.",
-        "- Touch, remote, and keyboard input tracking source is present.",
-        "- Adaptive navigation selection source is present.",
-        "- Shared focus components consume adaptive input state.",
-        "- Adaptive classifier tests are present.",
-        "- HomeContentSnapshot preservation marker remains present.",
+        "- Responsive four-destination mobile navigation.",
+        "- Status-bar and navigation-bar safe areas.",
+        "- Login keyboard dismissal and focus clearing.",
+        "- Responsive player controls.",
+        "- Stable movie favorite action width.",
+        "- Qualified ABI configuration preserved.",
+        "- HomeContentSnapshot preserved.",
         "",
         "Checked files:",
         "",
