@@ -1,0 +1,232 @@
+name: Build HULK SA v0.9.2.0 Architecture
+
+on:
+  push:
+    branches:
+      - phase-2-v0.9.2.0-architecture
+    paths:
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+      - '.github/workflows/build-v0920-architecture.yml'
+      - 'tools/**'
+      - 'docs/PHASE-2-ARCHITECTURE-QUALIFICATION.md'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+      - '.github/workflows/build-v0920-architecture.yml'
+      - 'tools/**'
+      - 'docs/PHASE-2-ARCHITECTURE-QUALIFICATION.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v0920-architecture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  architecture-qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build-logs reports
+          {
+            yes | sdkmanager --licenses >/dev/null || true
+            sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          } 2>&1 | tee build-logs/01-sdk-setup.log
+
+      - name: Extract official source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          test -f "$ARCHIVE"
+          rm -rf extracted project
+          mkdir -p extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f -name settings.gradle.kts -printf '%h\n' | head -n 1)
+          if [ -z "$ROOT" ]; then
+            ROOT=$(find extracted -type f -name settings.gradle -printf '%h\n' | head -n 1)
+          fi
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          sha256sum "$ARCHIVE" | tee archive.sha256 build-logs/02-source-archive-sha256.log
+          find project -maxdepth 3 -type f | sort | tee build-logs/03-project-tree.log
+
+      - name: Repair recovered source compiler artifacts
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/repair-v09120.py project 2>&1 | tee build-logs/04-source-repair.log
+
+      - name: Prepare v0.9.2.0 architecture source
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 tools/prepare-v0920-architecture.py project 2>&1 | tee build-logs/05-architecture-source-preparation.log
+
+      - name: Verify prepared source policy
+        shell: bash
+        working-directory: project
+        run: |
+          set -o pipefail
+          {
+            set -e
+            grep -n 'versionCode = 43' app/build.gradle.kts
+            grep -n 'versionName = "0.9.2.0"' app/build.gradle.kts
+            grep -n '"arm64-v8a"' app/build.gradle.kts
+            grep -n '"armeabi-v7a"' app/build.gradle.kts
+            grep -n '"x86_64"' app/build.gradle.kts
+            ! grep -E '^[[:space:]]*"x86",?[[:space:]]*$' app/build.gradle.kts
+            grep -RIl 'HomeContentSnapshot' app/src/main >/dev/null
+            test -f app/src/main/AndroidManifest.xml
+            test -f settings.gradle.kts
+            test -f build.gradle.kts
+          } 2>&1 | tee ../build-logs/06-source-policy-verification.log
+
+      - name: Clean project
+        shell: bash
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain clean --stacktrace 2>&1 | tee ../build-logs/07-clean.log
+
+      - name: Build universal debug APK
+        shell: bash
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/08-assemble-debug.log
+
+      - name: Build debug Android App Bundle
+        shell: bash
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/09-bundle-debug.log
+
+      - name: Run unit tests
+        shell: bash
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain testDebugUnitTest --stacktrace 2>&1 | tee ../build-logs/10-unit-tests.log
+
+      - name: Verify APK and AAB architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find project/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          AAB=$(find project/app/build/outputs/bundle/debug -maxdepth 1 -type f -name '*.aab' | head -n 1)
+          test -n "$APK"
+          test -n "$AAB"
+          test -s "$APK"
+          test -s "$AAB"
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/11-apk-architecture.log
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/12-aab-architecture.log
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt build-logs/13-apk-badging.log
+          grep "package: name='sa.hulksa.player.dev' versionCode='43' versionName='0.9.2.0-beta'" reports/APK-BADGING.txt
+
+      - name: Package complete Phase 2 delivery
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p delivery
+          APK=$(find project/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          AAB=$(find project/app/build/outputs/bundle/debug -maxdepth 1 -type f -name '*.aab' | head -n 1)
+          cp "$APK" delivery/HULK-SA-v0.9.2.0-ARCHITECTURE-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.2.0-ARCHITECTURE-debug.aab
+          cp reports/APK-ARCHITECTURE-REPORT.md delivery/
+          cp reports/AAB-ARCHITECTURE-REPORT.md delivery/
+          cp reports/APK-BADGING.txt delivery/
+          cp docs/PHASE-2-ARCHITECTURE-QUALIFICATION.md delivery/
+
+          rm -rf source-delivery
+          mkdir -p source-delivery
+          cp -a project/. source-delivery/
+          rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.2.0-ARCHITECTURE.zip .)
+
+          {
+            echo '# HULK SA v0.9.2.0 Architecture Build Report'
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo '- Build source: official v0.9.1.20 source archive plus reviewed source-only GitHub patches'
+            echo '- Version: 0.9.2.0-beta / versionCode 43'
+            echo '- Java: 17'
+            echo '- Gradle: 8.13'
+            echo '- minSdk: 23'
+            echo '- targetSdk: 36'
+            echo '- compileSdk: 36'
+            echo '- Universal APK: passed'
+            echo '- Android App Bundle: passed'
+            echo '- Unit tests: passed'
+            echo '- Qualified ABIs: arm64-v8a, armeabi-v7a, x86_64'
+            echo '- Excluded ABI: x86'
+            echo '- Native ELF verification: passed'
+            echo '- APK/DEX modification: prohibited and not used'
+          } > delivery/BUILD-REPORT-v0.9.2.0.md
+
+          {
+            echo '# HULK SA v0.9.2.0 Changelog'
+            echo
+            echo '- Started Phase 2 architecture qualification.'
+            echo '- Preserved the approved v0.9.1.20 application source and features.'
+            echo '- Qualified arm64-v8a, armeabi-v7a, and x86_64.'
+            echo '- Excluded legacy x86 from produced packages.'
+            echo '- Added source-level ABI configuration.'
+            echo '- Added ELF machine and native-library coverage verification.'
+            echo '- Added Universal APK and Android App Bundle outputs from one source tree.'
+          } > delivery/CHANGELOG-v0.9.2.0.md
+
+          (cd delivery && sha256sum * > SHA256SUMS.txt)
+
+      - name: Upload complete Phase 2 delivery
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.2.0-ARCHITECTURE-QUALIFIED
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Phase 2 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.2.0-ARCHITECTURE-DIAGNOSTICS
+          path: |
+            archive.sha256
+            build-logs/
+            reports/
+            project/app/build/reports/
+            project/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
