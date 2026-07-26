@@ -6,16 +6,18 @@ Implementation and validation branch:
 
 - `phase-3-v0.9.3.0-adaptive-foundation`
 
+Build status: **PASS**.
+
 This phase continues directly from the qualified v0.9.2.0 architecture source. It does not merge or modify `main`.
 
 ## Source governance
 
 - All engineering changes are source-level and stored in GitHub.
 - The official v0.9.1.20 source archive remains the recovery base.
-- Phase 2 source preparation is applied first, then the reviewed Phase 3 source patch.
+- Phase 2 source preparation is applied first, then the reviewed Phase 3 source templates and preparation tool.
 - APK and AAB files are outputs only.
 - No APK, DEX, binary patching, repackaging, or APK-derived development is used.
-- Existing ViewModel, Repository, API, HomeContentSnapshot, downloads, recommendations, focus navigation, and performance work must remain intact.
+- Existing ViewModel, Repository, API, HomeContentSnapshot, downloads, recommendations, focus navigation, and performance work remain intact.
 
 ## Engineering version
 
@@ -47,6 +49,8 @@ This phase continues directly from the qualified v0.9.2.0 architecture source. I
 
 The latest active input mode controls shared focus chrome. Touch input suppresses TV-style focus scaling and borders on shared buttons, poster cards, history cards, channel items, and adaptive navigation. Remote and keyboard input restore focus feedback. Television devices always retain focus feedback.
 
+Input-source bitmasks are compared against complete Android source constants so keyboard events are not incorrectly classified as D-pad events.
+
 ### Navigation adaptation
 
 - Television devices use the cinematic navigation rail.
@@ -56,7 +60,7 @@ The latest active input mode controls shared focus chrome. Touch input suppresse
 
 ### Television detection
 
-Television classification now checks:
+Television classification checks:
 
 - `UI_MODE_TYPE_TELEVISION`.
 - `FEATURE_LEANBACK`.
@@ -79,21 +83,33 @@ The phase adds an adaptive presentation environment around the existing applicat
 
 ## Automated validation
 
-The workflow must pass:
+Successful workflow run: `30186296812`.
+
+The workflow passed:
 
 1. Official source extraction.
 2. Recovered-source compiler-artifact repair.
 3. v0.9.2.0 architecture source preparation.
-4. Reviewed Phase 3 patch application.
-5. Adaptive source policy verification.
-6. Clean Gradle build.
-7. Universal debug APK build.
-8. Debug Android App Bundle build.
-9. Unit tests, including adaptive classifier tests.
-10. APK and AAB ABI / ELF verification.
-11. APK badging verification for version 0.9.3.0-beta / versionCode 44.
-12. Complete source and binary delivery packaging.
-13. SHA256 generation and verification.
+4. Reviewed Phase 3 source-template preparation.
+5. Preparation idempotency check.
+6. Adaptive source policy verification.
+7. Clean Gradle build and Kotlin compilation.
+8. Unit tests, including adaptive classifier and input-source tests.
+9. Universal debug APK build.
+10. Debug Android App Bundle build.
+11. APK and AAB ABI / ELF verification.
+12. APK badging verification for version 0.9.3.0-beta / versionCode 44.
+13. Complete source and binary delivery packaging.
+14. SHA256 generation and verification.
+
+Complete artifact:
+
+- ID: `8627152631`
+- Name: `HULK-SA-v0.9.3.0-ADAPTIVE-FOUNDATION`
+
+Diagnostics artifact:
+
+- ID: `8627152793`
 
 ## Device acceptance matrix
 
@@ -119,9 +135,8 @@ The workflow must pass:
 
 ## Merge policy
 
-This branch and its pull request remain unmerged until:
+This branch and pull request `#20` remain unmerged until:
 
-- GitHub Actions passes.
 - The produced APK is installed and tested by the project owner.
 - Mobile and television smoke tests pass.
 - The owner explicitly approves the merge.
