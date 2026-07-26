@@ -1,0 +1,2 @@
+Phase 3 validation trigger for PR #20.
+Source-only workflow; no APK or DEX input is used.
