@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# v0.9.3.13 targeted regression fix: category follow + exact two-step player back.
 from pathlib import Path
 import sys
 
