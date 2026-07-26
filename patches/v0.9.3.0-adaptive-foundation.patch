@@ -1,0 +1,852 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index a2d7e9e..7e8a159 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -20,14 +20,14 @@ android {
+         applicationId = "sa.hulksa.player"
+         minSdk = 23
+         targetSdk = 36
+-        versionCode = 43
+-        versionName = "0.9.2.0"
++        versionCode = 44
++        versionName = "0.9.3.0"
+ 
+         buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
+         buildConfigField("String", "CONFIG_URL", configUrl.get().asBuildConfigString())
+         vectorDrawables.useSupportLibrary = true
+ 
+-        // Phase 2: ship one universal APK with only qualified ABIs.
++        // Phase 3: preserve the qualified universal ABI set while adding adaptive UI.
+         // x86 is intentionally excluded; x86_64 remains for emulators/tests.
+         ndk {
+             abiFilters += listOf(
+diff --git a/app/src/main/java/sa/hulksa/player/MainActivity.kt b/app/src/main/java/sa/hulksa/player/MainActivity.kt
+index 33eac8a..b304d8b 100644
+--- a/app/src/main/java/sa/hulksa/player/MainActivity.kt
++++ b/app/src/main/java/sa/hulksa/player/MainActivity.kt
+@@ -3,6 +3,7 @@ package sa.hulksa.player
+ import android.app.UiModeManager
+ import android.content.Context
+ import android.content.pm.ActivityInfo
++import android.content.pm.PackageManager
+ import android.content.res.Configuration
+ import android.os.Build
+ import android.os.Bundle
+@@ -19,27 +20,32 @@ class MainActivity : ComponentActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+-        val isTv = isTelevision()
+-        if (isTv) {
++        val isTelevisionDevice = isTelevisionDevice()
++        if (isTelevisionDevice) {
+             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+             enterImmersiveMode()
+         }
+ 
+         setContent {
+             HulkTheme {
+-                HulkApp(viewModel = viewModel, isTv = isTv)
++                HulkApp(
++                    viewModel = viewModel,
++                    isTelevisionDevice = isTelevisionDevice,
++                )
+             }
+         }
+     }
+ 
+     override fun onWindowFocusChanged(hasFocus: Boolean) {
+         super.onWindowFocusChanged(hasFocus)
+-        if (hasFocus && isTelevision()) enterImmersiveMode()
++        if (hasFocus && isTelevisionDevice()) enterImmersiveMode()
+     }
+ 
+-    private fun isTelevision(): Boolean {
++    private fun isTelevisionDevice(): Boolean {
+         val mode = (getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType
+-        return mode == Configuration.UI_MODE_TYPE_TELEVISION
++        return mode == Configuration.UI_MODE_TYPE_TELEVISION ||
++            packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
++            packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+     }
+ 
+     @Suppress("DEPRECATION")
+diff --git a/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt b/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt
+index 082e64b..9d475d3 100644
+--- a/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt
++++ b/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt
+@@ -2,15 +2,22 @@ package sa.hulksa.player.ui
+ 
+ import android.widget.Toast
+ import androidx.activity.compose.BackHandler
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.CompositionLocalProvider
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.collectAsState
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.remember
++import androidx.compose.ui.Modifier
+ import androidx.compose.ui.platform.LocalContext
+ import sa.hulksa.player.HulkScreen
+ import sa.hulksa.player.HulkViewModel
+ import sa.hulksa.player.model.ContentType
++import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
++import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
++import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
+ import sa.hulksa.player.ui.screens.LoginScreen
+ import sa.hulksa.player.ui.screens.MainShellScreen
+ import sa.hulksa.player.ui.screens.MovieDetailsScreen
+@@ -21,9 +28,11 @@ import sa.hulksa.player.ui.screens.SeriesScreen
+ @Composable
+ fun HulkApp(
+     viewModel: HulkViewModel,
+-    isTv: Boolean,
++    isTelevisionDevice: Boolean,
+ ) {
+     val state by viewModel.state.collectAsState()
++    val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
++    val isTv = adaptiveUi.isTelevision
+     val context = LocalContext.current
+     val navigationMemory = remember { NavigationMemoryStore() }
+     val notify: (String) -> Unit = { message ->
+@@ -35,144 +44,152 @@ fun HulkApp(
+         onBack = viewModel::back,
+     )
+ 
+-    when (state.screen) {
+-        HulkScreen.LOGIN -> LoginScreen(
+-            isTv = isTv,
+-            isStarting = state.isStarting,
+-            isLoading = state.isLoading,
+-            errorMessage = state.errorMessage,
+-            onLogin = viewModel::login,
+-        )
++    CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
++        Box(
++            modifier = Modifier
++                .fillMaxSize()
++                .trackAdaptiveInput(adaptiveInputController),
++        ) {
++            when (state.screen) {
++                HulkScreen.LOGIN -> LoginScreen(
++                    isTv = isTv,
++                    isStarting = state.isStarting,
++                    isLoading = state.isLoading,
++                    errorMessage = state.errorMessage,
++                    onLogin = viewModel::login,
++                )
+ 
+-        HulkScreen.MAIN -> MainShellScreen(
+-            state = state,
+-            isTv = isTv,
+-            navigationMemory = navigationMemory,
+-            isFavorite = viewModel::isFavorite,
+-            onSelectDestination = viewModel::selectDestination,
+-            onSelectCategory = viewModel::selectCategory,
+-            onSearch = viewModel::updateSearch,
+-            onOpen = viewModel::open,
+-            onOpenHistory = viewModel::openHistory,
+-            onToggleFavorite = viewModel::toggleFavorite,
+-            onRefresh = viewModel::refresh,
+-            onClearHistory = viewModel::clearHistory,
+-            onPlayDownload = viewModel::playDownload,
+-            onDeleteDownload = { item ->
+-                viewModel.deleteDownload(item)
+-                notify("تم حذف التحميل.")
+-            },
+-            onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
+-            onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
+-            onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
+-            onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
+-            onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
+-            onRunDiagnostics = viewModel::runDiagnostics,
+-            onLogout = viewModel::logout,
+-        )
++                HulkScreen.MAIN -> MainShellScreen(
++                    state = state,
++                    isTv = isTv,
++                    navigationMemory = navigationMemory,
++                    isFavorite = viewModel::isFavorite,
++                    onSelectDestination = viewModel::selectDestination,
++                    onSelectCategory = viewModel::selectCategory,
++                    onSearch = viewModel::updateSearch,
++                    onOpen = viewModel::open,
++                    onOpenHistory = viewModel::openHistory,
++                    onToggleFavorite = viewModel::toggleFavorite,
++                    onRefresh = viewModel::refresh,
++                    onClearHistory = viewModel::clearHistory,
++                    onPlayDownload = viewModel::playDownload,
++                    onDeleteDownload = { item ->
++                        viewModel.deleteDownload(item)
++                        notify("تم حذف التحميل.")
++                    },
++                    onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
++                    onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
++                    onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
++                    onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
++                    onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
++                    onRunDiagnostics = viewModel::runDiagnostics,
++                    onLogout = viewModel::logout,
++                )
+ 
+-        HulkScreen.MOVIE_DETAILS -> {
+-            val item = state.selectedItem
+-            if (item != null) {
+-                val relatedMovies = state.catalogs[ContentType.MOVIE]
+-                    ?.items
+-                    .orEmpty()
+-                    .asSequence()
+-                    .filter { it.id != item.id && it.categoryId == item.categoryId }
+-                    .take(10)
+-                    .toList()
+-                val movieDownload = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
+-                MovieDetailsScreen(
+-                    item = item,
+-                    details = state.selectedDetails,
+-                    isLoading = state.isLoading,
+-                    errorMessage = state.errorMessage,
+-                    isTv = isTv,
+-                    isFavorite = viewModel.isFavorite(item),
+-                    download = movieDownload,
+-                    historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
+-                    relatedItems = relatedMovies,
+-                    isRelatedFavorite = viewModel::isFavorite,
+-                    onBack = viewModel::back,
+-                    onPlay = viewModel::playSelectedMovie,
+-                    onDownload = {
+-                        notify(if (movieDownload == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(movieDownload))
+-                    },
+-                    onCancelDownload = {
+-                        movieDownload?.let {
+-                            viewModel.deleteDownload(it)
+-                            notify("تم الغاء التحميل.")
+-                        }
+-                    },
+-                    onToggleFavorite = { viewModel.toggleFavorite(item) },
+-                    onOpenRelated = viewModel::open,
+-                )
+-            } else {
+-                LaunchedEffect(state.screen) { viewModel.back() }
+-            }
+-        }
++                HulkScreen.MOVIE_DETAILS -> {
++                    val item = state.selectedItem
++                    if (item != null) {
++                        val relatedMovies = state.catalogs[ContentType.MOVIE]
++                            ?.items
++                            .orEmpty()
++                            .asSequence()
++                            .filter { it.id != item.id && it.categoryId == item.categoryId }
++                            .take(10)
++                            .toList()
++                        val movieDownload = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
++                        MovieDetailsScreen(
++                            item = item,
++                            details = state.selectedDetails,
++                            isLoading = state.isLoading,
++                            errorMessage = state.errorMessage,
++                            isTv = isTv,
++                            isFavorite = viewModel.isFavorite(item),
++                            download = movieDownload,
++                            historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
++                            relatedItems = relatedMovies,
++                            isRelatedFavorite = viewModel::isFavorite,
++                            onBack = viewModel::back,
++                            onPlay = viewModel::playSelectedMovie,
++                            onDownload = {
++                                notify(if (movieDownload == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(movieDownload))
++                            },
++                            onCancelDownload = {
++                                movieDownload?.let {
++                                    viewModel.deleteDownload(it)
++                                    notify("تم الغاء التحميل.")
++                                }
++                            },
++                            onToggleFavorite = { viewModel.toggleFavorite(item) },
++                            onOpenRelated = viewModel::open,
++                        )
++                    } else {
++                        LaunchedEffect(state.screen) { viewModel.back() }
++                    }
++                }
+ 
+-        HulkScreen.SERIES -> {
+-            val series = state.selectedSeries
+-            if (series != null) {
+-                val relatedSeries = state.catalogs[ContentType.SERIES]
+-                    ?.items
+-                    .orEmpty()
+-                    .asSequence()
+-                    .filter { it.id != series.id && it.categoryId == series.categoryId }
+-                    .take(10)
+-                    .toList()
+-                SeriesScreen(
+-                    series = series,
+-                    details = state.selectedDetails,
+-                    episodes = state.episodes,
+-                    isLoading = state.isLoading,
+-                    errorMessage = state.errorMessage,
+-                    isTv = isTv,
+-                    isFavorite = viewModel.isFavorite(series),
+-                    downloads = state.downloads,
+-                    history = state.history,
+-                    relatedItems = relatedSeries,
+-                    isRelatedFavorite = viewModel::isFavorite,
+-                    onBack = viewModel::back,
+-                    onPlay = viewModel::playEpisode,
+-                    onDownload = { episode ->
+-                        val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+-                        notify(if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing))
+-                    },
+-                    onCancelDownload = { episode ->
+-                        state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }?.let {
+-                            viewModel.deleteDownload(it)
+-                            notify("تم الغاء التحميل.")
+-                        }
+-                    },
+-                    onToggleFavorite = { viewModel.toggleFavorite(series) },
+-                    onOpenRelated = viewModel::open,
+-                )
+-            } else {
+-                LaunchedEffect(state.screen) { viewModel.back() }
+-            }
+-        }
++                HulkScreen.SERIES -> {
++                    val series = state.selectedSeries
++                    if (series != null) {
++                        val relatedSeries = state.catalogs[ContentType.SERIES]
++                            ?.items
++                            .orEmpty()
++                            .asSequence()
++                            .filter { it.id != series.id && it.categoryId == series.categoryId }
++                            .take(10)
++                            .toList()
++                        SeriesScreen(
++                            series = series,
++                            details = state.selectedDetails,
++                            episodes = state.episodes,
++                            isLoading = state.isLoading,
++                            errorMessage = state.errorMessage,
++                            isTv = isTv,
++                            isFavorite = viewModel.isFavorite(series),
++                            downloads = state.downloads,
++                            history = state.history,
++                            relatedItems = relatedSeries,
++                            isRelatedFavorite = viewModel::isFavorite,
++                            onBack = viewModel::back,
++                            onPlay = viewModel::playEpisode,
++                            onDownload = { episode ->
++                                val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
++                                notify(if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing))
++                            },
++                            onCancelDownload = { episode ->
++                                state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }?.let {
++                                    viewModel.deleteDownload(it)
++                                    notify("تم الغاء التحميل.")
++                                }
++                            },
++                            onToggleFavorite = { viewModel.toggleFavorite(series) },
++                            onOpenRelated = viewModel::open,
++                        )
++                    } else {
++                        LaunchedEffect(state.screen) { viewModel.back() }
++                    }
++                }
+ 
+-        HulkScreen.PLAYER -> {
+-            val playback = state.playback
+-            if (playback != null) {
+-                val orderedEpisodes = state.episodes.sortedWith(compareBy(sa.hulksa.player.model.Episode::season, sa.hulksa.player.model.Episode::episodeNumber))
+-                val currentEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == playback.streamId }
+-                val nextEpisode = if (playback.streamKind == "series") orderedEpisodes.getOrNull(currentEpisodeIndex + 1) else null
+-                PlayerScreen(
+-                    request = playback,
+-                    liveCatalog = state.catalogs[ContentType.LIVE],
+-                    isFavorite = viewModel::isFavorite,
+-                    onSelectLiveChannel = viewModel::switchLiveChannel,
+-                    onToggleFavorite = viewModel::toggleFavorite,
+-                    onBack = viewModel::back,
+-                    onProgress = viewModel::onPlaybackProgress,
+-                    nextEpisodeTitle = nextEpisode?.let { "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}" },
+-                    onPlayNextEpisode = nextEpisode?.let { { viewModel.playNextEpisode() } },
+-                )
+-            } else {
+-                LaunchedEffect(state.screen) { viewModel.back() }
++                HulkScreen.PLAYER -> {
++                    val playback = state.playback
++                    if (playback != null) {
++                        val orderedEpisodes = state.episodes.sortedWith(compareBy(sa.hulksa.player.model.Episode::season, sa.hulksa.player.model.Episode::episodeNumber))
++                        val currentEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == playback.streamId }
++                        val nextEpisode = if (playback.streamKind == "series") orderedEpisodes.getOrNull(currentEpisodeIndex + 1) else null
++                        PlayerScreen(
++                            request = playback,
++                            liveCatalog = state.catalogs[ContentType.LIVE],
++                            isFavorite = viewModel::isFavorite,
++                            onSelectLiveChannel = viewModel::switchLiveChannel,
++                            onToggleFavorite = viewModel::toggleFavorite,
++                            onBack = viewModel::back,
++                            onProgress = viewModel::onPlaybackProgress,
++                            nextEpisodeTitle = nextEpisode?.let { "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}" },
++                            onPlayNextEpisode = nextEpisode?.let { { viewModel.playNextEpisode() } },
++                        )
++                    } else {
++                        LaunchedEffect(state.screen) { viewModel.back() }
++                    }
++                }
+             }
+         }
+     }
+ }
+diff --git a/app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt b/app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt
+new file mode 100644
+index 0000000..6f7dcd7
+--- /dev/null
++++ b/app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt
+@@ -0,0 +1,156 @@
++package sa.hulksa.player.ui.adaptive
++
++import android.view.InputDevice
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.Immutable
++import androidx.compose.runtime.Stable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.runtime.staticCompositionLocalOf
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.input.key.nativeKeyEvent
++import androidx.compose.ui.input.key.onPreviewKeyEvent
++import androidx.compose.ui.input.pointer.PointerEventPass
++import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.platform.LocalConfiguration
++
++enum class HulkDeviceClass {
++    MOBILE,
++    TABLET,
++    TELEVISION,
++}
++
++enum class HulkWindowWidthClass {
++    COMPACT,
++    MEDIUM,
++    EXPANDED,
++}
++
++enum class HulkInputMode {
++    TOUCH,
++    REMOTE,
++    KEYBOARD,
++}
++
++enum class HulkNavigationType {
++    TOP_BAR,
++    RAIL,
++}
++
++@Immutable
++data class AdaptiveUiState(
++    val deviceClass: HulkDeviceClass,
++    val windowWidthClass: HulkWindowWidthClass,
++    val navigationType: HulkNavigationType,
++    val inputMode: HulkInputMode,
++    val screenWidthDp: Int,
++    val screenHeightDp: Int,
++) {
++    val isTelevision: Boolean get() = deviceClass == HulkDeviceClass.TELEVISION
++
++    val showFocusHighlights: Boolean
++        get() = shouldShowFocusHighlights(deviceClass, inputMode)
++}
++
++@Stable
++class AdaptiveInputController internal constructor(initialMode: HulkInputMode) {
++    var mode by mutableStateOf(initialMode)
++        private set
++
++    fun recordTouchInput() {
++        if (mode != HulkInputMode.TOUCH) mode = HulkInputMode.TOUCH
++    }
++
++    fun recordKeyInput(source: Int) {
++        val remoteSources =
++            InputDevice.SOURCE_DPAD or InputDevice.SOURCE_GAMEPAD or InputDevice.SOURCE_JOYSTICK
++        val nextMode = if (source and remoteSources != 0) HulkInputMode.REMOTE else HulkInputMode.KEYBOARD
++        if (mode != nextMode) mode = nextMode
++    }
++}
++
++val LocalAdaptiveUi = staticCompositionLocalOf {
++    AdaptiveUiState(
++        deviceClass = HulkDeviceClass.MOBILE,
++        windowWidthClass = HulkWindowWidthClass.COMPACT,
++        navigationType = HulkNavigationType.TOP_BAR,
++        inputMode = HulkInputMode.TOUCH,
++        screenWidthDp = 360,
++        screenHeightDp = 640,
++    )
++}
++
++@Composable
++fun rememberAdaptiveUiState(
++    isTelevisionDevice: Boolean,
++): Pair<AdaptiveUiState, AdaptiveInputController> {
++    val configuration = LocalConfiguration.current
++    val widthDp = configuration.screenWidthDp.coerceAtLeast(1)
++    val heightDp = configuration.screenHeightDp.coerceAtLeast(1)
++    val smallestWidthDp = configuration.smallestScreenWidthDp.coerceAtLeast(minOf(widthDp, heightDp))
++    val deviceClass = classifyDeviceClass(
++        isTelevisionDevice = isTelevisionDevice,
++        smallestWidthDp = smallestWidthDp,
++        widthDp = widthDp,
++    )
++    val windowWidthClass = classifyWindowWidth(widthDp)
++    val controller = remember(isTelevisionDevice) {
++        AdaptiveInputController(
++            if (isTelevisionDevice) HulkInputMode.REMOTE else HulkInputMode.TOUCH,
++        )
++    }
++    val state = AdaptiveUiState(
++        deviceClass = deviceClass,
++        windowWidthClass = windowWidthClass,
++        navigationType = selectNavigationType(deviceClass, windowWidthClass),
++        inputMode = controller.mode,
++        screenWidthDp = widthDp,
++        screenHeightDp = heightDp,
++    )
++    return state to controller
++}
++
++fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
++    pointerInput(controller) {
++        awaitPointerEventScope {
++            while (true) {
++                awaitPointerEvent(PointerEventPass.Initial)
++                controller.recordTouchInput()
++            }
++        }
++    }.onPreviewKeyEvent { event ->
++        controller.recordKeyInput(event.nativeKeyEvent.source)
++        false
++    }
++
++fun classifyWindowWidth(widthDp: Int): HulkWindowWidthClass = when {
++    widthDp < 600 -> HulkWindowWidthClass.COMPACT
++    widthDp < 840 -> HulkWindowWidthClass.MEDIUM
++    else -> HulkWindowWidthClass.EXPANDED
++}
++
++fun classifyDeviceClass(
++    isTelevisionDevice: Boolean,
++    smallestWidthDp: Int,
++    widthDp: Int,
++): HulkDeviceClass = when {
++    isTelevisionDevice -> HulkDeviceClass.TELEVISION
++    smallestWidthDp >= 600 || widthDp >= 840 -> HulkDeviceClass.TABLET
++    else -> HulkDeviceClass.MOBILE
++}
++
++fun selectNavigationType(
++    deviceClass: HulkDeviceClass,
++    windowWidthClass: HulkWindowWidthClass,
++): HulkNavigationType = when {
++    deviceClass == HulkDeviceClass.TELEVISION -> HulkNavigationType.RAIL
++    windowWidthClass == HulkWindowWidthClass.EXPANDED -> HulkNavigationType.RAIL
++    else -> HulkNavigationType.TOP_BAR
++}
++
++fun shouldShowFocusHighlights(
++    deviceClass: HulkDeviceClass,
++    inputMode: HulkInputMode,
++): Boolean = deviceClass == HulkDeviceClass.TELEVISION || inputMode != HulkInputMode.TOUCH
+diff --git a/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt b/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
+index 3c91f31..4aca833 100644
+--- a/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
++++ b/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
+@@ -66,6 +66,7 @@ import sa.hulksa.player.R
+ import sa.hulksa.player.model.ContentItem
+ import sa.hulksa.player.model.HistoryEntry
++import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+ import sa.hulksa.player.ui.theme.LocalHulkColors
+ 
+ @Composable
+@@ -114,8 +115,10 @@ fun FocusButton(
+     onLongClick: (() -> Unit)? = null,
+ ) {
+     val colors = LocalHulkColors.current
++    val adaptiveUi = LocalAdaptiveUi.current
+     var focused by remember { mutableStateOf(false) }
+-    val scale by animateFloatAsState(if (focused) 1.035f else 1f, label = "buttonScale")
++    val showFocused = focused && adaptiveUi.showFocusHighlights
++    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "buttonScale")
+     val shape = RoundedCornerShape(12.dp)
+     val background = when {
+         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
+-        primary && focused -> colors.goldBright
++        primary && showFocused -> colors.goldBright
+         primary -> colors.gold
+-        focused -> Color(0xFF2A281B)
++        showFocused -> Color(0xFF2A281B)
+         outlined -> Color(0xFF151711)
+         else -> Color(0xFF181914)
+     }
+@@ -137,12 +140,12 @@ fun FocusButton(
+             .background(background)
+             .border(
+                 width = when {
+-                    focused -> 2.dp
++                    showFocused -> 2.dp
+                     outlined -> 1.dp
+                     else -> 0.dp
+                 },
+                 color = when {
+-                    focused -> colors.goldBright
++                    showFocused -> colors.goldBright
+                     outlined -> colors.gold.copy(alpha = .42f)
+                     else -> Color.Transparent
+                 },
+@@ -179,8 +182,10 @@ fun NavRailButton(
+     modifier: Modifier = Modifier,
+ ) {
+     val colors = LocalHulkColors.current
++    val adaptiveUi = LocalAdaptiveUi.current
+     var focused by remember { mutableStateOf(false) }
++    val showFocused = focused && adaptiveUi.showFocusHighlights
+     val shape = RoundedCornerShape(13.dp)
+-    val active = focused || selected
++    val active = showFocused || selected
+     Row(
+         modifier = modifier
+             .fillMaxWidth()
+             .clip(shape)
+-            .background(if (active) colors.gold.copy(alpha = if (focused) .25f else .13f) else Color.Transparent)
++            .background(if (active) colors.gold.copy(alpha = if (showFocused) .25f else .13f) else Color.Transparent)
+             .border(
+-                if (focused) 2.dp else 0.dp,
+-                if (focused) colors.goldBright else Color.Transparent,
++                if (showFocused) 2.dp else 0.dp,
++                if (showFocused) colors.goldBright else Color.Transparent,
+                 shape,
+             )
+             .onFocusChanged { focused = it.isFocused }
+@@ -317,11 +322,13 @@ fun CompactPosterCard(
+     onFocused: (() -> Unit)? = null,
+ ) {
+     val colors = LocalHulkColors.current
++    val adaptiveUi = LocalAdaptiveUi.current
+     var focused by remember { mutableStateOf(false) }
+     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
+     var remoteLongPressHandled by remember { mutableStateOf(false) }
+-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "posterScale")
++    val showFocused = focused && adaptiveUi.showFocusHighlights
++    val scale by animateFloatAsState(if (showFocused) 1.04f else 1f, label = "posterScale")
+     val shape = RoundedCornerShape(12.dp)
+     Box(
+         modifier = modifier
+@@ -329,13 +336,13 @@ fun CompactPosterCard(
+                 scaleX = scale
+                 scaleY = scale
+-                shadowElevation = if (focused) 14.dp.toPx() else 0f
++                shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+             }
+             .aspectRatio(2f / 3f)
+             .clip(shape)
+             .background(Color(0xFF15160F))
+             .border(
+-                if (focused) 3.dp else 0.dp,
+-                if (focused) colors.goldBright else Color.Transparent,
++                if (showFocused) 3.dp else 0.dp,
++                if (showFocused) colors.goldBright else Color.Transparent,
+                 shape,
+             )
+             .onFocusChanged {
+@@ -444,8 +451,10 @@ fun HistoryCard(
+     onFocused: (() -> Unit)? = null,
+ ) {
+     val colors = LocalHulkColors.current
++    val adaptiveUi = LocalAdaptiveUi.current
+     var focused by remember { mutableStateOf(false) }
+-    val scale by animateFloatAsState(if (focused) 1.035f else 1f, label = "historyScale")
++    val showFocused = focused && adaptiveUi.showFocusHighlights
++    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
+     val shape = RoundedCornerShape(12.dp)
+     val progress = if (entry.durationMs > 0L) {
+         (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f)
+@@ -458,7 +467,7 @@ fun HistoryCard(
+             .aspectRatio(16f / 9f)
+             .clip(shape)
+             .background(Color(0xFF15160F))
+-            .border(if (focused) 3.dp else 0.dp, if (focused) colors.goldBright else Color.Transparent, shape)
++            .border(if (showFocused) 3.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+             .onFocusChanged {
+                 focused = it.isFocused
+                 if (it.isFocused) onFocused?.invoke()
+@@ -494,9 +503,11 @@ fun ChannelListItem(
+     onLongClick: (() -> Unit)? = null,
+ ) {
+     val colors = LocalHulkColors.current
++    val adaptiveUi = LocalAdaptiveUi.current
+     var focused by remember { mutableStateOf(false) }
+     var remoteLongPressHandled by remember { mutableStateOf(false) }
+-    val active = focused || selected
++    val showFocused = focused && adaptiveUi.showFocusHighlights
++    val active = showFocused || selected
+     val shape = RoundedCornerShape(11.dp)
+     Row(
+         modifier = modifier
+@@ -505,7 +516,7 @@ fun ChannelListItem(
+             .height(64.dp)
+             .clip(shape)
+             .background(if (active) colors.gold.copy(alpha = .14f) else Color.Transparent)
+-            .border(if (focused) 2.dp else 0.dp, if (focused) colors.goldBright else Color.Transparent, shape)
++            .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+             .onFocusChanged {
+                 focused = it.isFocused
+                 if (it.isFocused) onFocused()
+diff --git a/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt b/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+index ddf5921..d2a2184 100644
+--- a/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
++++ b/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+@@ -107,6 +107,8 @@ import sa.hulksa.player.model.OfflineDownload
+ import sa.hulksa.player.model.OfflineStatus
+ import sa.hulksa.player.model.ServerDiagnosticsReport
++import sa.hulksa.player.ui.adaptive.HulkNavigationType
++import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+ import sa.hulksa.player.ui.components.BrandLogo
+ import sa.hulksa.player.ui.components.BrandBadge
+ import sa.hulksa.player.ui.components.ChannelLogo
+@@ -332,6 +334,8 @@ fun MainShellScreen(
+ ) {
+     val colors = LocalHulkColors.current
+     val context = LocalContext.current
++    val adaptiveUi = LocalAdaptiveUi.current
++    val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
+     val toggleFavoriteWithFeedback: (ContentItem) -> Unit = { item ->
+         val wasFavorite = isFavorite(item)
+         onToggleFavorite(item)
+@@ -342,7 +346,7 @@ fun MainShellScreen(
+         ).show()
+     }
+     Box(Modifier.fillMaxSize().background(colors.background)) {
+-        if (isTv) {
++        if (useNavigationRail) {
+             Row(Modifier.fillMaxSize()) {
+                 CinematicNavigationRail(
+                     selected = state.destination,
+@@ -463,8 +467,10 @@ private fun NavigationItem(
+     onClick: () -> Unit,
+ ) {
+     val colors = LocalHulkColors.current
++    val adaptiveUi = LocalAdaptiveUi.current
+     var focused by remember { mutableStateOf(false) }
+-    val active = selected || focused
++    val showFocused = focused && adaptiveUi.showFocusHighlights
++    val active = selected || showFocused
+     Row(
+         modifier = Modifier
+             .fillMaxWidth()
+@@ -472,7 +478,7 @@ private fun NavigationItem(
+             .background(
+                 when {
+-                    focused -> colors.gold
++                    showFocused -> colors.gold
+                     selected -> colors.gold.copy(alpha = .13f)
+                     else -> Color.Transparent
+                 },
+@@ -485,7 +491,7 @@ private fun NavigationItem(
+         Icon(
+             imageVector = entry.icon,
+             contentDescription = entry.label,
+-            tint = if (focused) Color.Black else if (active) colors.goldBright else colors.textMuted,
++            tint = if (showFocused) Color.Black else if (active) colors.goldBright else colors.textMuted,
+             modifier = Modifier.size(23.dp),
+         )
+         if (expanded) {
+@@ -493,7 +499,7 @@ private fun NavigationItem(
+             Spacer(Modifier.width(11.dp))
+             Text(
+                 entry.label,
+-                color = if (focused) Color.Black else if (active) colors.text else colors.textMuted,
++                color = if (showFocused) Color.Black else if (active) colors.text else colors.textMuted,
+                 fontSize = 14.sp,
+                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                 maxLines = 1,
+diff --git a/app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt b/app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
+new file mode 100644
+index 0000000..739d506
+--- /dev/null
++++ b/app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
+@@ -0,0 +1,79 @@
++package sa.hulksa.player.ui.adaptive
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class AdaptiveUiClassifierTest {
++    @Test
++    fun compactPhoneUsesMobileTopNavigation() {
++        val device = classifyDeviceClass(
++            isTelevisionDevice = false,
++            smallestWidthDp = 411,
++            widthDp = 411,
++        )
++        val window = classifyWindowWidth(411)
++
++        assertEquals(HulkDeviceClass.MOBILE, device)
++        assertEquals(HulkWindowWidthClass.COMPACT, window)
++        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
++    }
++
++    @Test
++    fun portraitTabletUsesTabletLayoutWithoutTelevisionSizing() {
++        val device = classifyDeviceClass(
++            isTelevisionDevice = false,
++            smallestWidthDp = 600,
++            widthDp = 800,
++        )
++        val window = classifyWindowWidth(800)
++
++        assertEquals(HulkDeviceClass.TABLET, device)
++        assertEquals(HulkWindowWidthClass.MEDIUM, window)
++        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
++    }
++
++    @Test
++    fun expandedTabletUsesRailNavigation() {
++        val device = classifyDeviceClass(
++            isTelevisionDevice = false,
++            smallestWidthDp = 600,
++            widthDp = 1280,
++        )
++        val window = classifyWindowWidth(1280)
++
++        assertEquals(HulkDeviceClass.TABLET, device)
++        assertEquals(HulkWindowWidthClass.EXPANDED, window)
++        assertEquals(HulkNavigationType.RAIL, selectNavigationType(device, window))
++    }
++
++    @Test
++    fun televisionAlwaysUsesRailAndFocusHighlights() {
++        val device = classifyDeviceClass(
++            isTelevisionDevice = true,
++            smallestWidthDp = 540,
++            widthDp = 960,
++        )
++        val window = classifyWindowWidth(960)
++
++        assertEquals(HulkDeviceClass.TELEVISION, device)
++        assertEquals(HulkNavigationType.RAIL, selectNavigationType(device, window))
++        assertTrue(shouldShowFocusHighlights(device, HulkInputMode.TOUCH))
++    }
++
++    @Test
++    fun touchSuppressesFocusChromeButKeyboardRestoresIt() {
++        assertFalse(shouldShowFocusHighlights(HulkDeviceClass.TABLET, HulkInputMode.TOUCH))
++        assertTrue(shouldShowFocusHighlights(HulkDeviceClass.TABLET, HulkInputMode.KEYBOARD))
++        assertTrue(shouldShowFocusHighlights(HulkDeviceClass.MOBILE, HulkInputMode.REMOTE))
++    }
++}
