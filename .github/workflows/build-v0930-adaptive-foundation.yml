@@ -1,4 +1,4 @@
-name: Build HULK SA v0.9.3.1 Mobile Polish
+name: Build HULK SA v0.9.3.2 Mobile Follow-up
 
 on:
   push:
@@ -18,11 +18,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-v0931-mobile-polish-${{ github.ref }}
+  group: build-v0932-mobile-followup-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  mobile-polish:
+  mobile-followup:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -61,14 +61,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/prepare-v0930-adaptive-ui.py project 2>&1 | tee build-logs/04-mobile-source-preparation.log
-          python3 tools/prepare-v0930-adaptive-ui.py project 2>&1 | tee build-logs/05-mobile-idempotency.log
-          python3 tools/verify-v0930-adaptive-source.py project --report reports/MOBILE-POLISH-SOURCE-REPORT.md 2>&1 | tee build-logs/06-source-policy.log
+          python3 tools/prepare-v0932-mobile-followup.py project 2>&1 | tee build-logs/05-mobile-followup-preparation.log
+          python3 tools/prepare-v0932-mobile-followup.py project 2>&1 | tee build-logs/06-mobile-followup-idempotency.log
+          grep -n 'versionCode = 46' project/app/build.gradle.kts
+          grep -n 'versionName = "0.9.3.2"' project/app/build.gradle.kts
+          grep -RIn 'animateScrollToItem(selectedIndex + 1)' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -RIn 'detectDragGesturesAfterLongPress' project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          grep -RIn 'detectHorizontalDragGestures' project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+          python3 tools/verify-v0930-adaptive-source.py project --report reports/MOBILE-FOLLOWUP-SOURCE-REPORT.md 2>&1 | tee build-logs/07-source-policy.log
 
       - name: Compile, test and build
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/07-gradle.log
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/08-gradle.log
 
       - name: Verify packages
         run: |
@@ -77,10 +83,10 @@ jobs:
           AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
           test -s "$APK"
           test -s "$AAB"
-          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/08-apk-architecture.log
-          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/09-aab-architecture.log
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt build-logs/10-apk-badging.log
-          grep "package: name='sa.hulksa.player.dev' versionCode='45' versionName='0.9.3.1-beta'" reports/APK-BADGING.txt
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/09-apk-architecture.log
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/10-aab-architecture.log
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt build-logs/11-apk-badging.log
+          grep "package: name='sa.hulksa.player.dev' versionCode='46' versionName='0.9.3.2-beta'" reports/APK-BADGING.txt
 
       - name: Package complete mobile delivery
         run: |
@@ -89,22 +95,22 @@ jobs:
           mkdir delivery source-delivery
           APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
           AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
-          cp "$APK" delivery/HULK-SA-v0.9.3.1-MOBILE-POLISH-UNIVERSAL-debug.apk
-          cp "$AAB" delivery/HULK-SA-v0.9.3.1-MOBILE-POLISH-debug.aab
+          cp "$APK" delivery/HULK-SA-v0.9.3.2-MOBILE-FOLLOWUP-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.2-MOBILE-FOLLOWUP-debug.aab
           cp reports/*.md reports/APK-BADGING.txt delivery/
           cp docs/PHASE-3-ADAPTIVE-FOUNDATION.md delivery/
-          cp tools/prepare-v0930-adaptive-ui.py delivery/
+          cp tools/prepare-v0930-adaptive-ui.py tools/prepare-v0932-mobile-followup.py delivery/
           cp -a project/. source-delivery/
           rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
-          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.1-MOBILE-POLISH.zip .)
-          printf '# HULK SA v0.9.3.1 Mobile Build Report\n\n- Commit: %s\n- Responsive mobile source: PASS\n- Keyboard dismissal: PASS\n- Mobile navigation sizing: PASS\n- Player safe insets: PASS\n- Movie favorite action: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n- Qualified ABIs: arm64-v8a, armeabi-v7a, x86_64\n' "$GITHUB_SHA" > delivery/BUILD-REPORT-v0.9.3.1.md
-          printf '# HULK SA v0.9.3.1 Changelog\n\n- Close the mobile keyboard on submit and outside tap.\n- Distribute primary mobile navigation evenly across compact screens.\n- Respect status and navigation bar safe areas.\n- Compact VOD and live player controls for phone screens.\n- Keep the movie My List action visible with equal-width actions.\n' > delivery/CHANGELOG-v0.9.3.1.md
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.2-MOBILE-FOLLOWUP.zip .)
+          printf '# HULK SA v0.9.3.2 Mobile Follow-up Build Report\n\n- Commit: %s\n- All mobile destinations visible in scrollable navigation: PASS\n- Touch long-press category drag reorder: PASS\n- Movie and series hero title safe spacing: PASS\n- Touch and drag VOD seeking: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n- Qualified ABIs: arm64-v8a, armeabi-v7a, x86_64\n' "$GITHUB_SHA" > delivery/BUILD-REPORT-v0.9.3.2.md
+          printf '# HULK SA v0.9.3.2 Changelog\n\n- Restore all mobile destinations in a horizontally scrollable top navigation.\n- Automatically keep the selected destination visible.\n- Add real touch long-press and horizontal drag reordering for live categories.\n- Increase mobile movie and series hero safe space and reduce title size to prevent badge overlap.\n- Add tap and horizontal-drag seeking to movie and episode playback.\n' > delivery/CHANGELOG-v0.9.3.2.md
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
 
-      - name: Upload complete v0.9.3.1 delivery
+      - name: Upload complete v0.9.3.2 delivery
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.3.1-MOBILE-POLISH
+          name: HULK-SA-v0.9.3.2-MOBILE-FOLLOWUP
           path: delivery/
           if-no-files-found: error
           retention-days: 30
@@ -113,7 +119,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.3.1-MOBILE-DIAGNOSTICS
+          name: HULK-SA-v0.9.3.2-MOBILE-DIAGNOSTICS
           path: |
             archive.sha256
             build-logs/
