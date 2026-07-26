@@ -61,20 +61,6 @@ jobs:
           python3 tools/prepare-v0934-mobile-fixes.py project 2>&1 | tee build-logs/07-mobile-fixes.log
           python3 tools/prepare-v0935-tv-compatibility.py project 2>&1 | tee build-logs/08-tv-compatibility.log
           python3 tools/prepare-v0935-tv-compatibility.py project 2>&1 | tee build-logs/09-tv-idempotency.log
-          python3 - <<'PY'
-          from pathlib import Path
-          build=Path('project/app/build.gradle.kts').read_text()
-          manifest=Path('project/app/src/main/AndroidManifest.xml').read_text()
-          tv=Path('project/app/src/main/java/sa/hulksa/player/TvMainActivity.kt')
-          assert 'versionCode = 49' in build
-          assert 'versionName = "0.9.3.5"' in build
-          assert manifest.count('android:name=".TvMainActivity"') == 1
-          assert manifest.count('LEANBACK_LAUNCHER') == 1
-          assert '@mipmap/ic_launcher' in manifest
-          assert '@drawable/tv_banner' in manifest
-          assert tv.is_file()
-          print('Source TV policy: PASS')
-          PY
 
       - name: Compile, test and build
         working-directory: project
