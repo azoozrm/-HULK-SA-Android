@@ -60,7 +60,6 @@ jobs:
           python3 tools/prepare-v0933-mobile-memory.py project 2>&1 | tee build-logs/06-memory.log
           python3 tools/prepare-v0934-mobile-fixes.py project 2>&1 | tee build-logs/07-mobile-fixes.log
           python3 tools/prepare-v0935-tv-compatibility.py project 2>&1 | tee build-logs/08-tv-compatibility.log
-          python3 tools/prepare-v0935-tv-compatibility.py project 2>&1 | tee build-logs/09-tv-idempotency.log
 
       - name: Compile, test and build
         working-directory: project
