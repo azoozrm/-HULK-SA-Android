@@ -1,1 +1,1 @@
-Trigger v0.9.3.13 registered workflow build.
+Trigger v0.9.3.13 registered workflow build via PR synchronize.
