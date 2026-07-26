@@ -22,7 +22,6 @@ manifest=manifest_path.read_text(encoding='utf-8')
 manifest=manifest.replace('android:banner="@drawable/ic_banner"','android:banner="@drawable/tv_banner"')
 manifest=manifest.replace('android:icon="@drawable/hulk_sa_logo"','android:icon="@mipmap/ic_launcher"')
 manifest=manifest.replace('android:roundIcon="@drawable/hulk_sa_logo"','android:roundIcon="@mipmap/ic_launcher_round"')
-# Remove any earlier experimental TV activity, then add exactly one reviewed TV entry.
 manifest=re.sub(r'\n\s*<activity\s+android:name="\.TvMainActivity"[\s\S]*?</activity>\s*', '\n', manifest)
 leanback='''            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -33,8 +32,11 @@ manifest=manifest.replace(leanback,'',1)
 tv_activity='''
         <activity
             android:name=".TvMainActivity"
+            android:banner="@drawable/tv_banner"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.HulkSA.TV">
             <intent-filter>
