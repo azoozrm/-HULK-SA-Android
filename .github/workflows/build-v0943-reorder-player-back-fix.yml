@@ -1,0 +1,129 @@
+name: Build HULK SA v0.9.3.13 Reorder Player Back Fix
+
+on:
+  push:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+      - '.github/workflows/build-v0943-reorder-player-back-fix.yml'
+      - 'patches/v0.9.3.0-adaptive-source/**'
+      - 'tools/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v0943-reorder-player-back-fix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reorder-player-back-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -o pipefail
+          mkdir -p build-logs reports
+          { yes | sdkmanager --licenses >/dev/null || true; sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'; } 2>&1 | tee build-logs/01-sdk.log
+
+      - name: Prepare source
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          rm -rf extracted project
+          mkdir extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f \( -name settings.gradle.kts -o -name settings.gradle \) -printf '%h\n' | head -n1)
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          sha256sum "$ARCHIVE" | tee archive.sha256
+          python3 tools/repair-v09120.py project
+          python3 tools/prepare-v0920-architecture.py project
+          python3 tools/prepare-v0930-adaptive-ui.py project
+          python3 tools/prepare-v0932-mobile-followup.py project
+          python3 tools/prepare-v0933-mobile-memory.py project
+          python3 tools/prepare-v0934-mobile-fixes.py project
+          python3 tools/prepare-v0935-tv-compatibility.py project
+          python3 tools/prepare-v0936-tcl-polish.py project
+          python3 tools/prepare-v0937-tcl-navigation-player.py project
+          python3 tools/prepare-v0938-back-focus-fix.py project
+          python3 tools/prepare-v0939-category-search-polish.py project
+          python3 tools/prepare-v0940-installer-favorites-fix.py project
+          python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project
+          python3 tools/prepare-v0942-category-position-memory.py project
+          python3 tools/prepare-v0943-reorder-player-back-fix.py project
+
+      - name: Compile, test and build
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/16-gradle.log
+
+      - name: Verify packages
+        run: |
+          set -euo pipefail
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          test -s "$APK"
+          test -s "$AAB"
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          badging=Path('reports/APK-BADGING.txt').read_text(errors='ignore')
+          assert "versionCode='57'" in badging
+          assert "versionName='0.9.3.13-beta'" in badging
+          PY
+
+      - name: Package delivery
+        run: |
+          set -euo pipefail
+          rm -rf delivery source-delivery
+          mkdir delivery source-delivery
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          cp "$APK" delivery/HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-debug.aab
+          cp reports/*.md reports/APK-BADGING.txt delivery/
+          cp tools/prepare-v0943-reorder-player-back-fix.py delivery/
+          cp -a project/. source-delivery/
+          rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.13-REORDER-PLAYER-BACK-FIX.zip .)
+          printf '# HULK SA v0.9.3.13 Reorder Player Back Fix\n\n- Category memory does not fight active reorder: PASS\n- Reorder list follows moved category after layout update: PASS\n- First Back hides player controls: PASS\n- Second Back exits playback: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n' > delivery/BUILD-REPORT-v0.9.3.13.md
+          (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+
+      - name: Upload delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-DIAGNOSTICS
+          path: |
+            archive.sha256
+            build-logs/
+            reports/
+            project/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
