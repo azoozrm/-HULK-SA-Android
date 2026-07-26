@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # v0.9.3.13 targeted regression fix: category follow + exact two-step player back.
+# Build trigger refreshed after correcting the workflow path.
 from pathlib import Path
 import sys
 
