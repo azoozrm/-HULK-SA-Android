@@ -5,10 +5,7 @@ on:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
     paths:
-      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
       - '.github/workflows/build-v0942-category-position-memory.yml'
-      - 'patches/v0.9.3.0-adaptive-source/**'
-      - 'tools/**'
   workflow_dispatch:
 
 permissions:
