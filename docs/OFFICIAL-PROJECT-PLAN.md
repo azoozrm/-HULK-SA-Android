@@ -58,20 +58,47 @@ Relevant commits:
 - Phase 0 audit workflow: `e1193140dc61fe9205d8c28b5ca3946eb3811294`
 - Audit uploaded source archive workflow update: `cf482665cef2c9123d3bd3ebd47b2c270935ade0`
 - Source-only build workflow: `f365b6d5c8a3662426e29d7dd8db68c3e19b9cd8`
+- Full Gradle log capture and monitored build workflow: `c2fb77f1aa42084008a37d362b031804a56604d2`
+- First Compose stability-field repair: `8db2c097d98a1903c793d78ff308f57a28dbc8f6`
+- Final Compose/JvmField build repair and successful source build: `fbac81787054f07dd4e996e2e9be55954bfb601a`
 
 Workflows:
 
 - `.github/workflows/phase0-audit.yml`
 - `.github/workflows/build-v09120.yml`
 
+Open validation PR:
+
+- PR `#18` — `Phase 0 — build and repair HULK SA v0.9.1.20`
+
 ## Current build status
 
 - Source audit succeeded.
 - `clean` succeeded.
-- `testDebugUnitTest` failed with exit code 1.
-- No APK is approved yet from this workflow run.
-- The next engineering action is to retrieve the failed GitHub Actions job log directly through GitHub, identify the first real Gradle/test error, fix it in source or workflow, rerun, and continue until the complete source-built APK succeeds.
-- Do not ask the user to repeatedly download, unzip, or manually relay logs when GitHub access can retrieve them directly.
+- `:app:assembleDebug` succeeded.
+- `testDebugUnitTest` succeeded.
+- The first APK built directly from the official v0.9.1.20 source was produced successfully.
+- Complete delivery packaging succeeded.
+- SHA256 verification succeeded.
+- Successful workflow run: `30184291495`.
+- GitHub artifact: `HULK-SA-v0.9.1.20-COMPLETE`.
+- APK SHA256: `2d766d539091fce11254e3481d900725be3880898034e80937b53ec2443d4d40`.
+- This APK is a debug-signed engineering build and is not yet the approved stable release.
+
+## Current engineering stage
+
+Stages 1 and 2 of the mandatory engineering sequence are complete:
+
+- Complete v0.9.1.20 source recovered and audited.
+- Source build stabilized and verified.
+
+The active stage is now stage 3:
+
+- Compare package name, version code, manifest identity, signing certificate, supported update path, and installation behavior against the stable v0.9.1.19 reference APK.
+- Determine whether v0.9.1.20 can update v0.9.1.19 in place without uninstalling and without losing application data.
+- Do not copy, extract, reuse, or derive a private signing key from the reference APK.
+- If the original signing key is unavailable, document the signing incompatibility and establish an approved source-based release-signing strategy before v1.0.
+- After installation/signing compatibility is resolved or formally documented, continue to architecture qualification.
 
 ## Release and delivery rule for every approved version
 
