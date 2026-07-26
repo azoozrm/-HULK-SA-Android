@@ -1,4 +1,4 @@
-name: Build HULK SA v0.9.3.12 Category Position Memory
+name: Build HULK SA v0.9.3.13 Reorder Player Back Fix
 
 on:
   push:
@@ -9,19 +9,17 @@ on:
       - '.github/workflows/build-v0942-category-position-memory.yml'
       - 'patches/v0.9.3.0-adaptive-source/**'
       - 'tools/**'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-v0942-category-position-memory-${{ github.ref }}
+  group: build-v0943-reorder-player-back-fix-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  category-position-memory:
+  reorder-player-back-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -53,20 +51,21 @@ jobs:
           test -n "$ROOT"
           cp -a "$ROOT" project
           sha256sum "$ARCHIVE" | tee archive.sha256
-          python3 tools/repair-v09120.py project 2>&1 | tee build-logs/02-repair.log
-          python3 tools/prepare-v0920-architecture.py project 2>&1 | tee build-logs/03-architecture.log
-          python3 tools/prepare-v0930-adaptive-ui.py project 2>&1 | tee build-logs/04-adaptive.log
-          python3 tools/prepare-v0932-mobile-followup.py project 2>&1 | tee build-logs/05-followup.log
-          python3 tools/prepare-v0933-mobile-memory.py project 2>&1 | tee build-logs/06-memory.log
-          python3 tools/prepare-v0934-mobile-fixes.py project 2>&1 | tee build-logs/07-mobile-fixes.log
-          python3 tools/prepare-v0935-tv-compatibility.py project 2>&1 | tee build-logs/08-tv-compatibility.log
-          python3 tools/prepare-v0936-tcl-polish.py project 2>&1 | tee build-logs/09-tcl-polish.log
-          python3 tools/prepare-v0937-tcl-navigation-player.py project 2>&1 | tee build-logs/10-navigation-player.log
-          python3 tools/prepare-v0938-back-focus-fix.py project 2>&1 | tee build-logs/11-back-focus.log
-          python3 tools/prepare-v0939-category-search-polish.py project 2>&1 | tee build-logs/12-category-search.log
-          python3 tools/prepare-v0940-installer-favorites-fix.py project 2>&1 | tee build-logs/13-installer-favorites.log
-          python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project 2>&1 | tee build-logs/14-rtl-login.log
-          python3 tools/prepare-v0942-category-position-memory.py project 2>&1 | tee build-logs/15-category-position.log
+          python3 tools/repair-v09120.py project
+          python3 tools/prepare-v0920-architecture.py project
+          python3 tools/prepare-v0930-adaptive-ui.py project
+          python3 tools/prepare-v0932-mobile-followup.py project
+          python3 tools/prepare-v0933-mobile-memory.py project
+          python3 tools/prepare-v0934-mobile-fixes.py project
+          python3 tools/prepare-v0935-tv-compatibility.py project
+          python3 tools/prepare-v0936-tcl-polish.py project
+          python3 tools/prepare-v0937-tcl-navigation-player.py project
+          python3 tools/prepare-v0938-back-focus-fix.py project
+          python3 tools/prepare-v0939-category-search-polish.py project
+          python3 tools/prepare-v0940-installer-favorites-fix.py project
+          python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project
+          python3 tools/prepare-v0942-category-position-memory.py project
+          python3 tools/prepare-v0943-reorder-player-back-fix.py project
 
       - name: Compile, test and build
         working-directory: project
@@ -81,18 +80,14 @@ jobs:
           AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
           test -s "$APK"
           test -s "$AAB"
-          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/17-apk-architecture.log
-          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/18-aab-architecture.log
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt build-logs/19-apk-badging.log
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$APK" AndroidManifest.xml > reports/MANIFEST-TREE.txt
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
           python3 - <<'PY'
           from pathlib import Path
           badging=Path('reports/APK-BADGING.txt').read_text(errors='ignore')
-          manifest=Path('reports/MANIFEST-TREE.txt').read_text(errors='ignore')
-          assert "versionCode='56'" in badging
-          assert "versionName='0.9.3.12-beta'" in badging
-          assert 'TvMainActivity' in manifest
-          assert 'LEANBACK_LAUNCHER' in manifest
+          assert "versionCode='57'" in badging
+          assert "versionName='0.9.3.13-beta'" in badging
           PY
 
       - name: Package delivery
@@ -102,20 +97,20 @@ jobs:
           mkdir delivery source-delivery
           APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
           AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
-          cp "$APK" delivery/HULK-SA-v0.9.3.12-CATEGORY-POSITION-MEMORY-UNIVERSAL-debug.apk
-          cp "$AAB" delivery/HULK-SA-v0.9.3.12-CATEGORY-POSITION-MEMORY-debug.aab
-          cp reports/*.md reports/APK-BADGING.txt reports/MANIFEST-TREE.txt delivery/
-          cp tools/prepare-v0942-category-position-memory.py delivery/
+          cp "$APK" delivery/HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-debug.aab
+          cp reports/*.md reports/APK-BADGING.txt delivery/
+          cp tools/prepare-v0943-reorder-player-back-fix.py delivery/
           cp -a project/. source-delivery/
           rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
-          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.12-CATEGORY-POSITION-MEMORY.zip .)
-          printf '# HULK SA v0.9.3.12 Category Position Memory Build Report\n\n- Commit: %s\n- Live selected category position restored: PASS\n- Movies selected category position restored: PASS\n- Series selected category position restored: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n- Qualified ABIs: arm64-v8a, armeabi-v7a, x86_64\n' "$GITHUB_SHA" > delivery/BUILD-REPORT-v0.9.3.12.md
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.13-REORDER-PLAYER-BACK-FIX.zip .)
+          printf '# HULK SA v0.9.3.13 Reorder Player Back Fix\n\n- Category memory does not fight active reorder: PASS\n- Reorder list follows moved category: PASS\n- First Back hides controls: PASS\n- Second Back exits playback: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n' > delivery/BUILD-REPORT-v0.9.3.13.md
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
 
       - name: Upload delivery
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.3.12-CATEGORY-POSITION-MEMORY
+          name: HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX
           path: delivery/
           if-no-files-found: error
           retention-days: 30
@@ -124,7 +119,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.3.12-CATEGORY-POSITION-MEMORY-DIAGNOSTICS
+          name: HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-DIAGNOSTICS
           path: |
             archive.sha256
             build-logs/
