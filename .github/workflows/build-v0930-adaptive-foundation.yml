@@ -7,7 +7,7 @@ on:
     paths:
       - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
       - '.github/workflows/build-v0930-adaptive-foundation.yml'
-      - 'patches/v0.9.3.0-adaptive-foundation.patch'
+      - 'patches/v0.9.3.0-adaptive-source/**'
       - 'tools/**'
       - 'docs/PHASE-3-ADAPTIVE-FOUNDATION.md'
   pull_request:
@@ -57,20 +57,18 @@ jobs:
           python3 tools/repair-v09120.py project 2>&1 | tee build-logs/02-repair.log
           python3 tools/prepare-v0920-architecture.py project 2>&1 | tee build-logs/03-architecture.log
 
-      - name: Normalize and apply reviewed adaptive source patch
+      - name: Prepare and verify reviewed adaptive source
         run: |
           set -euo pipefail
-          cp patches/v0.9.3.0-adaptive-foundation.patch /tmp/adaptive.patch
-          python3 tools/normalize-unified-diff.py /tmp/adaptive.patch 2>&1 | tee build-logs/04-normalize-patch.log
-          git apply --check --directory=project --whitespace=error-all /tmp/adaptive.patch 2>&1 | tee build-logs/05-patch-check.log
-          git apply --directory=project --whitespace=error-all /tmp/adaptive.patch 2>&1 | tee build-logs/06-patch-apply.log
-          python3 tools/verify-v0930-adaptive-source.py project --report reports/ADAPTIVE-SOURCE-REPORT.md 2>&1 | tee build-logs/07-source-policy.log
+          python3 tools/prepare-v0930-adaptive-ui.py project 2>&1 | tee build-logs/04-adaptive-source-preparation.log
+          python3 tools/prepare-v0930-adaptive-ui.py project 2>&1 | tee build-logs/05-adaptive-idempotency.log
+          python3 tools/verify-v0930-adaptive-source.py project --report reports/ADAPTIVE-SOURCE-REPORT.md 2>&1 | tee build-logs/06-source-policy.log
 
       - name: Compile, test and build
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/08-gradle.log
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/07-gradle.log
 
       - name: Verify packages
         run: |
@@ -79,9 +77,9 @@ jobs:
           AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
           test -s "$APK"
           test -s "$AAB"
-          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md
-          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/08-apk-architecture.log
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md 2>&1 | tee build-logs/09-aab-architecture.log
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt build-logs/10-apk-badging.log
           grep "package: name='sa.hulksa.player.dev' versionCode='44' versionName='0.9.3.0-beta'" reports/APK-BADGING.txt
 
       - name: Package complete delivery
@@ -95,11 +93,12 @@ jobs:
           cp "$AAB" delivery/HULK-SA-v0.9.3.0-ADAPTIVE-FOUNDATION-debug.aab
           cp reports/*.md reports/APK-BADGING.txt delivery/
           cp docs/PHASE-3-ADAPTIVE-FOUNDATION.md delivery/
+          cp tools/prepare-v0930-adaptive-ui.py delivery/
           cp -a project/. source-delivery/
           rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
           (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.0-ADAPTIVE-FOUNDATION.zip .)
-          printf '# HULK SA v0.9.3.0 Build Report\n\n- Commit: %s\n- Source-only adaptive build: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n- Qualified ABIs: arm64-v8a, armeabi-v7a, x86_64\n' "$GITHUB_SHA" > delivery/BUILD-REPORT-v0.9.3.0.md
-          printf '# HULK SA v0.9.3.0 Changelog\n\n- Adaptive mobile, tablet and television foundation.\n- Touch, remote and keyboard input classification.\n- Adaptive top-bar and rail navigation.\n- Preserved ViewModel, Repository, API, downloads, recommendations, HomeContentSnapshot and architecture work.\n' > delivery/CHANGELOG-v0.9.3.0.md
+          printf '# HULK SA v0.9.3.0 Build Report\n\n- Commit: %s\n- Source-only adaptive build: PASS\n- Adaptive preparation idempotency: PASS\n- Kotlin compilation: PASS\n- Unit tests: PASS\n- Universal APK and AAB: PASS\n- Qualified ABIs: arm64-v8a, armeabi-v7a, x86_64\n- Excluded ABI: x86\n' "$GITHUB_SHA" > delivery/BUILD-REPORT-v0.9.3.0.md
+          printf '# HULK SA v0.9.3.0 Changelog\n\n- Adaptive mobile, tablet and television foundation.\n- Touch, remote and keyboard input classification.\n- Correct source-bitmask handling for keyboard and D-pad input.\n- Adaptive top-bar and rail navigation.\n- Preserved ViewModel, Repository, API, downloads, recommendations, HomeContentSnapshot and architecture work.\n' > delivery/CHANGELOG-v0.9.3.0.md
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
 
       - name: Upload complete Phase 3 delivery
