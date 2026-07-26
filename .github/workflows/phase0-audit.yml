@@ -1,0 +1,93 @@
+name: Phase 0 Source Audit
+
+on:
+  push:
+    branches:
+      - phase-0-v0.9.1.20-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase0-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reconstruct compact source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-output project
+
+          if compgen -G '.payload/lean/chunk-*' > /dev/null; then
+            cat .payload/lean/chunk-* > source.tar.xz.b64
+            base64 --decode source.tar.xz.b64 > source.tar.xz
+            tar -xJf source.tar.xz -C project
+          elif [ -f '.payload/lean/source.b64' ]; then
+            base64 --decode .payload/lean/source.b64 > source.tar.xz
+            tar -xJf source.tar.xz -C project
+          else
+            echo 'No recognized compact source payload found.' | tee audit-output/ERROR.txt
+            exit 1
+          fi
+
+      - name: Generate source audit report
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '# HULK SA Phase 0 Source Audit'
+            echo
+            echo '## Repository ref'
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo "- Commit: $GITHUB_SHA"
+            echo
+            echo '## Top-level project files'
+            find project -maxdepth 3 -type f | sort | sed -n '1,300p'
+            echo
+            echo '## Android build files'
+            find project -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' -o -name 'build.gradle' -o -name 'build.gradle.kts' -o -name 'gradle.properties' -o -name 'libs.versions.toml' -o -name 'gradle-wrapper.properties' -o -name 'AndroidManifest.xml' \) | sort
+            echo
+            echo '## Version and SDK declarations'
+            grep -RInE 'versionName|versionCode|compileSdk|targetSdk|minSdk|applicationId|namespace|kotlin|com.android.application|org.jetbrains.kotlin' project --include='*.gradle' --include='*.gradle.kts' --include='*.toml' --include='gradle-wrapper.properties' 2>/dev/null | sed -n '1,500p' || true
+            echo
+            echo '## Required completed feature markers'
+            for term in HomeContentSnapshot Downloads Recommendation Focus; do
+              echo "### $term"
+              grep -RIl "$term" project 2>/dev/null | sed -n '1,100p' || true
+            done
+            echo
+            echo '## Source counts'
+            printf 'Kotlin files: '; find project -type f -name '*.kt' | wc -l
+            printf 'Java files: '; find project -type f -name '*.java' | wc -l
+            printf 'XML files: '; find project -type f -name '*.xml' | wc -l
+            printf 'Total files: '; find project -type f | wc -l
+          } | tee audit-output/PHASE-0-SOURCE-AUDIT.md
+
+      - name: Copy critical build files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-output/critical-files
+          find project -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' -o -name 'build.gradle' -o -name 'build.gradle.kts' -o -name 'gradle.properties' -o -name 'libs.versions.toml' -o -name 'gradle-wrapper.properties' -o -name 'AndroidManifest.xml' \) -print0 | while IFS= read -r -d '' file; do
+            target="audit-output/critical-files/${file#project/}"
+            mkdir -p "$(dirname "$target")"
+            cp "$file" "$target"
+          done
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-Phase-0-Source-Audit
+          path: audit-output/
+          if-no-files-found: error
+          retention-days: 7
