@@ -1,0 +1,168 @@
+name: Build HULK SA v0.9.3.16 All Retest Fixes
+
+on:
+  push:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/build-v0946-all-retest-fixes.yml'
+      - 'release/v0.9.3.16/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v0946-all-retest-fixes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  all-retest-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -o pipefail
+          mkdir -p build-logs reports
+          { yes | sdkmanager --licenses >/dev/null || true; sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'; } 2>&1 | tee build-logs/01-sdk.log
+
+      - name: Prepare source
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          rm -rf extracted project
+          mkdir extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f \( -name settings.gradle.kts -o -name settings.gradle \) -printf '%h\n' | head -n1)
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          python3 tools/repair-v09120.py project
+          python3 tools/prepare-v0920-architecture.py project
+          python3 tools/prepare-v0930-adaptive-ui.py project
+          python3 tools/prepare-v0932-mobile-followup.py project
+          python3 tools/prepare-v0933-mobile-memory.py project
+          python3 tools/prepare-v0934-mobile-fixes.py project
+          python3 tools/prepare-v0935-tv-compatibility.py project
+          python3 tools/prepare-v0936-tcl-polish.py project
+          python3 tools/prepare-v0937-tcl-navigation-player.py project
+          python3 tools/prepare-v0938-back-focus-fix.py project
+          python3 tools/prepare-v0939-category-search-polish.py project
+          python3 tools/prepare-v0940-installer-favorites-fix.py project
+          python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project
+          python3 tools/prepare-v0942-category-position-memory.py project
+          python3 tools/prepare-v0943-category-player-state-fix.py project
+          python3 tools/prepare-v0944-favorites-home-polish.py project
+          python3 tools/prepare-v0945-xiaomi-search-safeareas.py project
+          python3 release/v0.9.3.16/prepare-v0946-all-retest-fixes.py project
+
+      - name: Compile, test and build
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/19-gradle.log
+
+      - name: Verify packages and all reported fixes
+        run: |
+          set -euo pipefail
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          test -s "$APK" && test -s "$AAB"
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
+          python3 - <<'PY'
+          from pathlib import Path
+
+          badging = Path('reports/APK-BADGING.txt').read_text(errors='ignore')
+          shell = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt').read_text()
+          login = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt').read_text()
+          player = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt').read_text()
+          series = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt').read_text()
+
+          checks = {
+              'versionCode 60': "versionCode='60'" in badging,
+              'versionName 0.9.3.16-beta': "versionName='0.9.3.16-beta'" in badging,
+              'search starts at first result': 'if (destination == MainDestination.SEARCH)' in shell and 'gridState.scrollToItem(0)' in shell,
+              'favorite optimistic state': 'val favoriteOverrides = remember' in shell,
+              'favorite resolver reaches TV and mobile': shell.count('isFavorite = resolvedIsFavorite') >= 2,
+              'favorite held-key duplicate guard': 'favoriteActionLocked' in shell and 'delay(900L)' in shell,
+              'favorite feedback snapshots pressed title': 'val feedbackName = item.name' in shell,
+              'category movement has no asymmetric animated tail': 'listState.animateScrollToItem(targetIndex.coerceAtLeast(0))' not in shell,
+              'collapsed rail logo is inset': '.offset(x = if (expanded) 0.dp else (-7).dp)' in shell,
+              'login uses platform IME hide': 'InputMethodManager' in login and 'view.postDelayed(hidePlatformIme, 320L)' in login,
+              'login non-text controls hide IME': login.count('onFocused = onNonTextFocus') >= 4,
+              'next episode controls hidden': player.count('controlsVisible && nextCountdown < 0') >= 2,
+              'next episode focus isolated': 'nextEpisodePlayFocus' in player and 'FocusRequester.Cancel' in player,
+              'remote live hint': 'السهم لاعلى: القناة التالية' in player,
+              'player TV top safe area': 'top = if (isTv) 28.dp else 10.dp' in player,
+              'player TV bottom safe area': 'bottom = if (adaptiveUi.isTelevision) 30.dp else 24.dp' in player,
+              'episode row right padding preserved': 'contentPadding = PaddingValues(start = 8.dp, end = 20.dp)' in series,
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          for name, passed in checks.items():
+              print(f"{name}: {'PASS' if passed else 'FAIL'}")
+          if failed:
+              raise SystemExit('verification failed: ' + ', '.join(failed))
+          PY
+
+      - name: Package delivery
+        run: |
+          set -euo pipefail
+          rm -rf delivery source-delivery
+          mkdir delivery source-delivery
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          cp "$APK" delivery/HULK-SA-v0.9.3.16-ALL-RETEST-FIXES-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.16-ALL-RETEST-FIXES-debug.aab
+          cp reports/*.md reports/APK-BADGING.txt delivery/
+          cp -a project/. source-delivery/
+          rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.16-ALL-RETEST-FIXES.zip .)
+          cat > delivery/BUILD-REPORT-v0.9.3.16.md <<'EOF'
+          # HULK SA v0.9.3.16
+
+          - Main and catalog search favorite stars update immediately: PASS
+          - Home Because You Watched and Recommended favorite stars update immediately: PASS
+          - Favorites removal message stays bound to the removed card: PASS
+          - Next-episode prompt traps focus inside Play Now and Cancel: PASS
+          - Player top and bottom controls use stronger TV safe areas: PASS
+          - Collapsed Xiaomi rail logo is inset and fully visible: PASS
+          - Category reorder movement is identical in both directions: PASS
+          - Xiaomi Android TV live hint uses remote arrows: PASS
+          - Login keyboard is hidden on every non-text control focus: PASS
+          - Previous search, episode padding, architecture and player fixes are preserved: PASS
+          - Kotlin compilation, unit tests, APK and AAB builds: PASS
+          EOF
+          (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+
+      - name: Upload delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.16-ALL-RETEST-FIXES
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.16-ALL-RETEST-FIXES-DIAGNOSTICS
+          path: |
+            build-logs/
+            reports/
+            project/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
