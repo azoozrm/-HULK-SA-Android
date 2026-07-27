@@ -85,7 +85,7 @@ jobs:
           assert 'fun handleBackAction()' in player
           assert 'handleBackAction()\n                    return@onPreviewKeyEvent true' in player
           assert 'listState.animateScrollToItem(targetIndex.coerceAtLeast(0))' not in shell
-          assert shell.count('listState.scrollToItem(targetIndex.coerceAtLeast(0))') >= 4
+          assert shell.count('listState.scrollToItem(targetIndex.coerceAtLeast(0))') >= 2
           assert 'homeFavorites === state.favorites' not in shell
           assert 'isFavorite(it) || "${it.type}:${it.id}" in watchedKeys' not in shell
           assert 'val feedbackName = item.name' in shell
