@@ -1,0 +1,172 @@
+name: Build HULK SA v0.9.3.17 Stability Polish
+
+on:
+  push:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/build-v0947-stability-polish.yml'
+      - 'release/v0.9.3.17/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v0947-stability-polish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stability-polish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -o pipefail
+          mkdir -p build-logs reports
+          { yes | sdkmanager --licenses >/dev/null || true; sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'; } 2>&1 | tee build-logs/01-sdk.log
+
+      - name: Prepare source
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          rm -rf extracted project
+          mkdir extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f \( -name settings.gradle.kts -o -name settings.gradle \) -printf '%h\n' | head -n1)
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          python3 tools/repair-v09120.py project
+          python3 tools/prepare-v0920-architecture.py project
+          python3 tools/prepare-v0930-adaptive-ui.py project
+          python3 tools/prepare-v0932-mobile-followup.py project
+          python3 tools/prepare-v0933-mobile-memory.py project
+          python3 tools/prepare-v0934-mobile-fixes.py project
+          python3 tools/prepare-v0935-tv-compatibility.py project
+          python3 tools/prepare-v0936-tcl-polish.py project
+          python3 tools/prepare-v0937-tcl-navigation-player.py project
+          python3 tools/prepare-v0938-back-focus-fix.py project
+          python3 tools/prepare-v0939-category-search-polish.py project
+          python3 tools/prepare-v0940-installer-favorites-fix.py project
+          python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project
+          python3 tools/prepare-v0942-category-position-memory.py project
+          python3 tools/prepare-v0943-category-player-state-fix.py project
+          python3 tools/prepare-v0944-favorites-home-polish.py project
+          python3 tools/prepare-v0945-xiaomi-search-safeareas.py project
+          python3 release/v0.9.3.16/v0946-main.py project
+          python3 release/v0.9.3.16/v0946-login.py project
+          python3 release/v0.9.3.16/v0946-player.py project
+          python3 release/v0.9.3.16/v0946-series.py project
+          python3 release/v0.9.3.17/v0947-navigation-categories.py project
+          python3 release/v0.9.3.17/v0947-player-panels.py project
+          python3 release/v0.9.3.17/v0947-details-favorites-downloads.py project
+
+      - name: Compile, test and build
+        working-directory: project
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/20-gradle.log
+
+      - name: Verify packages and stability fixes
+        run: |
+          set -euo pipefail
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          test -s "$APK" && test -s "$AAB"
+          python3 tools/verify-android-architectures.py "$APK" --require-native-libs --report reports/APK-ARCHITECTURE-REPORT.md
+          python3 tools/verify-android-architectures.py "$AAB" --require-native-libs --report reports/AAB-ARCHITECTURE-REPORT.md
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
+          python3 - <<'PY'
+          from pathlib import Path
+
+          badging = Path('reports/APK-BADGING.txt').read_text(errors='ignore')
+          shell = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt').read_text()
+          login = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt').read_text()
+          player = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt').read_text()
+          movie = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt').read_text()
+          series = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt').read_text()
+          app = Path('project/app/src/main/java/sa/hulksa/player/ui/HulkApp.kt').read_text()
+
+          checks = {
+              'versionCode 61': "versionCode='61'" in badging,
+              'versionName 0.9.3.17-beta': "versionName='0.9.3.17-beta'" in badging,
+              'collapsed logo restored without old clipping': '.size(if (expanded) 76.dp else 50.dp)' in shell and '.offset(x = if (expanded) 0.dp else (-4).dp)' in shell,
+              'category safe anchors in catalog and live': shell.count('val anchorIndex = (targetIndex - 1).coerceAtLeast(0)') >= 4 and shell.count('delay(40L)') >= 2,
+              'live all category is real default': 'FAVORITES_CATEGORY_ID -> 1' in shell and '?.plus(2)' in shell and 'catalog?.categories?.firstOrNull()?.id?.let(onSelectCategory)' not in shell,
+              'player option panels use RTL safe side': player.count('modifier = Modifier.align(Alignment.CenterStart)') >= 6,
+              'player option panels are scrollable and bounded': 'verticalScroll(rememberScrollState())' in player and '.width(if (adaptiveUi.isTelevision) 500.dp else 340.dp)' in player,
+              'movie related long press toggles favorite': 'onLongClick = { toggleRelatedFavorite(related) }' in movie,
+              'series related long press toggles favorite': 'onLongClick = { onToggleFavorite(item) }' in series,
+              'related favorite callbacks reach view model': app.count('onToggleRelatedFavorite = { related ->') >= 2,
+              'movie download progress is visible': 'MovieDownloadProgress(download)' in movie and 'جاري تحميل الفيلم' in movie and 'movieFormatBytes' in movie,
+              'previous search fix preserved': 'if (destination == MainDestination.SEARCH)' in shell and 'gridState.scrollToItem(0)' in shell,
+              'previous login keyboard fix preserved': 'InputMethodManager' in login and 'view.postDelayed(hidePlatformIme, 260L)' in login,
+              'previous next episode isolation preserved': 'nextEpisodePlayFocus' in player and 'FocusRequester.Cancel' in player and player.count('controlsVisible && nextCountdown < 0') >= 2,
+              'previous player TV safe areas preserved': 'top = if (adaptiveUi.isTelevision) 24.dp else 10.dp' in player and 'bottom = if (adaptiveUi.isTelevision) 32.dp else 24.dp' in player,
+              'previous episode safe padding preserved': 'start = if (isTv) 36.dp else 12.dp' in series and 'end = if (isTv) 36.dp else 12.dp' in series,
+          }
+          failed = [name for name, passed in checks.items() if not passed]
+          for name, passed in checks.items():
+              print(f"{name}: {'PASS' if passed else 'FAIL'}")
+          if failed:
+              raise SystemExit('verification failed: ' + ', '.join(failed))
+          PY
+
+      - name: Package delivery
+        run: |
+          set -euo pipefail
+          rm -rf delivery source-delivery
+          mkdir delivery source-delivery
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
+          cp "$APK" delivery/HULK-SA-v0.9.3.17-STABILITY-POLISH-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.17-STABILITY-POLISH-debug.aab
+          cp reports/*.md reports/APK-BADGING.txt delivery/
+          cp -a project/. source-delivery/
+          rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.17-STABILITY-POLISH.zip .)
+          cat > delivery/BUILD-REPORT-v0.9.3.17.md <<'EOF'
+          # HULK SA v0.9.3.17
+
+          - Collapsed navigation logo restored to a balanced visible size: PASS
+          - Reordered categories stay fully visible in both directions: PASS
+          - Live TV includes an All category showing all server channels: PASS
+          - All player option panels use one safe, scrollable RTL layout: PASS
+          - Movie and series related items support long-press favorites without opening or disappearing: PASS
+          - Movie details display live download progress, percentage and size: PASS
+          - All v0.9.3.16 search, keyboard, player, favorites and safe-area fixes are preserved: PASS
+          - Kotlin compilation, unit tests, APK and AAB builds: PASS
+          EOF
+          (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+
+      - name: Upload delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.17-STABILITY-POLISH
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.17-STABILITY-POLISH-DIAGNOSTICS
+          path: |
+            build-logs/
+            reports/
+            project/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
