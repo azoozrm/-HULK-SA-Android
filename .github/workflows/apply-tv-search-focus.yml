@@ -2,15 +2,11 @@ name: Apply TV search focus fix
 
 on:
   push:
-    branches:
-      - pr-tv-search-focus-v09317
-    paths:
-      - '.github/workflows/apply-tv-search-focus.yml'
+    branches: [pr-tv-search-focus-v09317]
+    paths: ['.github/workflows/apply-tv-search-focus.yml']
   pull_request:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - '.github/workflows/apply-tv-search-focus.yml'
+    branches: [phase-3-v0.9.3.0-adaptive-foundation]
+    paths: ['.github/workflows/apply-tv-search-focus.yml']
 
 permissions:
   contents: write
@@ -25,27 +21,21 @@ jobs:
     timeout-minutes: 75
     env:
       HULK_PORTAL_URL: https://example.invalid
-
     steps:
       - uses: actions/checkout@v7
         with:
           ref: pr-tv-search-focus-v09317
           fetch-depth: 0
           persist-credentials: true
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/wrapper-validation@v4
-
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: on-success
-
       - uses: android-actions/setup-android@v4
-
       - name: Install Android build SDK
         run: |
           set -euo pipefail
@@ -61,99 +51,65 @@ jobs:
           source = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
           text = source.read_text(encoding='utf-8')
 
-          def insert_after(anchor: str, addition: str, label: str) -> None:
+          def insert_after(anchor: str, addition: str) -> None:
               global text
               if addition in text:
                   return
               if text.count(anchor) != 1:
-                  raise SystemExit(f'Expected one {label} anchor, found {text.count(anchor)}')
+                  raise SystemExit(f'Non-unique import anchor: {anchor!r}')
               text = text.replace(anchor, anchor + addition, 1)
 
-          insert_after(
-              'import androidx.compose.foundation.layout.ColumnScope\n',
-              'import androidx.compose.foundation.layout.WindowInsets\n',
-              'WindowInsets import',
-          )
-          insert_after(
-              'import androidx.compose.foundation.layout.widthIn\n',
-              'import androidx.compose.foundation.layout.isImeVisible\n',
-              'IME visibility import',
-          )
-          insert_after(
-              'import androidx.compose.foundation.shape.RoundedCornerShape\n',
-              'import androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\n',
-              'keyboard imports',
-          )
-          insert_after(
-              'import androidx.compose.ui.platform.LocalContext\n',
-              'import androidx.compose.ui.platform.LocalSoftwareKeyboardController\n',
-              'software keyboard controller import',
-          )
-          insert_after(
-              'import androidx.compose.ui.text.font.FontWeight\n',
-              'import androidx.compose.ui.text.input.ImeAction\n',
-              'IME action import',
-          )
+          insert_after('import androidx.compose.foundation.layout.ColumnScope\n', 'import androidx.compose.foundation.layout.WindowInsets\n')
+          insert_after('import androidx.compose.foundation.layout.widthIn\n', 'import androidx.compose.foundation.layout.isImeVisible\n')
+          insert_after('import androidx.compose.foundation.shape.RoundedCornerShape\n', 'import androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\n')
+          insert_after('import androidx.compose.ui.platform.LocalContext\n', 'import androidx.compose.ui.platform.LocalSoftwareKeyboardController\n')
+          insert_after('import androidx.compose.ui.text.font.FontWeight\n', 'import androidx.compose.ui.text.input.ImeAction\n')
 
-          search_start_marker = '@Composable\nprivate fun UnifiedSearchScreen('
-          downloads_marker = '\n@Composable\nprivate fun DownloadsScreen('
-          if text.count(search_start_marker) != 1 or text.count(downloads_marker) != 1:
-              raise SystemExit('Search screen boundaries are not unique')
-          start = text.index(search_start_marker)
-          end = text.index(downloads_marker, start)
-          replacement = '''@Composable
-          private fun UnifiedSearchScreen(
-              state: HulkUiState,
-              isTv: Boolean,
-              navigationMemory: NavigationMemoryStore,
-              isFavorite: (ContentItem) -> Boolean,
-              onSearch: (String) -> Unit,
-              onOpen: (ContentItem) -> Unit,
-              onToggleFavorite: (ContentItem) -> Unit,
-          ) {
-              val colors = LocalHulkColors.current
-              val searchFieldRequester = remember { FocusRequester() }
-              val firstResultRequester = remember { FocusRequester() }
-              val results = remember(state.catalogs, state.searchQuery) {
-                  val query = state.searchQuery.trim()
-                  if (query.isBlank()) emptyList() else state.catalogs.values.flatMap { it.items }
-                      .filter { it.matchesSearch(query) }
-                      .distinctBy { "${it.type}:${it.id}" }
-              }
-              Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {
-                  PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
-                  Spacer(Modifier.height(14.dp))
-                  TvSearchField(
-                      value = state.searchQuery,
-                      onValueChange = onSearch,
-                      isTv = isTv,
-                      hasResults = results.isNotEmpty(),
-                      fieldRequester = searchFieldRequester,
-                      firstResultRequester = firstResultRequester,
-                      modifier = Modifier.fillMaxWidth(),
-                  )
-                  Spacer(Modifier.height(16.dp))
-                  if (state.searchQuery.isBlank()) {
-                      EmptyState("ابدا بكتابة الاسم او السنة او النوع او وصف المحتوى")
-                  } else if (results.isEmpty()) {
-                      EmptyState("لا توجد نتائج مطابقة")
-                  } else {
-                      Text("${results.size} نتيجة", color = colors.textMuted, fontSize = 11.sp)
-                      Spacer(Modifier.height(9.dp))
-                      ContentGrid(
-                          content = results,
-                          isTv = isTv,
-                          destination = MainDestination.SEARCH,
-                          navigationMemory = navigationMemory,
-                          isFavorite = isFavorite,
-                          onOpen = onOpen,
-                          onToggleFavorite = onToggleFavorite,
-                          firstItemFocusRequester = if (isTv) firstResultRequester else null,
-                          firstItemUpRequester = if (isTv) searchFieldRequester else null,
-                      )
-                  }
-              }
-          }
+          start_marker = '@Composable\nprivate fun UnifiedSearchScreen('
+          end_marker = '\n@Composable\nprivate fun DownloadsScreen('
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          search = text[start:end]
+
+          old = '    val colors = LocalHulkColors.current\n'
+          new = old + '    val searchFieldRequester = remember { FocusRequester() }\n    val firstResultRequester = remember { FocusRequester() }\n'
+          if search.count(old) != 1:
+              raise SystemExit('Search colors anchor changed')
+          search = search.replace(old, new, 1)
+
+          old = '        HulkTextField(state.searchQuery, onSearch, "ابحث بالاسم او السنة او النوع…", Modifier.fillMaxWidth())\n'
+          new = '''        TvSearchField(
+              value = state.searchQuery,
+              onValueChange = onSearch,
+              isTv = isTv,
+              hasResults = results.isNotEmpty(),
+              fieldRequester = searchFieldRequester,
+              firstResultRequester = firstResultRequester,
+              modifier = Modifier.fillMaxWidth(),
+          )
+          '''.replace('          ', '')
+          if search.count(old) != 1:
+              raise SystemExit('Search text field anchor changed')
+          search = search.replace(old, new, 1)
+
+          old = '            ContentGrid(results, isTv, MainDestination.SEARCH, navigationMemory, isFavorite, onOpen, onToggleFavorite)\n'
+          new = '''            ContentGrid(
+                  content = results,
+                  isTv = isTv,
+                  destination = MainDestination.SEARCH,
+                  navigationMemory = navigationMemory,
+                  isFavorite = isFavorite,
+                  onOpen = onOpen,
+                  onToggleFavorite = onToggleFavorite,
+                  firstItemFocusRequester = if (isTv) firstResultRequester else null,
+                  firstItemUpRequester = if (isTv) searchFieldRequester else null,
+              )
+          '''.replace('          ', '')
+          if search.count(old) != 1:
+              raise SystemExit('Search results grid anchor changed')
+          search = search.replace(old, new, 1)
+
+          tv_field = '''
 
           @Composable
           private fun TvSearchField(
@@ -183,19 +139,11 @@ jobs:
                   }
               }
 
-              val tvFocusModifier = if (isTv) {
+              val tvModifier = if (isTv) {
                   Modifier
                       .focusRequester(fieldRequester)
                       .onPreviewKeyEvent { event ->
-                          when (
-                              tvSearchFocusAction(
-                                  isTv = true,
-                                  eventType = event.type,
-                                  key = event.key,
-                                  hasResults = hasResults,
-                                  imeVisible = imeVisible,
-                              )
-                          ) {
+                          when (tvSearchFocusAction(true, event.type, event.key, hasResults, imeVisible)) {
                               TvSearchFocusAction.MOVE_TO_RESULTS -> moveToResults()
                               TvSearchFocusAction.DISMISS_KEYBOARD -> {
                                   keyboardController?.hide()
@@ -212,68 +160,41 @@ jobs:
                   value = value,
                   onValueChange = onValueChange,
                   label = "ابحث بالاسم او السنة او النوع…",
-                  modifier = modifier.then(tvFocusModifier),
+                  modifier = modifier.then(tvModifier),
                   keyboardOptions = if (isTv) KeyboardOptions(imeAction = ImeAction.Search) else KeyboardOptions.Default,
-                  keyboardActions = if (isTv) {
-                      KeyboardActions(onSearch = { moveToResults() })
-                  } else {
-                      KeyboardActions.Default
-                  },
+                  keyboardActions = if (isTv) KeyboardActions(onSearch = { moveToResults() }) else KeyboardActions.Default,
               )
           }
-          '''
-          replacement = replacement.replace('          ', '')
-          text = text[:start] + replacement + text[end:]
+          '''.replace('          ', '')
+          text = text[:start] + search + tv_field + text[end:]
 
-          old_signature = '''    onToggleFavorite: (ContentItem) -> Unit,
-              restoreFocusedCard: Boolean = true,
-          ) {'''.replace('          ', '')
-          new_signature = '''    onToggleFavorite: (ContentItem) -> Unit,
-              restoreFocusedCard: Boolean = true,
-              firstItemFocusRequester: FocusRequester? = null,
-              firstItemUpRequester: FocusRequester? = null,
-          ) {'''.replace('          ', '')
-          if text.count(old_signature) != 1:
-              raise SystemExit(f'Expected one ContentGrid signature, found {text.count(old_signature)}')
-          text = text.replace(old_signature, new_signature, 1)
+          old = '    restoreFocusedCard: Boolean = true,\n) {'
+          new = '    restoreFocusedCard: Boolean = true,\n    firstItemFocusRequester: FocusRequester? = null,\n    firstItemUpRequester: FocusRequester? = null,\n) {'
+          if text.count(old) != 1:
+              raise SystemExit('ContentGrid signature anchor changed')
+          text = text.replace(old, new, 1)
 
-          old_card = '''            CompactPosterCard(
-                          item = item,
-                          isFavorite = isFavorite(item),
-                          onClick = { onOpen(item) },
-                          modifier = Modifier.fillMaxWidth().restoreFocus(restore, targetRequester),
-                          onLongClick = { onToggleFavorite(item) },
-                          onFocused = { navigationMemory.save(destination, key, index) },
-                      )'''.replace('          ', '')
-          new_card = '''            val externalRequester = firstItemFocusRequester.takeIf { index == 0 }
-                      val upRequester = firstItemUpRequester.takeIf { index == 0 }
-                      CompactPosterCard(
-                          item = item,
-                          isFavorite = isFavorite(item),
-                          onClick = { onOpen(item) },
-                          modifier = Modifier
-                              .fillMaxWidth()
-                              .then(
-                                  if (externalRequester != null) {
-                                      Modifier.focusRequester(externalRequester)
-                                  } else {
-                                      Modifier.restoreFocus(restore, targetRequester)
-                                  },
-                              )
-                              .then(
-                                  if (upRequester != null) {
-                                      Modifier.focusProperties { up = upRequester }
-                                  } else {
-                                      Modifier
-                                  },
-                              ),
-                          onLongClick = { onToggleFavorite(item) },
-                          onFocused = { navigationMemory.save(destination, key, index) },
-                      )'''.replace('          ', '')
-          if text.count(old_card) != 1:
-              raise SystemExit(f'Expected one ContentGrid card block, found {text.count(old_card)}')
-          text = text.replace(old_card, new_card, 1)
-
+          old = '                modifier = Modifier.fillMaxWidth().restoreFocus(restore, targetRequester),\n'
+          new = '''                modifier = Modifier
+                      .fillMaxWidth()
+                      .then(
+                          if (index == 0 && firstItemFocusRequester != null) {
+                              Modifier.focusRequester(firstItemFocusRequester)
+                          } else {
+                              Modifier.restoreFocus(restore, targetRequester)
+                          },
+                      )
+                      .then(
+                          if (index == 0 && firstItemUpRequester != null) {
+                              Modifier.focusProperties { up = firstItemUpRequester }
+                          } else {
+                              Modifier
+                          },
+                      ),
+          '''.replace('          ', '')
+          if text.count(old) != 1:
+              raise SystemExit('ContentGrid card modifier anchor changed')
+          text = text.replace(old, new, 1)
           source.write_text(text, encoding='utf-8')
           PY
 
@@ -283,11 +204,7 @@ jobs:
           import androidx.compose.ui.input.key.Key
           import androidx.compose.ui.input.key.KeyEventType
 
-          internal enum class TvSearchFocusAction {
-              NONE,
-              MOVE_TO_RESULTS,
-              DISMISS_KEYBOARD,
-          }
+          internal enum class TvSearchFocusAction { NONE, MOVE_TO_RESULTS, DISMISS_KEYBOARD }
 
           internal fun tvSearchFocusAction(
               isTv: Boolean,
@@ -315,55 +232,25 @@ jobs:
           import org.junit.Test
 
           class TvSearchFocusPolicyTest {
-              @Test
-              fun tvDpadDownMovesToResultsWhenResultsExist() {
-                  assertEquals(
-                      TvSearchFocusAction.MOVE_TO_RESULTS,
-                      tvSearchFocusAction(true, KeyEventType.KeyDown, Key.DirectionDown, true, false),
-                  )
+              @Test fun downMovesToResultsOnlyOnTvWithResults() {
+                  assertEquals(TvSearchFocusAction.MOVE_TO_RESULTS, tvSearchFocusAction(true, KeyEventType.KeyDown, Key.DirectionDown, true, false))
+                  assertEquals(TvSearchFocusAction.NONE, tvSearchFocusAction(true, KeyEventType.KeyDown, Key.DirectionDown, false, false))
+                  assertEquals(TvSearchFocusAction.NONE, tvSearchFocusAction(false, KeyEventType.KeyDown, Key.DirectionDown, true, false))
               }
 
-              @Test
-              fun tvDpadDownStaysOnFieldWithoutResults() {
-                  assertEquals(
-                      TvSearchFocusAction.NONE,
-                      tvSearchFocusAction(true, KeyEventType.KeyDown, Key.DirectionDown, false, false),
-                  )
+              @Test fun backDismissesOnlyVisibleTvKeyboard() {
+                  assertEquals(TvSearchFocusAction.DISMISS_KEYBOARD, tvSearchFocusAction(true, KeyEventType.KeyDown, Key.Back, true, true))
+                  assertEquals(TvSearchFocusAction.NONE, tvSearchFocusAction(true, KeyEventType.KeyDown, Key.Back, true, false))
               }
 
-              @Test
-              fun tvBackDismissesOnlyVisibleKeyboard() {
-                  assertEquals(
-                      TvSearchFocusAction.DISMISS_KEYBOARD,
-                      tvSearchFocusAction(true, KeyEventType.KeyDown, Key.Back, true, true),
-                  )
-                  assertEquals(
-                      TvSearchFocusAction.NONE,
-                      tvSearchFocusAction(true, KeyEventType.KeyDown, Key.Back, true, false),
-                  )
-              }
-
-              @Test
-              fun keyUpNeverChangesFocus() {
-                  assertEquals(
-                      TvSearchFocusAction.NONE,
-                      tvSearchFocusAction(true, KeyEventType.KeyUp, Key.DirectionDown, true, true),
-                  )
-              }
-
-              @Test
-              fun touchLayoutsKeepExistingSearchBehavior() {
-                  assertEquals(
-                      TvSearchFocusAction.NONE,
-                      tvSearchFocusAction(false, KeyEventType.KeyDown, Key.DirectionDown, true, true),
-                  )
+              @Test fun keyUpNeverChangesFocus() {
+                  assertEquals(TvSearchFocusAction.NONE, tvSearchFocusAction(true, KeyEventType.KeyUp, Key.DirectionDown, true, true))
               }
           }
           KOTLIN
 
           git diff --check
           grep -Fq 'firstItemFocusRequester' app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-          grep -Fq 'TvSearchFocusAction.MOVE_TO_RESULTS' app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
           grep -Fq 'WindowInsets.isImeVisible' app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 
       - name: Build and test focused change
@@ -390,11 +277,9 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
             app/src/main/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicy.kt \
             app/src/test/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicyTest.kt
-          git diff --cached --quiet && exit 0
           git diff --cached --check
           git commit -m 'fix: hand off TV search focus to results'
           git push origin HEAD:pr-tv-search-focus-v09317
