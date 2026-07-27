@@ -27,6 +27,7 @@ class HomeRecommendationCacheTest {
         val before = store.homeContent(state)
         assertTrue(before.becauseYouWatched.isEmpty())
 
+        // Catalog and history identities stay unchanged; Favorites alone must invalidate the snapshot.
         val after = store.homeContent(state.copy(favorites = setOf("MOVIE:1")))
 
         assertNotSame(before, after)
