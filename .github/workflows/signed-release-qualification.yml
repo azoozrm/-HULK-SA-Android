@@ -1,0 +1,235 @@
+name: HULK SA Signed Release Qualification
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - 'app/build.gradle.kts'
+      - 'tools/verify-apk-signing.sh'
+      - 'tools/verify-aab-signing.sh'
+      - '.github/workflows/signed-release-qualification.yml'
+      - 'docs/project-audit/RELEASE-SIGNING-QUALIFICATION.md'
+  workflow_dispatch:
+    inputs:
+      expected_version_code:
+        description: Expected Android versionCode
+        required: true
+        default: '61'
+        type: string
+      expected_version_name:
+        description: Expected Android versionName
+        required: true
+        default: '0.9.3.17'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-sa-signed-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signing-preflight:
+    name: Unsigned fallback and signing fail-closed preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android build SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Validate verification scripts
+        run: |
+          set -euo pipefail
+          bash -n tools/verify-apk-signing.sh
+          bash -n tools/verify-aab-signing.sh
+
+      - name: Prove unsigned release fallback remains buildable
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            clean :app:assembleRelease :app:bundleRelease \
+            -PHULK_PORTAL_URL=https://example.invalid
+
+          unsigned_apk='app/build/outputs/apk/release/app-release-unsigned.apk'
+          test -f "$unsigned_apk"
+          if apksigner verify "$unsigned_apk" >/dev/null 2>&1; then
+            echo 'Unsigned fallback unexpectedly produced a signed APK' >&2
+            exit 1
+          fi
+          echo 'PASS: no signing inputs produces an explicitly unsigned release APK'
+
+      - name: Prove incomplete signing configuration fails closed
+        run: |
+          set -euo pipefail
+          set +e
+          ./gradlew --no-daemon --console=plain :app:tasks \
+            -PHULK_RELEASE_KEY_ALIAS=preflight-only \
+            > signing-incomplete.log 2>&1
+          status=$?
+          set -e
+
+          if [[ "$status" -eq 0 ]]; then
+            echo 'Incomplete signing configuration was accepted unexpectedly' >&2
+            cat signing-incomplete.log >&2
+            exit 1
+          fi
+          grep -Fq 'Incomplete release signing configuration' signing-incomplete.log
+          echo 'PASS: partial signing inputs fail before any release is produced'
+
+  signed-release:
+    name: Build and verify signed production artifacts
+    if: github.event_name == 'workflow_dispatch'
+    needs: signing-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
+      ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
+      ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
+      ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
+      EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
+      HULK_PORTAL_URL: ${{ secrets.HULK_PORTAL_URL || 'https://example.invalid' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android build SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Validate required release secrets
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$HULK_RELEASE_KEYSTORE_BASE64" ]] || missing+=(HULK_RELEASE_KEYSTORE_BASE64)
+          [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS" ]] || missing+=(HULK_RELEASE_KEY_ALIAS)
+          [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD" ]] || missing+=(HULK_RELEASE_STORE_PASSWORD)
+          [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD" ]] || missing+=(HULK_RELEASE_KEY_PASSWORD)
+          [[ -n "$EXPECTED_CERT_SHA256" ]] || missing+=(HULK_RELEASE_CERT_SHA256)
+          if [[ "${#missing[@]}" -ne 0 ]]; then
+            printf 'Missing required release secrets: %s\n' "${missing[*]}" >&2
+            exit 2
+          fi
+          echo 'PASS: all required release signing inputs are present'
+
+      - name: Materialize ephemeral keystore
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/hulk-sa-release.jks"
+          printf '%s' "$HULK_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          test -s "$keystore"
+          echo "ORG_GRADLE_PROJECT_HULK_RELEASE_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
+          echo 'PASS: keystore materialized only in runner temporary storage'
+
+      - name: Build signed APK and AAB
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            clean :app:assembleRelease :app:bundleRelease \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+          test -f app/build/outputs/apk/release/app-release.apk
+          test -f app/build/outputs/bundle/release/app-release.aab
+          test ! -e app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify package identity and version
+        env:
+          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code }}
+          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name }}
+        run: |
+          set -euo pipefail
+          apk='app/build/outputs/apk/release/app-release.apk'
+          package_id="$(apkanalyzer manifest application-id "$apk")"
+          version_code="$(apkanalyzer manifest version-code "$apk")"
+          version_name="$(apkanalyzer manifest version-name "$apk")"
+
+          test "$package_id" = 'sa.hulksa.player'
+          test "$version_code" = "$EXPECTED_VERSION_CODE"
+          test "$version_name" = "$EXPECTED_VERSION_NAME"
+
+          mkdir -p signed-release-artifacts
+          {
+            echo "Application ID: $package_id"
+            echo "Version code: $version_code"
+            echo "Version name: $version_name"
+            echo 'Package identity: PASS'
+          } > signed-release-artifacts/PACKAGE-IDENTITY.txt
+
+      - name: Verify signer identity and signature schemes
+        run: |
+          set -euo pipefail
+          bash tools/verify-apk-signing.sh \
+            app/build/outputs/apk/release/app-release.apk \
+            "$EXPECTED_CERT_SHA256" \
+            signed-release-artifacts/APK-SIGNING.txt
+          bash tools/verify-aab-signing.sh \
+            app/build/outputs/bundle/release/app-release.aab \
+            "$EXPECTED_CERT_SHA256" \
+            signed-release-artifacts/AAB-SIGNING.txt
+
+      - name: Verify signed output architectures
+        run: |
+          set -euo pipefail
+          python3 tools/verify-android-architectures.py \
+            app/build/outputs/apk/release/app-release.apk \
+            --require-native-libs \
+            --report signed-release-artifacts/APK-ARCHITECTURES.md
+          python3 tools/verify-android-architectures.py \
+            app/build/outputs/bundle/release/app-release.aab \
+            --require-native-libs \
+            --report signed-release-artifacts/AAB-ARCHITECTURES.md
+
+      - name: Package signed release evidence
+        run: |
+          set -euo pipefail
+          cp app/build/outputs/apk/release/app-release.apk signed-release-artifacts/
+          cp app/build/outputs/bundle/release/app-release.aab signed-release-artifacts/
+          (
+            cd signed-release-artifacts
+            sha256sum app-release.apk app-release.aab > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-SIGNED-RELEASE-QUALIFICATION
+          path: signed-release-artifacts/
+          if-no-files-found: error
+          retention-days: 14
