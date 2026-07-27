@@ -4,10 +4,11 @@ import json
 import sys
 
 root = Path(sys.argv[1])
+root.mkdir(parents=True, exist_ok=True)
 summaries = []
 for p in sorted(root.rglob('summary.json')):
     try:
-        summaries.append(json.loads(p.read_text()))
+        summaries.append(json.loads(p.read_text(encoding='utf-8')))
     except Exception:
         pass
 critical = sum(s.get('critical_count', 0) for s in summaries)
@@ -20,6 +21,15 @@ lines = [
     f'- Critical findings: {critical}',
     f'- Warnings: {warnings}',
     '',
+]
+if not summaries:
+    lines += [
+        '## Matrix status',
+        '',
+        'No emulator device summaries were produced. Inspect the QA APK build diagnostics and workflow logs before trusting this run.',
+        '',
+    ]
+lines += [
     '| Device | Scenarios | Critical | Warnings | Login IME hidden |',
     '|---|---:|---:|---:|---|',
 ]
@@ -33,6 +43,16 @@ for s in summaries:
     if s.get('warnings'):
         lines += ['', f"## {s.get('device')} warnings", ''] + [f'- {x}' for x in s['warnings']]
 (root / 'EMULATOR-MATRIX-REPORT.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
-(root / 'EMULATOR-MATRIX-SUMMARY.json').write_text(json.dumps({'devices': summaries, 'critical_count': critical, 'warning_count': warnings}, ensure_ascii=False, indent=2), encoding='utf-8')
-if not summaries:
-    sys.exit('No device summaries found')
+(root / 'EMULATOR-MATRIX-SUMMARY.json').write_text(
+    json.dumps(
+        {
+            'devices': summaries,
+            'critical_count': critical,
+            'warning_count': warnings,
+            'matrix_complete': len(summaries) == 4,
+        },
+        ensure_ascii=False,
+        indent=2,
+    ),
+    encoding='utf-8',
+)
