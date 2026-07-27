@@ -406,7 +406,8 @@ fun MainShellScreen(
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     DestinationContent(
                         state = state,
-                        isTv = true,
+                        // A rail is a layout choice; only an actual TV uses TV interaction semantics.
+                        isTv = isTv,
                         navigationMemory = navigationMemory,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,

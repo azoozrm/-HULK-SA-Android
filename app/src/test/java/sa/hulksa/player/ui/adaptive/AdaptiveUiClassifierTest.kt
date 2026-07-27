@@ -50,6 +50,22 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
+    fun expandedTouchTabletUsesRailWithoutTelevisionInteractionModel() {
+        val state = AdaptiveUiState(
+            deviceClass = HulkDeviceClass.TABLET,
+            windowWidthClass = HulkWindowWidthClass.EXPANDED,
+            navigationType = HulkNavigationType.RAIL,
+            inputMode = HulkInputMode.TOUCH,
+            screenWidthDp = 1280,
+            screenHeightDp = 800,
+        )
+
+        assertEquals(HulkNavigationType.RAIL, state.navigationType)
+        assertFalse(state.isTelevision)
+        assertFalse(state.showFocusHighlights)
+    }
+
+    @Test
     fun televisionAlwaysUsesRailAndFocusHighlights() {
         val device = classifyDeviceClass(
             isTelevisionDevice = true,
