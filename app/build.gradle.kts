@@ -1,3 +1,4 @@
+import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -11,6 +12,33 @@ fun String.asBuildConfigString(): String =
 
 val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse("")
 val configUrl = providers.gradleProperty("HULK_CONFIG_URL").orElse("")
+
+val releaseSigningProperties = linkedMapOf(
+    "HULK_RELEASE_KEYSTORE_FILE" to providers.gradleProperty("HULK_RELEASE_KEYSTORE_FILE"),
+    "HULK_RELEASE_KEY_ALIAS" to providers.gradleProperty("HULK_RELEASE_KEY_ALIAS"),
+    "HULK_RELEASE_STORE_PASSWORD" to providers.gradleProperty("HULK_RELEASE_STORE_PASSWORD"),
+    "HULK_RELEASE_KEY_PASSWORD" to providers.gradleProperty("HULK_RELEASE_KEY_PASSWORD"),
+)
+val releaseSigningRequested = releaseSigningProperties.values.any { it.isPresent }
+val releaseSigningConfigured = releaseSigningProperties.values.all { it.isPresent }
+
+if (releaseSigningRequested && !releaseSigningConfigured) {
+    val missing = releaseSigningProperties
+        .filterValues { !it.isPresent }
+        .keys
+        .joinToString(", ")
+    throw GradleException("Incomplete release signing configuration. Missing: $missing")
+}
+
+val releaseKeystoreFile = if (releaseSigningConfigured) {
+    file(releaseSigningProperties.getValue("HULK_RELEASE_KEYSTORE_FILE").get()).also { keystore ->
+        if (!keystore.isFile) {
+            throw GradleException("Release keystore file does not exist: ${keystore.absolutePath}")
+        }
+    }
+} else {
+    null
+}
 
 android {
     namespace = "sa.hulksa.player"
@@ -38,12 +66,30 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseSigningProperties.getValue("HULK_RELEASE_STORE_PASSWORD").get()
+                keyAlias = releaseSigningProperties.getValue("HULK_RELEASE_KEY_ALIAS").get()
+                keyPassword = releaseSigningProperties.getValue("HULK_RELEASE_KEY_PASSWORD").get()
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-beta"
         }
         release {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
