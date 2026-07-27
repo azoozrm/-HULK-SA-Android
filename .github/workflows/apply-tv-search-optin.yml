@@ -1,0 +1,92 @@
+name: Apply TV search focus opt-in
+
+on:
+  push:
+    branches: [pr-tv-search-focus-v09317]
+    paths: ['.github/workflows/apply-tv-search-optin.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hulk-sa-tv-search-focus-optin
+  cancel-in-progress: true
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr-tv-search-focus-v09317
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+      - name: Install SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Apply verified patch plus scoped opt-in
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/apply-tv-search-focus.yml').read_text().splitlines()
+          start = workflow.index('      - name: Apply explicit TV search focus contract') + 2
+          end = next(i for i in range(start, len(workflow)) if workflow[i].startswith('      - name:'))
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in workflow[start:end]) + '\n'
+          Path('/tmp/apply-tv-search.sh').write_text(script)
+          PY
+          bash /tmp/apply-tv-search.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          text = path.read_text(encoding='utf-8')
+          import_anchor = 'import androidx.compose.foundation.layout.ColumnScope\n'
+          import_line = 'import androidx.compose.foundation.layout.ExperimentalLayoutApi\n'
+          if import_line not in text:
+              if text.count(import_anchor) != 1:
+                  raise SystemExit('ExperimentalLayoutApi import anchor changed')
+              text = text.replace(import_anchor, import_anchor + import_line, 1)
+          function_anchor = '@Composable\nprivate fun TvSearchField('
+          annotated = '@OptIn(ExperimentalLayoutApi::class)\n' + function_anchor
+          if annotated not in text:
+              if text.count(function_anchor) != 1:
+                  raise SystemExit('TvSearchField annotation anchor changed')
+              text = text.replace(function_anchor, annotated, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+      - name: Full qualification
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            clean :app:compileDebugKotlin testDebugUnitTest \
+            :app:lintDebug :app:assembleDebug :app:bundleDebug \
+            :app:assembleRelease :app:bundleRelease \
+            -PHULK_PORTAL_URL=https://example.invalid
+          count=0
+          while IFS= read -r -d '' archive; do
+            python3 tools/verify-android-architectures.py "$archive" --require-native-libs
+            count=$((count + 1))
+          done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
+          test "$count" -ge 4
+      - name: Commit verified source only
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+            app/src/main/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicy.kt \
+            app/src/test/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicyTest.kt
+          git diff --cached --check
+          git commit -m 'fix: hand off TV search focus to results'
+          git push origin HEAD:pr-tv-search-focus-v09317
