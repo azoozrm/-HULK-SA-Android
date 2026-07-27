@@ -1,0 +1,156 @@
+name: Apply home recommendation cache fix
+
+on:
+  push:
+    branches: [pr-home-recommendation-cache-v09317]
+    paths: ['.github/workflows/apply-home-recommendation-cache-fix.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hulk-sa-home-recommendation-cache-fix
+  cancel-in-progress: true
+
+jobs:
+  apply-test-and-clean:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      HULK_PORTAL_URL: https://example.invalid
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr-home-recommendation-cache-v09317
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
+      - name: Install Android build SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Apply favorites-aware Home cache identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          text = source.read_text(encoding='utf-8')
+          old_check = '''            homeLiveCatalog === liveCatalog &&
+                      homeHistory === state.history
+          '''.replace('          ', '')
+          new_check = '''            homeLiveCatalog === liveCatalog &&
+                      homeHistory === state.history &&
+                      homeFavorites === state.favorites
+          '''.replace('          ', '')
+          if text.count(old_check) != 1:
+              raise SystemExit(f'Expected one Home cache check anchor, found {text.count(old_check)}')
+          text = text.replace(old_check, new_check, 1)
+          old_store = '''            homeHistory = state.history
+                      cachedHome = snapshot
+          '''.replace('          ', '')
+          new_store = '''            homeHistory = state.history
+                      homeFavorites = state.favorites
+                      cachedHome = snapshot
+          '''.replace('          ', '')
+          if text.count(old_store) != 1:
+              raise SystemExit(f'Expected one Home cache store anchor, found {text.count(old_store)}')
+          source.write_text(text.replace(old_store, new_store, 1), encoding='utf-8')
+          PY
+          mkdir -p app/src/test/java/sa/hulksa/player/ui/screens
+          cat > app/src/test/java/sa/hulksa/player/ui/screens/HomeRecommendationCacheTest.kt <<'KOTLIN'
+          package sa.hulksa.player.ui.screens
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertNotSame
+          import org.junit.Assert.assertSame
+          import org.junit.Assert.assertTrue
+          import org.junit.Test
+          import sa.hulksa.player.HulkUiState
+          import sa.hulksa.player.model.Catalog
+          import sa.hulksa.player.model.ContentItem
+          import sa.hulksa.player.model.ContentType
+
+          class HomeRecommendationCacheTest {
+              @Test
+              fun unchangedInputsReuseTheCachedHomeSnapshot() {
+                  val state = testState()
+                  val store = NavigationMemoryStore()
+                  val first = store.homeContent(state)
+                  val second = store.homeContent(state)
+                  assertSame(first, second)
+              }
+
+              @Test
+              fun changingFavoritesInvalidatesAndRebuildsRecommendations() {
+                  val state = testState()
+                  val store = NavigationMemoryStore()
+                  val before = store.homeContent(state)
+                  assertTrue(before.becauseYouWatched.isEmpty())
+                  val after = store.homeContent(state.copy(favorites = setOf("MOVIE:1")))
+                  assertNotSame(before, after)
+                  assertEquals(setOf(1, 2), after.becauseYouWatched.map(ContentItem::id).toSet())
+              }
+
+              private fun testState(): HulkUiState {
+                  val catalog = Catalog(
+                      categories = emptyList(),
+                      items = listOf(
+                          movie(1, "action", "7.0", 300L),
+                          movie(2, "action", "9.0", 200L),
+                          movie(3, "drama", "10.0", 100L),
+                      ),
+                  )
+                  return HulkUiState(
+                      catalogs = mapOf(ContentType.MOVIE to catalog),
+                      favorites = emptySet(),
+                      history = emptyList(),
+                  )
+              }
+
+              private fun movie(id: Int, categoryId: String, rating: String, added: Long): ContentItem = ContentItem(
+                  id = id,
+                  name = "Movie $id",
+                  categoryId = categoryId,
+                  type = ContentType.MOVIE,
+                  posterUrl = null,
+                  rating = rating,
+                  year = null,
+                  containerExtension = "mp4",
+                  addedAtEpochSeconds = added,
+                  genre = categoryId,
+              )
+          }
+          KOTLIN
+          git diff --check
+      - name: Build and test focused change
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleDebug :app:assembleRelease :app:bundleRelease -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+      - name: Verify output architectures
+        run: |
+          set -euo pipefail
+          count=0
+          while IFS= read -r -d '' archive; do
+            python3 tools/verify-android-architectures.py "$archive" --require-native-libs
+            count=$((count + 1))
+          done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
+          test "$count" -ge 4
+      - name: Commit verified source and remove temporary workflow
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/apply-home-recommendation-cache-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt app/src/test/java/sa/hulksa/player/ui/screens/HomeRecommendationCacheTest.kt
+          git diff --cached --check
+          git commit -m 'fix: invalidate Home recommendations when favorites change'
+          git push origin HEAD:pr-home-recommendation-cache-v09317
