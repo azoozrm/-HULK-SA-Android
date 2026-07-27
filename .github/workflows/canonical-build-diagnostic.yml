@@ -69,7 +69,7 @@ jobs:
           from pathlib import Path
           player = Path("app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt")
           text = player.read_text(encoding="utf-8")
-          annotation = "@file:OptIn(androidx.media3.common.util.UnstableApi::class)"
+          annotation = "@file:androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])"
           if annotation not in text:
               player.write_text(annotation + "\n\n" + text, encoding="utf-8")
           PY
