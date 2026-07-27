@@ -60,6 +60,10 @@ manifest_dir.mkdir(parents=True, exist_ok=True)
 qa_dir = app / "src/debug/java/sa/hulksa/player/qa"
 qa_dir.mkdir(parents=True, exist_ok=True)
 source = Path(__file__).with_name("QaActivity.kt")
-(qa_dir / "QaActivity.kt").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+qa_text = source.read_text(encoding="utf-8").replace(
+    '    val panel = scenario.substringAfter("panel_", "").uppercase().ifBlank { null }',
+    '    val panelName = scenario.substringAfter("panel_", "").uppercase()\n    val panel = panelName.takeIf { it.isNotBlank() }',
+)
+(qa_dir / "QaActivity.kt").write_text(qa_text, encoding="utf-8")
 
 print("Prepared debug-only emulator QA harness")
