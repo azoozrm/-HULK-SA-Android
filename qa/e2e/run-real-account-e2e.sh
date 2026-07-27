@@ -67,27 +67,26 @@ find_text() {
   python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --text-contains "$1" --index 0 2>/dev/null || true
 }
 
-wait_for_network() {
-  local ok=false
+record_network_state() {
+  local label="$1"
+  {
+    echo "===== $label ====="
+    date -u +%FT%TZ
+    adb shell dumpsys connectivity | grep -E 'NetworkAgentInfo|VALIDATED|INTERNET|CONNECTED' | head -n 40 || true
+    adb shell ip route || true
+    adb shell getprop net.dns1 || true
+    adb shell getprop net.dns2 || true
+  } >> "$OUT/network-diagnostics.txt" 2>&1
+}
+
+prepare_network() {
   adb shell settings put global airplane_mode_on 0 >/dev/null 2>&1 || true
   adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false >/dev/null 2>&1 || true
   adb shell svc wifi enable >/dev/null 2>&1 || true
   adb shell svc data enable >/dev/null 2>&1 || true
-  adb shell settings put global private_dns_mode off >/dev/null 2>&1 || true
-  for attempt in $(seq 1 30); do
-    {
-      echo "attempt=$attempt"
-      adb shell dumpsys connectivity | grep -E 'NetworkAgentInfo|VALIDATED|INTERNET' | head -n 20 || true
-      adb shell ping -c 1 -W 2 8.8.8.8 || true
-      adb shell ping -c 1 -W 2 3162356.xyz || true
-    } >> "$OUT/network-preflight.txt" 2>&1
-    if adb shell ping -c 1 -W 2 3162356.xyz >/dev/null 2>&1; then
-      ok=true
-      break
-    fi
-    sleep 3
-  done
-  [[ "$ok" == "true" ]]
+  adb shell settings put global private_dns_mode opportunistic >/dev/null 2>&1 || true
+  sleep 4
+  record_network_state "network-ready-check"
 }
 
 is_logged_in() {
@@ -111,21 +110,22 @@ PY
 
 login_once() {
   local attempt="$1"
+  prepare_network
   adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
   adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 > "$OUT/launch-$attempt.txt" 2>&1 || return 1
-  sleep 5
+  sleep 6
   dump_ui
   local user pass login
   user=$(python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --class-contains EditText --index 0 2>/dev/null || true)
   pass=$(python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --class-contains EditText --index 1 2>/dev/null || true)
-  [[ -n "$user" && -n "$pass" ]] || return 1
+  [[ -n "$user" && -n "$pass" ]] || { capture "login-form-missing-$attempt" 1; return 1; }
   adb shell input tap $user >/dev/null 2>&1 || true
   adb shell input keyevent 123 >/dev/null 2>&1 || true
-  for _ in $(seq 1 32); do adb shell input keyevent 67 >/dev/null 2>&1 || true; done
+  for _ in $(seq 1 64); do adb shell input keyevent 67 >/dev/null 2>&1 || true; done
   adb shell input text "$HULK_QA_USERNAME" >/dev/null 2>&1 || return 1
   adb shell input tap $pass >/dev/null 2>&1 || true
   adb shell input keyevent 123 >/dev/null 2>&1 || true
-  for _ in $(seq 1 32); do adb shell input keyevent 67 >/dev/null 2>&1 || true; done
+  for _ in $(seq 1 64); do adb shell input keyevent 67 >/dev/null 2>&1 || true; done
   adb shell input text "$HULK_QA_PASSWORD" >/dev/null 2>&1 || return 1
   adb shell input keyevent 4 >/dev/null 2>&1 || true
   sleep 1
@@ -133,10 +133,11 @@ login_once() {
   login=$(find_text "الدخول")
   [[ -z "$login" ]] && login=$(find_text "دخول")
   if [[ -n "$login" ]]; then adb shell input tap $login >/dev/null 2>&1 || true; else adb shell input keyevent 66 >/dev/null 2>&1 || true; fi
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 40); do
     sleep 3
     if is_logged_in; then return 0; fi
   done
+  record_network_state "login-attempt-$attempt-failed"
   capture "login-failure-attempt-$attempt" 1
   return 1
 }
@@ -165,7 +166,7 @@ adb shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
 adb shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
 adb shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
 adb shell settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
-wait_for_network || die "Emulator network did not become reachable"
+prepare_network
 adb install -r -t "$APK" > "$OUT/install.txt" 2>&1 || die "APK installation failed"
 PACKAGE=$(adb shell pm list packages | tr -d '\r' | sed -n 's/package:\(.*hulksa.*\)/\1/p' | head -n1)
 [[ -n "$PACKAGE" ]] || PACKAGE="sa.hulksa.player.dev"
@@ -179,12 +180,11 @@ adb shell pm clear "$PACKAGE" >/dev/null 2>&1 || true
 adb logcat -c >/dev/null 2>&1 || true
 LOGIN_OK=false
 for attempt in 1 2 3; do
-  wait_for_network || true
   if login_once "$attempt"; then LOGIN_OK=true; break; fi
   adb shell pm clear "$PACKAGE" >/dev/null 2>&1 || true
-  sleep 4
+  sleep 5
 done
-[[ "$LOGIN_OK" == "true" ]] || die "Real account login failed after three network-safe attempts"
+[[ "$LOGIN_OK" == "true" ]] || die "Real account login failed after three attempts; inspect captured login screens and network diagnostics"
 touch "$OUT/login-success.flag"
 adb logcat -c >/dev/null 2>&1 || true
 capture "home-real" 4
