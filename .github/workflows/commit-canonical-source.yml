@@ -1,0 +1,106 @@
+name: Commit verified canonical source
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/commit-canonical-source.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: hulk-sa-commit-canonical-source
+  cancel-in-progress: false
+
+jobs:
+  commit-source:
+    name: Commit verified recovery artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr-canonical-source-v09317
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download verified canonical source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            'https://api.github.com/repos/azoozrm/-HULK-SA-Android/actions/artifacts/8666382687/zip' \
+            --output "$RUNNER_TEMP/canonical-source.zip"
+
+          mkdir "$RUNNER_TEMP/canonical-source"
+          unzip -q "$RUNNER_TEMP/canonical-source.zip" \
+            -d "$RUNNER_TEMP/canonical-source"
+          test -d "$RUNNER_TEMP/canonical-source/app/src/main"
+          test -f "$RUNNER_TEMP/canonical-source/canonical/canonical-source.sha256"
+
+      - name: Materialize verified artifact into repository
+        run: |
+          set -euo pipefail
+          SRC="$RUNNER_TEMP/canonical-source"
+
+          rm -rf app gradle qa/canonical
+          cp -a "$SRC/app" app
+          cp -a "$SRC/gradle" gradle
+          cp "$SRC/gradlew" gradlew
+          cp "$SRC/gradlew.bat" gradlew.bat
+          cp "$SRC/settings.gradle.kts" settings.gradle.kts
+          cp "$SRC/build.gradle.kts" build.gradle.kts
+          cp "$SRC/gradle.properties" gradle.properties
+          chmod +x gradlew
+
+          mkdir -p qa
+          cp -a "$SRC/canonical" qa/canonical
+          cp "$SRC/CANONICAL-SOURCE-PARITY.md" \
+            docs/project-audit/CANONICAL-SOURCE-PARITY.md
+          cp "$SRC/canonical-build.yml" \
+            .github/workflows/canonical-build.yml
+
+      - name: Verify committed bytes and scope
+        run: |
+          set -euo pipefail
+          sha256sum -c qa/canonical/canonical-source.sha256
+          grep -Fq \
+            '@file:androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])' \
+            app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
+          test ! -e app/src/main/java/sa/hulksa/player/qa
+          test -f gradle/wrapper/gradle-wrapper.jar
+          test -f gradle/wrapper/gradle-wrapper.properties
+          test -x gradlew
+
+          if find app gradle qa/canonical -type f \
+            \( -name '*.jks' -o -name '*.keystore' -o -name '*.p12' \
+               -o -name '*.pfx' -o -name '*.pem' -o -name '*.key' \) \
+            -print -quit | grep -q .; then
+            echo 'Sensitive signing material detected' >&2
+            exit 1
+          fi
+
+      - name: Remove temporary bootstrap workflows
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/materialize-canonical-source.yml
+          rm -f .github/workflows/canonical-build-diagnostic.yml
+          rm -f .github/workflows/commit-canonical-source.yml
+
+      - name: Commit canonical project to PR branch
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git commit -m 'build: materialize canonical v0.9.3.17 source'
+          git push origin HEAD:pr-canonical-source-v09317
