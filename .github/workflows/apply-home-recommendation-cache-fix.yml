@@ -1,8 +1,8 @@
 name: Apply home recommendation cache fix
 
 on:
-  pull_request:
-    branches: [phase-3-v0.9.3.0-adaptive-foundation]
+  push:
+    branches: [pr-home-recommendation-cache-v09317]
     paths: ['.github/workflows/apply-home-recommendation-cache-fix.yml']
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: hulk-sa-home-recommendation-cache-fix
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   apply-test-and-clean:
