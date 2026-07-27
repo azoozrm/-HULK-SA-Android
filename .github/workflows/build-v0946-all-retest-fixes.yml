@@ -68,6 +68,7 @@ jobs:
           python3 release/v0.9.3.16/v0946-main.py project
           python3 release/v0.9.3.16/v0946-login.py project
           python3 release/v0.9.3.16/v0946-player.py project
+          python3 release/v0.9.3.16/v0946-series.py project
 
       - name: Compile, test and build
         working-directory: project
@@ -110,7 +111,7 @@ jobs:
               'remote live hint': 'السهم لاعلى: القناة التالية' in player,
               'player TV top safe area': 'top = if (adaptiveUi.isTelevision) 24.dp else 10.dp' in player,
               'player TV bottom safe area': 'bottom = if (adaptiveUi.isTelevision) 32.dp else 24.dp' in player,
-              'episode row right padding preserved': 'contentPadding = PaddingValues(start = 8.dp, end = 20.dp)' in series,
+              'episode grid TV safe padding': 'start = if (isTv) 36.dp else 12.dp' in series and 'end = if (isTv) 36.dp else 12.dp' in series,
           }
           failed = [name for name, passed in checks.items() if not passed]
           for name, passed in checks.items():
@@ -144,7 +145,8 @@ jobs:
           - Category movement is identical in both directions: PASS
           - Xiaomi Android TV live hint uses remote arrows: PASS
           - Login keyboard hides on non-text focus: PASS
-          - Previous search, episode padding and architecture fixes are preserved: PASS
+          - Series episode grid uses stronger TV safe padding: PASS
+          - Previous search and architecture fixes are preserved: PASS
           - Kotlin compilation, unit tests, APK and AAB builds: PASS
           EOF
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
