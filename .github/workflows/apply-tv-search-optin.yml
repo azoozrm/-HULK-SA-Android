@@ -4,9 +4,13 @@ on:
   push:
     branches: [pr-tv-search-focus-v09317]
     paths: ['.github/workflows/apply-tv-search-optin.yml']
+  pull_request:
+    branches: [phase-3-v0.9.3.0-adaptive-foundation]
+    paths: ['.github/workflows/apply-tv-search-optin.yml']
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: hulk-sa-tv-search-focus-optin
@@ -14,6 +18,7 @@ concurrency:
 
 jobs:
   apply-and-verify:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -66,20 +71,42 @@ jobs:
           PY
           git diff --check
       - name: Full qualification
+        id: qualification
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set +e
           ./gradlew --no-daemon --console=plain \
             clean :app:compileDebugKotlin testDebugUnitTest \
             :app:lintDebug :app:assembleDebug :app:bundleDebug \
             :app:assembleRelease :app:bundleRelease \
-            -PHULK_PORTAL_URL=https://example.invalid
-          count=0
-          while IFS= read -r -d '' archive; do
-            python3 tools/verify-android-architectures.py "$archive" --require-native-libs
-            count=$((count + 1))
-          done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
-          test "$count" -ge 4
+            -PHULK_PORTAL_URL=https://example.invalid 2>&1 | tee tv-search-optin-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            count=0
+            while IFS= read -r -d '' archive; do
+              python3 tools/verify-android-architectures.py "$archive" --require-native-libs
+              status=$?
+              [ "$status" -eq 0 ] || break
+              count=$((count + 1))
+            done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
+            [ "$count" -ge 4 ] || status=1
+          fi
+          exit "$status"
+      - name: Report failure
+        if: steps.qualification.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### TV Search scoped opt-in qualification failed'
+            echo
+            echo '```text'
+            tail -n 140 tv-search-optin-build.log
+            echo '```'
+          } > tv-search-optin-comment.md
+          gh pr comment 25 --body-file tv-search-optin-comment.md
       - name: Commit verified source only
+        if: steps.qualification.outcome == 'success'
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
@@ -90,3 +117,6 @@ jobs:
           git diff --cached --check
           git commit -m 'fix: hand off TV search focus to results'
           git push origin HEAD:pr-tv-search-focus-v09317
+      - name: Fail when qualification failed
+        if: steps.qualification.outcome == 'failure'
+        run: exit 1
