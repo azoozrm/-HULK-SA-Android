@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build-qa-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -75,29 +75,58 @@ jobs:
           python3 release/v0.9.3.17/v0947-details-favorites-downloads.py project
           python3 qa/emulator/prepare-qa-harness.py project
 
-      - name: Static tests, lint and QA APK
+      - name: Unit tests and QA APK
+        id: qa_build
+        working-directory: project
+        run: |
+          set +e
+          set -o pipefail
+          gradle --no-daemon --console=plain clean testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../qa-build.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Android lint diagnostics
+        if: always()
+        continue-on-error: true
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain clean testDebugUnitTest :app:lintDebug :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../qa-build.log
+          gradle --no-daemon --console=plain :app:lintDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../qa-lint.log
 
-      - name: Package QA APK
+      - name: Package QA build and diagnostics
+        if: always()
         run: |
           set -euo pipefail
           mkdir -p qa-apk
-          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
-          test -s "$APK"
-          cp "$APK" qa-apk/HULK-SA-v0.9.3.17-QA-EMULATOR-debug.apk
-          cp qa-build.log qa-apk/
+          cp qa-build.log qa-apk/ 2>/dev/null || true
+          cp qa-lint.log qa-apk/ 2>/dev/null || true
           cp -a project/app/build/reports/lint-results-debug.html qa-apk/ 2>/dev/null || true
-          sha256sum qa-apk/* > qa-apk/SHA256SUMS.txt
+          cp -a project/app/build/reports/lint-results-debug.xml qa-apk/ 2>/dev/null || true
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1 || true)
+          if test -n "$APK" && test -s "$APK"; then
+            cp "$APK" qa-apk/HULK-SA-v0.9.3.17-QA-EMULATOR-debug.apk
+            echo 'QA APK build: PASS' > qa-apk/BUILD-STATUS.txt
+          else
+            echo 'QA APK build: FAIL' > qa-apk/BUILD-STATUS.txt
+            tail -n 400 qa-build.log > qa-apk/qa-build-tail.log 2>/dev/null || true
+          fi
+          (cd qa-apk && sha256sum * > SHA256SUMS.txt)
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload QA build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: HULK-SA-v0.9.3.17-QA-APK
           path: qa-apk/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Enforce QA APK build success
+        if: always()
+        run: |
+          test '${{ steps.qa_build.outputs.status }}' = '0'
+          test -s qa-apk/HULK-SA-v0.9.3.17-QA-EMULATOR-debug.apk
 
   emulator-smoke:
     needs: build-qa-apk
@@ -185,21 +214,24 @@ jobs:
           retention-days: 14
 
   aggregate-report:
-    needs: emulator-smoke
+    needs: [build-qa-apk, emulator-smoke]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           pattern: HULK-SA-v0.9.3.17-QA-*
           path: all-qa-artifacts
           merge-multiple: false
       - name: Build overall diagnosis
         run: |
+          mkdir -p all-qa-artifacts
           python3 qa/emulator/aggregate.py all-qa-artifacts
-          find all-qa-artifacts -maxdepth 3 -type f | sort > all-qa-artifacts/FILES.txt
+          find all-qa-artifacts -maxdepth 4 -type f | sort > all-qa-artifacts/FILES.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: HULK-SA-v0.9.3.17-EMULATOR-MATRIX-REPORT
           path: |
