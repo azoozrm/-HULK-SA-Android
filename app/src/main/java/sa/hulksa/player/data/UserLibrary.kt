@@ -22,7 +22,7 @@ class UserLibrary(context: Context) {
     }
 
     fun replaceFavorites(favorites: Set<String>) {
-        preferences.edit().putStringSet(KEY_FAVORITES, favorites.toSet()).commit()
+        preferences.edit().putStringSet(KEY_FAVORITES, favorites.toSet()).apply()
     }
 
     fun isFavorite(item: ContentItem, favorites: Set<String>): Boolean = keyFor(item) in favorites
