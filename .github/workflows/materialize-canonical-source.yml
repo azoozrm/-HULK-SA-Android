@@ -1,0 +1,474 @@
+name: Bootstrap canonical v0.9.3.17 source
+
+on:
+  push:
+    branches:
+      - pr-canonical-source-v09317
+    paths:
+      - '.github/workflows/materialize-canonical-source.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hulk-sa-canonical-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    name: Materialize, verify and commit canonical source
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android build SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Reconstruct production and lab projects
+        run: |
+          set -euo pipefail
+          PROD="$RUNNER_TEMP/hulk-production"
+          LAB="$RUNNER_TEMP/hulk-lab"
+          SAVED_HARNESS="$RUNNER_TEMP/prepare-harness.py"
+
+          cp qa/compatibility/prepare-harness.py "$SAVED_HARNESS"
+          cat > qa/compatibility/prepare-harness.py <<'PY'
+          #!/usr/bin/env python3
+          from pathlib import Path
+          import sys
+
+          if len(sys.argv) != 2:
+              raise SystemExit("usage: prepare-harness.py <prepared-project>")
+          project = Path(sys.argv[1]).resolve()
+          if not (project / "settings.gradle.kts").is_file():
+              raise SystemExit(f"not a prepared Android project: {project}")
+          if not (project / "app/src/main").is_dir():
+              raise SystemExit(f"production source missing: {project}")
+          print("PASS: production project prepared without debug QA injection")
+          PY
+          chmod +x qa/compatibility/prepare-harness.py
+
+          bash qa/compatibility/prepare-project.sh "$PROD"
+          mv "$SAVED_HARNESS" qa/compatibility/prepare-harness.py
+          bash qa/compatibility/prepare-project.sh "$LAB"
+
+          echo "PROD=$PROD" >> "$GITHUB_ENV"
+          echo "LAB=$LAB" >> "$GITHUB_ENV"
+
+      - name: Prove production and lab parity outside debug harness
+        run: |
+          set -euo pipefail
+          python3 - "$PROD" "$LAB" <<'PY'
+          from pathlib import Path
+          import hashlib
+          import sys
+
+          production = Path(sys.argv[1])
+          lab = Path(sys.argv[2])
+
+          def inventory(root: Path):
+              result = {}
+              for path in sorted(p for p in root.rglob("*") if p.is_file()):
+                  rel = path.relative_to(root).as_posix()
+                  if rel.startswith("app/src/debug/"):
+                      continue
+                  result[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+              return result
+
+          prod = inventory(production)
+          lab_inventory = inventory(lab)
+          if prod != lab_inventory:
+              changed = sorted(set(prod) | set(lab_inventory))
+              changed = [p for p in changed if prod.get(p) != lab_inventory.get(p)]
+              print("Production/lab parity failed outside app/src/debug:")
+              for path in changed[:100]:
+                  print(path)
+              raise SystemExit(1)
+          print(f"PASS: {len(prod)} files match outside app/src/debug")
+          PY
+
+          test -f "$LAB/app/src/debug/java/sa/hulksa/player/qa/QaActivity.kt"
+          test ! -e "$PROD/app/src/debug/java/sa/hulksa/player/qa/QaActivity.kt"
+
+      - name: Record baseline manifest and copy canonical project
+        run: |
+          set -euo pipefail
+          mkdir -p qa/canonical
+
+          python3 - "$PROD" qa/canonical/v0.9.3.17-baseline.sha256 <<'PY'
+          from pathlib import Path
+          import hashlib
+          import sys
+
+          root = Path(sys.argv[1])
+          destination = Path(sys.argv[2])
+          excluded_parts = {"build", ".gradle", ".idea"}
+          excluded_names = {"local.properties"}
+          lines = []
+          for path in sorted(p for p in root.rglob("*") if p.is_file()):
+              rel = path.relative_to(root)
+              if any(part in excluded_parts for part in rel.parts):
+                  continue
+              if rel.name in excluded_names:
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {rel.as_posix()}")
+          destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"Recorded {len(lines)} baseline files")
+          PY
+
+          rm -rf app gradle
+          cp -a "$PROD/app" app
+          for file in settings.gradle.kts settings.gradle build.gradle.kts build.gradle gradle.properties; do
+            if [[ -f "$PROD/$file" ]]; then
+              cp "$PROD/$file" "$file"
+            fi
+          done
+
+          test -d app/src/main
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f gradle.properties
+
+      - name: Apply the single intentional lint-only source difference
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          player = Path("app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt")
+          text = player.read_text(encoding="utf-8")
+          annotation = "@file:OptIn(androidx.media3.common.util.UnstableApi::class)"
+          if annotation not in text:
+              player.write_text(annotation + "\n\n" + text, encoding="utf-8")
+          if "format.bitrate" not in player.read_text(encoding="utf-8"):
+              raise SystemExit("Expected Media3 bitrate usage was not found")
+          print("PASS: added file-scoped Media3 opt-in; runtime behavior unchanged")
+          PY
+
+      - name: Add Gradle Wrapper 8.13
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain wrapper \
+            --gradle-version 8.13 \
+            --distribution-type bin \
+            -PHULK_PORTAL_URL=https://example.invalid
+          chmod +x gradlew
+          ./gradlew --version
+
+      - name: Add canonical CI and parity documentation
+        run: |
+          set -euo pipefail
+          cat > .github/workflows/canonical-build.yml <<'YAML'
+          name: HULK SA Canonical Build
+
+          on:
+            push:
+              branches:
+                - phase-3-v0.9.3.0-adaptive-foundation
+              paths:
+                - 'app/**'
+                - 'gradle/**'
+                - 'gradlew'
+                - 'gradlew.bat'
+                - 'build.gradle*'
+                - 'settings.gradle*'
+                - 'gradle.properties'
+                - 'qa/canonical/**'
+                - 'tools/verify-android-architectures.py'
+                - '.github/workflows/canonical-build.yml'
+            pull_request:
+              branches:
+                - phase-3-v0.9.3.0-adaptive-foundation
+              paths:
+                - 'app/**'
+                - 'gradle/**'
+                - 'gradlew'
+                - 'gradlew.bat'
+                - 'build.gradle*'
+                - 'settings.gradle*'
+                - 'gradle.properties'
+                - 'qa/canonical/**'
+                - 'tools/verify-android-architectures.py'
+                - '.github/workflows/canonical-build.yml'
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          concurrency:
+            group: hulk-sa-canonical-${{ github.workflow }}-${{ github.ref }}
+            cancel-in-progress: true
+
+          jobs:
+            canonical-build:
+              name: Clean, lint, unit, debug, release and ABI
+              runs-on: ubuntu-latest
+              timeout-minutes: 70
+              env:
+                HULK_PORTAL_URL: ${{ secrets.HULK_PORTAL_URL || 'https://example.invalid' }}
+
+              steps:
+                - uses: actions/checkout@v7
+
+                - uses: actions/setup-java@v5
+                  with:
+                    distribution: temurin
+                    java-version: '17'
+
+                - uses: gradle/actions/wrapper-validation@v4
+
+                - uses: gradle/actions/setup-gradle@v6
+                  with:
+                    cache-cleanup: on-success
+
+                - uses: android-actions/setup-android@v4
+
+                - name: Install Android build SDK
+                  run: |
+                    set -euo pipefail
+                    yes | sdkmanager --licenses >/dev/null || true
+                    sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+                - name: Verify canonical checkout
+                  run: |
+                    set -euo pipefail
+                    test -f settings.gradle.kts
+                    test -x gradlew
+                    test -d app/src/main
+                    test ! -e app/src/main/java/sa/hulksa/player/qa
+                    test ! -e project/app/src/main
+                    ./gradlew --version
+
+                - name: Build and test from checkout
+                  run: |
+                    set -euo pipefail
+                    ./gradlew --no-daemon --console=plain \
+                      clean :app:compileDebugKotlin testDebugUnitTest \
+                      :app:lintDebug :app:assembleDebug :app:bundleDebug \
+                      :app:assembleRelease :app:bundleRelease \
+                      -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+                - name: Verify APK and AAB architectures
+                  run: |
+                    set -euo pipefail
+                    mkdir -p build/reports/architecture
+                    count=0
+                    while IFS= read -r -d '' archive; do
+                      name="$(basename "$archive")"
+                      python3 tools/verify-android-architectures.py \
+                        "$archive" \
+                        --require-native-libs \
+                        --report "build/reports/architecture/$name.md"
+                      count=$((count + 1))
+                    done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
+                    test "$count" -ge 4
+
+                - name: Package unsigned verification artifacts
+                  run: |
+                    set -euo pipefail
+                    mkdir -p canonical-artifacts
+                    find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) \
+                      -exec cp {} canonical-artifacts/ \;
+                    cp -a build/reports/architecture canonical-artifacts/
+                    (
+                      cd canonical-artifacts
+                      sha256sum *.apk *.aab > SHA256SUMS.txt
+                      sha256sum -c SHA256SUMS.txt
+                    )
+
+                - uses: actions/upload-artifact@v7
+                  with:
+                    name: HULK-SA-CANONICAL-UNSIGNED-BUILD
+                    path: canonical-artifacts/
+                    if-no-files-found: error
+                    retention-days: 14
+          YAML
+
+          cat > docs/project-audit/CANONICAL-SOURCE-PARITY.md <<'MD'
+          # HULK SA Android — Canonical Source Parity
+
+          ## Scope
+
+          This change materializes the exact v0.9.3.17 production project reconstructed from audited head `8db147faea8fae0290bf75d53b4194de2035880f` and audit delivery head `0bc9a31a8538a8fadc1f0223d8c69d35ba17bd0a`.
+
+          It does not redesign the UI, change business logic, add a feature, implement signing, or remove the historical ZIP/transformation chain.
+
+          ## Parity method
+
+          1. Run the audited 24-step reconstruction once without the debug Compatibility Lab injection.
+          2. Run the normal Compatibility Lab reconstruction separately.
+          3. Compare every file outside `app/src/debug`; all files must match byte-for-byte.
+          4. Record `qa/canonical/v0.9.3.17-baseline.sha256` before canonical-only additions.
+          5. Materialize the production Gradle project directly in Git.
+          6. Add Gradle Wrapper 8.13.
+          7. Apply one intentional source-only difference: a file-scoped Media3 `UnstableApi` opt-in in `PlayerScreen.kt` to clear the already documented lint error. This changes no runtime behavior.
+          8. Record `qa/canonical/canonical-source.sha256` for the committed source and build files.
+
+          ## Required acceptance evidence
+
+          - Clean checkout builds directly through `./gradlew`; no reconstruction creates `app/src/main`.
+          - Debug and unsigned Release APK/AAB build successfully, including R8/resource shrinking.
+          - Existing unit tests pass.
+          - `lintDebug` has no error.
+          - ABI verification passes exactly for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, with legacy `x86` absent.
+          - Compatibility QA remains debug-only and is not copied into production source.
+          - Historical ZIP, scripts, workflows, and audit evidence remain available until this parity PR is accepted.
+
+          ## Out of scope
+
+          Release signing, install/upgrade proof, landscape navigation, TV Search focus, durable downloads, authenticated production E2E, performance qualification, and any feature work remain separate follow-up PRs.
+          MD
+
+          cat > qa/canonical/README.md <<'MD'
+          # Canonical source evidence
+
+          - `v0.9.3.17-baseline.sha256` records the reconstructed production project before canonical additions.
+          - `canonical-source.sha256` records the direct Gradle source, wrapper, and build configuration committed by the parity PR.
+          - The canonical CI builds directly from checkout and does not reconstruct `app/src/main`.
+          MD
+
+      - name: Record canonical manifest
+        run: |
+          set -euo pipefail
+          python3 - qa/canonical/canonical-source.sha256 <<'PY'
+          from pathlib import Path
+          import hashlib
+          import sys
+
+          destination = Path(sys.argv[1])
+          roots = [Path("app"), Path("gradle")]
+          root_files = [
+              Path("gradlew"),
+              Path("gradlew.bat"),
+              Path("settings.gradle.kts"),
+              Path("build.gradle.kts"),
+              Path("gradle.properties"),
+          ]
+          excluded_parts = {"build", ".gradle", ".idea"}
+          paths = []
+          for root in roots:
+              if root.exists():
+                  paths.extend(p for p in root.rglob("*") if p.is_file())
+          paths.extend(p for p in root_files if p.is_file())
+          lines = []
+          for path in sorted(set(paths), key=lambda p: p.as_posix()):
+              if any(part in excluded_parts for part in path.parts):
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {path.as_posix()}")
+          destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"Recorded {len(lines)} canonical files")
+          PY
+
+      - name: Guard against sensitive material
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          forbidden_suffixes = {".jks", ".keystore", ".p12", ".pfx", ".pem", ".key"}
+          forbidden_markers = (
+              b"-----BEGIN PRIVATE KEY-----",
+              b"-----BEGIN RSA PRIVATE KEY-----",
+              b"-----BEGIN EC PRIVATE KEY-----",
+          )
+          violations = []
+          for root_name in ("app", "gradle", "qa/canonical"):
+              root = Path(root_name)
+              if not root.exists():
+                  continue
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  if path.suffix.lower() in forbidden_suffixes:
+                      violations.append(path.as_posix())
+                      continue
+                  try:
+                      payload = path.read_bytes()
+                  except OSError:
+                      continue
+                  if any(marker in payload for marker in forbidden_markers):
+                      violations.append(path.as_posix())
+          if violations:
+              print("Sensitive material guard failed for paths:")
+              for path in violations:
+                  print(path)
+              raise SystemExit(1)
+          print("PASS: no signing key or private-key material detected")
+          PY
+
+      - name: Build, lint, test and verify ABI from canonical checkout
+        env:
+          HULK_PORTAL_URL: https://example.invalid
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            clean :app:compileDebugKotlin testDebugUnitTest \
+            :app:lintDebug :app:assembleDebug :app:bundleDebug \
+            :app:assembleRelease :app:bundleRelease \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+          mkdir -p build/reports/architecture
+          count=0
+          while IFS= read -r -d '' archive; do
+            name="$(basename "$archive")"
+            python3 tools/verify-android-architectures.py \
+              "$archive" \
+              --require-native-libs \
+              --report "build/reports/architecture/$name.md"
+            count=$((count + 1))
+          done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
+          test "$count" -ge 4
+
+      - name: Create source-only recovery artifact
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/canonical-source-artifact"
+          mkdir -p "$RUNNER_TEMP/canonical-source-artifact"
+          rsync -a \
+            --exclude '.gradle/' \
+            --exclude 'build/' \
+            --exclude 'app/build/' \
+            app gradle gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties \
+            qa/canonical docs/project-audit/CANONICAL-SOURCE-PARITY.md \
+            .github/workflows/canonical-build.yml \
+            "$RUNNER_TEMP/canonical-source-artifact/"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-CANONICAL-SOURCE-RECOVERY
+          path: ${{ runner.temp }}/canonical-source-artifact/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Commit canonical source to PR branch
+        run: |
+          set -euo pipefail
+          rm .github/workflows/materialize-canonical-source.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git commit -m 'build: materialize canonical v0.9.3.17 source'
+          git push origin HEAD:pr-canonical-source-v09317
