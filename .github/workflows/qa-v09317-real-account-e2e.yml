@@ -1,0 +1,233 @@
+name: QA HULK SA v0.9.3.17 Real Account E2E
+
+on:
+  push:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/qa-v09317-real-account-e2e.yml'
+      - 'qa/e2e/**'
+      - 'qa/emulator/node-center.py'
+      - 'release/v0.9.3.17/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-v09317-real-account-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-real-e2e-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Reconstruct official v0.9.3.17 source
+        run: |
+          set -euo pipefail
+          ARCHIVE='HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+          rm -rf extracted project
+          mkdir extracted
+          unzip -q "$ARCHIVE" -d extracted
+          ROOT=$(find extracted -type f \( -name settings.gradle.kts -o -name settings.gradle \) -printf '%h\n' | head -n1)
+          test -n "$ROOT"
+          cp -a "$ROOT" project
+          python3 tools/repair-v09120.py project
+          python3 tools/prepare-v0920-architecture.py project
+          python3 tools/prepare-v0930-adaptive-ui.py project
+          python3 tools/prepare-v0932-mobile-followup.py project
+          python3 tools/prepare-v0933-mobile-memory.py project
+          python3 tools/prepare-v0934-mobile-fixes.py project
+          python3 tools/prepare-v0935-tv-compatibility.py project
+          python3 tools/prepare-v0936-tcl-polish.py project
+          python3 tools/prepare-v0937-tcl-navigation-player.py project
+          python3 tools/prepare-v0938-back-focus-fix.py project
+          python3 tools/prepare-v0939-category-search-polish.py project
+          python3 tools/prepare-v0940-installer-favorites-fix.py project
+          python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project
+          python3 tools/prepare-v0942-category-position-memory.py project
+          python3 tools/prepare-v0943-category-player-state-fix.py project
+          python3 tools/prepare-v0944-favorites-home-polish.py project
+          python3 tools/prepare-v0945-xiaomi-search-safeareas.py project
+          python3 release/v0.9.3.16/v0946-main.py project
+          python3 release/v0.9.3.16/v0946-login.py project
+          python3 release/v0.9.3.16/v0946-player.py project
+          python3 release/v0.9.3.16/v0946-series.py project
+          python3 release/v0.9.3.17/v0947-navigation-categories.py project
+          python3 release/v0.9.3.17/v0947-player-panels.py project
+          python3 release/v0.9.3.17/v0947-details-favorites-downloads.py project
+
+      - name: Build authenticated E2E APK
+        working-directory: project
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain clean testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../real-e2e-build.log
+
+      - name: Package authenticated E2E APK
+        run: |
+          set -euo pipefail
+          mkdir -p real-e2e-apk
+          APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          test -s "$APK"
+          cp "$APK" real-e2e-apk/HULK-SA-v0.9.3.17-REAL-E2E-debug.apk
+          cp real-e2e-build.log real-e2e-apk/
+          (cd real-e2e-apk && sha256sum * > SHA256SUMS.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.17-REAL-E2E-APK
+          path: real-e2e-apk/
+          if-no-files-found: error
+          retention-days: 2
+
+  real-account-e2e:
+    needs: build-real-e2e-apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - device: galaxy-phone-real-api35
+            api: 35
+            target: google_apis
+            profile: pixel_6
+            is_tv: 'false'
+          - device: android-tv-real-1080p-api34
+            api: 34
+            target: android-tv
+            profile: tv_1080p
+            is_tv: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: HULK-SA-v0.9.3.17-REAL-E2E-APK
+          path: real-e2e-apk
+
+      - name: Verify temporary account secrets
+        env:
+          HULK_QA_USERNAME: ${{ secrets.HULK_QA_USERNAME }}
+          HULK_QA_PASSWORD: ${{ secrets.HULK_QA_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$HULK_QA_USERNAME"
+          test -n "$HULK_QA_PASSWORD"
+
+      - name: Install report tooling
+        run: python3 -m pip install --disable-pip-version-check pillow
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run authenticated login, catalog and playback E2E
+        id: authenticated_e2e
+        uses: reactivecircus/android-emulator-runner@v2
+        continue-on-error: true
+        env:
+          HULK_QA_USERNAME: ${{ secrets.HULK_QA_USERNAME }}
+          HULK_QA_PASSWORD: ${{ secrets.HULK_QA_PASSWORD }}
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          cores: 2
+          ram-size: 3072M
+          heap-size: 768M
+          disk-size: 6G
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-snapshot-save
+          script: bash qa/e2e/run-real-account-e2e.sh real-e2e-apk/HULK-SA-v0.9.3.17-REAL-E2E-debug.apk '${{ matrix.device }}' '${{ matrix.is_tv }}' 'qa-real-results/${{ matrix.device }}'
+
+      - name: Preserve authenticated diagnostics
+        if: always()
+        run: |
+          mkdir -p qa-real-results/${{ matrix.device }}
+          adb devices -l > qa-real-results/${{ matrix.device }}/adb-devices.txt 2>&1 || true
+          test -f qa-real-results/${{ matrix.device }}/REPORT.md || cat > qa-real-results/${{ matrix.device }}/REPORT.md <<EOF
+          # HULK SA Real Account E2E — ${{ matrix.device }}
+
+          The authenticated emulator harness did not complete. Inspect workflow and ADB diagnostics.
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HULK-SA-v0.9.3.17-REAL-E2E-${{ matrix.device }}
+          path: qa-real-results/${{ matrix.device }}/
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Enforce authenticated E2E result
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import sys
+          path = Path('qa-real-results/${{ matrix.device }}/summary.json')
+          if not path.exists():
+              raise SystemExit('Authenticated E2E summary is missing')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          if not data.get('login_success') or data.get('critical_count', 0) > 0:
+              raise SystemExit('Authenticated E2E did not pass')
+          PY
+
+  aggregate-real-e2e:
+    needs: [build-real-e2e-apk, real-account-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: HULK-SA-v0.9.3.17-REAL-E2E-*-api*
+          path: all-real-e2e
+          merge-multiple: false
+
+      - name: Build authenticated matrix report
+        run: |
+          mkdir -p all-real-e2e
+          python3 qa/e2e/aggregate-real-e2e.py all-real-e2e
+          find all-real-e2e -maxdepth 4 -type f | sort > all-real-e2e/FILES.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HULK-SA-v0.9.3.17-REAL-E2E-REPORT
+          path: |
+            all-real-e2e/REAL-E2E-REPORT.md
+            all-real-e2e/REAL-E2E-SUMMARY.json
+            all-real-e2e/FILES.txt
+          if-no-files-found: error
+          retention-days: 7
