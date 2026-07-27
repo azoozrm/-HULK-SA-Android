@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -43,6 +46,8 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Download
@@ -90,8 +95,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1293,6 +1300,8 @@ private fun UnifiedSearchScreen(
     onToggleFavorite: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val searchFieldRequester = remember { FocusRequester() }
+    val firstResultRequester = remember { FocusRequester() }
     val results = remember(state.catalogs, state.searchQuery) {
         val query = state.searchQuery.trim()
         if (query.isBlank()) emptyList() else state.catalogs.values.flatMap { it.items }
@@ -1302,7 +1311,15 @@ private fun UnifiedSearchScreen(
     Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
         Spacer(Modifier.height(14.dp))
-        HulkTextField(state.searchQuery, onSearch, "ابحث بالاسم او السنة او النوع…", Modifier.fillMaxWidth())
+        TvSearchField(
+            value = state.searchQuery,
+            onValueChange = onSearch,
+            isTv = isTv,
+            hasResults = results.isNotEmpty(),
+            fieldRequester = searchFieldRequester,
+            firstResultRequester = firstResultRequester,
+            modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(16.dp))
         if (state.searchQuery.isBlank()) {
             EmptyState("ابدا بكتابة الاسم او السنة او النوع او وصف المحتوى")
@@ -1311,9 +1328,83 @@ private fun UnifiedSearchScreen(
         } else {
             Text("${results.size} نتيجة", color = colors.textMuted, fontSize = 11.sp)
             Spacer(Modifier.height(9.dp))
-            ContentGrid(results, isTv, MainDestination.SEARCH, navigationMemory, isFavorite, onOpen, onToggleFavorite)
+            ContentGrid(
+                content = results,
+                isTv = isTv,
+                destination = MainDestination.SEARCH,
+                navigationMemory = navigationMemory,
+                isFavorite = isFavorite,
+                onOpen = onOpen,
+                onToggleFavorite = onToggleFavorite,
+                firstItemFocusRequester = if (isTv) firstResultRequester else null,
+                firstItemUpRequester = if (isTv) searchFieldRequester else null,
+            )
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TvSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isTv: Boolean,
+    hasResults: Boolean,
+    fieldRequester: FocusRequester,
+    firstResultRequester: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
+    val moveToResults: () -> Boolean = {
+        if (!isTv || !hasResults) {
+            false
+        } else {
+            keyboardController?.hide()
+            runCatching { firstResultRequester.requestFocus() }.isSuccess
+        }
+    }
+
+    LaunchedEffect(isTv) {
+        if (isTv) {
+            delay(140L)
+            runCatching { fieldRequester.requestFocus() }
+        }
+    }
+
+    val tvModifier = if (isTv) {
+        Modifier
+            .focusRequester(fieldRequester)
+            .onPreviewKeyEvent { event ->
+                when (tvSearchFocusAction(true, event.type, event.key, hasResults, imeVisible)) {
+                    TvSearchFocusAction.MOVE_TO_RESULTS -> moveToResults()
+                    TvSearchFocusAction.DISMISS_KEYBOARD -> {
+                        keyboardController?.hide()
+                        true
+                    }
+                    TvSearchFocusAction.NONE -> false
+                }
+            }
+    } else {
+        Modifier
+    }
+
+    HulkTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = "ابحث بالاسم او السنة او النوع…",
+        modifier = modifier.then(tvModifier),
+        keyboardOptions = if (isTv) {
+            KeyboardOptions(imeAction = ImeAction.Search)
+        } else {
+            KeyboardOptions.Default
+        },
+        keyboardActions = if (isTv) {
+            KeyboardActions(onSearch = { moveToResults() })
+        } else {
+            KeyboardActions.Default
+        },
+    )
 }
 
 @Composable
@@ -1695,6 +1786,8 @@ private fun ContentGrid(
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     restoreFocusedCard: Boolean = true,
+    firstItemFocusRequester: FocusRequester? = null,
+    firstItemUpRequester: FocusRequester? = null,
 ) {
     val remembered = navigationMemory.position(destination)
     val rememberedKeyIndex = content.indexOfFirst { "${it.type}:${it.id}" == remembered.itemKey }
@@ -1740,7 +1833,22 @@ private fun ContentGrid(
                 item = item,
                 isFavorite = isFavorite(item),
                 onClick = { onOpen(item) },
-                modifier = Modifier.fillMaxWidth().restoreFocus(restore, targetRequester),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (index == 0 && firstItemFocusRequester != null) {
+                            Modifier.focusRequester(firstItemFocusRequester)
+                        } else {
+                            Modifier.restoreFocus(restore, targetRequester)
+                        },
+                    )
+                    .then(
+                        if (index == 0 && firstItemUpRequester != null) {
+                            Modifier.focusProperties { up = firstItemUpRequester }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 onLongClick = { onToggleFavorite(item) },
                 onFocused = { navigationMemory.save(destination, key, index) },
             )
