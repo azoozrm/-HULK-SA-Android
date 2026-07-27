@@ -13,7 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalWindowInfo
+import kotlin.math.roundToInt
 
 enum class HulkDeviceClass {
     MOBILE,
@@ -83,10 +84,10 @@ val LocalAdaptiveUi = staticCompositionLocalOf {
 fun rememberAdaptiveUiState(
     isTelevisionDevice: Boolean,
 ): Pair<AdaptiveUiState, AdaptiveInputController> {
-    val configuration = LocalConfiguration.current
-    val widthDp = configuration.screenWidthDp.coerceAtLeast(1)
-    val heightDp = configuration.screenHeightDp.coerceAtLeast(1)
-    val smallestWidthDp = configuration.smallestScreenWidthDp.coerceAtLeast(minOf(widthDp, heightDp))
+    val windowSize = LocalWindowInfo.current.containerDpSize
+    val widthDp = windowSize.width.value.roundToInt().coerceAtLeast(1)
+    val heightDp = windowSize.height.value.roundToInt().coerceAtLeast(1)
+    val smallestWidthDp = minOf(widthDp, heightDp)
     val deviceClass = classifyDeviceClass(
         isTelevisionDevice = isTelevisionDevice,
         smallestWidthDp = smallestWidthDp,

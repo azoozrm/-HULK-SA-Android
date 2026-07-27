@@ -22,6 +22,28 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
+    fun resizedCompactContainerDoesNotKeepThePhysicalDisplayLayout() {
+        val device = classifyDeviceClass(
+            isTelevisionDevice = false,
+            smallestWidthDp = 500,
+            widthDp = 500,
+        )
+        val window = classifyWindowWidth(500)
+
+        assertEquals(HulkDeviceClass.MOBILE, device)
+        assertEquals(HulkWindowWidthClass.COMPACT, window)
+        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+    }
+
+    @Test
+    fun windowWidthBreakpointsUseContainerDimensions() {
+        assertEquals(HulkWindowWidthClass.COMPACT, classifyWindowWidth(599))
+        assertEquals(HulkWindowWidthClass.MEDIUM, classifyWindowWidth(600))
+        assertEquals(HulkWindowWidthClass.MEDIUM, classifyWindowWidth(839))
+        assertEquals(HulkWindowWidthClass.EXPANDED, classifyWindowWidth(840))
+    }
+
+    @Test
     fun portraitTabletUsesTabletLayoutWithoutTelevisionSizing() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
