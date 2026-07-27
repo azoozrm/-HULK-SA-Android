@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   diagnose:
@@ -47,7 +48,7 @@ jobs:
             -PHULK_PORTAL_URL=https://example.invalid > tv-search-build.log 2>&1
           status=$?
           echo "$status" > tv-search-build-status.txt
-          tail -n 250 tv-search-build.log > tv-search-build-tail.log
+          tail -n 180 tv-search-build.log > tv-search-build-tail.log
           exit "$status"
       - name: Upload diagnostics
         if: always()
@@ -64,6 +65,19 @@ jobs:
             app/src/test/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicyTest.kt
           if-no-files-found: error
           retention-days: 3
+      - name: Comment compiler failure
+        if: steps.compile.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### TV Search compiler diagnostics'
+            echo
+            echo '```text'
+            tail -n 120 tv-search-build.log
+            echo '```'
+          } > tv-search-pr-comment.md
+          gh pr comment 25 --body-file tv-search-pr-comment.md
       - name: Fail when compilation failed
         if: steps.compile.outcome == 'failure'
         run: exit 1
