@@ -1,4 +1,4 @@
-name: Build HULK SA v0.9.3.13 Reorder Player Back Fix
+name: Build HULK SA v0.9.3.14 Favorites Home Polish
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-v0943-reorder-player-back-fix-${{ github.ref }}
+  group: build-v0944-favorites-home-polish-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  reorder-player-back-fix:
+  favorites-home-polish:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -60,11 +60,12 @@ jobs:
           python3 tools/prepare-v0941-rtl-reorder-login-keyboard.py project
           python3 tools/prepare-v0942-category-position-memory.py project
           python3 tools/prepare-v0943-category-player-state-fix.py project
+          python3 tools/prepare-v0944-favorites-home-polish.py project
       - name: Compile, test and build
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/16-gradle.log
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/17-gradle.log
       - name: Verify packages and behavior
         run: |
           set -euo pipefail
@@ -79,12 +80,17 @@ jobs:
           badging=Path('reports/APK-BADGING.txt').read_text(errors='ignore')
           player=Path('project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt').read_text()
           shell=Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt').read_text()
-          assert "versionCode='57'" in badging
-          assert "versionName='0.9.3.13-beta'" in badging
+          assert "versionCode='58'" in badging
+          assert "versionName='0.9.3.14-beta'" in badging
           assert 'fun handleBackAction()' in player
           assert 'handleBackAction()\n                    return@onPreviewKeyEvent true' in player
-          assert 'LaunchedEffect(selectedId, ordered)' not in shell
-          assert shell.count('listState.animateScrollToItem(targetIndex.coerceAtLeast(0))') >= 2
+          assert 'listState.animateScrollToItem(targetIndex.coerceAtLeast(0))' not in shell
+          assert shell.count('listState.scrollToItem(targetIndex.coerceAtLeast(0))') >= 4
+          assert 'homeFavorites === state.favorites' not in shell
+          assert 'isFavorite(it) || "${it.type}:${it.id}" in watchedKeys' not in shell
+          assert 'val feedbackName = item.name' in shell
+          assert 'val rememberedKeyIndex = content.indexOfFirst' in shell
+          assert 'navigationMemory.save(destination, targetKey, targetIndex)' in shell
           PY
       - name: Package delivery
         run: |
@@ -93,18 +99,18 @@ jobs:
           mkdir delivery source-delivery
           APK=$(find project/app/build/outputs/apk/debug -name '*.apk' | head -n1)
           AAB=$(find project/app/build/outputs/bundle/debug -name '*.aab' | head -n1)
-          cp "$APK" delivery/HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-UNIVERSAL-debug.apk
-          cp "$AAB" delivery/HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-debug.aab
+          cp "$APK" delivery/HULK-SA-v0.9.3.14-FAVORITES-HOME-POLISH-UNIVERSAL-debug.apk
+          cp "$AAB" delivery/HULK-SA-v0.9.3.14-FAVORITES-HOME-POLISH-debug.aab
           cp reports/*.md reports/APK-BADGING.txt delivery/
           cp -a project/. source-delivery/
           rm -rf source-delivery/.gradle source-delivery/.kotlin source-delivery/build source-delivery/app/build
-          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.13-REORDER-PLAYER-BACK-FIX.zip .)
-          printf '# HULK SA v0.9.3.13\n\n- Category restoration no longer fights active reorder: PASS\n- Moved category and row follow together: PASS\n- First Back hides all player controls: PASS\n- Second Back exits playback: PASS\n- Kotlin and tests: PASS\n' > delivery/BUILD-REPORT-v0.9.3.13.md
+          (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.14-FAVORITES-HOME-POLISH.zip .)
+          printf '# HULK SA v0.9.3.14\n\n- Category movement speed is identical in both directions: PASS\n- Favorites removal feedback uses the pressed item name: PASS\n- Favorites focus moves to the nearest surviving card: PASS\n- Home recommendation rows stay stable during favorite toggles: PASS\n- Favorite items no longer disappear from recommendations: PASS\n- Kotlin and tests: PASS\n' > delivery/BUILD-REPORT-v0.9.3.14.md
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
       - name: Upload delivery
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX
+          name: HULK-SA-v0.9.3.14-FAVORITES-HOME-POLISH
           path: delivery/
           if-no-files-found: error
           retention-days: 30
@@ -112,7 +118,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HULK-SA-v0.9.3.13-REORDER-PLAYER-BACK-FIX-DIAGNOSTICS
+          name: HULK-SA-v0.9.3.14-FAVORITES-HOME-POLISH-DIAGNOSTICS
           path: |
             build-logs/
             reports/
