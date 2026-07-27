@@ -163,12 +163,12 @@ jobs:
 
           player = Path("app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt")
           text = player.read_text(encoding="utf-8")
-          annotation = "@file:OptIn(androidx.media3.common.util.UnstableApi::class)"
+          annotation = "@file:androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])"
           if annotation not in text:
               player.write_text(annotation + "\n\n" + text, encoding="utf-8")
           if "format.bitrate" not in player.read_text(encoding="utf-8"):
               raise SystemExit("Expected Media3 bitrate usage was not found")
-          print("PASS: added file-scoped Media3 opt-in; runtime behavior unchanged")
+          print("PASS: added file-scoped AndroidX Media3 opt-in; runtime behavior unchanged")
           PY
 
       - name: Add Gradle Wrapper 8.13
@@ -261,12 +261,25 @@ jobs:
                     test ! -e project/app/src/main
                     ./gradlew --version
 
-                - name: Build and test from checkout
+                - name: Debug and unit tests
                   run: |
                     set -euo pipefail
                     ./gradlew --no-daemon --console=plain \
                       clean :app:compileDebugKotlin testDebugUnitTest \
-                      :app:lintDebug :app:assembleDebug :app:bundleDebug \
+                      :app:assembleDebug :app:bundleDebug \
+                      -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+                - name: Lint
+                  run: |
+                    set -euo pipefail
+                    ./gradlew --no-daemon --console=plain \
+                      :app:lintDebug \
+                      -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+                - name: Release and R8
+                  run: |
+                    set -euo pipefail
+                    ./gradlew --no-daemon --console=plain \
                       :app:assembleRelease :app:bundleRelease \
                       -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
 
@@ -323,7 +336,7 @@ jobs:
           4. Record `qa/canonical/v0.9.3.17-baseline.sha256` before canonical-only additions.
           5. Materialize the production Gradle project directly in Git.
           6. Add Gradle Wrapper 8.13.
-          7. Apply one intentional source-only difference: a file-scoped Media3 `UnstableApi` opt-in in `PlayerScreen.kt` to clear the already documented lint error. This changes no runtime behavior.
+          7. Apply one intentional source-only difference: a file-scoped AndroidX opt-in for Media3 `UnstableApi` in `PlayerScreen.kt` to clear the documented lint error. This changes no runtime behavior.
           8. Record `qa/canonical/canonical-source.sha256` for the committed source and build files.
 
           ## Required acceptance evidence
@@ -405,10 +418,7 @@ jobs:
                   if path.suffix.lower() in forbidden_suffixes:
                       violations.append(path.as_posix())
                       continue
-                  try:
-                      payload = path.read_bytes()
-                  except OSError:
-                      continue
+                  payload = path.read_bytes()
                   if any(marker in payload for marker in forbidden_markers):
                       violations.append(path.as_posix())
           if violations:
@@ -419,17 +429,37 @@ jobs:
           print("PASS: no signing key or private-key material detected")
           PY
 
-      - name: Build, lint, test and verify ABI from canonical checkout
+      - name: Debug and unit tests from canonical checkout
         env:
           HULK_PORTAL_URL: https://example.invalid
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             clean :app:compileDebugKotlin testDebugUnitTest \
-            :app:lintDebug :app:assembleDebug :app:bundleDebug \
+            :app:assembleDebug :app:bundleDebug \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+      - name: Lint canonical checkout
+        env:
+          HULK_PORTAL_URL: https://example.invalid
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            :app:lintDebug \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+
+      - name: Release and R8 from canonical checkout
+        env:
+          HULK_PORTAL_URL: https://example.invalid
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
             :app:assembleRelease :app:bundleRelease \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
 
+      - name: Verify canonical ABI outputs
+        run: |
+          set -euo pipefail
           mkdir -p build/reports/architecture
           count=0
           while IFS= read -r -d '' archive; do
@@ -468,6 +498,7 @@ jobs:
         run: |
           set -euo pipefail
           rm .github/workflows/materialize-canonical-source.yml
+          rm -f .github/workflows/canonical-build-diagnostic.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
