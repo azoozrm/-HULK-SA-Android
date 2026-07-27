@@ -122,7 +122,6 @@ rep(
     "collapsed rail logo inset",
 )
 
-# Remove the asymmetric animated tail after a category is reordered.
 rep(
     main,
     """                val targetIndex = to + 3
@@ -170,19 +169,22 @@ rep(
         focusManager.clearFocus(force = true)
     }
 ''',
-    '''    val hideKeyboard = {
+    '''    val hideKeyboard: () -> Unit = {
         keyboardController?.hide()
-        val hidePlatformIme = {
+        val hidePlatformIme: () -> Unit = {
             (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.hideSoftInputFromWindow(view.windowToken, 0)
+            Unit
         }
         view.post(hidePlatformIme)
         view.postDelayed(hidePlatformIme, 120L)
         view.postDelayed(hidePlatformIme, 320L)
+        Unit
     }
-    val dismissKeyboard = {
+    val dismissKeyboard: () -> Unit = {
         hideKeyboard()
         focusManager.clearFocus(force = true)
+        Unit
     }
 ''',
     "login robust ime hide",
@@ -394,160 +396,165 @@ rep(
     '''        if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
             PlayerTopBar(
 ''',
-    "top controls hidden under next prompt",
+    "hide top controls behind next prompt",
 )
 rep(
     player,
-    '''        if (controlsVisible && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
-            if (request.isLive) {
+    '''        if (controlsVisible && !browserVisible && activePanel == null && !controlsLocked) {
+            PlayerBottomControls(
 ''',
-    '''        if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
-            if (request.isLive) {
+    '''        if (controlsVisible && nextCountdown < 0 && !browserVisible && activePanel == null && !controlsLocked) {
+            PlayerBottomControls(
 ''',
-    "bottom controls hidden under next prompt",
+    "hide bottom controls behind next prompt",
 )
 rep(
     player,
-    '''                onPlayNow = { nextCountdown = -1; saveAndPlayNext() },
-                onCancel = { nextCountdown = -1 },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(28.dp),
+    '''                NextEpisodePrompt(
+                    seconds = nextCountdown,
+                    nextTitle = nextTitle,
+                    onPlay = { playNextEpisode() },
+                    onCancel = { nextCountdown = -1 },
+                )
 ''',
-    '''                onPlayNow = { nextCountdown = -1; saveAndPlayNext() },
-                onCancel = { nextCountdown = -1; controlsVisible = true },
-                playFocusRequester = nextEpisodePlayFocus,
-                cancelFocusRequester = nextEpisodeCancelFocus,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(36.dp),
+    '''                NextEpisodePrompt(
+                    seconds = nextCountdown,
+                    nextTitle = nextTitle,
+                    playFocusRequester = nextEpisodePlayFocus,
+                    cancelFocusRequester = nextEpisodeCancelFocus,
+                    onPlay = { playNextEpisode() },
+                    onCancel = { nextCountdown = -1 },
+                )
 ''',
-    "next prompt focus wiring",
+    "next prompt requester wiring",
 )
 rep(
     player,
     '''    val colors = LocalHulkColors.current
     Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
 ''',
     '''    val colors = LocalHulkColors.current
-    val isTv = LocalAdaptiveUi.current.isTelevision
     Row(
-''',
-    "player top adaptive state",
-)
-rep(
-    player,
-    '''            .statusBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-''',
-    '''            .statusBarsPadding()
+        modifier = Modifier
+            .fillMaxWidth()
             .padding(
-                start = if (isTv) 34.dp else 14.dp,
-                end = if (isTv) 34.dp else 14.dp,
+                start = if (isTv) 32.dp else 24.dp,
+                end = if (isTv) 32.dp else 24.dp,
                 top = if (isTv) 28.dp else 10.dp,
-                bottom = if (isTv) 18.dp else 10.dp,
+                bottom = 10.dp,
             ),
 ''',
-    "player top overscan safe area",
+    "player top TV safe area",
 )
 rep(
     player,
-    '''    val colors = LocalHulkColors.current
-    val progress = if (durationMs > 0L) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    '''            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 20.dp),
 ''',
-    '''    val colors = LocalHulkColors.current
-    val isTv = LocalAdaptiveUi.current.isTelevision
-    val progress = if (durationMs > 0L) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-''',
-    "vod controls adaptive state",
-)
-rep(
-    player,
-    '''            .navigationBarsPadding()
-            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 20.dp),
-''',
-    '''            .navigationBarsPadding()
-            .padding(
-                start = if (isTv) 34.dp else 24.dp,
-                end = if (isTv) 34.dp else 24.dp,
+    '''            .padding(
+                start = if (adaptiveUi.isTelevision) 32.dp else 24.dp,
+                end = if (adaptiveUi.isTelevision) 32.dp else 24.dp,
                 top = 12.dp,
-                bottom = if (isTv) 30.dp else 20.dp,
+                bottom = if (adaptiveUi.isTelevision) 28.dp else 20.dp,
             ),
 ''',
-    "vod controls overscan safe area",
+    "vod bottom TV safe area",
 )
 rep(
     player,
-    '''    val colors = LocalHulkColors.current
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .97f))))
-            .navigationBarsPadding()
-            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 24.dp),
+    '''            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 24.dp),
 ''',
-    '''    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val isRemoteUi = adaptiveUi.isTelevision || adaptiveUi.inputMode != HulkInputMode.TOUCH
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .97f))))
-            .navigationBarsPadding()
-            .padding(
-                start = if (adaptiveUi.isTelevision) 34.dp else 24.dp,
-                end = if (adaptiveUi.isTelevision) 34.dp else 24.dp,
+    '''            .padding(
+                start = if (adaptiveUi.isTelevision) 32.dp else 24.dp,
+                end = if (adaptiveUi.isTelevision) 32.dp else 24.dp,
                 top = 12.dp,
                 bottom = if (adaptiveUi.isTelevision) 30.dp else 24.dp,
             ),
 ''',
-    "live controls adaptive safe area",
+    "live bottom TV safe area",
 )
 rep(
     player,
-    '''            Text("اسحب لاعلى للقناة التالية  •  اسحب لاسفل للقناة السابقة", color = colors.textMuted, fontSize = 10.sp)
+    '''    val colors = LocalHulkColors.current
+    val density = LocalDensity.current
 ''',
-    '''            Text(
-                if (isRemoteUi) "السهم لاعلى: القناة التالية  •  السهم لاسفل: القناة السابقة"
-                else "اسحب لاعلى للقناة التالية  •  اسحب لاسفل للقناة السابقة",
-                color = colors.textMuted,
-                fontSize = 10.sp,
-            )
+    '''    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val density = LocalDensity.current
 ''',
-    "remote live channel hint",
+    "live adaptive context",
+)
+rep(
+    player,
+    '''                Text("اسحب لاعلى للقناة التالية  •  اسحب لاسفل للقناة السابقة", color = Color.White.copy(alpha = 0.82f), fontSize = 11.sp)
+''',
+    '''                Text(
+                    if (adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE) {
+                        "السهم لاعلى: القناة التالية  •  السهم لاسفل: القناة السابقة"
+                    } else {
+                        "اسحب لاعلى للقناة التالية  •  اسحب لاسفل للقناة السابقة"
+                    },
+                    color = Color.White.copy(alpha = 0.82f),
+                    fontSize = 11.sp,
+                )
+''',
+    "remote-aware live hint",
 )
 rep(
     player,
     '''private fun NextEpisodePrompt(
-    title: String,
     seconds: Int,
-    onPlayNow: () -> Unit,
+    nextTitle: String,
+    onPlay: () -> Unit,
     onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
 ''',
     '''private fun NextEpisodePrompt(
-    title: String,
     seconds: Int,
-    onPlayNow: () -> Unit,
-    onCancel: () -> Unit,
+    nextTitle: String,
     playFocusRequester: FocusRequester,
     cancelFocusRequester: FocusRequester,
-    modifier: Modifier = Modifier,
+    onPlay: () -> Unit,
+    onCancel: () -> Unit,
 ) {
 ''',
-    "next prompt focus params",
+    "next prompt parameters",
 )
 rep(
     player,
-    '''        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FocusButton("تشغيل الان", onPlayNow, compact = true)
-            FocusButton("الغاء", onCancel, primary = false, compact = true)
-        }
+    '''    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(22.dp))
+            .border(1.dp, colors.accent.copy(alpha = 0.75f), RoundedCornerShape(22.dp))
+            .padding(18.dp),
 ''',
-    '''        Row(
-            modifier = Modifier.focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FocusButton(
+    '''    Column(
+        Modifier
+            .fillMaxWidth()
+            .focusGroup()
+            .focusProperties {
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+                up = FocusRequester.Cancel
+                down = FocusRequester.Cancel
+            }
+            .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(22.dp))
+            .border(1.dp, colors.accent.copy(alpha = 0.75f), RoundedCornerShape(22.dp))
+            .padding(18.dp),
+''',
+    "next prompt focus group",
+)
+rep(
+    player,
+    '''            FocusButton("تشغيل الان", onPlay, primary = true, compact = true)
+            FocusButton("الغاء", onCancel, primary = false, compact = true)
+''',
+    '''            FocusButton(
                 "تشغيل الان",
-                onPlayNow,
+                onPlay,
                 modifier = Modifier
                     .focusRequester(playFocusRequester)
                     .focusProperties {
@@ -556,6 +563,7 @@ rep(
                         up = FocusRequester.Cancel
                         down = FocusRequester.Cancel
                     },
+                primary = true,
                 compact = true,
             )
             FocusButton(
@@ -572,7 +580,6 @@ rep(
                 primary = false,
                 compact = true,
             )
-        }
 ''',
     "next prompt focus trap",
 )
