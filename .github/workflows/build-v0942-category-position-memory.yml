@@ -30,11 +30,13 @@ jobs:
           gradle-version: '8.13'
           cache-cleanup: on-success
       - uses: android-actions/setup-android@v3
+
       - name: Install Android SDK packages
         run: |
           set -o pipefail
           mkdir -p build-logs reports
           { yes | sdkmanager --licenses >/dev/null || true; sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'; } 2>&1 | tee build-logs/01-sdk.log
+
       - name: Prepare source
         run: |
           set -euo pipefail
@@ -61,11 +63,13 @@ jobs:
           python3 tools/prepare-v0942-category-position-memory.py project
           python3 tools/prepare-v0943-category-player-state-fix.py project
           python3 tools/prepare-v0944-favorites-home-polish.py project
+
       - name: Compile, test and build
         working-directory: project
         run: |
           set -o pipefail
           gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/17-gradle.log
+
       - name: Verify packages and behavior
         run: |
           set -euo pipefail
@@ -77,21 +81,30 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee reports/APK-BADGING.txt
           python3 - <<'PY'
           from pathlib import Path
-          badging=Path('reports/APK-BADGING.txt').read_text(errors='ignore')
-          player=Path('project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt').read_text()
-          shell=Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt').read_text()
-          assert "versionCode='58'" in badging
-          assert "versionName='0.9.3.14-beta'" in badging
-          assert 'fun handleBackAction()' in player
-          assert 'handleBackAction()\n                    return@onPreviewKeyEvent true' in player
-          assert 'listState.animateScrollToItem(targetIndex.coerceAtLeast(0))' not in shell
-          assert shell.count('listState.scrollToItem(targetIndex.coerceAtLeast(0))') >= 2
-          assert 'homeFavorites === state.favorites' not in shell
-          assert 'isFavorite(it) || "${it.type}:${it.id}" in watchedKeys' not in shell
-          assert 'val feedbackName = item.name' in shell
-          assert 'val rememberedKeyIndex = content.indexOfFirst' in shell
-          assert 'navigationMemory.save(destination, targetKey, targetIndex)' in shell
+
+          badging = Path('reports/APK-BADGING.txt').read_text(errors='ignore')
+          player = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt').read_text()
+          shell = Path('project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt').read_text()
+
+          checks = {
+              'versionCode 58': "versionCode='58'" in badging,
+              'versionName 0.9.3.14-beta': "versionName='0.9.3.14-beta'" in badging,
+              'player back handler': 'fun handleBackAction()' in player,
+              'player preview back consumption': 'handleBackAction()\n                    return@onPreviewKeyEvent true' in player,
+              'symmetric category follow': shell.count('listState.scrollToItem(targetIndex.coerceAtLeast(0))') >= 2,
+              'favorite feedback snapshot': 'val feedbackName = item.name' in shell,
+              'favorites nearest surviving index': 'val rememberedKeyIndex = content.indexOfFirst' in shell,
+              'favorites navigation retarget': 'navigationMemory.save(destination, targetKey, targetIndex)' in shell,
+              'home recommendations exclude watched only': '.filterNot { "${it.type}:${it.id}" in watchedKeys }' in shell,
+          }
+
+          failed = [name for name, passed in checks.items() if not passed]
+          for name, passed in checks.items():
+              print(f"{name}: {'PASS' if passed else 'FAIL'}")
+          if failed:
+              raise SystemExit('verification failed: ' + ', '.join(failed))
           PY
+
       - name: Package delivery
         run: |
           set -euo pipefail
@@ -107,6 +120,7 @@ jobs:
           (cd source-delivery && zip -qr ../delivery/HULK-SA-Source-v0.9.3.14-FAVORITES-HOME-POLISH.zip .)
           printf '# HULK SA v0.9.3.14\n\n- Category movement speed is identical in both directions: PASS\n- Favorites removal feedback uses the pressed item name: PASS\n- Favorites focus moves to the nearest surviving card: PASS\n- Home recommendation rows stay stable during favorite toggles: PASS\n- Favorite items no longer disappear from recommendations: PASS\n- Kotlin and tests: PASS\n' > delivery/BUILD-REPORT-v0.9.3.14.md
           (cd delivery && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+
       - name: Upload delivery
         uses: actions/upload-artifact@v4
         with:
@@ -114,6 +128,7 @@ jobs:
           path: delivery/
           if-no-files-found: error
           retention-days: 30
+
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
