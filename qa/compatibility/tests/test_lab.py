@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from PIL import Image, ImageDraw
+
+
+LAB_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(LAB_ROOT))
+
+from analyze import analyze_run  # noqa: E402
+from lab_config import DEVICES, PAGES, matrix_json, validate  # noqa: E402
+
+RUN_LAB_SPEC = importlib.util.spec_from_file_location(
+    "compatibility_run_lab",
+    LAB_ROOT / "run-lab.py",
+)
+assert RUN_LAB_SPEC and RUN_LAB_SPEC.loader
+RUN_LAB_MODULE = importlib.util.module_from_spec(RUN_LAB_SPEC)
+sys.modules[RUN_LAB_SPEC.name] = RUN_LAB_MODULE
+RUN_LAB_SPEC.loader.exec_module(RUN_LAB_MODULE)
+png_dimensions = RUN_LAB_MODULE.png_dimensions
+external_error_dialog_center = RUN_LAB_MODULE.external_error_dialog_center
+
+
+class ConfigTests(unittest.TestCase):
+    def test_matrix_is_complete_and_serializable(self) -> None:
+        validate()
+        matrix = json.loads(matrix_json())
+        self.assertEqual(9, len(matrix["include"]))
+        self.assertEqual({"phone": 4, "tablet": 2, "tv": 3}, {
+            family: sum(device["family"] == family for device in DEVICES)
+            for family in ("phone", "tablet", "tv")
+        })
+        self.assertEqual(
+            ["home", "live", "movies", "series", "search", "downloads", "settings"],
+            [page["id"] for page in PAGES],
+        )
+        tv_4k = next(device for device in DEVICES if device["id"] == "android-tv-4k-api36")
+        self.assertEqual("tv_4k", tv_4k["profile"])
+        self.assertEqual("3840x2160", tv_4k["boot_skin"])
+
+    def test_png_dimensions_reads_screencap_header(self) -> None:
+        with tempfile.NamedTemporaryFile(suffix=".png") as temporary:
+            Image.new("RGB", (2400, 1080), "black").save(temporary.name)
+            self.assertEqual((2400, 1080), png_dimensions(Path(temporary.name).read_bytes()))
+        self.assertIsNone(png_dimensions(b"not a png"))
+
+    def test_adb_recovers_after_transient_offline_transport(self) -> None:
+        offline = subprocess.CompletedProcess(
+            ["adb", "devices"],
+            1,
+            stdout=b"",
+            stderr=b"error: device offline",
+        )
+        waited = subprocess.CompletedProcess(["adb", "wait-for-device"], 0, b"", b"")
+        recovered = subprocess.CompletedProcess(["adb", "devices"], 0, b"device", b"")
+        with (
+            patch(
+                "compatibility_run_lab.subprocess.run",
+                side_effect=(offline, waited, recovered),
+            ) as mocked_run,
+            patch("compatibility_run_lab.time.sleep"),
+        ):
+            result = RUN_LAB_MODULE.Adb().run(["devices"])
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(b"device", result.stdout)
+        self.assertEqual(3, mocked_run.call_count)
+
+    def test_external_error_dialog_close_target_is_detected(self) -> None:
+        xml = (
+            '<hierarchy><node resource-id="android:id/alertTitle" '
+            'text="Pixel Launcher isn&apos;t responding" bounds="[0,0][10,10]" />'
+            '<node resource-id="android:id/aerr_close" text="Close app" '
+            'bounds="[20,40][220,140]" /></hierarchy>'
+        ).encode()
+        self.assertEqual((120, 90), external_error_dialog_center(xml))
+
+
+class AnalyzerTests(unittest.TestCase):
+    def create_run(self, root: Path, *, out_of_bounds: bool = False) -> None:
+        case_root = root / "raw/portrait/font-100/home"
+        case_root.mkdir(parents=True)
+        image = Image.new("RGB", (100, 200), "#090a07")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((10, 20, 90, 180), fill="#80661f")
+        image.save(case_root / "screenshot.png")
+        bounds = "[10,30][90,60]"
+        if out_of_bounds:
+            bounds = "[-4,30][110,60]"
+        (case_root / "ui.xml").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<hierarchy rotation="0">'
+            '<node package="sa.hulksa.player.dev" class="android.view.View" '
+            'bounds="[0,0][100,200]" content-desc="qa-page:home">'
+            f'<node package="sa.hulksa.player.dev" class="android.widget.TextView" '
+            f'bounds="{bounds}" text="الرئيسية" />'
+            "</node></hierarchy>",
+            encoding="utf-8",
+        )
+        for filename in ("logcat.txt", "crash.logcat.txt", "gfxinfo.txt", "meminfo.txt"):
+            (case_root / filename).write_text("", encoding="utf-8")
+        manifest = {
+            "device": {
+                "id": "unit-phone",
+                "name": "Unit Phone",
+                "family": "phone",
+                "api": 35,
+                "target": "google_apis",
+                "arch": "x86_64",
+                "profile": "pixel_6",
+                "requested_width": 100,
+                "requested_height": 200,
+                "requested_density": 160,
+                "orientations": "portrait",
+                "font_scales": "1.0",
+                "is_tv": False,
+            },
+            "pages": [{"id": "home", "label": "الرئيسية"}],
+            "cases": [
+                {
+                    "id": "portrait/font-100/home",
+                    "page": "home",
+                    "orientation": "portrait",
+                    "font_scale": 1.0,
+                    "marker": "qa-page:home",
+                    "marker_found": True,
+                    "capture_error": None,
+                    "start_metrics_ms": {"TotalTime": 200},
+                    "files": {
+                        "screenshot": "raw/portrait/font-100/home/screenshot.png",
+                        "xml": "raw/portrait/font-100/home/ui.xml",
+                        "logcat": "raw/portrait/font-100/home/logcat.txt",
+                        "crash_log": "raw/portrait/font-100/home/crash.logcat.txt",
+                        "gfxinfo": "raw/portrait/font-100/home/gfxinfo.txt",
+                        "meminfo": "raw/portrait/font-100/home/meminfo.txt",
+                    },
+                }
+            ],
+            "navigation": [
+                {
+                    "orientation": "portrait",
+                    "page": "home",
+                    "label": "الرئيسية",
+                    "success": True,
+                    "reason": None,
+                }
+            ],
+            "focus": [],
+            "harness_errors": [],
+        }
+        (root / "run-manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def test_clean_capture_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            summary = analyze_run(root)
+            self.assertEqual("PASS", summary["overall_status"])
+            self.assertEqual(0, summary["critical_count"])
+            self.assertTrue((root / "REPORT.html").is_file())
+            self.assertTrue((root / "REPORT.md").is_file())
+            self.assertTrue((root / "junit.xml").is_file())
+
+    def test_out_of_bounds_is_critical(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root, out_of_bounds=True)
+            summary = analyze_run(root)
+            self.assertEqual("FAIL", summary["overall_status"])
+            self.assertGreaterEqual(summary["critical_count"], 1)
+            self.assertIn(
+                "out_of_bounds",
+                {item["code"] for item in summary["findings"]},
+            )
+
+    def test_external_android_error_dialog_is_infrastructure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["cases"][0]["marker_found"] = False
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            xml_path = root / "raw/portrait/font-100/home/ui.xml"
+            xml_path.write_text(
+                '<hierarchy><node package="android" '
+                'resource-id="android:id/alertTitle" '
+                'text="Pixel Launcher isn&apos;t responding" bounds="[0,0][100,40]" />'
+                '<node package="android" resource-id="android:id/aerr_close" '
+                'text="Close app" bounds="[0,40][100,80]" /></hierarchy>',
+                encoding="utf-8",
+            )
+            summary = analyze_run(root)
+            self.assertEqual("BLOCKED", summary["overall_status"])
+            self.assertEqual(0, summary["critical_count"])
+            self.assertEqual(1, summary["infrastructure_error_count"])
+            self.assertIn(
+                "external_system_error_dialog",
+                {item["code"] for item in summary["findings"]},
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
