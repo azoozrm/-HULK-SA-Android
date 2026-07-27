@@ -6,12 +6,17 @@ on:
       - pr-canonical-source-v09317
     paths:
       - '.github/workflows/materialize-canonical-source.yml'
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/materialize-canonical-source.yml'
 
 permissions:
   contents: write
 
 concurrency:
-  group: hulk-sa-canonical-bootstrap
+  group: hulk-sa-canonical-bootstrap-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -216,17 +221,13 @@ jobs:
           permissions:
             contents: read
 
-          concurrency:
-            group: hulk-sa-canonical-${{ github.workflow }}-${{ github.ref }}
-            cancel-in-progress: true
-
           jobs:
             canonical-build:
               name: Clean, lint, unit, debug, release and ABI
               runs-on: ubuntu-latest
               timeout-minutes: 70
               env:
-                HULK_PORTAL_URL: ${{ secrets.HULK_PORTAL_URL || 'https://example.invalid' }}
+                HULK_PORTAL_URL: https://example.invalid
 
               steps:
                 - uses: actions/checkout@v7
@@ -463,6 +464,7 @@ jobs:
           retention-days: 14
 
       - name: Commit canonical source to PR branch
+        if: github.event_name == 'push'
         run: |
           set -euo pipefail
           rm .github/workflows/materialize-canonical-source.yml
