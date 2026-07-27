@@ -20,7 +20,6 @@ rep("app/build.gradle.kts", 'versionName = "0.9.3.14"', 'versionName = "0.9.3.15
 
 main = "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
 
-# Search results always start from item zero instead of a stale remembered position.
 rep(
     main,
     '''    val targetIndex = (if (rememberedKeyIndex >= 0) rememberedKeyIndex else remembered.itemIndex)
@@ -48,8 +47,6 @@ rep(
 ''',
     "search result reset and focus guard",
 )
-
-# Do not let result recomposition steal focus from the keyboard in Movies/Series search.
 rep(
     main,
     '''    onToggleFavorite: (ContentItem) -> Unit,
@@ -74,8 +71,6 @@ rep(
 ''',
     "catalog search keyboard focus",
 )
-
-# Do not let live-channel result updates steal focus after the first typed character.
 rep(
     main,
     '''        if (remembered.itemKey.isNotBlank() && visible.isNotEmpty()) {
@@ -92,8 +87,6 @@ rep(
 ''',
     "live search keyboard focus",
 )
-
-# Give Xiaomi overscan extra room around the collapsed navigation rail logo.
 rep(
     main,
     '''            .padding(start = 10.dp, end = 10.dp, top = 16.dp, bottom = 18.dp),
@@ -111,19 +104,20 @@ rep(
     "collapsed logo safe size",
 )
 
-# Add right-side breathing room before the first episode card.
 series = "app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt"
 rep(
     series,
-    '''            horizontalArrangement = Arrangement.spacedBy(12.dp),
+    '''            contentPadding = PaddingValues(bottom = if (isTv) 42.dp else 28.dp),
 ''',
-    '''            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(start = 8.dp, end = 20.dp),
+    '''            contentPadding = PaddingValues(
+                start = if (isTv) 20.dp else 12.dp,
+                end = if (isTv) 20.dp else 12.dp,
+                bottom = if (isTv) 42.dp else 28.dp,
+            ),
 ''',
     "episodes right padding",
 )
 
-# Player safe areas cover live, movies and series controls, logo, back action and hints.
 player = "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
 rep(
     player,
@@ -150,16 +144,7 @@ rep(
     "live controls safe area",
 )
 
-# Hide the login keyboard when focus reaches the login button, without clearing button focus.
 login = "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt"
-rep(
-    login,
-    '''private fun LoginPanel(
-''',
-    '''private fun LoginPanel(
-''',
-    "login panel marker",
-)
 rep(
     login,
     '''    val colors = LocalHulkColors.current
