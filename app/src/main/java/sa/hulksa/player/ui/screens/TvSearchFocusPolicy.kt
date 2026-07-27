@@ -3,7 +3,11 @@ package sa.hulksa.player.ui.screens
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 
-internal enum class TvSearchFocusAction { NONE, MOVE_TO_RESULTS, DISMISS_KEYBOARD }
+internal enum class TvSearchFocusAction {
+    NONE,
+    MOVE_TO_RESULTS,
+    DISMISS_KEYBOARD,
+}
 
 internal fun tvSearchFocusAction(
     isTv: Boolean,

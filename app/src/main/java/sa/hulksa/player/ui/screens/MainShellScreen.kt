@@ -1305,44 +1305,43 @@ private fun UnifiedSearchScreen(
     val results = remember(state.catalogs, state.searchQuery) {
         val query = state.searchQuery.trim()
         if (query.isBlank()) emptyList() else state.catalogs.values.flatMap { it.items }
-            .filter { it.matchesSearch(query) }
-            .distinctBy { "${it.type}:${it.id}" }
+  .filter { it.matchesSearch(query) }
+  .distinctBy { "${it.type}:${it.id}" }
     }
     Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
         Spacer(Modifier.height(14.dp))
         TvSearchField(
-    value = state.searchQuery,
-    onValueChange = onSearch,
-    isTv = isTv,
-    hasResults = results.isNotEmpty(),
-    fieldRequester = searchFieldRequester,
-    firstResultRequester = firstResultRequester,
-    modifier = Modifier.fillMaxWidth(),
-)
+  value = state.searchQuery,
+  onValueChange = onSearch,
+  isTv = isTv,
+  hasResults = results.isNotEmpty(),
+  fieldRequester = searchFieldRequester,
+  firstResultRequester = firstResultRequester,
+  modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(16.dp))
         if (state.searchQuery.isBlank()) {
-            EmptyState("ابدا بكتابة الاسم او السنة او النوع او وصف المحتوى")
+  EmptyState("ابدا بكتابة الاسم او السنة او النوع او وصف المحتوى")
         } else if (results.isEmpty()) {
-            EmptyState("لا توجد نتائج مطابقة")
+  EmptyState("لا توجد نتائج مطابقة")
         } else {
-            Text("${results.size} نتيجة", color = colors.textMuted, fontSize = 11.sp)
-            Spacer(Modifier.height(9.dp))
+  Text("${results.size} نتيجة", color = colors.textMuted, fontSize = 11.sp)
+  Spacer(Modifier.height(9.dp))
   ContentGrid(
-        content = results,
-        isTv = isTv,
-        destination = MainDestination.SEARCH,
-        navigationMemory = navigationMemory,
-        isFavorite = isFavorite,
-        onOpen = onOpen,
-        onToggleFavorite = onToggleFavorite,
-        firstItemFocusRequester = if (isTv) firstResultRequester else null,
-        firstItemUpRequester = if (isTv) searchFieldRequester else null,
-    )
+      content = results,
+      isTv = isTv,
+      destination = MainDestination.SEARCH,
+      navigationMemory = navigationMemory,
+      isFavorite = isFavorite,
+      onOpen = onOpen,
+      onToggleFavorite = onToggleFavorite,
+      firstItemFocusRequester = if (isTv) firstResultRequester else null,
+      firstItemUpRequester = if (isTv) searchFieldRequester else null,
+  )
         }
     }
 }
-
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -1395,8 +1394,16 @@ TvSearchFocusAction.NONE -> false
         onValueChange = onValueChange,
         label = "ابحث بالاسم او السنة او النوع…",
         modifier = modifier.then(tvModifier),
-        keyboardOptions = if (isTv) KeyboardOptions(imeAction = ImeAction.Search) else KeyboardOptions.Default,
-        keyboardActions = if (isTv) KeyboardActions(onSearch = { moveToResults() }) else KeyboardActions.Default,
+        keyboardOptions = if (isTv) {
+  KeyboardOptions(imeAction = ImeAction.Search)
+        } else {
+  KeyboardOptions.Default
+        },
+        keyboardActions = if (isTv) {
+  KeyboardActions(onSearch = { moveToResults() })
+        } else {
+  KeyboardActions.Default
+        },
     )
 }
 
@@ -1822,26 +1829,26 @@ private fun ContentGrid(
         itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
             val key = "${item.type}:${item.id}"
             val restore = remembered.itemKey == key || index == targetIndex
-            CompactPosterCard(
-                item = item,
-                isFavorite = isFavorite(item),
-                onClick = { onOpen(item) },
-      modifier = Modifier
-  .fillMaxWidth()
-  .then(
-      if (index == 0 && firstItemFocusRequester != null) {
-Modifier.focusRequester(firstItemFocusRequester)
-      } else {
-Modifier.restoreFocus(restore, targetRequester)
-      },
-  )
-  .then(
-      if (index == 0 && firstItemUpRequester != null) {
-Modifier.focusProperties { up = firstItemUpRequester }
-      } else {
-Modifier
-      },
-  ),
+  CompactPosterCard(
+    item = item,
+    isFavorite = isFavorite(item),
+    onClick = { onOpen(item) },
+    modifier = Modifier
+        .fillMaxWidth()
+        .then(
+  if (index == 0 && firstItemFocusRequester != null) {
+      Modifier.focusRequester(firstItemFocusRequester)
+  } else {
+      Modifier.restoreFocus(restore, targetRequester)
+  },
+        )
+        .then(
+  if (index == 0 && firstItemUpRequester != null) {
+      Modifier.focusProperties { up = firstItemUpRequester }
+  } else {
+      Modifier
+  },
+        ),
                 onLongClick = { onToggleFavorite(item) },
                 onFocused = { navigationMemory.save(destination, key, index) },
             )
