@@ -10,16 +10,10 @@ mkdir -p "$OUT"
 : "${HULK_QA_USERNAME:?HULK_QA_USERNAME secret is required}"
 : "${HULK_QA_PASSWORD:?HULK_QA_PASSWORD secret is required}"
 
-die() {
-  echo "$1" > "$OUT/harness-error.txt"
-  finalize 1
-}
-
 sanitize_artifacts() {
   python3 - "$OUT" <<'PY'
 from pathlib import Path
-import os
-import sys
+import os, sys
 root = Path(sys.argv[1])
 secrets = [os.environ.get("HULK_QA_USERNAME", ""), os.environ.get("HULK_QA_PASSWORD", "")]
 for path in root.rglob("*"):
@@ -37,21 +31,25 @@ PY
 }
 
 finalize() {
-  local requested_status="${1:-0}"
+  local requested="${1:-0}"
   sanitize_artifacts
   set +e
   python3 qa/e2e/analyze-real-e2e.py "$OUT" "$DEVICE"
-  local analyzer_status=$?
+  local analyzed=$?
   sanitize_artifacts
-  if [[ $requested_status -ne 0 ]]; then
-    exit "$requested_status"
-  fi
-  exit "$analyzer_status"
+  [[ $requested -ne 0 ]] && exit "$requested"
+  exit "$analyzed"
+}
+
+die() {
+  echo "$1" > "$OUT/harness-error.txt"
+  adb logcat -d -v threadtime > "$OUT/failure.logcat.txt" 2>&1 || true
+  finalize 1
 }
 
 capture() {
   local name="$1"
-  sleep "${2:-2.5}"
+  sleep "${2:-3}"
   adb exec-out screencap -p > "$OUT/$name.png" 2>/dev/null || true
   adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
   adb pull /sdcard/window.xml "$OUT/$name.xml" >/dev/null 2>&1 || true
@@ -60,58 +58,106 @@ capture() {
   adb logcat -d -v threadtime > "$OUT/$name.logcat.txt" 2>&1 || true
 }
 
-dump_temp_ui() {
+dump_ui() {
   adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
   adb pull /sdcard/window.xml /tmp/hulk-real-window.xml >/dev/null 2>&1 || true
 }
 
-find_text_center() {
-  local text="$1"
-  python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --text-contains "$text" --index 0 2>/dev/null || true
+find_text() {
+  python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --text-contains "$1" --index 0 2>/dev/null || true
+}
+
+wait_for_network() {
+  local ok=false
+  adb shell settings put global airplane_mode_on 0 >/dev/null 2>&1 || true
+  adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false >/dev/null 2>&1 || true
+  adb shell svc wifi enable >/dev/null 2>&1 || true
+  adb shell svc data enable >/dev/null 2>&1 || true
+  adb shell settings put global private_dns_mode off >/dev/null 2>&1 || true
+  for attempt in $(seq 1 30); do
+    {
+      echo "attempt=$attempt"
+      adb shell dumpsys connectivity | grep -E 'NetworkAgentInfo|VALIDATED|INTERNET' | head -n 20 || true
+      adb shell ping -c 1 -W 2 8.8.8.8 || true
+      adb shell ping -c 1 -W 2 3162356.xyz || true
+    } >> "$OUT/network-preflight.txt" 2>&1
+    if adb shell ping -c 1 -W 2 3162356.xyz >/dev/null 2>&1; then
+      ok=true
+      break
+    fi
+    sleep 3
+  done
+  [[ "$ok" == "true" ]]
+}
+
+is_logged_in() {
+  dump_ui
+  python3 - /tmp/hulk-real-window.xml <<'PY'
+import sys, xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except Exception:
+    raise SystemExit(1)
+texts, edits = [], 0
+for node in root.iter("node"):
+    if "EditText" in node.attrib.get("class", ""):
+        edits += 1
+    texts.append((node.attrib.get("text", "") or "") + " " + (node.attrib.get("content-desc", "") or ""))
+joined = " ".join(texts)
+markers = ("الرئيسية", "الأفلام", "افلام", "المسلسلات", "مسلسلات", "البث", "القنوات", "المفضلة")
+raise SystemExit(0 if edits == 0 and any(m in joined for m in markers) else 1)
+PY
+}
+
+login_once() {
+  local attempt="$1"
+  adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
+  adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 > "$OUT/launch-$attempt.txt" 2>&1 || return 1
+  sleep 5
+  dump_ui
+  local user pass login
+  user=$(python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --class-contains EditText --index 0 2>/dev/null || true)
+  pass=$(python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --class-contains EditText --index 1 2>/dev/null || true)
+  [[ -n "$user" && -n "$pass" ]] || return 1
+  adb shell input tap $user >/dev/null 2>&1 || true
+  adb shell input keyevent 123 >/dev/null 2>&1 || true
+  for _ in $(seq 1 32); do adb shell input keyevent 67 >/dev/null 2>&1 || true; done
+  adb shell input text "$HULK_QA_USERNAME" >/dev/null 2>&1 || return 1
+  adb shell input tap $pass >/dev/null 2>&1 || true
+  adb shell input keyevent 123 >/dev/null 2>&1 || true
+  for _ in $(seq 1 32); do adb shell input keyevent 67 >/dev/null 2>&1 || true; done
+  adb shell input text "$HULK_QA_PASSWORD" >/dev/null 2>&1 || return 1
+  adb shell input keyevent 4 >/dev/null 2>&1 || true
+  sleep 1
+  dump_ui
+  login=$(find_text "الدخول")
+  [[ -z "$login" ]] && login=$(find_text "دخول")
+  if [[ -n "$login" ]]; then adb shell input tap $login >/dev/null 2>&1 || true; else adb shell input keyevent 66 >/dev/null 2>&1 || true; fi
+  for _ in $(seq 1 30); do
+    sleep 3
+    if is_logged_in; then return 0; fi
+  done
+  capture "login-failure-attempt-$attempt" 1
+  return 1
 }
 
 tap_destination() {
-  local capture_name="$1"
-  shift
-  dump_temp_ui
-  local center=""
-  local label
-  for label in "$@"; do
-    center=$(find_text_center "$label")
-    if [[ -n "$center" ]]; then
-      break
-    fi
-  done
-  if [[ -z "$center" ]]; then
-    echo "Destination not found: $capture_name" >> "$OUT/navigation-warnings.txt"
-    return 1
-  fi
+  local name="$1"; shift
+  dump_ui
+  local center="" label
+  for label in "$@"; do center=$(find_text "$label"); [[ -n "$center" ]] && break; done
+  [[ -n "$center" ]] || { echo "Destination not found: $name" >> "$OUT/navigation-warnings.txt"; return 1; }
   adb shell input tap $center >/dev/null 2>&1 || true
-  capture "$capture_name" 5
-  if [[ "$IS_TV" == "true" ]]; then
-    {
-      echo "capture=$capture_name"
-      for key in 22 22 20 21 19 23 4; do
-        adb shell input keyevent "$key" >/dev/null 2>&1 || true
-        sleep 0.2
-        adb shell dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp' || true
-      done
-    } > "$OUT/$capture_name.focus-trace.txt" 2>&1
-  fi
-  return 0
+  capture "$name" 5
 }
 
 open_first_content() {
-  local source_capture="$1"
-  local target_capture="$2"
-  local xml="$OUT/$source_capture.xml"
-  [[ -s "$xml" ]] || return 1
-  local center
-  center=$(python3 qa/e2e/pick-content-node.py "$xml" --index 0 2>/dev/null || true)
+  local source="$1" target="$2" center
+  [[ -s "$OUT/$source.xml" ]] || return 1
+  center=$(python3 qa/e2e/pick-content-node.py "$OUT/$source.xml" --index 0 2>/dev/null || true)
   [[ -n "$center" ]] || return 1
   adb shell input tap $center >/dev/null 2>&1 || true
-  capture "$target_capture" 7
-  return 0
+  capture "$target" 7
 }
 
 adb wait-for-device || die "ADB device did not become ready"
@@ -119,121 +165,50 @@ adb shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
 adb shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
 adb shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
 adb shell settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
+wait_for_network || die "Emulator network did not become reachable"
 adb install -r -t "$APK" > "$OUT/install.txt" 2>&1 || die "APK installation failed"
-
 PACKAGE=$(adb shell pm list packages | tr -d '\r' | sed -n 's/package:\(.*hulksa.*\)/\1/p' | head -n1)
 [[ -n "$PACKAGE" ]] || PACKAGE="sa.hulksa.player.dev"
 adb shell pm clear "$PACKAGE" >/dev/null 2>&1 || true
-
 {
-  echo "device=$DEVICE"
-  echo "is_tv=$IS_TV"
-  echo "package=$PACKAGE"
-  adb shell wm size
-  adb shell wm density
-  adb shell getprop ro.build.version.release
-  adb shell getprop ro.product.model
-  adb shell getprop ro.build.characteristics
+  echo "device=$DEVICE"; echo "is_tv=$IS_TV"; echo "package=$PACKAGE"
+  adb shell wm size; adb shell wm density; adb shell getprop ro.build.version.release
+  adb shell getprop ro.product.model; adb shell getprop ro.build.characteristics
 } > "$OUT/device.txt" 2>&1
 
 adb logcat -c >/dev/null 2>&1 || true
-adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 > "$OUT/launch.txt" 2>&1 || die "Launcher activity could not be started"
-sleep 4
-
-dump_temp_ui
-USER_CENTER=$(python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --class-contains EditText --index 0 2>/dev/null || true)
-PASS_CENTER=$(python3 qa/emulator/node-center.py /tmp/hulk-real-window.xml --class-contains EditText --index 1 2>/dev/null || true)
-[[ -n "$USER_CENTER" ]] || die "Username field was not found"
-[[ -n "$PASS_CENTER" ]] || die "Password field was not found"
-
-adb shell input tap $USER_CENTER >/dev/null 2>&1 || true
-sleep 0.4
-adb shell input text "$HULK_QA_USERNAME" >/dev/null 2>&1 || die "Username input failed"
-adb shell input tap $PASS_CENTER >/dev/null 2>&1 || true
-sleep 0.4
-adb shell input text "$HULK_QA_PASSWORD" >/dev/null 2>&1 || die "Password input failed"
-adb shell input keyevent 4 >/dev/null 2>&1 || true
-sleep 0.5
-
-dump_temp_ui
-LOGIN_CENTER=$(find_text_center "الدخول")
-if [[ -z "$LOGIN_CENTER" ]]; then LOGIN_CENTER=$(find_text_center "دخول"); fi
-if [[ -n "$LOGIN_CENTER" ]]; then
-  adb shell input tap $LOGIN_CENTER >/dev/null 2>&1 || true
-else
-  adb shell input keyevent 66 >/dev/null 2>&1 || true
-fi
-
 LOGIN_OK=false
-for _ in $(seq 1 40); do
-  sleep 3
-  dump_temp_ui
-  if python3 - /tmp/hulk-real-window.xml <<'PY'
-import sys
-import xml.etree.ElementTree as ET
-try:
-    root = ET.parse(sys.argv[1]).getroot()
-except Exception:
-    raise SystemExit(1)
-texts = []
-edit_count = 0
-for node in root.iter("node"):
-    cls = node.attrib.get("class", "")
-    if "EditText" in cls:
-        edit_count += 1
-    texts.append((node.attrib.get("text", "") or "") + " " + (node.attrib.get("content-desc", "") or ""))
-joined = " ".join(texts)
-markers = ("الرئيسية", "الأفلام", "افلام", "المسلسلات", "مسلسلات", "البث", "القنوات", "المفضلة")
-raise SystemExit(0 if edit_count == 0 and any(x in joined for x in markers) else 1)
-PY
-  then
-    LOGIN_OK=true
-    break
-  fi
+for attempt in 1 2 3; do
+  wait_for_network || true
+  if login_once "$attempt"; then LOGIN_OK=true; break; fi
+  adb shell pm clear "$PACKAGE" >/dev/null 2>&1 || true
+  sleep 4
 done
-
-if [[ "$LOGIN_OK" != "true" ]]; then
-  adb logcat -d -v threadtime > "$OUT/login-failure.logcat.txt" 2>&1 || true
-  finalize 1
-fi
-
+[[ "$LOGIN_OK" == "true" ]] || die "Real account login failed after three network-safe attempts"
 touch "$OUT/login-success.flag"
 adb logcat -c >/dev/null 2>&1 || true
 capture "home-real" 4
 
 tap_destination "live-real" "البث المباشر" "البث" "القنوات" "مباشر" || true
-if open_first_content "live-real" "live-player-real"; then
-  adb shell input keyevent 4 >/dev/null 2>&1 || true
-  sleep 2
-fi
+if open_first_content "live-real" "live-player-real"; then adb shell input keyevent 4 >/dev/null 2>&1 || true; sleep 2; fi
 
 tap_destination "movies-real" "الأفلام" "افلام" || true
 if open_first_content "movies-real" "movie-details-real"; then
-  dump_temp_ui
-  PLAY_CENTER=$(find_text_center "تشغيل")
-  if [[ -z "$PLAY_CENTER" ]]; then PLAY_CENTER=$(find_text_center "شاهد"); fi
-  if [[ -n "$PLAY_CENTER" ]]; then
-    adb shell input tap $PLAY_CENTER >/dev/null 2>&1 || true
-    capture "movie-player-real" 9
-    adb shell input keyevent 4 >/dev/null 2>&1 || true
-    sleep 2
-  fi
+  dump_ui
+  PLAY=$(find_text "تشغيل"); [[ -z "$PLAY" ]] && PLAY=$(find_text "شاهد")
+  if [[ -n "$PLAY" ]]; then adb shell input tap $PLAY >/dev/null 2>&1 || true; capture "movie-player-real" 9; adb shell input keyevent 4 >/dev/null 2>&1 || true; fi
 fi
 
 tap_destination "series-real" "المسلسلات" "مسلسلات" || true
 open_first_content "series-real" "series-details-real" || true
 adb shell input keyevent 4 >/dev/null 2>&1 || true
-sleep 1
 
 tap_destination "search-real" "البحث" || true
 adb shell input keyevent 4 >/dev/null 2>&1 || true
-sleep 1
 
 tap_destination "downloads-real" "التنزيلات" "التحميلات" || true
 adb shell input keyevent 4 >/dev/null 2>&1 || true
-sleep 1
 
 tap_destination "settings-real" "الإعدادات" "الاعدادات" || true
-
 adb logcat -d -v threadtime > "$OUT/final.logcat.txt" 2>&1 || true
 finalize 0
