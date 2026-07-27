@@ -203,7 +203,8 @@ class NavigationMemoryStore {
             homeMoviesCatalog === movieCatalog &&
             homeSeriesCatalog === seriesCatalog &&
             homeLiveCatalog === liveCatalog &&
-            homeHistory === state.history
+            homeHistory === state.history &&
+            homeFavorites === state.favorites
         ) {
             return cached
         }
@@ -315,6 +316,7 @@ class NavigationMemoryStore {
             homeSeriesCatalog = seriesCatalog
             homeLiveCatalog = liveCatalog
             homeHistory = state.history
+            homeFavorites = state.favorites
             cachedHome = snapshot
         }
     }
