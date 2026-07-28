@@ -19,7 +19,7 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
 def replace_regex_once(path: str, pattern: str, replacement: str, label: str) -> None:
     target = root / path
     text = target.read_text(encoding="utf-8")
-    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE | re.DOTALL)
     if count == 0:
         raise SystemExit(f"missing {label}")
     target.write_text(updated, encoding="utf-8")
@@ -37,7 +37,7 @@ replace_once(
 )
 replace_regex_once(
     main,
-    r"(?s)(private fun MobileNavigation\(.*?Modifier\n\s*\.fillMaxWidth\(\)\n\s*\.background\(Color\(0xFF090A07\)\)\n\s*\.statusBarsPadding\(\))\n\s*\.padding\(horizontal = 6\.dp, vertical = 6\.dp\),\n\s*horizontalArrangement = Arrangement\.spacedBy\(4\.dp\),",
+    r"(private fun MobileNavigation\([^)]*\)\s*\{.*?\.statusBarsPadding\(\))\s*\.padding\(horizontal\s*=\s*6\.dp,\s*vertical\s*=\s*6\.dp\),\s*horizontalArrangement\s*=\s*Arrangement\.spacedBy\(4\.dp\),",
     r"\1\n            .navigationBarsPadding()\n            .padding(horizontal = 8.dp, vertical = 8.dp),\n        horizontalArrangement = Arrangement.spacedBy(6.dp),",
     "mobile navigation safe-area and spacing",
 )
@@ -49,15 +49,9 @@ replace_once(
 )
 replace_regex_once(
     main,
-    r"contentPadding = PaddingValues\(horizontal = 24\.dp, vertical = 4\.dp\),",
+    r"contentPadding\s*=\s*PaddingValues\(horizontal\s*=\s*24\.dp,\s*vertical\s*=\s*4\.dp\),",
     "contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),",
     "catalog row vertical breathing room",
-)
-replace_regex_once(
-    main,
-    r"contentPadding = PaddingValues\(horizontal = 24\.dp, vertical = 4\.dp\),",
-    "contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),",
-    "live row vertical breathing room",
 )
 
 components = "app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt"
@@ -69,7 +63,7 @@ replace_once(
 )
 replace_regex_once(
     components,
-    r"modifier = modifier\n\s*\.scale\(scale\)",
+    r"modifier\s*=\s*modifier\s*\.scale\(scale\)",
     "modifier = modifier\n            .widthIn(min = 48.dp)\n            .heightIn(min = 48.dp)\n            .scale(scale)",
     "FocusButton minimum adaptive bounds",
 )
