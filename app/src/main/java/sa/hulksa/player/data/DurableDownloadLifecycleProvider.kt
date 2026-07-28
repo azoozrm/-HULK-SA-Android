@@ -12,7 +12,7 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var store: DurableDownloadPreferenceStore? = null
     private var bridge: DurableDownloadLifecycleBridge? = null
-    private var knownDownloadIds: Set<Long> = emptySet()
+    private var knownSchedulingStates: Map<Long, DurableDownloadSchedulingState> = emptyMap()
 
     private val reconcileRunnable = Runnable(::reconcile)
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -44,21 +44,26 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         val currentStore = store ?: return
         val currentBridge = bridge ?: return
         val snapshot = currentStore.snapshot()
-        val currentIds = snapshot.records.mapTo(mutableSetOf()) { it.downloadId }
+        val recordsById = snapshot.records.associateBy { it.downloadId }
+        val currentStates = recordsById.mapValues { (_, record) ->
+            durableDownloadSchedulingState(record, snapshot.wifiOnly)
+        }
 
-        (knownDownloadIds - currentIds).forEach(currentBridge::cancel)
-        snapshot.records.forEach { record ->
-            when (durableDownloadLifecycleAction(record.status)) {
+        (knownSchedulingStates.keys - currentStates.keys).forEach(currentBridge::cancel)
+        recordsById.forEach { (downloadId, record) ->
+            val currentState = currentStates.getValue(downloadId)
+            if (knownSchedulingStates[downloadId] == currentState) return@forEach
+            when (currentState.action) {
                 DurableDownloadLifecycleAction.ENQUEUE -> currentBridge.enqueue(
-                    downloadId = record.downloadId,
+                    downloadId = downloadId,
                     title = record.title,
-                    wifiOnly = snapshot.wifiOnly,
-                    scheduledAtEpochMs = record.scheduledAtEpochMs,
+                    wifiOnly = currentState.wifiOnly,
+                    scheduledAtEpochMs = currentState.scheduledAtEpochMs,
                 )
-                DurableDownloadLifecycleAction.CANCEL -> currentBridge.cancel(record.downloadId)
+                DurableDownloadLifecycleAction.CANCEL -> currentBridge.cancel(downloadId)
             }
         }
-        knownDownloadIds = currentIds
+        knownSchedulingStates = currentStates
     }
 
     override fun query(
