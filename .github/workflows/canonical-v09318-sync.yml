@@ -1,4 +1,4 @@
-name: Generate canonical v0.9.3.18 reconciliation
+name: Apply canonical v0.9.3.18 source reconciliation
 
 on:
   pull_request:
@@ -10,22 +10,24 @@ on:
       - 'qa/compatibility/prepare-reconstructed-project.sh'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: canonical-v09318-sync-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  generate:
+  apply-source:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           ref: sync-canonical-v09318-lab
+          fetch-depth: 0
 
-      - name: Apply audited reconciliation in workspace
+      - name: Apply audited reconciliation
         run: |
           set -euo pipefail
           python3 -m py_compile qa/canonical/sync-v09318.py
@@ -39,27 +41,14 @@ jobs:
           grep -Fq "cp -a \"\$REPO_ROOT/app\"" qa/compatibility/prepare-project.sh
           sha256sum -c qa/canonical/canonical-source.sha256
 
-      - name: Package reconciliation files
+      - name: Commit non-workflow reconciliation files
         run: |
           set -euo pipefail
-          mkdir -p reconciliation
-          git diff --name-only > reconciliation/CHANGED-FILES.txt
-          test -s reconciliation/CHANGED-FILES.txt
-          while IFS= read -r file; do
-            test -f "$file"
-            mkdir -p "reconciliation/files/$(dirname "$file")"
-            cp -a "$file" "reconciliation/files/$file"
-          done < reconciliation/CHANGED-FILES.txt
-          git diff --binary > reconciliation/reconciliation.patch
-          (
-            cd reconciliation
-            sha256sum reconciliation.patch > SHA256SUMS.txt
-          )
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: HULK-SA-CANONICAL-V09318-RECONCILIATION
-          path: reconciliation/
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 3
+          git restore --source=HEAD -- .github/workflows
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app docs qa
+          git diff --cached --stat
+          git diff --cached --quiet && { echo 'No source reconciliation changes were produced' >&2; exit 1; }
+          git commit -m 'build: synchronize canonical v0.9.3.18 application source'
+          git push origin HEAD:sync-canonical-v09318-lab
