@@ -8,6 +8,12 @@ on:
       - '.github/workflows/generated-source-snapshot.yml'
       - 'release/v0.9.3.18/**'
       - 'qa/compatibility/prepare-project.sh'
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+      - 'gradle.properties'
       - 'tools/prepare-v09*.py'
       - 'tools/repair-v09120.py'
       - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
@@ -17,12 +23,12 @@ permissions:
 
 jobs:
   snapshot:
-    name: Reconstruct generated UI source
+    name: Prepare canonical UI source
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Reconstruct current source
+      - name: Prepare canonical current source
         run: |
           set -euo pipefail
           bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/project"
