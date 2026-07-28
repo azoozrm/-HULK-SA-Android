@@ -37,7 +37,8 @@ internal class DurableDownloadForeground(
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(0, 0, true)
-            .addAction(pauseAction(downloadId))
+            .addAction(downloadAction(downloadId, ACTION_PAUSE_DOWNLOAD, "ايقاف مؤقت", android.R.drawable.ic_media_pause))
+            .addAction(downloadAction(downloadId, ACTION_RESUME_DOWNLOAD, "استئناف", android.R.drawable.ic_media_play))
             .build()
         val notificationId = durableDownloadNotificationId(downloadId)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -51,21 +52,23 @@ internal class DurableDownloadForeground(
         }
     }
 
-    private fun pauseAction(downloadId: Long): Notification.Action {
+    private fun downloadAction(
+        downloadId: Long,
+        action: String,
+        label: String,
+        icon: Int,
+    ): Notification.Action {
         val intent = Intent(context, DurableDownloadActionReceiver::class.java)
-            .setAction(ACTION_PAUSE_DOWNLOAD)
+            .setAction(action)
             .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
+        val requestCode = durableDownloadNotificationId(downloadId) xor action.hashCode()
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            durableDownloadNotificationId(downloadId),
+            requestCode,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Action.Builder(
-            android.R.drawable.ic_media_pause,
-            "ايقاف مؤقت",
-            pendingIntent,
-        ).build()
+        return Notification.Action.Builder(icon, label, pendingIntent).build()
     }
 
     private fun ensureNotificationChannel() {
