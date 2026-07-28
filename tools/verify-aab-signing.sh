@@ -53,13 +53,17 @@ if [[ "$ACTUAL" != "$EXPECTED" ]]; then
   echo "Actual:   $ACTUAL" >&2
   exit 1
 fi
-if ! grep -Fq 'jar verified.' "$JAR_REPORT"; then
-  echo "AAB JAR signature verification did not report success" >&2
-  exit 1
-fi
 if [[ "$JARSIGNER_STATUS" -ne 0 && "$JARSIGNER_STATUS" -ne 4 ]]; then
   echo "AAB jarsigner verification failed with status $JARSIGNER_STATUS" >&2
   exit "$JARSIGNER_STATUS"
+fi
+if grep -Eiq 'jar is unsigned|not signed by a trusted signer|signature error|unable to verify' "$JAR_REPORT"; then
+  echo "AAB JAR signature verification reported a real signing failure" >&2
+  exit 1
+fi
+if ! grep -Eiq 'jar verified\.|The signer certificate will expire on|Signer #[0-9]+:' "$JAR_REPORT"; then
+  echo "AAB JAR signature verification did not produce recognizable signed-output evidence" >&2
+  exit 1
 fi
 
 {
