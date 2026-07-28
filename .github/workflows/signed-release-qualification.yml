@@ -1,6 +1,12 @@
 name: HULK SA Signed Release Qualification
 
 on:
+  push:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/signed-release-qualification.yml'
+      - '.github/signing-qualification-v09318'
   pull_request:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
@@ -99,9 +105,10 @@ jobs:
 
   signed-release:
     name: Build and verify signed production artifacts
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs: signing-preflight
     runs-on: ubuntu-latest
+    environment: production-signing
     timeout-minutes: 60
     env:
       HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
@@ -171,8 +178,8 @@ jobs:
 
       - name: Verify package identity and version
         env:
-          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code }}
-          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name }}
+          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '62' }}
+          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.18' }}
         run: |
           set -euo pipefail
           apk='app/build/outputs/apk/release/app-release.apk'
