@@ -90,16 +90,21 @@ private fun DurableDownloadWorkPlan.toWorkRequest(): OneTimeWorkRequest {
         .build()
 }
 
-/**
- * Execution is intentionally introduced in the next Durable Downloads stage.
- * This worker currently defines the persisted WorkManager contract only, so the
- * existing in-process transport engine is not duplicated or falsely qualified.
- */
 internal class DownloadCoordinatorWorker(
     appContext: Context,
     workerParameters: WorkerParameters,
 ) : CoroutineWorker(appContext, workerParameters) {
-    override suspend fun doWork(): Result = Result.success()
+    override suspend fun doWork(): Result {
+        val downloadId = inputData.getLong(KEY_DOWNLOAD_ID, -1L)
+        if (downloadId <= 0L) return Result.failure()
+        return when (DownloadExecutionEntryPoint(applicationContext).execute(downloadId)) {
+            DurableDownloadExecutionResult.COMPLETED,
+            DurableDownloadExecutionResult.TERMINAL,
+            -> Result.success()
+
+            DurableDownloadExecutionResult.RETRY -> Result.retry()
+        }
+    }
 }
 
 internal const val KEY_DOWNLOAD_ID = "download_id"
