@@ -19,7 +19,7 @@ internal class DurableDownloadForeground(
 ) {
     fun createInfo(downloadId: Long, title: String?): ForegroundInfo {
         ensureNotificationChannel()
-        val notificationTitle = title?.trim().takeUnless(String?::isNullOrEmpty)
+        val notificationTitle = title?.trim()?.takeIf { it.isNotEmpty() }
             ?: "تحميل محتوى HULK SA"
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(context, CHANNEL_ID)
