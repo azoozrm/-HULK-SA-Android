@@ -1,0 +1,49 @@
+name: HULK SA Generated Source Snapshot
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/generated-source-snapshot.yml'
+      - 'release/v0.9.3.18/**'
+      - 'qa/compatibility/prepare-project.sh'
+      - 'tools/prepare-v09*.py'
+      - 'tools/repair-v09120.py'
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: Reconstruct generated UI source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Reconstruct current source
+        run: |
+          set -euo pipefail
+          bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/project"
+      - name: Package generated UI source
+        run: |
+          set -euo pipefail
+          mkdir -p generated-source
+          cp project/app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt generated-source/
+          cp project/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt generated-source/
+          cp project/app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt generated-source/
+          grep -RIl --include='*.kt' -E 'Search|بحث|OutlinedTextField|BasicTextField|TextField' \
+            project/app/src/main/java/sa/hulksa/player/ui \
+            | while read -r source; do
+                relative="${source#project/app/src/main/java/}"
+                mkdir -p "generated-source/search-context/$(dirname "$relative")"
+                cp "$source" "generated-source/search-context/$relative"
+              done
+          find generated-source -type f -print | sort > generated-source/FILES.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-GENERATED-UI-SOURCE
+          path: generated-source/
+          if-no-files-found: error
+          retention-days: 3
