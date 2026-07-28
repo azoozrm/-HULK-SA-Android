@@ -17,6 +17,11 @@ internal fun durableDownloadNotificationId(downloadId: Long): Int {
     return folded.coerceAtLeast(1)
 }
 
+internal fun durableDownloadNotificationRequestCode(downloadId: Long, action: String): Int {
+    validateDurableDownloadId(downloadId)
+    return durableDownloadNotificationId(downloadId) xor action.hashCode()
+}
+
 internal class DurableDownloadForeground(
     private val context: Context,
 ) {
@@ -61,7 +66,7 @@ internal class DurableDownloadForeground(
             .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
         return PendingIntent.getActivity(
             context,
-            durableDownloadNotificationId(downloadId),
+            durableDownloadNotificationRequestCode(downloadId, ACTION_OPEN_DOWNLOADS),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -76,10 +81,9 @@ internal class DurableDownloadForeground(
         val intent = Intent(context, DurableDownloadActionReceiver::class.java)
             .setAction(action)
             .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
-        val requestCode = durableDownloadNotificationId(downloadId) xor action.hashCode()
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            requestCode,
+            durableDownloadNotificationRequestCode(downloadId, action),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -104,5 +108,6 @@ internal class DurableDownloadForeground(
 
     private companion object {
         const val CHANNEL_ID = "hulk_durable_downloads"
+        const val ACTION_OPEN_DOWNLOADS = "sa.hulksa.player.action.OPEN_DOWNLOADS"
     }
 }
