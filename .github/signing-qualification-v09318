@@ -2,4 +2,5 @@ HULK SA signed release qualification marker
 versionName=0.9.3.18
 versionCode=62
 purpose=qualification-only-no-public-release
-request=2
+request=3
+secrets-configured=2026-07-28
