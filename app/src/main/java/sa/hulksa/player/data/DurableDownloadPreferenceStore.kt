@@ -22,6 +22,13 @@ internal enum class DurableDownloadLifecycleAction {
     CANCEL,
 }
 
+internal data class DurableDownloadSchedulingState(
+    val action: DurableDownloadLifecycleAction,
+    val title: String?,
+    val wifiOnly: Boolean,
+    val scheduledAtEpochMs: Long,
+)
+
 internal fun durableDownloadLifecycleAction(
     status: OfflineStatus,
 ): DurableDownloadLifecycleAction = when (status) {
@@ -38,6 +45,16 @@ internal fun durableDownloadLifecycleAction(
     OfflineStatus.COMPLETED,
     -> DurableDownloadLifecycleAction.CANCEL
 }
+
+internal fun durableDownloadSchedulingState(
+    record: DurableDownloadPersistedRecord,
+    wifiOnly: Boolean,
+): DurableDownloadSchedulingState = DurableDownloadSchedulingState(
+    action = durableDownloadLifecycleAction(record.status),
+    title = record.title,
+    wifiOnly = wifiOnly,
+    scheduledAtEpochMs = record.scheduledAtEpochMs,
+)
 
 internal class DurableDownloadPreferenceStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
