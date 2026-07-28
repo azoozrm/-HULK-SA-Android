@@ -1,13 +1,6 @@
-name: Apply canonical v0.9.3.18 reconciliation
+name: Generate canonical v0.9.3.18 reconciliation
 
 on:
-  push:
-    branches:
-      - sync-canonical-v09318-lab
-    paths:
-      - '.github/workflows/canonical-v09318-sync.yml'
-      - 'qa/canonical/sync-v09318.py'
-      - 'qa/compatibility/prepare-reconstructed-project.sh'
   pull_request:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
@@ -17,24 +10,22 @@ on:
       - 'qa/compatibility/prepare-reconstructed-project.sh'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: canonical-v09318-sync-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  generate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           ref: sync-canonical-v09318-lab
-          fetch-depth: 0
 
-      - name: Apply audited reconciliation
+      - name: Apply audited reconciliation in workspace
         run: |
           set -euo pipefail
           python3 -m py_compile qa/canonical/sync-v09318.py
@@ -48,14 +39,23 @@ jobs:
           grep -Fq "cp -a \"\$REPO_ROOT/app\"" qa/compatibility/prepare-project.sh
           sha256sum -c qa/canonical/canonical-source.sha256
 
-      - name: Commit canonical source and remove bootstrap workflow
+      - name: Package reconciliation files
         run: |
           set -euo pipefail
-          rm -f .github/workflows/canonical-v09318-sync.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --stat
-          git diff --cached --quiet && { echo 'No reconciliation changes were produced' >&2; exit 1; }
-          git commit -m 'build: synchronize canonical v0.9.3.18 source and lab'
-          git push origin HEAD:sync-canonical-v09318-lab
+          mkdir -p reconciliation
+          git diff --name-only > reconciliation/CHANGED-FILES.txt
+          test -s reconciliation/CHANGED-FILES.txt
+          while IFS= read -r file; do
+            test -f "$file"
+            mkdir -p "reconciliation/files/$(dirname "$file")"
+            cp -a "$file" "reconciliation/files/$file"
+          done < reconciliation/CHANGED-FILES.txt
+          git diff --binary > reconciliation/reconciliation.patch
+          sha256sum reconciliation/reconciliation.patch > reconciliation/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-CANONICAL-V09318-RECONCILIATION
+          path: reconciliation/
+          if-no-files-found: error
+          retention-days: 3
