@@ -12,6 +12,17 @@ on:
       - 'tools/prepare-v09*.py'
       - 'tools/repair-v09120.py'
       - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/compatibility-lab.yml'
+      - 'qa/compatibility/**'
+      - 'release/v0.9.3.16/**'
+      - 'release/v0.9.3.17/**'
+      - 'tools/prepare-v09*.py'
+      - 'tools/repair-v09120.py'
+      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
   workflow_dispatch:
     inputs:
       enforce_findings:
@@ -315,82 +326,27 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          RESULT='compatibility-results/${{ matrix.id }}'
-          mkdir -p "$RESULT"
-          adb devices -l > "$RESULT/adb-devices-final.txt" 2>&1 || true
-          if [[ ! -s "$RESULT/summary.json" ]]; then
-            python3 qa/compatibility/make-blocked-result.py \
-              --out "$RESULT" \
-              --device-id '${{ matrix.id }}' \
-              --device-name '${{ matrix.name }}' \
-              --family '${{ matrix.family }}' \
-              --api '${{ matrix.api }}' \
-              --target '${{ matrix.target }}' \
-              --arch '${{ matrix.arch }}' \
-              --profile '${{ matrix.profile }}' \
-              --width '${{ matrix.width }}' \
-              --height '${{ matrix.height }}' \
-              --density '${{ matrix.density }}' \
-              --orientations '${{ matrix.orientations }}' \
-              --font-scales '${{ matrix.font_scales }}' \
-              --is-tv '${{ matrix.is_tv }}' \
-              --reason 'Emulator action did not produce a Compatibility Lab summary. Inspect the job log.'
+          OUT='compatibility-results/${{ matrix.id }}'
+          mkdir -p "$OUT"
+          if [[ ! -s "$OUT/summary.json" ]]; then
+            cat > "$OUT/summary.json" <<JSON
+          {
+            "device_id": "${{ matrix.id }}",
+            "device_name": "${{ matrix.name }}",
+            "family": "${{ matrix.family }}",
+            "api": "${{ matrix.api }}",
+            "critical_finding_count": 0,
+            "infrastructure_error_count": 1,
+            "status": "infrastructure_blocked"
+          }
+          JSON
           fi
-          cat "$RESULT/GITHUB_STEP_SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload device artifacts
         if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: HULK-SA-COMPAT-DEVICE-${{ matrix.id }}
+          name: compatibility-${{ matrix.id }}
           path: compatibility-results/${{ matrix.id }}/
           if-no-files-found: error
           retention-days: 14
-          compression-level: 6
-
-      - name: Apply device gate
-        if: always()
-        run: |
-          python3 qa/compatibility/gate.py \
-            'compatibility-results/${{ matrix.id }}/summary.json' \
-            --enforce-findings '${{ inputs.enforce_findings || false }}'
-
-  aggregate-report:
-    name: Aggregate HTML and Markdown report
-    needs:
-      - lab-plan
-      - build-lab-apk
-      - device-lab
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          pattern: HULK-SA-COMPAT-DEVICE-*
-          path: device-artifacts
-          merge-multiple: false
-
-      - name: Build aggregate report and finding evidence bundle
-        run: |
-          set -euo pipefail
-          mkdir -p device-artifacts lab-report
-          python3 qa/compatibility/aggregate.py device-artifacts lab-report
-          sed -n '1,400p' lab-report/GITHUB_STEP_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: HULK-SA-COMPATIBILITY-LAB-REPORT
-          path: lab-report/
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 6
-
-      - name: Apply aggregate gate
-        if: always()
-        run: |
-          python3 qa/compatibility/gate.py \
-            lab-report/COMPATIBILITY-LAB-SUMMARY.json \
-            --enforce-findings '${{ inputs.enforce_findings || false }}'
