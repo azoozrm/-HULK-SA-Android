@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import sa.hulksa.player.model.OfflineStatus
 
@@ -34,5 +35,36 @@ class DurableDownloadPreferenceStoreTest {
                 durableDownloadLifecycleAction(status),
             )
         }
+    }
+
+    @Test
+    fun `progress-only status changes keep the same scheduling state`() {
+        val queued = DurableDownloadPersistedRecord(
+            downloadId = 42L,
+            title = "Movie",
+            status = OfflineStatus.QUEUED,
+            scheduledAtEpochMs = 0L,
+        )
+        val downloading = queued.copy(status = OfflineStatus.DOWNLOADING)
+
+        assertEquals(
+            durableDownloadSchedulingState(queued, wifiOnly = false),
+            durableDownloadSchedulingState(downloading, wifiOnly = false),
+        )
+    }
+
+    @Test
+    fun `network constraint changes require rescheduling`() {
+        val record = DurableDownloadPersistedRecord(
+            downloadId = 42L,
+            title = "Movie",
+            status = OfflineStatus.QUEUED,
+            scheduledAtEpochMs = 0L,
+        )
+
+        assertNotEquals(
+            durableDownloadSchedulingState(record, wifiOnly = false),
+            durableDownloadSchedulingState(record, wifiOnly = true),
+        )
     }
 }
