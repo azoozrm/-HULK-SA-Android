@@ -52,7 +52,16 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         (knownSchedulingStates.keys - currentStates.keys).forEach(currentBridge::cancel)
         recordsById.forEach { (downloadId, record) ->
             val currentState = currentStates.getValue(downloadId)
-            if (knownSchedulingStates[downloadId] == currentState) return@forEach
+            val previousState = knownSchedulingStates[downloadId]
+            if (
+                !shouldApplyDurableDownloadSchedulingState(
+                    previous = previousState,
+                    current = currentState,
+                    currentStatus = record.status,
+                )
+            ) {
+                return@forEach
+            }
             when (currentState.action) {
                 DurableDownloadLifecycleAction.ENQUEUE -> currentBridge.enqueue(
                     downloadId = downloadId,
