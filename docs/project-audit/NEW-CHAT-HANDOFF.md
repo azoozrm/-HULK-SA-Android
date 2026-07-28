@@ -1,368 +1,169 @@
 # HULK SA Android — NEW CHAT HANDOFF
 
-هذا الملف مكتفٍ بذاته. لا تعتمد على أي محادثة سابقة. لا تبدأ المشروع من الصفر، ولا تعيد تصميم ما أُنجز، ولا تضف ميزة كبرى قبل إغلاق بوابات v1.0.
+هذا الملف مكتفٍ بذاته. لا تبدأ المشروع من الصفر، ولا تعيد تصميم ما أُنجز، ولا تضف ميزة كبيرة قبل إغلاق بوابات v1.0.
 
 ## الهوية المعتمدة
 
-- Repository: <https://github.com/azoozrm/-HULK-SA-Android>
-- Official branch: `phase-3-v0.9.3.0-adaptive-foundation`
-- GitHub default branch عند التدقيق: `main`، لكنه ليس الفرع الرسمي الحالي.
-- Baseline المطلوب: `v0.9.3.17-beta`.
-- الحقيقة في Gradle: base `0.9.3.17`, versionCode `61`; Debug فقط يضيف `-beta`.
-- لا يوجد Git Tag لأي إصدار وقت التدقيق.
-- Application/Compatibility Lab audited head: `8db147faea8fae0290bf75d53b4194de2035880f`.
-- Audit delivery commit: الـCommit الذي يحتوي هذا الملف، وهو HEAD الفرع الرسمي عند التسليم. Git لا يمكنه تضمين SHA الخاص بالـCommit داخل محتواه لأن SHA يعتمد على المحتوى نفسه. احصل على SHA الدقيق من: <https://github.com/azoozrm/-HULK-SA-Android/commits/phase-3-v0.9.3.0-adaptive-foundation>. يجب أن يطابق رابط Commit المرفق في رسالة التسليم.
+- Repository: `azoozrm/-HULK-SA-Android`.
+- Official branch: `phase-3-v0.9.3.0-adaptive-foundation`.
+- GitHub default branch هو `main` لكنه ليس الفرع الرسمي للعمل.
+- Current official HEAD: `75853490d0fd9d7a0ed523eb30133288246094ba`.
+- Current preparation version: `0.9.3.18`.
+- versionCode: `62`.
+- Debug يضيف `-beta`.
+- applicationId لم يتغير.
 
-## ملخص تنفيذي
+## الحالة التنفيذية الحالية
 
-المشروع قابل للتجميع لكنه غير جاهز لـv1.0. Debug وRelease/R8 بُنيا فعليًا، و14/14 unit tests نجحت، وABI verification نجح. لكن Release APK/AAB غير موقعين، `lintDebug` يفشل بخطأ Media3 واحد، والسورس النهائي لا يوجد كمشروع Gradle مباشر بل يُولد من ZIP v0.9.1.20 وسلسلة 24 script.
+Compatibility Lab foundation اكتمل وربط بالـPRs. تم دمج:
 
-Compatibility Lab شُغّل فعليًا على 9 emulator profiles. أنشأ 133 capture و692 evidence file. بعد مراجعة الأدلة، 132 capture تخص التطبيق؛ حالة TV 720p/Series التقطت Android TV Launcher وهي `NOT TESTED`. توجد 8 عيوب تطبيق حرجة مؤكدة: 5 navigation failures في Phone landscape و3 TV Search focus traps. لا Crash أو ANR مؤكدة في الجولة.
+- PR #46: instrumentation foundation.
+- PR #47: runtime/input compatibility coverage.
+- PR #48: PR-triggered Compatibility Lab.
+- PR #49: تحليل وتوثيق الجولة التاريخية.
+- PR #50: responsive layout/device-class/navigation/safe-area foundation ورفع الإصدار إلى 0.9.3.18.
+- PR #51: إغلاق Android TV Search focus trap.
 
-Overall v1.0 readiness: **44/100**.
+## أحدث تشغيل معتمد
 
-## ما تغير في Compatibility Lab
+Compatibility Lab Run #31:
 
-أُنشئ/عُدل:
+- Run ID: `30377208398`.
+- PR head: `2af1356cd89bdd2d0f0cb7384791d8e8dfdf6449`.
+- Conclusion: SUCCESS.
+- Profiles: 9.
+- Cases: 133/133.
+- Warnings: 263.
+- Infrastructure errors النهائية: 0.
+- Crash/ANR المؤكد: 0/0.
+- Raw Critical: 2.
+- Confirmed Product Critical بعد مراجعة الأدلة: **0**.
 
-- `.github/workflows/compatibility-lab.yml`
-- `qa/compatibility/.gitignore`
-- `qa/compatibility/QaActivity.kt`
-- `qa/compatibility/README.md`
-- `qa/compatibility/__init__.py`
-- `qa/compatibility/aggregate.py`
-- `qa/compatibility/analyze.py`
-- `qa/compatibility/gate.py`
-- `qa/compatibility/lab_config.py`
-- `qa/compatibility/make-blocked-result.py`
-- `qa/compatibility/prepare-harness.py`
-- `qa/compatibility/prepare-project.sh`
-- `qa/compatibility/requirements.txt`
-- `qa/compatibility/run-lab.py`
-- `qa/compatibility/run-native-emulator.sh`
-- `qa/compatibility/tests/test_lab.py`
+الحالتان الخام ظهرتا في Android TV 1080p/Movies (`page_marker_missing` و`empty_hierarchy`). لقطة الدليل تعرض Android TV Launcher مع نافذة Google TV Shop وليست التطبيق، لذلك هما false positive/launcher contamination.
 
-استُبدلت/حُذفت منظومة QA السابقة:
+Android TV 720p احتاج retry بسبب Emulator عابر ثم أنتج 7/7 حالات صالحة.
 
-- `.github/workflows/qa-v09317-emulator-matrix.yml`
-- `.github/workflows/qa-v09317-real-account-e2e.yml`
-- `qa/emulator/**`
-- `qa/e2e/**`
+Generated Source Snapshot Run #8 نجح أيضًا.
 
-نتيجة ذلك: المختبر الحالي أقوى في UI compatibility/evidence matrix، لكنه fixture-only ولا يحتوي authenticated production E2E.
+## ما أُغلق
 
-## ملفات Audit التي أُنشئت
+- 5 Phone Landscape navigation defects القديمة.
+- منع تحول الهاتف الأفقي إلى Tablet/Rail.
+- Downloads/Settings reachability ضمن phone profiles.
+- TV Search focus trap على 720p/1080p/4K.
+- TV Search IME/D-pad conflict؛ `DPAD_DOWN` ينتقل لأول نتيجة.
+- Product Critical المؤكد ضمن Compatibility fixture matrix أصبح 0.
 
-- `docs/project-audit/PROJECT-STATE.md`
-- `docs/project-audit/ARCHITECTURE-AUDIT.md`
-- `docs/project-audit/BUILD-AND-RELEASE-AUDIT.md`
-- `docs/project-audit/COMPATIBILITY-RESULTS.md`
-- `docs/project-audit/KNOWN-ISSUES.md`
-- `docs/project-audit/ROADMAP-TO-V1.md`
-- `docs/project-audit/TEST-STRATEGY.md`
-- `docs/project-audit/HANDOFF-FOR-NEXT-ENGINEER.md`
-- `docs/project-audit/NEW-CHAT-HANDOFF.md`
-- `docs/project-audit/project-state.json`
+## ما لم يُغلق
 
-لم يُعدل `app/src/main` أو Business Logic أو التصميم خلال Commit تقارير التدقيق.
+### Build/source governance
 
-## وصف Compatibility Lab
+- السورس النهائي ما زال يُولد من ZIP v0.9.1.20 وسلسلة Scripts.
+- لا يوجد Gradle project canonical مباشر معتمد في Git.
+- Gradle Wrapper 8.13 غير موجود في المشروع الرسمي.
+- لا يوجد Workflow حاكم واحد يبني مباشرة من checkout.
+- parity بين reconstructed وcanonical source غير منفذ.
 
-- يعيد تكوين سورس التطبيق الحالي بنفس سلسلة production.
-- يحقن Activity وfixtures في `app/src/debug` فقط.
-- لا يختبر Login؛ يفتح authenticated main shell ببيانات deterministic.
-- يفتح Home, Live, Movies, Series, Search, Downloads, Settings.
-- يلتقط Screenshot PNG، UI XML، Logcat، crash/system logs، window/activity، gfxinfo، meminfo.
-- يفحص page markers، bounds، clipping heuristics، safe area، overlap، crash/ANR/render، navigation reachability، وTV D-pad focus.
-- يبني HTML وMarkdown وJSON وGitHub Step Summary.
-- Push run يسجل findings ولا يفشل بها افتراضيًا؛ manual dispatch يدعم `enforce_findings=true`.
+### lint
 
-## التشغيل والـArtifacts
+- `lintDebug` لم يُثبت clean على HEAD الحالي.
+- الخطأ التاريخي Media3 unstable API في PlayerScreen يجب إعادة تشغيله والتحقق منه، لا تفترض اختفاءه.
 
-- Compatibility run: <https://github.com/azoozrm/-HULK-SA-Android/actions/runs/30287050875>
-- Aggregate report artifact: <https://github.com/azoozrm/-HULK-SA-Android/actions/runs/30287050875/artifacts/8661831141>
-- Lab APK artifact: <https://github.com/azoozrm/-HULK-SA-Android/actions/runs/30287050875/artifacts/8661311514>
-- Stability build workflow page: <https://github.com/azoozrm/-HULK-SA-Android/actions/workflows/build-v0947-stability-polish.yml>
-- Compatibility workflow page: <https://github.com/azoozrm/-HULK-SA-Android/actions/workflows/compatibility-lab.yml>
+### signing/release
 
-Artifact التقرير مسجل صالحًا حتى 2026-08-26. Device/APK artifacts مسجلة حتى 2026-08-10.
+- Release production موقع من HEAD الحالي غير موجود.
+- signing configuration المحمي غير منفذ.
+- certificate parity غير مثبت.
+- clean install وupgrade من مرجع الاستقرار غير مختبرين.
+- signed/minified R8 runtime غير مختبر.
 
-## الأجهزة والدقات والنتائج الفعلية
+### production/physical testing
 
-كل profiles هي Android Emulators x86_64، وليست OEM hardware certification.
+- real login/catalog/playback/download E2E غير موجود.
+- physical arm64/armeabi-v7a/API 23 غير مختبر.
+- Samsung/TCL/OEM hardware غير مؤهل.
+- process death/reboot/network/storage pressure غير مختبرة.
+- Macrobenchmark/screenshot regression/accessibility غير مكتملة.
 
-| الجهاز | API | الدقة/density | الحالات | النتيجة |
-|---|---:|---|---:|---|
-| Pixel 4a | 29 | 1080×2340 / 440dpi | 28/28 valid؛ portrait+landscape، font 1.0/1.3 | `PASS*` |
-| Pixel 6 | 31 | 1080×2400 / 420dpi | 14/14 | `FAIL` — Downloads+Settings navigation في Landscape |
-| Pixel 8 Pro | 35 | 1344×2992 / 480dpi | 14/14 | `FAIL` — Settings navigation في Landscape |
-| Galaxy S24 Ultra profile | 35 | 1440×3120 / 560dpi | 14/14 | `FAIL` — Downloads+Settings navigation في Landscape |
-| Pixel Tablet | 35 | 1600×2560 / 320dpi | 28/28؛ portrait+landscape، font 1.0/1.3 | `PASS*` |
-| Nexus 9 | 28 | 1536×2048 / 320dpi | 14/14 | `PASS*` |
-| Android TV 720p | 36 | 1280×720 / 213dpi | 6 valid من 7 | `FAIL`; Search focus trap؛ Series `NOT TESTED` |
-| Android TV 1080p | 36 | 1920×1080 / 320dpi | 7/7 | `FAIL` — Search focus trap |
-| Android TV 4K | 36 | 3840×2160 / 640dpi | 7/7 | `FAIL` — Search focus trap |
+## تحذيرات Run #31
 
-`PASS*` = لا critical product defect مؤكد في الجولة، لكن توجد advisories ولم يُختبر عتاد فعلي.
-
-الصفحات التي التقطت لكل حالة صالحة: Home, Live, Movies, Series, Search, Downloads, Settings. الاستثناء الوحيد: TV 720p/Series `NOT TESTED`.
-
-## النتائج الخام وتصحيحها
-
-- Raw cases: 133.
-- Valid app captures: 132.
-- Raw critical findings: 10.
-- Confirmed product critical findings: 8.
-- Invalid critical findings: 2، كلاهما من نفس TV 720p/Series launcher capture.
-- Warnings: 252.
-- Crash: 0.
-- ANR: 0.
-- Infrastructure error raw counter: 0، لكنه أخفق في تصنيف launcher capture.
-
-Warning counts:
-
-- `high_emulator_jank`: 133؛ غير صالح كبوابة أداء.
-- `text_at_display_edge`: 39.
-- `slow_page_start`: 27.
-- `interactive_overlap`: 24.
-- `possible_text_clipping`: 23.
+- `high_emulator_jank`: 133 — Advisory فقط، لا تستخدمه كبوابة أداء.
+- `text_at_display_edge`: 42.
+- `slow_page_start`: 39.
+- `possible_text_clipping`: 22.
+- `interactive_overlap`: 21.
 - `tv_safe_area`: 6.
 
-لا تعتمد warnings البصرية كعيوب مؤكدة قبل مراجعة screenshot/XML. لا تعتمد jank على أنه فشل أداء؛ القياس Debug Emulator وبضعة frames.
-
-## حالة Build وAPK/AAB
-
-Toolchain:
-
-- Gradle 8.13، بلا Wrapper في repo.
-- AGP 8.13.2.
-- Kotlin 2.2.21.
-- Java/JVM 17.
-- compileSdk/targetSdk 36.
-- minSdk 23.
-- module واحدة `:app`.
-
-النتائج المشغلة:
-
-- source reconstruction: `PASS`.
-- `compileDebugKotlin`: `PASS`.
-- `testDebugUnitTest`: `PASS`, 14/14.
-- `assembleDebug`: `PASS`.
-- `bundleDebug`: `PASS`.
-- `lintDebug`: `FAIL`, 1 error + 32 warnings + 1 hint.
-- `assembleRelease`: `PASS`.
-- `bundleRelease`: `PASS`.
-- R8/resource shrinking: `PASS`.
-- Release APK/AAB signature: `FAIL/UNSIGNED`.
-- signed Release install: `NOT TESTED`.
-
-Hashes المحلية المؤقتة:
-
-- Debug APK: `faca742c60caa7e151968569b95c53826245ba67cef1630e159cd0eab9728cf0`.
-- Debug AAB: `47396d500c1f6c85246869846d3e5023e89f6a304eef293828b359c302b8dce9`.
-- Unsigned Release APK: `9b4e535b8871db9aa8157b95291c81a1fa885507801b47f598d64641c92bf021`.
-- Unsigned Release AAB: `ed4dec629b6d9d43473145137982d2a9645767bb148968822862f6fff50fe472`.
-
-ABI verifier مرّ للـAPK/AAB Debug/Release بمجموعة دقيقة:
-
-- `arm64-v8a`
-- `armeabi-v7a`
-- `x86_64`
-- لا `x86`
-
-## ما تأكد وجوده في التطبيق
-
-- `HomeContentSnapshot` موصول ومستهلك في Home.
-- Smart Home scoring من history/favorites/genre/category.
-- `becauseYouWatched`, `suggested`, `personalizedLive`, popular/featured/continue watching.
-- Home catalog compaction إلى 320 عنصرًا.
-- FocusRequester وnavigation memory وD-pad handlers واسعة.
-- Downloads UI وqueue/pause/resume/retry/priority/Wi-Fi/schedule/speed/ETA/integrity.
-- Adaptive phone/tablet/TV + compact/medium/expanded + touch/remote.
-- Xtream networking وPortalResolver.
-- AES/GCM Android Keystore credential vault.
-- Media3 ExoPlayer/HLS، tracks، next episode، live switch، player release.
-- SharedPreferences history/favorites/download metadata.
-- R8/resource shrinking.
-
-هذه الميزات ليست كلها `COMPLETED`: Smart Home/Recommendations/Downloads/Focus/Performance/Adaptive كلها `PARTIAL` بسبب المشاكل أو فجوات الاختبار الموضحة أدناه.
-
-## المشاكل المؤكدة
-
-### P0
-
-1. Release غير موقع؛ لا signingConfig أو CI signing path.
-
-### P1
-
-1. السورس النهائي مولد من ZIP + 24 scripts، وليس Gradle project canonical.
-2. Landscape navigation يخفي Downloads/Settings في 5 حالات على Pixel 6/8/Galaxy profiles.
-3. TV Search Focus trap على 720p/1080p/4K.
-4. `lintDebug` يفشل عند `PlayerScreen.kt:1707` بسبب Media3 unstable API opt-in.
-5. cleartext مسموح عالميًا؛ Xtream credentials تدخل query/path إذا كانت البوابة HTTP.
-6. Downloads process-bound CoroutineScope بلا WorkManager/Foreground Service.
-7. Compatibility findings لا تفشل CI افتراضيًا.
-8. لا authenticated production E2E في HEAD الحالي.
-
-### P2
-
-1. Home cache لا يدخل `favorites` في invalidation؛ recommendations قد تتقادم.
-2. `UserLibrary.replaceFavorites()` يستخدم synchronous `commit()`.
-3. adaptive sizing يستخدم `Configuration.screenWidthDp/screenHeightDp` بدل window container.
-4. TV 720p/Series false critical؛ الحالة غير مختبرة.
-5. navigation audit swipe قد يفتح notification shade.
-6. jank advisory غير صالح كبوابة.
-7. startup يقرأ JSON/download metadata على main thread: خطر مشتبه به من الكود.
-8. لا Android instrumentation أو screenshot regression tests.
-9. version/tag/default-branch governance غير متسقة.
-10. service endpoint build configuration مكرر في 22 Workflow؛ لم تُكتشف credentials أو keys.
-
-### P3
-
-1. 22 Workflows، وبعض الأسماء/الإصدارات غير متطابقة.
-2. Gradle Wrapper مفقود.
-3. compiler deprecations وشروط دائمًا true.
-4. duplicate payload files وduplicate/unused icon resources.
-5. MainShell/Player/DownloadRepository ملفات ضخمة.
-6. README عنوان فقط.
-
-## المشاكل المشتبه بها منفصلة
-
-- startup jank/ANR عند history/download metadata كبيرة؛ لم يحدث ANR في المختبر.
-- DownloadRepository scope ownership/leak بعد ViewModel destruction؛ لم يُعمل heap/lifecycle test.
-- process kill/night schedule download failure متوقع معماريًا، لكن test runtime لم يُشغل.
-- edge/clipping/overlap/safe-area warnings البالغ عددها 92 غير متعلقة بالأداء تحتاج مراجعة حالة بحالة.
-- cleartext credential exposure لا يحدث على HTTPS؛ يجب التحقق من production portal policy دون كشف عنوانه.
-- R8 runtime regression غير مثبت لأن Release unsigned لم يُثبت.
-
-## أشياء لم يمكن التحقق منها
-
-- signing key ownership وupgrade certificate.
-- GitHub/Play Store release رسمي.
-- signed/minified Release runtime.
-- real login/catalog/backend.
-- real playback/download.
-- arm64/armeabi-v7a physical devices.
-- API 23 minimum.
-- Samsung/TCL/OEM firmware.
-- HDR/codecs/subtitles/audio focus.
-- process death/reboot/background constraints.
-- long-run memory/leak/ANR.
-- Store Data Safety/privacy/pre-launch report.
-- performance SLA/Macrobenchmark.
-
-## قيود وFalse Positives/Negatives
-
-False positives مثبتة:
-
-- TV Launcher حُسب app failure.
-- notification shade contamination.
-- 100% jank من عينة frames صغيرة.
-- lazy edge/semantic overlap heuristics.
-
-False negatives المحتملة:
-
-- fixture bypasses backend/loading/errors.
-- placeholder artwork.
-- no media/download I/O.
-- no ARM/OEM.
-- no signed Release.
-- no process death/accessibility/cutout/split-screen.
-
-لذلك Confidence للمختبر الحالي: `MEDIUM`.
-
-## درجات الجاهزية
-
-| المحور | /100 |
-|---|---:|
-| Build | 68 |
-| Installation | 55 |
-| Phone | 57 |
-| Tablet | 70 |
-| Android TV | 43 |
-| UI | 55 |
-| Performance | 38 |
-| Release signing | 5 |
-| Store | 20 |
-| Overall v1.0 | **44** |
-
-## الخطة الرسمية حتى v1.0
-
-1. استقرار البناء: materialize canonical source، Wrapper، workflow واحد، lint clean.
-2. التثبيت والتوقيع: protected signing environment، signed APK/AAB، install/upgrade.
-3. المعماريات: physical ARM/API minimum/runtime qualification.
-4. التكييف: landscape rail، TV Search focus، Home cache، window/insets، warning triage.
-5. الاختبارات: إصلاح lab classifier/gates، Compose UI/screenshots، Macrobenchmark، authenticated E2E، process/network/storage tests.
-6. v1.0: feature freeze، protected tag، signed candidate، Store/pre-launch، staged rollout.
-7. Features كبيرة بعد v1.0 فقط.
-
-اقرأ `docs/project-audit/ROADMAP-TO-V1.md` لشروط القبول والمخاطر والاعتماديات.
+لا تعدل UI لمجرد Warning heuristic. راجع screenshot/XML وأثبت الأثر أولًا.
 
 ## الخطوة التالية الوحيدة
 
-أنشئ PR واحدًا لا يغير السلوك: ولّد السورس من `8db147f...`، ثبّت الناتج كمشروع Gradle canonical في Git، أضف Gradle Wrapper 8.13 وWorkflow واحدًا يشغّل clean/lint/unit/debug/release/ABI مباشرة من checkout، وأثبت parity قبل إزالة reconstruction.
+نفذ PR واحدًا بلا تغيير سلوك باسم canonical source governance:
 
-لا تبدأ بإصلاح UI أو signing أو feature قبل قبول هذا PR، لأن كل هذه الأعمال يجب أن تُبنى فوق مصدر قابل للتتبع.
+1. أعد تكوين HEAD الحالي v0.9.3.18.
+2. ثبّت الناتج كمشروع Gradle canonical داخل Git.
+3. أضف Gradle Wrapper 8.13.
+4. أنشئ Workflow واحدًا يشغل مباشرة:
+   - clean.
+   - lintDebug.
+   - Unit Tests.
+   - Debug APK/AAB.
+   - Release APK/AAB.
+   - R8/resource shrinking.
+   - ABI verification.
+5. أنشئ Artifact/report يثبت parity مع reconstruction output.
+6. أبقِ ZIP والـScripts وWorkflows التاريخية مؤقتًا.
+7. لا تحذف reconstruction history قبل قبول parity.
 
-## الملفات التي يجب قراءتها أولًا
+إذا فشل CI:
 
-1. `docs/project-audit/PROJECT-STATE.md`
-2. `docs/project-audit/KNOWN-ISSUES.md`
-3. `docs/project-audit/BUILD-AND-RELEASE-AUDIT.md`
-4. `docs/project-audit/COMPATIBILITY-RESULTS.md`
-5. `docs/project-audit/ROADMAP-TO-V1.md`
-6. `docs/project-audit/TEST-STRATEGY.md`
-7. `docs/project-audit/ARCHITECTURE-AUDIT.md`
-8. `docs/project-audit/project-state.json`
+- افحص Logs.
+- حدد السبب الدقيق.
+- أصلح داخل نفس PR المنطقي.
+- أعد التشغيل.
+- لا تتوقف عند كل محاولة صغيرة.
 
-## أوامر البناء والاختبار الصحيحة للحالة الحالية
+## الترتيب بعد canonical source
 
-```bash
-AUDIT_OUT="$(mktemp -d)/project"
-bash qa/compatibility/prepare-project.sh "$AUDIT_OUT"
-cd "$AUDIT_OUT"
+1. lint clean.
+2. protected signing.
+3. signed Release APK/AAB.
+4. signature/certificate verification.
+5. clean install وupgrade.
+6. R8 runtime qualification.
+7. production E2E.
+8. physical ARM/OEM/API 23.
+9. performance/screenshots/process/network/storage.
+10. Release Candidate ثم v1.0.
 
-gradle --no-daemon --console=plain \
-  clean :app:compileDebugKotlin testDebugUnitTest \
-  :app:assembleDebug :app:bundleDebug \
-  -PHULK_PORTAL_URL=https://example.invalid
+## قرارات خطرة تحتاج توقفًا
 
-gradle --no-daemon --console=plain \
-  :app:lintDebug
+- حذف reconstruction history.
+- تغيير applicationId.
+- تغيير signing key.
+- كسر upgrade path.
+- تغيير معماري كبير.
+- نشر Release عام.
 
-gradle --no-daemon --console=plain \
-  :app:assembleRelease :app:bundleRelease \
-  -PHULK_PORTAL_URL=https://example.invalid
-```
+## قواعد إلزامية
 
-`lintDebug` متوقع أن يفشل حاليًا حتى إصلاح P1-04. لا تستخدم placeholder لتشغيل production؛ configuration الحقيقية يجب أن تحقن من بيئة آمنة.
+- لا تبدأ من الصفر.
+- لا تعيد التصميم.
+- لا تستخدم `main` بدل الفرع الرسمي.
+- لا تعرض endpoint أو credentials أو signing materials.
+- لا تعتبر Workflow أخضر Product PASS دون Artifacts.
+- لا تعتبر Emulator شهادة OEM/ARM.
+- لا تدّع نجاح signed Release أو production E2E أو performance قبل تشغيله.
+- لا تبدأ Feature كبيرة قبل v1.0.
 
-اختبارات أدوات المختبر:
+## ملفات المرجع
 
-```bash
-python3 -m pip install -r qa/compatibility/requirements.txt
-python3 -m unittest discover -s qa/compatibility/tests -v
-python3 qa/compatibility/lab_config.py --validate
-```
-
-تشغيل المختبر كبوابة بعد إصلاح false positives:
-
-```bash
-gh workflow run compatibility-lab.yml \
-  --ref phase-3-v0.9.3.0-adaptive-foundation \
-  -f enforce_findings=true
-```
-
-## تحذيرات إلزامية
-
-- لا تبدأ المشروع من الصفر.
-- لا تعيد تصميم المنجز.
-- لا تعتبر اسم Script/Commit دليل إنجاز؛ افحص الناتج الموصول.
-- لا تستخدم `main` بدل الفرع الرسمي دون قرار merge موثق.
-- لا توقع Debug artifact كتسليم production.
-- لا تقل إن Release install أو E2E أو performance نجح؛ لم يُشغل.
-- لا تعتبر GitHub run الأخضر product PASS؛ gate كان غير مفعل للـfindings.
-- لا تعتبر TV 720p/Series FAIL للتطبيق؛ هو `NOT TESTED`.
-- لا تعرض أو تنسخ Secrets أو بيانات دخول أو signing material أو service endpoint الفعلي.
-- لا تحذف reconstruction history قبل إثبات canonical-source parity.
-- لا تبدأ Feature كبيرة قبل إغلاق P0/P1 وإصدار v1.0 مستقر.
+- `docs/project-audit/PROJECT-STATE.md`.
+- `docs/project-audit/COMPATIBILITY-RESULTS.md`.
+- `docs/project-audit/KNOWN-ISSUES.md`.
+- `docs/project-audit/ROADMAP-TO-V1.md`.
+- `docs/project-audit/HANDOFF-FOR-NEXT-ENGINEER.md`.
+- `docs/project-audit/BUILD-AND-RELEASE-AUDIT.md`.
+- `docs/project-audit/ARCHITECTURE-AUDIT.md`.
+- `docs/project-audit/TEST-STRATEGY.md`.
+- `docs/project-audit/project-state.json`.
