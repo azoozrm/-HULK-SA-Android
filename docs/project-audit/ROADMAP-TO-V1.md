@@ -1,149 +1,101 @@
 # HULK SA Android — الخطة الرسمية إلى v1.0
 
 تاريخ التحديث: 2026-07-28 UTC  
-الحالة الحالية: v0.9.3.18 / build 62  
-HEAD الرسمي: `75853490d0fd9d7a0ed523eb30133288246094ba`
+الحالة الحالية: v0.9.3.18 / build 62
 
-لا تبدأ Feature كبيرة قبل إغلاق بوابات v1.0. لا تبدأ من الصفر ولا تعيد تصميم ما تم إنجازه. الترتيب أدناه إلزامي لأن التوقيع والاختبارات والإصدار يجب أن تُبنى فوق مصدر canonical قابل للتتبع.
+لا تبدأ Feature كبيرة قبل إغلاق بوابات v1.0. لا تبدأ من الصفر ولا تعيد تصميم ما تم إنجازه.
 
-## ما أُغلق منذ التدقيق الأول
+## المنجز الحاكم
 
-- Instrumentation وCompose UI Test foundation.
-- Launcher/Leanback/MainActivity/TvMainActivity/DPAD coverage.
-- Compatibility Lab مربوط بالـPRs ويعمل على 9 profiles.
-- Generated Source Snapshot متاح لفحص السورس المولد.
-- Phone landscape device classification/navigation defects أغلقت.
-- TV Search focus trap أُغلق على 720p/1080p/4K.
-- Product Critical المصحح في Run #31 أصبح 0.
+### المصدر والبناء — `COMPLETED`
 
-هذه الإنجازات لا تغلق canonical source أو signing أو production E2E.
+- مشروع Gradle canonical مباشر موجود.
+- Gradle Wrapper 8.13 موجود ومتحقق منه.
+- PR #53 أغلق drift بين canonical source وCompatibility reconstruction.
+- المسار التاريخي ZIP + patches محفوظ للتدقيق والاسترجاع، لكنه ليس Product source الفعال.
+- Canonical source manifest SHA-256 بوابة CI.
+- Canonical Build Run #89 نجح في clean/debug/unit/lint/release/R8/ABI.
 
-## المرحلة 1 — استقرار البناء وحوكمة المصدر
+### التكييف — `COMPLETED WITH ADVISORIES`
 
-الحالة: `IN PROGRESS / NEXT`
+- Phone Landscape classification/navigation defects مغلقة.
+- TV Search focus trap مغلق على 720p/1080p/4K.
+- Canonical Compatibility Run #47: 133/133، Product Critical = 0، Infrastructure = 0.
 
-### العمل المطلوب
+### signing foundation — `COMPLETED`
 
-1. إعادة تكوين HEAD الحالي v0.9.3.18 من السلسلة الرسمية.
-2. تثبيت الناتج كمشروع Gradle canonical مباشر داخل Git.
-3. إضافة Gradle Wrapper 8.13.
-4. إنشاء Workflow حاكم واحد يعمل من checkout مباشرة ويشغل:
-   - `clean`.
-   - `lintDebug`.
-   - Unit Tests.
-   - Debug APK/AAB.
-   - Release APK/AAB.
-   - R8/resource shrinking.
-   - ABI verification.
-5. بناء reconstruction output وcanonical output في CI ومقارنة:
-   - بنية الملفات الحساسة.
-   - Manifest/applicationId/version/SDK/dependencies.
-   - source hashes حيث يمكن.
-   - APK/AAB contents مع فصل الفروق غير الحتمية مثل timestamps/signatures.
-6. إبقاء ZIP والـScripts وWorkflows التاريخية مؤقتًا حتى قبول parity.
-7. بعد إثبات parity، اجعل canonical checkout هو مسار البناء الافتراضي.
+- signing inputs fail closed عند النقص.
+- unsigned fallback واضح ومتحقق منه.
+- verification scripts للـAPK/AAB موجودة.
+- Signed Release Qualification preflight نجح.
 
-### شروط القبول
+## المرحلة التالية — Signed Release Qualification
 
-- clone/checkout واحد قابل للفتح والبناء دون تشغيل 25+ patch script أولًا.
-- Wrapper موجود ويعمل.
-- Workflow canonical أخضر.
-- لا تغيير متعمد في السلوك أو UI.
-- تقرير parity داخل Artifact وداخل المستودع.
-- reconstruction history لم تُحذف.
-
-### مخاطر تمنع الدمج
-
-- اختلاف applicationId أو versionCode/versionName.
-- اختلاف Manifest أو network/security policy غير مقصود.
-- فقدان ABI.
-- حذف ملفات reconstruction قبل parity.
-- تعديل واسع غير متعلق بالحوكمة.
-
-## المرحلة 2 — lint clean
-
-الحالة: `BLOCKED BY STAGE 1`
+الحالة: `NEXT / BLOCKED BY PROTECTED SECRETS EXECUTION`
 
 ### العمل المطلوب
 
-- تشغيل `lintDebug` على canonical HEAD.
-- التحقق من خطأ Media3 unstable API التاريخي في `PlayerScreen`.
-- إصلاح الخطأ إن بقي بأقل تغيير صحيح، مثل opt-in بالمجال المناسب، دون تعطيل lint أو baseline يخفي الخطأ.
-- فرز warnings:
-  - fix required.
-  - accepted/documented.
-  - false positive.
-- جعل lint بوابة Required في Workflow الحاكم.
-
-### شروط القبول
-
-- lint لا يحتوي errors.
-- لا suppression واسع غير مبرر.
-- warnings المقبولة موثقة.
-
-## المرحلة 3 — التوقيع والتثبيت
-
-الحالة: `BLOCKED BY STAGES 1–2`
-
-### العمل المطلوب
-
-1. التحقق من شهادة مرجع الاستقرار محليًا/ببيئة محمية دون نشرها.
-2. إعداد GitHub protected environment وSecrets للمفتاح الرسمي.
-3. إضافة signingConfig لا يطبع كلمات المرور أو المسارات الحساسة.
-4. إخراج signed Release APK وAAB من canonical HEAD.
-5. التحقق من:
+1. تشغيل `HULK SA Signed Release Qualification` يدويًا من protected environment.
+2. استخدام Secrets الرسمية فقط:
+   - keystore base64.
+   - alias.
+   - store/key passwords.
+   - expected certificate SHA-256.
+   - production portal configuration الآمنة.
+3. بناء signed Release APK وAAB من v0.9.3.18.
+4. التحقق من:
+   - applicationId.
+   - versionCode/versionName.
    - APK signature schemes.
-   - certificate fingerprint parity.
-   - AAB signing.
-   - zipalign.
-6. install clean.
-7. upgrade من مرجع الاستقرار مع بقاء البيانات والمسار قابلًا للترقية.
-8. R8/minified runtime smoke.
+   - APK/AAB certificate fingerprint.
+   - ABI packaging.
+   - artifact hashes.
+5. عدم طباعة أو رفع signing materials.
 
 ### شروط القبول
 
-- signed APK/AAB Artifacts من CI محمي.
-- شهادة الترقية مطابقة للمسار المعتمد.
-- clean install وupgrade PASS.
-- لا Secrets في Logs أو Artifacts أو PR.
+- signed APK/AAB artifacts من CI محمي.
+- certificate fingerprint مطابق للمفتاح المعتمد.
+- لا unsigned APK يُقدم كتسليم production.
+- لا Secrets في Logs أو Artifacts.
 
 ### قرارات خطرة تحتاج توقفًا
 
 - تغيير signing key.
 - تغيير applicationId.
-- كسر upgrade path.
+- تغيير certificate أو كسر upgrade path.
 
-## المرحلة 4 — المعماريات والأجهزة الفعلية
+## المرحلة التالية — Install وUpgrade
 
 الحالة: `BLOCKED BY SIGNED RELEASE`
 
 ### العمل المطلوب
 
-- physical arm64-v8a.
-- physical armeabi-v7a عند توفر جهاز مناسب.
-- API 23 minimum runtime.
-- Samsung phone/tablet profile فعلي.
-- Android TV/Google TV/TCL أو OEM فعلي.
-- install/launch/login/playback/download على signed Release.
+- clean install للـsigned APK.
+- launch/login smoke.
+- upgrade من مرجع الاستقرار.
+- التحقق من بقاء بيانات التطبيق ومسار الترقية.
+- R8/minified runtime smoke.
 
 ### شروط القبول
 
-- لا UnsatisfiedLinkError أو ABI packaging regression.
-- التطبيق يعمل على الحد الأدنى المدعوم.
-- نتائج OEM موثقة بالأجهزة والإصدارات دون بيانات حسابات.
+- install وupgrade PASS.
+- لا certificate mismatch.
+- لا data loss غير مقصود.
+- لا launch/R8 regression.
 
-## المرحلة 5 — Production E2E والاعتمادية
+## Production E2E
 
 الحالة: `BLOCKED BY SIGNED RELEASE`
 
-### مسارات E2E
+### المسارات
 
 - real login.
 - catalog load.
 - Home/Live/Movies/Series/Search.
-- playback وtrack/subtitle/audio controls.
+- playback وtracks/subtitles/audio.
 - favorites/history.
-- download queue/pause/resume/retry/integrity.
+- Durable Downloads: queue/pause/resume/retry/integrity.
 - logout/login.
 
 ### اختبارات الاعتمادية
@@ -156,61 +108,62 @@ HEAD الرسمي: `75853490d0fd9d7a0ed523eb30133288246094ba`
 - scheduled/Wi-Fi download behavior.
 - long-run memory/leak/ANR.
 
-### شروط الأمان
+### الأمان
 
 - endpoint وcredentials من Secrets فقط.
 - لا screenshots أو logs تكشف بيانات حساب.
-- لا fixtures تعتبر بديلًا عن production E2E.
+- fixture matrix لا تعتبر بديلًا عن production E2E.
 
-## المرحلة 6 — جودة UI والأداء
+## Physical ARM/OEM qualification
+
+الحالة: `BLOCKED BY SIGNED RELEASE`
+
+- physical arm64-v8a.
+- armeabi-v7a عند توفر جهاز مناسب.
+- API 23 minimum.
+- Samsung phone/tablet فعلي.
+- Android TV/Google TV/TCL أو OEM فعلي.
+- playback/download على signed Release.
+
+Emulator x86_64 ليس شهادة أجهزة فعلية.
+
+## UI والجودة والأداء
 
 الحالة: `PARTIAL`
 
-### العمل المطلوب
-
-- إصلاح Compatibility classifier لتمييز Launcher/IME/system windows.
-- تفعيل Product Critical gate بعد إصلاح false positives.
-- screenshot regression لمجموعة مرجعية.
+- تفعيل Product Critical gate كشرط صارم مع policy موثقة.
+- screenshot regression.
 - Accessibility checks.
-- Macrobenchmark startup/scroll/playback وفق SLA معتمد.
-- triage تحذيرات Run #31 حالة بحالة.
+- Macrobenchmark startup/scroll/playback وفق SLA.
+- triage تحذيرات Run #47 حالة بحالة.
 
-### لا يُقبل
+لا تستخدم `high_emulator_jank` الحالي كقياس أداء ولا تصلح Warning بصريًا بلا Screenshot/XML.
 
-- اعتبار `high_emulator_jank` الحالي قياس performance.
-- إصلاح UI لمجرد Warning heuristic دون Screenshot/XML.
-- ادعاء OEM certification من Emulator.
-
-## المرحلة 7 — Release Candidate وv1.0
+## Release Candidate وv1.0
 
 الحالة: `NOT STARTED`
 
 ### شروط RC
 
 - feature freeze.
-- canonical CI أخضر.
-- lint clean.
+- canonical CI وlint أخضران.
 - signed Release install/upgrade PASS.
 - Product Critical = 0.
 - production E2E PASS.
 - physical ARM/OEM qualification مقبولة.
-- known issues مصنفة ولا توجد P0/P1 مفتوحة.
+- لا P0/P1 مفتوحة.
 - privacy/Data Safety/pre-launch review.
 
 ### إصدار v1.0
 
 - protected tag.
-- signed APK/AAB مطابقان للـtag.
+- APK/AAB مطابقان للـtag.
 - release notes.
 - staged rollout ومراقبة crash/ANR.
 - rollback plan.
 
-لا يُنشر Release عام دون قرار صريح من المستخدم.
+لا يُنشر Release عام دون قرار صريح.
 
-## المرحلة 8 — الميزات الكبرى بعد v1.0
+## التسلسل التنفيذي
 
-تبدأ فقط بعد استقرار v1.0. أي اقتراح ميزة قبل ذلك يُسجل في backlog ولا يُنفذ داخل خط الاستقرار.
-
-## التسلسل التنفيذي المختصر
-
-`Canonical source → lint clean → protected signing → install/upgrade → production E2E → physical ARM/OEM → performance/screenshots → RC → v1.0`
+`Signed artifacts → certificate verification → install/upgrade → signed R8 + production E2E → physical ARM/OEM → reliability/performance/screenshots → RC → v1.0`
