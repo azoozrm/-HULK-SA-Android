@@ -33,7 +33,11 @@ JAR_REPORT="$(mktemp)"
 CERT_REPORT="$(mktemp)"
 trap 'rm -f "$JAR_REPORT" "$CERT_REPORT"' EXIT
 
-jarsigner -verify -strict -verbose -certs "$AAB" | tee "$JAR_REPORT"
+set +e
+jarsigner -verify -strict -verbose -certs "$AAB" 2>&1 | tee "$JAR_REPORT"
+JARSIGNER_STATUS=${PIPESTATUS[0]}
+set -e
+
 keytool -printcert -jarfile "$AAB" | tee "$CERT_REPORT"
 
 ACTUAL_RAW="$(sed -n 's/^[[:space:]]*SHA256: //p' "$CERT_REPORT" | head -n1)"
@@ -53,11 +57,20 @@ if ! grep -Fq 'jar verified.' "$JAR_REPORT"; then
   echo "AAB JAR signature verification did not report success" >&2
   exit 1
 fi
+if [[ "$JARSIGNER_STATUS" -ne 0 && "$JARSIGNER_STATUS" -ne 4 ]]; then
+  echo "AAB jarsigner verification failed with status $JARSIGNER_STATUS" >&2
+  exit "$JARSIGNER_STATUS"
+fi
 
 {
   echo "AAB: $(basename "$AAB")"
   echo "Certificate SHA-256: $ACTUAL"
   echo "JAR signature verification: PASS"
+  if [[ "$JARSIGNER_STATUS" -eq 4 ]]; then
+    echo "Strict verification warnings: PRESENT (accepted after successful signature and certificate checks)"
+  else
+    echo "Strict verification warnings: NONE"
+  fi
 } > "$REPORT"
 
 cat "$REPORT"
