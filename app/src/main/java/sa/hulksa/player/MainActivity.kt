@@ -30,6 +30,9 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        requestDownloadNotificationPermissionIfNeeded(
+            televisionDevice = isTelevisionDevice,
+        )
         setContent {
             HulkTheme {
                 HulkApp(
