@@ -5,8 +5,12 @@ on:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
     paths:
+      - 'app/build.gradle.kts'
+      - 'tools/verify-apk-signing.sh'
+      - 'tools/verify-aab-signing.sh'
       - '.github/workflows/signed-release-qualification.yml'
       - '.github/signing-qualification-v09318'
+      - 'docs/project-audit/RELEASE-SIGNING-QUALIFICATION.md'
   pull_request:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
