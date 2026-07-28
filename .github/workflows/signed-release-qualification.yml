@@ -1,25 +1,6 @@
 name: HULK SA Signed Release Qualification
 
 on:
-  push:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - 'app/build.gradle.kts'
-      - 'tools/verify-apk-signing.sh'
-      - 'tools/verify-aab-signing.sh'
-      - '.github/workflows/signed-release-qualification.yml'
-      - '.github/signing-qualification-v09318'
-      - 'docs/project-audit/RELEASE-SIGNING-QUALIFICATION.md'
-  pull_request:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - 'app/build.gradle.kts'
-      - 'tools/verify-apk-signing.sh'
-      - 'tools/verify-aab-signing.sh'
-      - '.github/workflows/signed-release-qualification.yml'
-      - 'docs/project-audit/RELEASE-SIGNING-QUALIFICATION.md'
   workflow_dispatch:
     inputs:
       expected_version_code:
@@ -110,7 +91,6 @@ jobs:
 
   signed-release:
     name: Build and verify signed production artifacts
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs: signing-preflight
     runs-on: ubuntu-latest
     environment: production-signing
@@ -156,7 +136,7 @@ jobs:
           [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD" ]] || missing+=(HULK_RELEASE_KEY_PASSWORD)
           [[ -n "$EXPECTED_CERT_SHA256" ]] || missing+=(HULK_RELEASE_CERT_SHA256)
           if [[ "${#missing[@]}" -ne 0 ]]; then
-            printf 'Missing required release secrets: %s\n' "${missing[*]}" >&2
+            printf 'Missing required release signing inputs: %s\n' "${missing[*]}" >&2
             exit 2
           fi
           echo 'PASS: all required release signing inputs are present'
