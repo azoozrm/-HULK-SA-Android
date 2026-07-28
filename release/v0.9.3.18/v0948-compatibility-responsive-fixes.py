@@ -78,6 +78,8 @@ def harden_adaptive_classifier() -> None:
 }"""
     if device_replacement not in text:
         text, count = device_pattern.subn(device_replacement, text, count=1)
+        if count != 1:
+            raise SystemExit("missing adaptive device classifier")
         print(f"PASS: adaptive device classifier updates={count}")
 
     navigation_pattern = re.compile(
@@ -94,9 +96,37 @@ def harden_adaptive_classifier() -> None:
 }"""
     if navigation_replacement not in text:
         text, count = navigation_pattern.subn(navigation_replacement, text, count=1)
+        if count != 1:
+            raise SystemExit("missing adaptive navigation classifier")
         print(f"PASS: adaptive navigation classifier updates={count}")
 
     save(path, text)
+
+    test_relative = "app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt"
+    test_path, tests = load(test_relative)
+    test_name = "fun landscapePhoneDoesNotBecomeTabletOrRail()"
+    if test_name not in tests:
+        test_case = '''
+    @Test
+    fun landscapePhoneDoesNotBecomeTabletOrRail() {
+        val device = classifyDeviceClass(
+            isTelevisionDevice = false,
+            smallestWidthDp = 411,
+            widthDp = 891,
+        )
+        val window = classifyWindowWidth(891)
+
+        assertEquals(HulkDeviceClass.MOBILE, device)
+        assertEquals(HulkWindowWidthClass.EXPANDED, window)
+        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+    }
+'''
+        marker = "    @Test\n    fun portraitTabletUsesTabletLayoutWithoutTelevisionSizing()"
+        if marker not in tests:
+            raise SystemExit("missing adaptive classifier regression test marker")
+        tests = tests.replace(marker, test_case + "\n" + marker, 1)
+        save(test_path, tests)
+        print("PASS: landscape phone classifier regression test added")
 
 
 def harden_main_shell() -> None:
@@ -105,6 +135,8 @@ def harden_main_shell() -> None:
 
     for import_line in (
         "import androidx.compose.foundation.layout.navigationBarsPadding\n",
+        "import androidx.compose.ui.focus.FocusDirection\n",
+        "import androidx.compose.ui.platform.LocalFocusManager\n",
     ):
         text, added = ensure_import(text, import_line)
         if added:
@@ -160,7 +192,6 @@ def harden_main_shell() -> None:
     )
     print(f"PASS: category row padding updates={category_count}")
 
-    # Preserve the real device type when a navigation rail is used on tablets.
     text, rail_count = re.subn(
         r"(state\s*=\s*state,\s*\n\s*)isTv\s*=\s*true,(\s*\n\s*navigationMemory\s*=\s*navigationMemory,)",
         r"\1isTv = isTv,\2",
@@ -169,7 +200,6 @@ def harden_main_shell() -> None:
     )
     print(f"PASS: rail device-class corrections={rail_count}")
 
-    # Add explicit bottom breathing room to the TV Home surface when its function is discoverable.
     home_bounds = None
     for candidate in ("HomeScreen", "HomeContent", "HomePage"):
         home_bounds = function_bounds(text, candidate)
@@ -191,6 +221,50 @@ def harden_main_shell() -> None:
             print("PASS: TV Home function found; no safe-area rewrite required")
     else:
         print("WARN: TV Home function name not discoverable; mobile fixes still applied")
+
+    search_bounds = function_bounds(text, "UnifiedSearchScreen")
+    if search_bounds is None:
+        raise SystemExit("missing UnifiedSearchScreen")
+    search_start, search_end = search_bounds
+    search = text[search_start:search_end]
+    if "val focusManager = LocalFocusManager.current" not in search:
+        marker = "    val colors = LocalHulkColors.current\n"
+        if marker not in search:
+            raise SystemExit("missing UnifiedSearchScreen color marker")
+        search = search.replace(marker, marker + "    val focusManager = LocalFocusManager.current\n", 1)
+
+    old_field = '        HulkTextField(state.searchQuery, onSearch, "ابحث بالاسم او السنة او النوع…", Modifier.fillMaxWidth())'
+    if "val searchFieldModifier = Modifier" not in search:
+        if old_field not in search:
+            raise SystemExit("missing UnifiedSearchScreen field marker")
+        replacement = '''        val searchFieldModifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isTv) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) {
+                            false
+                        } else {
+                            when (event.key) {
+                                Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Down)
+                                Key.DirectionLeft -> focusManager.moveFocus(FocusDirection.Left)
+                                else -> false
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+        HulkTextField(
+            value = state.searchQuery,
+            onValueChange = onSearch,
+            label = "ابحث بالاسم او السنة او النوع…",
+            modifier = searchFieldModifier,
+        )'''
+        search = search.replace(old_field, replacement, 1)
+        print("PASS: TV search DPAD focus escape added")
+    text = text[:search_start] + search + text[search_end:]
 
     save(path, text)
 
