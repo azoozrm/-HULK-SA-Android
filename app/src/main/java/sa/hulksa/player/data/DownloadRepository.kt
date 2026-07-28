@@ -275,11 +275,20 @@ class DownloadRepository(context: Context) {
         val limit = settings().concurrentDownloads
         val availableSlots = (limit - jobs.values.count { it.isActive }).coerceAtLeast(0)
         if (availableSlots == 0) return
+        val now = System.currentTimeMillis()
+        val networkAvailable = networkConstraintMessage() == null
         val candidates = synchronized(lock) {
             cache.asSequence()
                 .filter { it.status in SCHEDULABLE_STATUSES }
                 .filter { jobs[it.downloadId]?.isActive != true }
-                .filter(::constraintsAllowAttempt)
+                .filter { item ->
+                    decideDownloadAttempt(
+                        item = item,
+                        nowEpochMs = now,
+                        networkAvailable = networkAvailable,
+                        storageAvailable = storageTarget(item) != null,
+                    ).canRun
+                }
                 .sortedWith(
                     compareByDescending<OfflineDownload> { it.priority }
                         .thenBy { it.queuePosition }
@@ -715,13 +724,6 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    private fun constraintsAllowAttempt(item: OfflineDownload): Boolean = when (item.status) {
-        OfflineStatus.WAITING_SCHEDULE -> item.scheduledAtEpochMs <= System.currentTimeMillis()
-        OfflineStatus.WAITING_NETWORK -> networkConstraintMessage() == null
-        OfflineStatus.WAITING_STORAGE -> storageTarget(item) != null
-        else -> true
-    }
-
     private fun scheduledStartForNewDownload(): Long = when (settings().scheduleMode) {
         DownloadScheduleMode.NOW -> 0L
         DownloadScheduleMode.NIGHT -> nextNightStartEpochMs()
@@ -976,51 +978,37 @@ class DownloadRepository(context: Context) {
         preferences.edit().putString(KEY_DOWNLOADS, array.toString()).apply()
     }
 
-    private fun JSONObject.optNullableString(key: String): String? =
-        if (!has(key) || isNull(key)) null else optString(key).takeIf(String::isNotBlank)
+    private fun currentCoroutineContextBlockingCheck() {
+        currentCoroutineContextBridge().ensureActive()
+    }
 
-    private fun JSONObject.optNullableInt(key: String): Int? =
-        if (!has(key) || isNull(key)) null else optInt(key)
+    private fun currentCoroutineContextBridge() = kotlinx.coroutines.runBlocking { currentCoroutineContext() }
 
-    private fun JSONObject.optNullableBoolean(key: String): Boolean? =
-        if (!has(key) || isNull(key)) null else optBoolean(key)
+    private fun parseTotalFromContentRange(value: String?): Long {
+        if (value.isNullOrBlank()) return -1L
+        return value.substringAfterLast('/', "").toLongOrNull() ?: -1L
+    }
 
-    private fun parseTotalFromContentRange(value: String?): Long = value
-        ?.substringAfterLast('/', missingDelimiterValue = "")
-        ?.trim()
-        ?.takeUnless { it == "*" }
-        ?.toLongOrNull()
-        ?: -1L
-
-    private fun safeExtension(raw: String): String = raw
+    private fun safeExtension(raw: String?): String = raw.orEmpty()
         .trim()
-        .trimStart('.')
         .lowercase()
-        .takeIf { it.matches(Regex("[a-z0-9]{2,5}")) }
-        ?: "mp4"
+        .filter { it.isLetterOrDigit() }
+        .take(8)
+        .ifBlank { "mp4" }
 
     private fun buildFileName(title: String, streamId: Int, extension: String): String {
         val safeTitle = title
-            .replace(Regex("[^\\p{L}\\p{N}._ -]"), "")
+            .replace(Regex("[^\\p{L}\\p{N}._ -]+"), "")
             .trim()
             .replace(Regex("\\s+"), "_")
-            .take(72)
-            .ifBlank { "HULK" }
-        return "${safeTitle}_${streamId}.$extension"
+            .take(96)
+            .ifBlank { "hulk_content" }
+        return "${safeTitle}_$streamId.$extension"
     }
 
     private fun formatBytes(bytes: Long): String {
-        if (bytes <= 0L) return "0 MB"
-        val megabytes = bytes.toDouble() / (1024.0 * 1024.0)
-        return if (megabytes >= 1024.0) {
-            String.format(java.util.Locale.US, "%.1f GB", megabytes / 1024.0)
-        } else {
-            String.format(java.util.Locale.US, "%.0f MB", megabytes)
-        }
-    }
-
-    private fun currentCoroutineContextBlockingCheck() {
-        if (Thread.currentThread().isInterrupted) throw CancellationException("Download paused")
+        val mb = bytes.toDouble() / (1024.0 * 1024.0)
+        return if (mb >= 1024.0) "%.1f GB".format(mb / 1024.0) else "%.0f MB".format(mb)
     }
 
     sealed interface EnqueueResult {
@@ -1047,28 +1035,29 @@ class DownloadRepository(context: Context) {
     private class PermanentDownloadException(message: String) : IOException(message)
 
     private companion object {
-        const val PREFERENCES_NAME = "hulk_offline_downloads"
+        const val PREFERENCES_NAME = "hulk_downloads"
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_WIFI_ONLY = "wifi_only"
-        const val KEY_STORAGE_PATH = "storage_path"
         const val KEY_SCHEDULE_MODE = "schedule_mode"
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
-        const val USER_AGENT = "HULK-SA-Android-TV/0.6.5"
-        const val DEFAULT_CONCURRENT_DOWNLOADS = 2
+        const val KEY_STORAGE_PATH = "storage_path"
+        const val DEFAULT_CONCURRENT_DOWNLOADS = 1
         const val MAX_CONCURRENT_DOWNLOADS = 3
+        const val MAX_RETRIES = 4
+        const val BUFFER_SIZE = 128 * 1024
         const val NIGHT_START_HOUR = 2
         const val NIGHT_END_HOUR = 6
-        const val MAX_RETRIES = 6
-        const val BUFFER_SIZE = 256 * 1024
-        const val PROGRESS_CHUNK_BYTES = 1024 * 1024L
         const val PROGRESS_INTERVAL_NANOS = 500_000_000L
+        const val PROGRESS_CHUNK_BYTES = 512 * 1024L
         const val MINIMUM_START_SPACE_BYTES = 64L * 1024L * 1024L
-        const val MINIMUM_SAFETY_BYTES = 32L * 1024L * 1024L
+        const val MINIMUM_SAFETY_BYTES = 96L * 1024L * 1024L
+        const val USER_AGENT = "HULK-SA-Android/0.9.3"
 
         val ACTIVE_STATUSES = setOf(
             OfflineStatus.QUEUED,
             OfflineStatus.CHECKING,
             OfflineStatus.DOWNLOADING,
+            OfflineStatus.WAITING_SCHEDULE,
             OfflineStatus.WAITING_NETWORK,
             OfflineStatus.WAITING_STORAGE,
         )
@@ -1080,3 +1069,9 @@ class DownloadRepository(context: Context) {
         )
     }
 }
+
+private fun JSONObject.optNullableString(name: String): String? = if (isNull(name)) null else optString(name).takeIf(String::isNotBlank)
+
+private fun JSONObject.optNullableInt(name: String): Int? = if (isNull(name)) null else optInt(name)
+
+private fun JSONObject.optNullableBoolean(name: String): Boolean? = if (isNull(name)) null else optBoolean(name)
