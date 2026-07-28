@@ -8,6 +8,13 @@ on:
       - '.github/workflows/canonical-v09318-sync.yml'
       - 'qa/canonical/sync-v09318.py'
       - 'qa/compatibility/prepare-reconstructed-project.sh'
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/canonical-v09318-sync.yml'
+      - 'qa/canonical/sync-v09318.py'
+      - 'qa/compatibility/prepare-reconstructed-project.sh'
 
 permissions:
   contents: write
@@ -18,6 +25,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
