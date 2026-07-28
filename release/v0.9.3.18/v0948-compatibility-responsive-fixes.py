@@ -264,7 +264,48 @@ def harden_main_shell() -> None:
         )'''
         search = search.replace(old_field, replacement, 1)
         print("PASS: TV search DPAD focus escape added")
+
+    old_grid_call = "            ContentGrid(results, isTv, MainDestination.SEARCH, navigationMemory, isFavorite, onOpen, onToggleFavorite)"
+    new_grid_call = '''            ContentGrid(
+                results,
+                isTv,
+                MainDestination.SEARCH,
+                navigationMemory,
+                isFavorite,
+                onOpen,
+                onToggleFavorite,
+                restoreFocusedCard = isTv,
+            )'''
+    if new_grid_call not in search:
+        if old_grid_call not in search:
+            raise SystemExit("missing UnifiedSearchScreen ContentGrid marker")
+        search = search.replace(old_grid_call, new_grid_call, 1)
+        print("PASS: TV search result focus restoration enabled")
     text = text[:search_start] + search + text[search_end:]
+
+    grid_bounds = function_bounds(text, "ContentGrid")
+    if grid_bounds is None:
+        raise SystemExit("missing ContentGrid")
+    grid_start, grid_end = grid_bounds
+    grid = text[grid_start:grid_end]
+    old_search_branch = '''        if (destination == MainDestination.SEARCH) {
+            if (content.isNotEmpty()) gridState.scrollToItem(0)
+            navigationMemory.save(destination, content.firstOrNull()?.let { "${it.type}:${it.id}" }.orEmpty(), 0)
+        } else if (restoreFocusedCard && content.isNotEmpty()) {'''
+    new_search_branch = '''        if (destination == MainDestination.SEARCH) {
+            if (content.isNotEmpty()) gridState.scrollToItem(0)
+            navigationMemory.save(destination, content.firstOrNull()?.let { "${it.type}:${it.id}" }.orEmpty(), 0)
+            if (restoreFocusedCard && content.isNotEmpty()) {
+                delay(120)
+                runCatching { targetRequester.requestFocus() }
+            }
+        } else if (restoreFocusedCard && content.isNotEmpty()) {'''
+    if new_search_branch not in grid:
+        if old_search_branch not in grid:
+            raise SystemExit("missing ContentGrid search focus marker")
+        grid = grid.replace(old_search_branch, new_search_branch, 1)
+        print("PASS: TV search first result receives focus")
+    text = text[:grid_start] + grid + text[grid_end:]
 
     save(path, text)
 
