@@ -74,6 +74,11 @@ jobs:
           test ! -e project/app/src/main
           ./gradlew --version
 
+      - name: Verify canonical source manifest
+        run: |
+          set -euo pipefail
+          sha256sum -c qa/canonical/canonical-source.sha256
+
       - name: Debug and unit tests
         run: |
           set -euo pipefail
