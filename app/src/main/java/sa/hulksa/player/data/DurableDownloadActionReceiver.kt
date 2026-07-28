@@ -15,12 +15,12 @@ internal fun durableDownloadNotificationAction(rawAction: String?): DurableDownl
     }
 
 internal class DurableDownloadActionReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val downloadId = intent.getLongExtra(EXTRA_DOWNLOAD_ID, -1L)
+    override fun onReceive(context: Context, intent: Intent?) {
+        val downloadId = intent?.getLongExtra(EXTRA_DOWNLOAD_ID, -1L) ?: -1L
         if (downloadId <= 0L) return
         when (durableDownloadNotificationAction(intent.action)) {
             DurableDownloadNotificationAction.PAUSE -> {
-                DownloadRepositoryProcessOwner.get(context).pause(downloadId)
+                DownloadRepositoryProcessOwner.get(context.applicationContext).pause(downloadId)
             }
             null -> Unit
         }
