@@ -42,7 +42,7 @@ internal fun durableDownloadExecutionDirective(
 
 internal class DownloadExecutionEntryPoint(
     context: Context,
-    private val repository: DownloadRepository = DownloadRepository(context.applicationContext),
+    private val repository: DownloadRepository = DownloadRepositoryProcessOwner.get(context),
 ) {
     suspend fun execute(downloadId: Long): DurableDownloadExecutionResult {
         validateDurableDownloadId(downloadId)
