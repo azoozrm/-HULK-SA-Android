@@ -56,6 +56,24 @@ internal fun durableDownloadSchedulingState(
     scheduledAtEpochMs = record.scheduledAtEpochMs,
 )
 
+internal fun shouldApplyDurableDownloadSchedulingState(
+    previous: DurableDownloadSchedulingState?,
+    current: DurableDownloadSchedulingState,
+    currentStatus: OfflineStatus,
+): Boolean {
+    if (previous == current) return false
+    val transportAlreadyActive =
+        currentStatus == OfflineStatus.CHECKING || currentStatus == OfflineStatus.DOWNLOADING
+    if (
+        transportAlreadyActive &&
+        previous?.action == DurableDownloadLifecycleAction.ENQUEUE &&
+        current.action == DurableDownloadLifecycleAction.ENQUEUE
+    ) {
+        return false
+    }
+    return true
+}
+
 internal class DurableDownloadPreferenceStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
