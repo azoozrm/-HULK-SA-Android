@@ -9,12 +9,16 @@ internal enum class DurableDownloadExecutionResult {
     TERMINAL,
 }
 
+internal fun validateDurableDownloadId(downloadId: Long) {
+    require(downloadId > 0L) { "downloadId must be positive" }
+}
+
 internal class DownloadExecutionEntryPoint(
     context: Context,
     private val repository: DownloadRepository = DownloadRepository(context.applicationContext),
 ) {
     suspend fun execute(downloadId: Long): DurableDownloadExecutionResult {
-        require(downloadId > 0L) { "downloadId must be positive" }
+        validateDurableDownloadId(downloadId)
         return repository.executeScheduledDownload(downloadId)
     }
 }
