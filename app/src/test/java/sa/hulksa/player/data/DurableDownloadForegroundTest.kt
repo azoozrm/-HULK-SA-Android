@@ -24,9 +24,28 @@ class DurableDownloadForegroundTest {
     }
 
     @Test
+    fun `notification actions have independent request codes`() {
+        assertNotEquals(
+            durableDownloadNotificationRequestCode(42L, ACTION_PAUSE_DOWNLOAD),
+            durableDownloadNotificationRequestCode(42L, ACTION_RESUME_DOWNLOAD),
+        )
+    }
+
+    @Test
+    fun `notification request codes stay stable`() {
+        assertEquals(
+            durableDownloadNotificationRequestCode(42L, ACTION_PAUSE_DOWNLOAD),
+            durableDownloadNotificationRequestCode(42L, ACTION_PAUSE_DOWNLOAD),
+        )
+    }
+
+    @Test
     fun `invalid download id is rejected`() {
         assertThrows(IllegalArgumentException::class.java) {
             durableDownloadNotificationId(0L)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            durableDownloadNotificationRequestCode(0L, ACTION_PAUSE_DOWNLOAD)
         }
     }
 }
