@@ -58,6 +58,7 @@ python3 "$REPO_ROOT/release/v0.9.3.17/v0947-navigation-categories.py" "$WORK_DIR
 python3 "$REPO_ROOT/release/v0.9.3.17/v0947-player-panels.py" "$WORK_DIR/project"
 python3 "$REPO_ROOT/release/v0.9.3.17/v0947-details-favorites-downloads.py" "$WORK_DIR/project"
 python3 "$REPO_ROOT/release/v0.9.3.18/v0948-compatibility-responsive-fixes.py" "$WORK_DIR/project"
+python3 "$REPO_ROOT/release/v0.9.3.18/v0948-tv-focus-safeareas.py" "$WORK_DIR/project"
 python3 "$REPO_ROOT/qa/compatibility/prepare-harness.py" "$WORK_DIR/project"
 
 mkdir -p "$(dirname "$OUTPUT")"
