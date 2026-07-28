@@ -44,6 +44,20 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
+    fun landscapePhoneDoesNotBecomeTabletOrRail() {
+        val device = classifyDeviceClass(
+            isTelevisionDevice = false,
+            smallestWidthDp = 411,
+            widthDp = 891,
+        )
+        val window = classifyWindowWidth(891)
+
+        assertEquals(HulkDeviceClass.MOBILE, device)
+        assertEquals(HulkWindowWidthClass.EXPANDED, window)
+        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+    }
+
+    @Test
     fun portraitTabletUsesTabletLayoutWithoutTelevisionSizing() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,

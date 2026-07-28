@@ -7,6 +7,13 @@ on:
     paths:
       - '.github/workflows/compatibility-lab.yml'
       - 'qa/compatibility/**'
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+      - 'gradle.properties'
       - 'release/v0.9.3.16/**'
       - 'release/v0.9.3.17/**'
       - 'release/v0.9.3.18/**'
@@ -19,6 +26,13 @@ on:
     paths:
       - '.github/workflows/compatibility-lab.yml'
       - 'qa/compatibility/**'
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+      - 'gradle.properties'
       - 'release/v0.9.3.16/**'
       - 'release/v0.9.3.17/**'
       - 'release/v0.9.3.18/**'
@@ -94,7 +108,7 @@ jobs:
           bash -n qa/compatibility/run-native-emulator.sh
           bash qa/compatibility/run-native-emulator.sh --help >/dev/null
 
-      - name: Reconstruct current source and inject debug harness
+      - name: Prepare canonical source and inject debug harness
         run: |
           set -euo pipefail
           bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/project"
@@ -105,9 +119,9 @@ jobs:
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain \
+          ./gradlew --no-daemon --console=plain \
             clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug \
-            -PHULK_PORTAL_URL=http://3162356.xyz:8080 \
+            -PHULK_PORTAL_URL=https://example.invalid \
             --stacktrace 2>&1 | tee ../compatibility-lab-build.log
 
       - name: Verify and package lab APK

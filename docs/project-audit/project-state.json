@@ -1,179 +1,123 @@
 {
-  "schema_version": 2,
-  "generated_at": "2026-07-28T16:40:00Z",
+  "schema_version": 3,
+  "generated_at": "2026-07-28T17:35:00Z",
   "repository": "azoozrm/-HULK-SA-Android",
   "official_branch": "phase-3-v0.9.3.0-adaptive-foundation",
   "default_branch": "main",
-  "official_head": "75853490d0fd9d7a0ed523eb30133288246094ba",
   "version": {
     "version_name": "0.9.3.18",
     "version_code": 62,
     "debug_suffix": "-beta",
+    "application_id_changed": false,
     "release_tag": null
   },
-  "readiness": {
-    "current_numeric_score": null,
-    "historical_score": 44,
-    "historical_score_status": "superseded",
-    "reason_not_rescored": "Canonical source, lint, signing, install/upgrade, production E2E and physical-device gates remain open; current state is tracked by verified gates rather than an invented composite score."
+  "source_governance": {
+    "canonical_source": "completed",
+    "canonical_source_origin": "PR #22",
+    "gradle_wrapper": "8.13",
+    "split_brain_reconciliation": "qualified_in_pr_53",
+    "historical_reconstruction_retained": true,
+    "active_compatibility_source": "canonical_checkout_with_debug_only_harness",
+    "canonical_manifest": "pass"
   },
-  "latest_compatibility_run": {
-    "run_number": 31,
-    "run_id": 30377208398,
-    "tested_head": "2af1356cd89bdd2d0f0cb7384791d8e8dfdf6449",
+  "canonical_build": {
+    "run_number": 89,
+    "run_id": 30381512860,
+    "qualified_code_head": "3088a1520f1204b95ec1cefa66b5bfd633abc165",
     "conclusion": "success",
+    "wrapper_validation": "pass",
+    "manifest": "pass",
+    "debug_compile": "pass",
+    "unit_tests": "pass",
+    "debug_apk_aab": "pass",
+    "lint_debug": "pass",
+    "release_apk_aab_r8": "pass_unsigned",
+    "abi_verification": "pass",
+    "unsigned_artifact_id": 8697430541
+  },
+  "compatibility": {
+    "run_number": 47,
+    "run_id": 30381512894,
+    "qualified_code_head": "3088a1520f1204b95ec1cefa66b5bfd633abc165",
+    "conclusion": "success",
+    "source": "canonical",
     "profiles": 9,
     "cases": 133,
-    "raw_critical": 2,
+    "raw_critical": 0,
     "confirmed_product_critical": 0,
-    "false_positive_critical": 2,
-    "warnings": 263,
-    "infrastructure_errors_final": 0,
+    "warnings": 238,
+    "infrastructure_errors": 0,
     "confirmed_crashes": 0,
     "confirmed_anrs": 0,
-    "retry_profiles": [
-      "android-tv-720p-api36"
-    ],
-    "false_positives": [
-      {
-        "device": "android-tv-1080p-api36",
-        "case": "landscape/font-100/movies",
-        "codes": [
-          "page_marker_missing",
-          "empty_hierarchy"
-        ],
-        "classification": "launcher_contamination",
-        "evidence_summary": "Screenshot captured Android TV Launcher with a Google TV Shop dialog instead of HULK SA."
-      }
-    ],
+    "retries": 0,
     "warning_counts": {
       "high_emulator_jank": 133,
-      "text_at_display_edge": 42,
-      "slow_page_start": 39,
-      "possible_text_clipping": 22,
-      "interactive_overlap": 21,
-      "tv_safe_area": 6
+      "text_at_display_edge": 35,
+      "slow_page_start": 34,
+      "interactive_overlap": 20,
+      "possible_text_clipping": 13,
+      "tv_safe_area": 3
     },
     "devices": [
-      {
-        "id": "pixel-4a-api29",
-        "cases": 28,
-        "critical": 0,
-        "warnings": 62,
-        "product_status": "pass_with_advisories"
-      },
-      {
-        "id": "pixel-6-api31",
-        "cases": 14,
-        "critical": 0,
-        "warnings": 28,
-        "product_status": "pass_with_advisories"
-      },
-      {
-        "id": "pixel-8-pro-api35",
-        "cases": 14,
-        "critical": 0,
-        "warnings": 31,
-        "product_status": "pass_with_advisories"
-      },
-      {
-        "id": "galaxy-s24-ultra-api35",
-        "cases": 14,
-        "critical": 0,
-        "warnings": 32,
-        "product_status": "pass_with_advisories"
-      },
-      {
-        "id": "nexus-9-api28",
-        "cases": 14,
-        "critical": 0,
-        "warnings": 24,
-        "product_status": "pass_with_advisories"
-      },
-      {
-        "id": "pixel-tablet-api35",
-        "cases": 28,
-        "critical": 0,
-        "warnings": 42,
-        "product_status": "pass_with_advisories"
-      },
-      {
-        "id": "android-tv-720p-api36",
-        "cases": 7,
-        "critical": 0,
-        "warnings": 15,
-        "product_status": "pass_with_advisories",
-        "retry_required": true
-      },
-      {
-        "id": "android-tv-1080p-api36",
-        "cases": 7,
-        "raw_critical": 2,
-        "confirmed_product_critical": 0,
-        "warnings": 17,
-        "product_status": "pass_with_false_positive_correction"
-      },
-      {
-        "id": "android-tv-4k-api36",
-        "cases": 7,
-        "critical": 0,
-        "warnings": 12,
-        "product_status": "pass_with_advisories"
-      }
-    ]
+      {"id": "pixel-4a-api29", "cases": 28, "critical": 0, "warnings": 54, "infrastructure": 0},
+      {"id": "pixel-6-api31", "cases": 14, "critical": 0, "warnings": 27, "infrastructure": 0},
+      {"id": "pixel-8-pro-api35", "cases": 14, "critical": 0, "warnings": 25, "infrastructure": 0},
+      {"id": "galaxy-s24-ultra-api35", "cases": 14, "critical": 0, "warnings": 31, "infrastructure": 0},
+      {"id": "nexus-9-api28", "cases": 14, "critical": 0, "warnings": 24, "infrastructure": 0},
+      {"id": "pixel-tablet-api35", "cases": 28, "critical": 0, "warnings": 43, "infrastructure": 0},
+      {"id": "android-tv-720p-api36", "cases": 7, "critical": 0, "warnings": 13, "infrastructure": 0, "unique_focus_targets": 7},
+      {"id": "android-tv-1080p-api36", "cases": 7, "critical": 0, "warnings": 11, "infrastructure": 0, "unique_focus_targets": 7},
+      {"id": "android-tv-4k-api36", "cases": 7, "critical": 0, "warnings": 10, "infrastructure": 0, "unique_focus_targets": 7}
+    ],
+    "historical_run_31_status": "superseded_as_product_authority_reconstructed_source_only"
   },
-  "generated_source_snapshot": {
-    "run_number": 8,
-    "conclusion": "success"
-  },
-  "closed_findings": [
-    "phone_landscape_device_classification",
-    "phone_landscape_downloads_settings_navigation",
-    "android_tv_search_focus_trap_720p",
-    "android_tv_search_focus_trap_1080p",
-    "android_tv_search_focus_trap_4k"
-  ],
-  "gates": {
-    "source_reconstruction": "pass",
-    "kotlin_compile": "pass",
-    "unit_tests": "pass_in_compatibility_workflow",
-    "lab_apk": "pass",
-    "compatibility_product_critical": "pass_after_evidence_correction",
-    "canonical_source": "not_implemented",
-    "gradle_wrapper_8_13": "not_implemented",
-    "canonical_ci": "not_implemented",
-    "lint_current_head": "not_verified",
-    "signed_release": "not_implemented",
+  "signing": {
+    "preflight_run_number": 14,
+    "preflight_run_id": 30381513355,
+    "unsigned_fallback": "pass",
+    "incomplete_configuration_fail_closed": "pass",
+    "signed_production_job": "skipped_requires_manual_dispatch_and_protected_secrets",
+    "signed_release_artifacts": "not_verified",
     "certificate_parity": "not_verified",
-    "signed_install": "not_verified",
-    "upgrade_test": "not_verified",
-    "production_e2e": "not_implemented",
-    "physical_arm": "not_verified",
-    "physical_oem": "not_verified",
-    "api_23_runtime": "not_verified",
+    "clean_install": "not_verified",
+    "upgrade": "not_verified"
+  },
+  "gates": {
+    "canonical_source": "pass",
+    "gradle_wrapper": "pass",
+    "canonical_ci": "pass",
+    "lint": "pass",
+    "release_r8_unsigned": "pass",
+    "abi": "pass",
+    "compatibility_product_critical": "pass",
+    "signing_safeguards": "pass",
+    "signed_release": "not_verified",
+    "certificate_parity": "not_verified",
+    "signed_install_upgrade": "not_verified",
+    "production_e2e": "not_verified",
+    "physical_arm_oem_api23": "not_verified",
+    "reliability_process_network_storage": "not_verified",
     "macrobenchmark": "not_verified",
     "release_candidate": "not_started",
     "v1_0": "not_started"
   },
   "next_step": {
-    "name": "canonical_source_governance",
-    "behavior_change_allowed": false,
-    "requirements": [
-      "Materialize the reconstructed v0.9.3.18 source as a direct Gradle project in Git.",
-      "Add Gradle Wrapper 8.13.",
-      "Add one canonical workflow for clean, lint, unit, debug/release APK and AAB, R8 and ABI verification.",
-      "Prove parity with reconstructed output.",
-      "Retain reconstruction history until parity is accepted."
+    "name": "signed_release_qualification",
+    "requires": "manual workflow dispatch in protected environment with existing official secrets",
+    "acceptance": [
+      "Produce signed APK and AAB for versionCode 62 and versionName 0.9.3.18.",
+      "Verify applicationId, signature schemes, expected certificate SHA-256, ABI and artifact hashes.",
+      "Perform clean install and upgrade from the stability reference.",
+      "Run signed minified R8 runtime smoke."
     ]
   },
   "hard_constraints": [
-    "Do not start from scratch.",
-    "Do not redesign completed work.",
+    "Do not start from scratch or redesign completed work.",
     "Do not use main as the official execution branch.",
     "Do not expose endpoints, credentials or signing materials.",
-    "Do not treat a green workflow as Product PASS without inspecting artifacts.",
-    "Do not delete reconstruction history before canonical parity.",
-    "Do not claim signed release, production E2E, performance or OEM success before actual execution.",
+    "Do not delete reconstruction history without an explicit governance decision.",
+    "Do not treat x86_64 emulators as ARM or OEM certification.",
+    "Do not claim signed release, install, upgrade, production E2E or performance success before execution.",
     "Do not implement major features before v1.0."
   ]
 }

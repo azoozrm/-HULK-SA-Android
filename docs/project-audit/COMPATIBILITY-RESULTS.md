@@ -1,132 +1,99 @@
 # HULK SA Android — نتائج Compatibility Lab
 
 تاريخ التحديث: 2026-07-28 UTC  
-الفرع الرسمي: `phase-3-v0.9.3.0-adaptive-foundation`  
 الإصدار: `0.9.3.18` / build `62`
 
-## التشغيل المعتمد
+## المرجع الحاكم الحالي
 
-- Compatibility Lab Run: **#31**.
-- Run ID: `30377208398`.
-- PR head المختبر: `2af1356cd89bdd2d0f0cb7384791d8e8dfdf6449`.
-- التغيير دُمج بعد نجاح التأهيل في PR #51.
-- Merge SHA على الفرع الرسمي: `75853490d0fd9d7a0ed523eb30133288246094ba`.
-- Generated Source Snapshot Run #8: `PASS`.
+Compatibility Lab Run #47 — Run ID `30381512894` — على code head `3088a1520f1204b95ec1cefa66b5bfd633abc165`.
 
-Run #26 وRun #29 مهمان للمقارنة التاريخية، لكن Run #31 هو مرجع النتيجة الحالية بعد إصلاح TV Search النهائي.
+هذا هو أول تشغيل كامل في هذه السلسلة يبني التطبيق من **السورس canonical المباشر داخل Git** ثم يحقن debug-only fixtures. Run #31 كان ناجحًا ومفيدًا لإثبات إصلاحات التكييف، لكنه كان يشغل reconstruction تاريخيًا مختلفًا عن التطبيق canonical، لذلك أصبح مرجعًا تاريخيًا وليس مرجع Product النهائي.
 
 ## النتيجة الموحدة
 
-| المؤشر | Run التاريخي الأول | Run #29 قبل إصلاح PR #51 | Run #31 الحالي |
-|---|---:|---:|---:|
-| Profiles | 9 | 9 | 9 |
-| Cases | 133 | 133 | 133 |
-| Confirmed Product Critical | 8 | 3 | **0** |
-| Raw Critical | 10 | 3 | 2 |
-| False-positive Critical | 2 | 0 | 2 |
-| Warnings | 252 | 262 | 263 |
-| Crash مؤكد | 0 | 0 | 0 |
-| ANR مؤكد | 0 | 0 | 0 |
-| Infrastructure errors النهائية | 0 | 0 | 0 |
+| المؤشر | Run #31 reconstructed | Run #47 canonical |
+|---|---:|---:|
+| Profiles | 9 | 9 |
+| Cases | 133 | 133 |
+| Raw Critical | 2 | **0** |
+| Confirmed Product Critical | 0 | **0** |
+| Warnings | 263 | 238 |
+| Infrastructure errors | 0 | 0 |
+| Crash مؤكد | 0 | 0 |
+| ANR مؤكد | 0 | 0 |
+| Retries | 1 عابر | **0** |
 
-الزيادة البسيطة في warnings ليست دليل regression تلقائيًا؛ معظمها heuristics وقياسات Debug Emulator. لا تستخدم مجموع warnings وحده كقرار قبول أو رفض.
+Run #47 لا يحتوي launcher contamination criticals التي ظهرت خامًا في Run #31.
 
-## النتيجة لكل جهاز في Run #31
+## النتيجة لكل جهاز
 
-| الجهاز | API | الحالات | Raw status | Product status بعد مراجعة الأدلة | Critical مؤكد | Warnings |
-|---|---:|---:|---|---|---:|---:|
-| Pixel 4a | 29 | 28/28 | WARN | PASS مع advisories | 0 | 62 |
-| Pixel 6 | 31 | 14/14 | WARN | PASS مع advisories | 0 | 28 |
-| Pixel 8 Pro | 35 | 14/14 | WARN | PASS مع advisories | 0 | 31 |
-| Galaxy S24 Ultra profile | 35 | 14/14 | WARN | PASS مع advisories | 0 | 32 |
-| Nexus 9 | 28 | 14/14 | WARN | PASS مع advisories | 0 | 24 |
-| Pixel Tablet | 35 | 28/28 | WARN | PASS مع advisories | 0 | 42 |
-| Android TV 720p | 36 | 7/7 | WARN | PASS مع advisories | 0 | 15 |
-| Android TV 1080p | 36 | 7/7 | FAIL raw | PASS مع false-positive مصحح | 0 | 17 |
-| Android TV 4K | 36 | 7/7 | WARN | PASS مع advisories | 0 | 12 |
+| الجهاز | API | الحالات | Critical | Warnings | Infrastructure | Product status |
+|---|---:|---:|---:|---:|---:|---|
+| Pixel 4a | 29 | 28/28 | 0 | 54 | 0 | PASS مع advisories |
+| Pixel 6 | 31 | 14/14 | 0 | 27 | 0 | PASS مع advisories |
+| Pixel 8 Pro | 35 | 14/14 | 0 | 25 | 0 | PASS مع advisories |
+| Galaxy S24 Ultra profile | 35 | 14/14 | 0 | 31 | 0 | PASS مع advisories |
+| Nexus 9 | 28 | 14/14 | 0 | 24 | 0 | PASS مع advisories |
+| Pixel Tablet | 35 | 28/28 | 0 | 43 | 0 | PASS مع advisories |
+| Android TV 720p | 36 | 7/7 | 0 | 13 | 0 | PASS مع advisories |
+| Android TV 1080p | 36 | 7/7 | 0 | 11 | 0 | PASS مع advisories |
+| Android TV 4K | 36 | 7/7 | 0 | 10 | 0 | PASS مع advisories |
 
-كل profiles هي Emulators x86_64، وليست شهادة أجهزة OEM أو ARM فعلية.
+كل profiles هي Android Emulators x86_64؛ لا تمثل شهادة ARM/OEM.
 
-## الإصلاحات المثبتة
+## التنقل والتكييف
 
-### Phone landscape navigation — `FIXED`
+### Phone Landscape — PASS
 
-المشاكل القديمة التي كانت تخفي Downloads وSettings في Landscape على Pixel 6 وPixel 8 Pro وGalaxy profile لم تعد Critical في Run #31. تصنيف الهاتف الأفقي بقي Mobile، والتنقل بقي Top Bar بدل التحول الخاطئ إلى Tablet/Rail.
+كل navigation audit entries نجحت. لم تعد Downloads أو Settings مخفية في phone landscape profiles، ولم يتحول الهاتف الأفقي إلى Tablet/Rail.
 
-### TV Search focus trap — `FIXED`
+### TV Search focus — PASS
 
-في Run #29 بقي حقل Search محبوسًا على Android TV 720p و1080p و4K لأن IME كان يستهلك D-pad. PR #51 أضاف وضع تنقل read-only ووضع تحرير صريح.
+على 720p و1080p و4K:
 
-Focus traces في Run #31 أثبتت على الدقات الثلاث:
+- لا `focus_trap`.
+- 13 خطوة focus trace لكل profile.
+- 7 أهداف تركيز فريدة لكل profile.
+- البداية على Search `EditText`.
+- `DPAD_DOWN` ينقل التركيز إلى أول بطاقة نتيجة.
+- التنقل يستمر بين النتائج والـRail.
 
-1. يبدأ التركيز على Search field.
-2. `DPAD_DOWN` ينقل التركيز إلى أول بطاقة نتيجة.
-3. بقية الأوامر تتحرك بين النتائج والـRail.
-4. `unique_focus_targets = 7` لكل TV profile.
-5. حالة Search في التقرير أصبحت `PASS` على 720p و1080p و4K.
+### Safe areas / clipping / overlap
 
-### TV safe areas — `IMPROVED / ADVISORY REMAINS`
+لا توجد Critical مؤكدة. التحذيرات المتبقية heuristics استشارية ولا تُصلح تلقائيًا.
 
-لا توجد Product Critical مرتبطة بالـsafe-area في Run #31. بقيت 6 تحذيرات `tv_safe_area` استشارية تحتاج مراجعة مستقلة قبل أي تعديل إضافي.
+## توزيع التحذيرات
 
-### fontScale وoverlap/clipping — `NO CONFIRMED CRITICAL`
-
-لم يظهر Critical مؤكد في حالات الهاتف والتابلت ذات fontScale 1.3. تحذيرات clipping/overlap لا تعتبر عيوبًا مثبتة قبل فحص screenshot/XML حالة بحالة.
-
-## False positive الحالي
-
-Android TV 1080p / Movies سجل:
-
-- `page_marker_missing`.
-- `empty_hierarchy`.
-
-لقطة الدليل تعرض Android TV Launcher مع نافذة **Google TV Shop**، وليس تطبيق HULK SA. Navigation audit سجل الوصول إلى Movies، ثم تلوث الالتقاط بنافذة خارج التطبيق. لذلك:
-
-- Raw Critical = 2.
-- Confirmed Product Critical = 0.
-- التصنيف: `FALSE POSITIVE / LAUNCHER CONTAMINATION`.
-
-يجب تحسين classifier مستقبلًا لتمييز النوافذ الخارجية وعدم رفعها كعيب Product.
-
-## Retry والبنية التحتية
-
-Android TV 720p احتاج retry بعد فشل Emulator عابر. المحاولة النهائية أنتجت 7/7 حالات، `critical_count=0` و`infrastructure_error_count=0`.
-
-هذا يُوثق كعدم استقرار بنية اختبار، ولا يُخفى، لكنه لا يثبت عيبًا في التطبيق.
-
-## توزيع التحذيرات في Run #31
-
-| النوع | العدد | التصنيف الحالي |
+| النوع | العدد | التصنيف |
 |---|---:|---|
-| `high_emulator_jank` | 133 | Advisory فقط؛ غير صالح كبوابة أداء |
-| `text_at_display_edge` | 42 | يحتاج مراجعة screenshot/XML |
-| `slow_page_start` | 39 | Debug Emulator؛ لا يعادل Startup benchmark |
-| `possible_text_clipping` | 22 | Heuristic؛ يحتاج إثبات بصري |
-| `interactive_overlap` | 21 | Heuristic؛ يحتاج إثبات وظيفي/بصري |
-| `tv_safe_area` | 6 | Advisory؛ لا Critical مؤكد |
+| `high_emulator_jank` | 133 | Advisory؛ غير صالح كبوابة أداء |
+| `text_at_display_edge` | 35 | راجع Screenshot/XML |
+| `slow_page_start` | 34 | Debug Emulator؛ ليس Macrobenchmark |
+| `interactive_overlap` | 20 | Heuristic يحتاج إثبات |
+| `possible_text_clipping` | 13 | Heuristic يحتاج إثبات |
+| `tv_safe_area` | 3 | Advisory؛ لا Critical مؤكد |
 
-## ما يثبته المختبر
+## ما يثبته Run #47
 
-- reconstruction يعمل.
-- Debug source مع harness يتجمع ويُثبت داخل Emulator.
-- الصفحات Home/Live/Movies/Series/Search/Downloads/Settings قابلة للالتقاط على profiles المختبرة.
-- Phone landscape navigation defects القديمة أغلقت.
-- TV Search D-pad focus trap أُغلق.
-- لا Crash أو ANR مؤكدة ضمن fixture captures.
+- Compatibility Lab يختبر canonical checkout الفعلي.
+- Lab APK يتجمع ويُثبت ويعمل على profiles التسعة.
+- Home/Live/Movies/Series/Search/Downloads/Settings قابلة للوصول والالتقاط.
+- Phone landscape navigation وTV Search focus defects القديمة مغلقة.
+- لا Crash أو ANR مؤكدة ضمن fixture matrix.
 
-## ما لا يثبته المختبر
+## ما لا يثبته
 
-- real login/catalog/backend.
-- real playback أو download I/O.
-- signed/minified Release runtime.
+- real backend/login/catalog.
+- real playback/download I/O.
+- signed/minified production Release runtime.
 - physical ARM/OEM/API 23.
 - process death/reboot/network/storage pressure.
 - HDR/codecs/subtitles/audio focus.
-- Accessibility كاملة أو screenshot regression.
+- Accessibility شاملة أو screenshot regression.
 - Macrobenchmark أو performance SLA.
 
 ## قرار البوابة
 
-**Compatibility Product Critical gate: PASS بعد التصحيح اليدوي للأدلة.**
+**Canonical Compatibility Product Critical gate: PASS — 0 Critical / 133 cases.**
 
-الخطوة التالية ليست تعديل UI إضافي بلا دليل؛ بل canonical source governance ثم إصلاح classifier/gate حتى يميز launcher contamination تلقائيًا قبل جعل findings بوابة صارمة.
+لا يُعتبر هذا بديلًا عن Signed Release أو production E2E أو physical-device qualification.

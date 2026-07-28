@@ -143,7 +143,7 @@ fun classifyDeviceClass(
     widthDp: Int,
 ): HulkDeviceClass = when {
     isTelevisionDevice -> HulkDeviceClass.TELEVISION
-    smallestWidthDp >= 600 || widthDp >= 840 -> HulkDeviceClass.TABLET
+    smallestWidthDp >= 600 -> HulkDeviceClass.TABLET
     else -> HulkDeviceClass.MOBILE
 }
 
@@ -152,7 +152,7 @@ fun selectNavigationType(
     windowWidthClass: HulkWindowWidthClass,
 ): HulkNavigationType = when {
     deviceClass == HulkDeviceClass.TELEVISION -> HulkNavigationType.RAIL
-    windowWidthClass == HulkWindowWidthClass.EXPANDED -> HulkNavigationType.RAIL
+    deviceClass == HulkDeviceClass.TABLET && windowWidthClass == HulkWindowWidthClass.EXPANDED -> HulkNavigationType.RAIL
     else -> HulkNavigationType.TOP_BAR
 }
 

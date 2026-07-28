@@ -1,114 +1,93 @@
 # HULK SA Android — قائمة المشاكل المدققة
 
 تاريخ التحديث: 2026-07-28 UTC  
-HEAD: `75853490d0fd9d7a0ed523eb30133288246094ba`  
 الإصدار: `0.9.3.18` / build `62`
-
-الحالات المستخدمة:
-
-- `OPEN`: مشكلة مثبتة ومفتوحة.
-- `PARTIAL`: عولج جزء منها وبقيت فجوة.
-- `CLOSED`: أغلقت بدليل تشغيل مناسب.
-- `ADVISORY`: تحذير يحتاج triage ولا يثبت عيبًا وحده.
-- `NOT VERIFIED`: لم يُشغل السيناريو المطلوب.
 
 ## P0 — يمنع Release production
 
-| ID | المشكلة | الحالة | دليل/شرط الإغلاق |
+| ID | المشكلة | الحالة | شرط الإغلاق |
 |---|---|---|---|
-| P0-01 | Release APK/AAB غير موقعين ولا يوجد signing path محمي من HEAD الحالي | `OPEN` | GitHub protected environment + Secrets، إخراج signed APK/AAB، التحقق من certificate، install وupgrade من مرجع الاستقرار، دون كشف materials |
-| P0-02 | upgrade certificate parity غير مثبت | `NOT VERIFIED` | مقارنة شهادة مرجع الاستقرار بالـRelease الجديد واختبار upgrade فعلي |
+| P0-01 | لا يوجد APK/AAB production موقع من v0.9.3.18 | `OPEN` | تشغيل Signed Release Workflow مع Secrets محمية والتحقق من artifacts |
+| P0-02 | certificate parity وupgrade path غير مثبتين | `NOT VERIFIED` | مقارنة شهادة مرجع الاستقرار واختبار upgrade فعلي |
+| P0-03 | clean install وupgrade للـsigned Release غير مختبرين | `NOT VERIFIED` | install/upgrade evidence من APK الموقع |
 
-## P1 — بوابات v1.0 الأساسية
+## P1 — بوابات v1.0
 
 | ID | المشكلة | الحالة | الملاحظات |
 |---|---|---|---|
-| P1-01 | السورس النهائي مولّد من ZIP + Scripts وليس Gradle project canonical | `OPEN` | الخطوة التالية المباشرة؛ materialize + Wrapper 8.13 + parity |
-| P1-02 | `lintDebug` لم يثبت clean على HEAD الحالي | `OPEN` | الخطأ التاريخي Media3 unstable API في PlayerScreen يجب إعادة تشغيله وإصلاحه إن بقي |
-| P1-03 | لا Workflow بناء حاكم واحد يعمل مباشرة من checkout | `OPEN` | مطلوب clean/lint/unit/debug/release/R8/ABI من canonical source |
-| P1-04 | Compatibility classifier يحسب launcher contamination كـProduct Critical | `OPEN` | Run #31 سجل حالتين raw في TV 1080p/Movies رغم أن الصورة Launcher؛ أصلح classifier قبل strict gate |
-| P1-05 | findings gate غير مفعل افتراضيًا كشرط صارم موثوق | `PARTIAL` | لا يُفعل حتى إصلاح false positives؛ بعدها enforce Product Critical فقط |
-| P1-06 | لا authenticated production E2E | `OPEN` | real login/catalog/playback/download دون كشف endpoint أو credentials |
-| P1-07 | Downloads process-bound بلا WorkManager/Foreground Service | `OPEN` | process death/reboot/background tests ثم حل معماري مثبت |
-| P1-08 | cleartext مسموح عالميًا وقد تمر credentials داخل query/path عند HTTP | `OPEN` | تحقق من policy الفعلية، تقييد cleartext أو توثيق استثناء آمن دون كشف endpoint |
-| P1-09 | Signed/minified Release runtime غير مختبر | `OPEN` | بعد signing: install، launch، playback/download smoke، R8 qualification |
+| P1-01 | real login/catalog/playback/download E2E غير منفذ | `OPEN` | Secrets فقط، دون كشف endpoint أو credentials |
+| P1-02 | signed/minified R8 runtime غير مختبر | `OPEN` | بعد إنتاج signed Release |
+| P1-03 | physical ARM/API 23/OEM qualification غير منفذة | `OPEN` | أجهزة فعلية، لا Emulator x86_64 |
+| P1-04 | process death/reboot/network/storage qualification غير مكتملة | `OPEN` | Durable Downloads موجودة، لكن runtime qualification لازمة |
+| P1-05 | Compatibility findings gate لا يزال يحتاج سياسة صارمة موثقة | `PARTIAL` | Run #47 نظيف من Critical؛ فعّل البوابة بعد تثبيت classifier policy |
+| P1-06 | cleartext/credential transport policy تحتاج تحقق إنتاجي آمن | `OPEN` | لا تكشف عنوان الخدمة أو بيانات الدخول |
+| P1-07 | Store/privacy/Data Safety/pre-launch review غير منفذ | `OPEN` | قبل RC |
 
-## P1 المغلقة في v0.9.3.18
+## P1/P0 المغلقة
 
 | ID | المشكلة السابقة | الحالة | دليل الإغلاق |
 |---|---|---|---|
-| P1-C01 | Phone landscape يتحول خطأ إلى Tablet/Rail ويخفي Downloads/Settings | `CLOSED` | PR #50 + Run #31؛ لا Product Critical على phone profiles |
-| P1-C02 | TV Search focus trap على 720p/1080p/4K | `CLOSED` | PR #51 + Run #31؛ Search focus `PASS` و7 unique targets لكل TV profile |
-| P1-C03 | TV Search يفتح IME مباشرة ويمنع D-pad | `CLOSED` | وضع navigation read-only + edit mode صريح؛ `DPAD_DOWN` يصل لأول نتيجة |
+| C-01 | السورس canonical وGradle Wrapper غير موجودين | `CLOSED / CORRECTED` | كانا موجودين منذ PR #22؛ PR #53 أغلق drift مع المختبر |
+| C-02 | Compatibility Lab يختبر reconstruction مختلفًا عن التطبيق canonical | `CLOSED` | PR #53 + Run #47 |
+| C-03 | `lintDebug` يفشل بخطأ Media3 | `CLOSED` | Canonical Build Run #89: lint PASS |
+| C-04 | Phone landscape يخفي Downloads/Settings | `CLOSED` | Canonical Run #47: navigation PASS |
+| C-05 | TV Search focus trap على 720p/1080p/4K | `CLOSED` | Canonical Run #47: 7 unique focus targets لكل profile |
+| C-06 | Downloads process-bound فقط | `CLOSED / SUPERSEDED` | Durable WorkManager/foreground implementation موجودة في canonical source؛ بقي runtime qualification فقط |
+| C-07 | لا signing safeguards أو fail-closed path | `CLOSED` | Signed Release Qualification Run #14 preflight PASS |
 
 ## P2 — جودة واعتمادية
 
 | ID | المشكلة | الحالة |
 |---|---|---|
-| P2-01 | Home cache لا يدخل `favorites` في invalidation وقد تتقادم recommendations | `OPEN` |
-| P2-02 | `UserLibrary.replaceFavorites()` يستخدم synchronous `commit()` | `OPEN` |
-| P2-03 | Adaptive sizing يعتمد على `Configuration` بدل window container | `PARTIAL`؛ التصنيف الحرج أصلح لكن الحوكمة المعمارية باقية |
-| P2-04 | TV/phone visual warnings تحتاج triage يدوي | `ADVISORY` |
-| P2-05 | startup يقرأ JSON/download metadata على main thread | `SUSPECTED / NOT VERIFIED` |
-| P2-06 | لا screenshot regression suite | `OPEN` |
-| P2-07 | لا process-death/reboot/network/storage test suite | `OPEN` |
-| P2-08 | لا physical ARM/API 23/OEM qualification | `OPEN` |
-| P2-09 | لا Macrobenchmark أو performance SLA | `OPEN` |
-| P2-10 | version/tag/default-branch governance غير مكتملة | `OPEN` |
+| P2-01 | Screenshot regression suite غير مكتملة | `OPEN` |
+| P2-02 | Accessibility qualification غير مكتملة | `OPEN` |
+| P2-03 | Macrobenchmark/performance SLA غير منفذ | `OPEN` |
+| P2-04 | visual warnings تحتاج triage حالة بحالة | `ADVISORY` |
+| P2-05 | long-run memory/leak/ANR qualification غير منفذة | `OPEN` |
+| P2-06 | HDR/codecs/subtitles/audio-focus coverage غير مكتملة | `OPEN` |
+| P2-07 | version/tag/release governance تحتاج RC policy | `OPEN` |
 
 ## P3 — صيانة تقنية
 
 | ID | المشكلة | الحالة |
 |---|---|---|
-| P3-01 | Workflows كثيرة وأسماء إصدارات متباينة | `OPEN` |
-| P3-02 | Gradle Wrapper مفقود من المصدر الرسمي | `OPEN`؛ سيغلق مع canonical PR |
-| P3-03 | compiler deprecations وشروط دائمًا true | `OPEN` |
-| P3-04 | duplicate payload/icon resources | `OPEN` |
-| P3-05 | MainShell/Player/DownloadRepository ملفات ضخمة | `OPEN`؛ لا refactor واسع قبل v1.0 بلا حاجة مثبتة |
-| P3-06 | README غير كافٍ | `OPEN` |
+| P3-01 | Workflows تاريخية كثيرة وأسماء متباينة | `OPEN`؛ لا تحذف قبل مراجعة الاعتماديات |
+| P3-02 | ملفات UI/Player كبيرة | `OPEN`؛ لا refactor واسع قبل v1.0 بلا عيب مثبت |
+| P3-03 | compiler deprecations والتحذيرات المقبولة تحتاج سجلًا مستمرًا | `OPEN` |
+| P3-04 | README العام يحتاج توسيعًا | `OPEN` |
 
 ## Compatibility advisories الحالية
 
-Run #31: 263 warnings.
+Run #47: 238 warnings و0 Critical.
 
 | النوع | العدد | القرار |
 |---|---:|---|
 | `high_emulator_jank` | 133 | لا يصلح كبوابة أداء |
-| `text_at_display_edge` | 42 | راجع الصورة وXML قبل التعديل |
-| `slow_page_start` | 39 | لا يعادل Macrobenchmark |
-| `possible_text_clipping` | 22 | heuristic فقط |
-| `interactive_overlap` | 21 | heuristic فقط |
-| `tv_safe_area` | 6 | لا Critical مؤكد |
+| `text_at_display_edge` | 35 | راجع Screenshot/XML |
+| `slow_page_start` | 34 | لا يعادل Macrobenchmark |
+| `interactive_overlap` | 20 | heuristic فقط |
+| `possible_text_clipping` | 13 | heuristic فقط |
+| `tv_safe_area` | 3 | لا Critical مؤكد |
 
-لا تنشئ PR إصلاح بصري لمجرد وجود Warning. يجب إرفاق Screenshot/XML يثبت أثرًا حقيقيًا.
+لا تنشئ PR بصريًا لمجرد Warning heuristic.
 
-## False positives المثبتة
+## غير متحقق منه حتى الآن
 
-1. Android TV Launcher/Google TV Shop contamination في Run #31، حالة TV 1080p/Movies؛ أنتجت `page_marker_missing` و`empty_hierarchy`.
-2. Android TV Launcher capture التاريخية في TV 720p/Series.
-3. notification shade contamination في navigation audit التاريخي.
-4. `high_emulator_jank` من عينة Debug Emulator قصيرة.
-5. lazy edge/semantic overlap heuristics.
-
-## أشياء ما زالت غير متحقق منها
-
-- ملكية signing key ومسار upgrade certificate الفعلي.
-- signed Release install/upgrade.
-- real backend/login/catalog.
-- real media playback/download.
-- physical ARM وOEM وAPI 23.
-- HDR/codecs/subtitles/audio focus.
-- process death/reboot/background constraints.
-- long-run leak/ANR.
-- Store pre-launch/Data Safety/privacy.
-- staged rollout.
+- signed production APK/AAB لـv0.9.3.18.
+- certificate parity.
+- clean install وupgrade.
+- real backend/login/catalog/playback/download.
+- physical arm64/armeabi-v7a/API 23/OEM.
+- process death/reboot/background/network/storage pressure.
+- performance SLA وMacrobenchmark.
+- Store pre-launch وstaged rollout.
 
 ## ترتيب الإغلاق
 
-1. canonical source governance.
-2. lint clean وcanonical CI.
-3. protected signing + signed install/upgrade.
-4. production E2E وR8 runtime.
+1. Signed Release Workflow في protected environment.
+2. certificate/signature/package/version/ABI verification.
+3. clean install وupgrade.
+4. signed R8 runtime + production E2E.
 5. physical ARM/OEM/API 23.
-6. performance/screenshot/process/network/storage qualification.
+6. process/network/storage/performance/screenshots/accessibility.
 7. Release Candidate ثم v1.0.

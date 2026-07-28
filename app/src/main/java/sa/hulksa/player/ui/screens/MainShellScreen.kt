@@ -142,6 +142,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import androidx.compose.foundation.layout.navigationBarsPadding
 
 private const val WEBSITE_URL = "https://hulksa.com/"
 private const val ACCOUNT_URL = "https://hulksa.com/account/login.php"
@@ -583,10 +584,11 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF090A07))
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .navigationBarsPadding(),
         state = navigationState,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         item { BrandBadge(Modifier.size(40.dp)) }
@@ -596,7 +598,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                 onClick = { onSelect(entry.destination) },
                 primary = selected == entry.destination,
                 compact = true,
-                modifier = Modifier.heightIn(min = 42.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
             )
         }
     }
@@ -725,7 +727,9 @@ private fun CinemaHomeScreen(
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = if (isTv) 32.dp else 0.dp), // compatibilityTvBottomPadding
         contentPadding = PaddingValues(bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
@@ -1035,7 +1039,7 @@ private fun HistorySection(
                 HistoryCard(
                     entry,
                     { onOpen(entry) },
-                    Modifier.width(if (isTv) 238.dp else 190.dp).restoreFocus(restore, targetRequester),
+                    Modifier.width(if (isTv) 214.dp else 190.dp).restoreFocus(restore, targetRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
                 )
             }
@@ -1358,10 +1362,12 @@ private fun TvSearchField(
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
+    var tvSearchEditing by remember { mutableStateOf(false) }
     val moveToResults: () -> Boolean = {
         if (!isTv || !hasResults) {
             false
         } else {
+            tvSearchEditing = false
             keyboardController?.hide()
             runCatching { firstResultRequester.requestFocus() }.isSuccess
         }
@@ -1373,18 +1379,37 @@ private fun TvSearchField(
             runCatching { fieldRequester.requestFocus() }
         }
     }
+    LaunchedEffect(isTv, tvSearchEditing) {
+        if (isTv) {
+            if (tvSearchEditing) keyboardController?.show() else keyboardController?.hide()
+        }
+    }
 
     val tvModifier = if (isTv) {
         Modifier
             .focusRequester(fieldRequester)
+            .onFocusChanged { focusState ->
+                if (!focusState.isFocused) {
+                    tvSearchEditing = false
+                    keyboardController?.hide()
+                }
+            }
             .onPreviewKeyEvent { event ->
-                when (tvSearchFocusAction(true, event.type, event.key, hasResults, imeVisible)) {
-                    TvSearchFocusAction.MOVE_TO_RESULTS -> moveToResults()
-                    TvSearchFocusAction.DISMISS_KEYBOARD -> {
-                        keyboardController?.hide()
-                        true
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else if (!tvSearchEditing && (event.key == Key.Enter || event.key == Key.DirectionCenter)) {
+                    tvSearchEditing = true
+                    true
+                } else {
+                    when (tvSearchFocusAction(true, event.type, event.key, hasResults, imeVisible)) {
+                        TvSearchFocusAction.MOVE_TO_RESULTS -> moveToResults()
+                        TvSearchFocusAction.DISMISS_KEYBOARD -> {
+                            tvSearchEditing = false
+                            keyboardController?.hide()
+                            true
+                        }
+                        TvSearchFocusAction.NONE -> false
                     }
-                    TvSearchFocusAction.NONE -> false
                 }
             }
     } else {
@@ -1396,6 +1421,7 @@ private fun TvSearchField(
         onValueChange = onValueChange,
         label = "ابحث بالاسم او السنة او النوع…",
         modifier = modifier.then(tvModifier),
+        readOnly = isTv && !tvSearchEditing,
         keyboardOptions = if (isTv) {
             KeyboardOptions(imeAction = ImeAction.Search)
         } else {
@@ -1536,7 +1562,7 @@ private fun DownloadCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (isTv) 236.dp else 220.dp)
+            .height(if (isTv) 220.dp else 220.dp)
             .clip(shape)
             .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
             .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .45f), shape)
@@ -1931,7 +1957,12 @@ private fun SettingsScreen(
     LazyColumn(
         state = settingsListState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(if (isTv) 27.dp else 15.dp),
+        contentPadding = PaddingValues(
+            start = if (isTv) 27.dp else 15.dp,
+            top = if (isTv) 36.dp else 15.dp,
+            end = if (isTv) 27.dp else 15.dp,
+            bottom = if (isTv) 32.dp else 15.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item { PageTitle("الحساب والاعدادات", "ادارة اشتراكك وتجربة المشاهدة", 0, Icons.Rounded.Settings) }
@@ -2473,7 +2504,7 @@ private fun ReorderableCatalogCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
     ) {
         item { FocusButton("الكل", { onSelect(null) }, primary = selectedId == null, compact = true) }
         item { FocusButton("★ المفضلة", { onSelect(FAVORITES_CATEGORY_ID) }, primary = selectedId == FAVORITES_CATEGORY_ID, compact = true) }
@@ -2567,7 +2598,7 @@ private fun ReorderableLiveCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
     ) {
         item {
             FocusButton(

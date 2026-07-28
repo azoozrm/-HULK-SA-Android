@@ -3,141 +3,116 @@
 تاريخ التحديث: 2026-07-28 UTC  
 المستودع: `azoozrm/-HULK-SA-Android`  
 الفرع الرسمي: `phase-3-v0.9.3.0-adaptive-foundation`  
-HEAD المعتمد بعد إغلاق عيوب التكييف: `75853490d0fd9d7a0ed523eb30133288246094ba`  
 الإصدار التحضيري: `0.9.3.18`، `versionCode 62`، وDebug يضيف `-beta`.
 
-## قاعدة قراءة الحالة
+## الملخص التنفيذي
 
-| الحالة | المعنى |
+المشروع يملك سورس Gradle canonical مباشر وGradle Wrapper 8.13 منذ PR #22. الخلل الذي كُشف في هذه الجولة لم يكن غياب canonical source، بل **انقسام مسار التنفيذ**: التطبيق canonical استمر بالتطور في PRs #23–#45، بينما Compatibility Lab بقي يعيد بناء ZIP تاريخي وسلسلة patches مختلفة.
+
+PR #53 أغلق هذا الانقسام دون إعادة بناء المشروع أو حذف التاريخ:
+
+- نقل إصلاحات v0.9.3.18 المثبتة إلى السورس canonical الحالي.
+- حافظ على أعمال canonical اللاحقة، ومنها signing safeguards وDurable Downloads المبنية على WorkManager.
+- جعل Compatibility Lab ينسخ canonical checkout نفسه ويحقن fixtures داخل `app/src/debug` فقط.
+- أبقى مسار ZIP + patches باسم `prepare-reconstructed-project.sh` للتدقيق والاسترجاع.
+- أضاف manifest SHA-256 للسورس canonical كبوابة CI.
+
+## نتائج البناء الحاكمة
+
+Canonical Build Run #89 — Run ID `30381512860` — على code head المؤهل `3088a1520f1204b95ec1cefa66b5bfd633abc165`:
+
+| البوابة | النتيجة |
 |---|---|
-| `COMPLETED` | موجود وموصول وله دليل بناء أو تشغيل مناسب |
-| `PARTIAL` | موجود ويعمل ضمن النطاق المختبر، لكن بقيت فجوة إنتاجية أو اختبارية |
-| `BROKEN` | فشل في دليل تشغيل أو بوابة لازمة |
-| `NOT VERIFIED` | لا توجد أدلة تشغيل كافية |
-| `NOT IMPLEMENTED` | لا يوجد تنفيذ فعلي |
+| Gradle Wrapper validation | PASS |
+| Canonical source manifest | PASS |
+| Clean / Debug compile | PASS |
+| Unit Tests | PASS |
+| Debug APK/AAB | PASS |
+| `lintDebug` | **PASS** |
+| Release APK/AAB + R8 | PASS، غير موقع |
+| ABI verification | PASS |
+| Unsigned build Artifact | PASS |
 
-## الملخص التنفيذي الحالي
+خطأ Media3 lint التاريخي لم يعد مشكلة مفتوحة على السورس canonical الحالي.
 
-إصلاحات التكييف المستهدفة في v0.9.3.18 اكتملت من ناحية Compatibility Lab: عيوب Phone Landscape الخمسة أغلقت، وTV Search focus trap على 720p و1080p و4K أُغلق في PR #51. Run #31 شغّل 133 حالة على 9 profiles، ونجح البناء وUnit Tests وتجهيز APK المختبر. بعد مراجعة `summary.json` والصور وFocus traces، أصبح **Product Critical المؤكد = 0**.
+## نتائج Compatibility Lab الحاكمة
 
-العداد الخام في Android TV 1080p سجل حالتين Critical في Movies (`page_marker_missing` و`empty_hierarchy`)، لكن لقطة الدليل كانت Android TV Launcher مع نافذة Google TV Shop وليست التطبيق. لذلك التصنيف الصحيح لهما `FALSE POSITIVE / LAUNCHER CONTAMINATION`، وليس عيب Product.
-
-هذا لا يعني جاهزية v1.0. ما زالت بوابات حاكمة مفتوحة: السورس النهائي مولّد من ZIP وسلسلة Scripts، Gradle Wrapper غير موجود في المشروع الرسمي، `lintDebug` لم يُثبت نظافته على HEAD الحالي، Release production ما زال غير موقع وغير مثبت، ولا توجد production E2E أو physical ARM/OEM qualification.
-
-درجة 44/100 الواردة في التدقيق الأول أصبحت **مرجعًا تاريخيًا فقط** ولا تستخدم كتقييم حالي. لم تُنشأ درجة رقمية جديدة لأن بوابات canonical source وlint والتوقيع لم تُغلق بعد؛ الحالة الحالية تُدار بالبوابات المثبتة أدناه.
-
-## هوية Git والإصدارات
-
-| البند | الحالة الحالية |
-|---|---|
-| الفرع الرسمي | `phase-3-v0.9.3.0-adaptive-foundation` |
-| الفرع الافتراضي GitHub | `main`، لكنه ليس فرع التنفيذ الرسمي |
-| HEAD الحالي | `75853490d0fd9d7a0ed523eb30133288246094ba` |
-| PR #50 | مدموج؛ responsive/layout/focus/safe-area foundation |
-| PR #51 | مدموج؛ إغلاق TV Search focus trap |
-| versionName | `0.9.3.18` |
-| versionCode | `62` |
-| Git tag لـv0.9.3.18 | غير موجود |
-| applicationId | لم يتغير |
-
-## نتائج Compatibility Lab المعتمدة
-
-أحدث Run معتمد: **Run #31 / ID `30377208398`** على PR #51 head `2af1356cd89bdd2d0f0cb7384791d8e8dfdf6449`. بعد ذلك دُمج نفس التغيير Squash في HEAD الحالي.
+Compatibility Lab Run #47 — Run ID `30381512894` — بنى وشغّل **السورس canonical نفسه** على 9 profiles:
 
 | المؤشر | النتيجة |
 |---|---:|
 | Profiles | 9 |
-| Captures | 133/133 |
-| Raw Critical | 2 |
+| Cases | 133/133 |
 | Confirmed Product Critical | **0** |
-| False-positive Critical | 2، لقطة Launcher واحدة |
-| Warnings | 263 |
-| Infrastructure errors النهائية | 0 |
+| Raw Critical | 0 |
+| Warnings | 238 |
+| Infrastructure errors | 0 |
 | Crash مؤكد | 0 |
 | ANR مؤكد | 0 |
-| TV Search focus | PASS على 720p/1080p/4K |
-| Phone landscape navigation | PASS ضمن profiles المختبرة |
+| Retries | 0 |
 
-Android TV 720p احتاج retry بسبب فشل Emulator عابر، ثم أنتج 7/7 حالات صالحة. هذا يُسجل كحدث بنية اختبار ولا يُحوّل إلى عيب Product.
+كل اختبارات التنقل نجحت، بما فيها Downloads وSettings في Phone Landscape. TV Search focus نجح على 720p و1080p و4K؛ كل profile سجل 7 أهداف تركيز فريدة وانتقل `DPAD_DOWN` من حقل البحث إلى أول نتيجة.
 
-التحذيرات الحالية استشارية وليست عيوبًا مؤكدة تلقائيًا:
+Run #31 يبقى مرجعًا تاريخيًا لإصلاحات reconstruction، لكنه لم يعد مرجع Product النهائي لأن المختبر وقتها لم يكن يشغل التطبيق canonical.
 
-- `high_emulator_jank`: 133 — Debug Emulator، غير صالح كبوابة أداء.
-- `text_at_display_edge`: 42.
-- `slow_page_start`: 39.
-- `possible_text_clipping`: 22.
-- `interactive_overlap`: 21.
-- `tv_safe_area`: 6.
+## التحذيرات الحالية
 
-أي Warning بصري لا يُصلح قبل مراجعة Screenshot/XML وإثبات أثر فعلي.
+| النوع | العدد | القرار |
+|---|---:|---|
+| `high_emulator_jank` | 133 | Advisory فقط؛ Debug Emulator ليس Macrobenchmark |
+| `text_at_display_edge` | 35 | يحتاج Screenshot/XML قبل أي تعديل |
+| `slow_page_start` | 34 | لا يعادل Startup SLA |
+| `interactive_overlap` | 20 | Heuristic يحتاج إثبات |
+| `possible_text_clipping` | 13 | Heuristic يحتاج إثبات |
+| `tv_safe_area` | 3 | Advisory؛ لا Critical مؤكد |
 
-## حالة البناء والاختبار
+لا يُعدل UI لمجرد وجود Warning heuristic.
 
-| البوابة | الحالة |
-|---|---|
-| Source reconstruction | `PASS` في Run #31 |
-| Generated Source Snapshot | `PASS` في Run #8 |
-| Kotlin compile | `PASS` |
-| Unit Tests | `PASS` ضمن Workflow الحالي |
-| Lab APK assemble/package | `PASS` |
-| Compatibility matrix | `PASS` بنيويًا؛ Product Critical المصحح = 0 |
-| `lintDebug` على HEAD الحالي | `NOT VERIFIED`؛ الخطأ القديم Media3 يجب إعادة اختباره |
-| Debug APK/AAB الرسميان | البناء التاريخي نجح، لكن يلزم توحيد Workflow canonical |
-| Release APK/AAB/R8 | البناء التاريخي نجح كـunsigned؛ HEAD الحالي يحتاج qualification بعد canonical |
-| Signed Release | `NOT IMPLEMENTED / NOT VERIFIED` |
-| Install/upgrade signed Release | `NOT VERIFIED` |
-| Production E2E | `NOT IMPLEMENTED` في HEAD الحالي |
-| Physical ARM/OEM/API 23 | `NOT VERIFIED` |
+## التوقيع والإصدار
+
+Signed Release Qualification Run #14 — Run ID `30381513355`:
+
+- unsigned fallback يبني بنجاح.
+- أي signing configuration ناقص يفشل مبكرًا وبشكل fail-closed.
+- مهمة signed production artifacts كانت `SKIPPED` لأنها تتطلب `workflow_dispatch` وSecrets محمية.
+
+لذلك لا يوجد حتى الآن APK/AAB production موقع من v0.9.3.18، ولا clean install/upgrade qualification.
 
 ## حالة المراحل الرسمية
 
-### 1. استقرار البناء — `PARTIAL / ADVANCED`
+| المرحلة | الحالة الحالية |
+|---|---|
+| Canonical source + Wrapper | `COMPLETED` |
+| Canonical CI مباشر من checkout | `COMPLETED` |
+| lint clean | `COMPLETED` |
+| Responsive Compatibility Criticals | `COMPLETED` ضمن المختبر |
+| Signing safeguards/preflight | `COMPLETED` |
+| Signed production APK/AAB | `NOT VERIFIED` |
+| Certificate parity + upgrade | `NOT VERIFIED` |
+| Production login/catalog/playback/download E2E | `NOT VERIFIED` |
+| Physical ARM/OEM/API 23 | `NOT VERIFIED` |
+| Performance/Macrobenchmark | `NOT VERIFIED` |
+| Release Candidate / v1.0 | `NOT STARTED` |
 
-تم إثبات reconstruction والبناء والاختبارات داخل المختبر. المتبقي: تثبيت السورس المولد كمشروع Gradle canonical، إضافة Gradle Wrapper 8.13، Workflow حاكم مباشر، parity، ثم lint clean.
+## الخطوة التالية
 
-### 2. التوقيع والتثبيت — `PARTIAL`
+المرحلة التالية هي **Signed Release Qualification** في بيئة GitHub محمية:
 
-معلومات المفتاح التاريخية فُحصت سابقًا، لكن لا يوجد مسار CI محمي يخرج APK/AAB production موقعًا من HEAD الحالي. لا تعرض أو تنسخ signing materials.
+1. تشغيل Workflow يدويًا مع Secrets الرسمية الموجودة في protected environment.
+2. إخراج APK وAAB موقعين من v0.9.3.18.
+3. التحقق من certificate fingerprint وsignature schemes وpackage/version وABI.
+4. clean install.
+5. upgrade من مرجع الاستقرار مع الحفاظ على البيانات والمسار.
+6. R8/minified runtime smoke.
 
-### 3. المعماريات — `PARTIAL`
-
-ABI verifier التاريخي نجح لـ`arm64-v8a` و`armeabi-v7a` و`x86_64`. لا توجد شهادة عتاد ARM/OEM فعلية أو API 23 runtime.
-
-### 4. التكييف — `COMPLETED WITH ADVISORIES` ضمن نطاق المختبر
-
-تم إغلاق العيوب الحرجة المثبتة في Phone Landscape وTV Search. بقيت warnings تحتاج triage، ولا تعتبر شهادة OEM أو Accessibility كاملة.
-
-### 5. الاختبارات — `PARTIAL / ADVANCED`
-
-المختبر يغطي 9 profiles وDPAD/launcher/pages/evidence. المتبقي production login/catalog/playback/download E2E، process death، network/storage، screenshot regression، Macrobenchmark، وphysical devices.
-
-### 6. v1.0 — `NOT IMPLEMENTED`
-
-لا Release Candidate موقع ولا install/upgrade qualification ولا staged rollout.
-
-### 7. الميزات الكبرى — `BLOCKED`
-
-تظل ممنوعة حتى إغلاق P0/P1 وإصدار v1.0 مستقر.
-
-## الخطوة التنفيذية التالية
-
-إنشاء PR **canonical source governance** بلا تغيير سلوك:
-
-1. إعادة تكوين HEAD الحالي v0.9.3.18.
-2. تثبيت الناتج كمشروع Gradle مباشر داخل Git.
-3. إضافة Gradle Wrapper 8.13.
-4. إضافة Workflow واحد يشغل مباشرة من checkout: clean، lint، unit، debug/release APK+AAB، R8، ABI verification.
-5. إثبات parity مع الناتج المعاد تكوينه.
-6. إبقاء reconstruction history مؤقتًا حتى قبول parity.
-
-بعده فقط: lint clean، signing، signed install/upgrade، production E2E، physical ARM/OEM، ثم Release Candidate.
+بعد ذلك: production E2E، physical ARM/OEM/API 23، process/network/storage tests، Macrobenchmark، ثم Release Candidate.
 
 ## قيود إلزامية
 
 - لا تبدأ من الصفر ولا تعيد تصميم المنجز.
 - لا تستخدم `main` بدل الفرع الرسمي.
-- لا تعتبر Workflow أخضر وحده Product PASS؛ اقرأ Artifacts.
 - لا تعرض endpoint أو credentials أو signing materials.
-- لا تحذف reconstruction history قبل canonical parity.
-- لا تدّع نجاح signed Release أو production E2E أو performance أو OEM قبل تشغيلها فعليًا.
-- لا تبدأ ميزة كبيرة قبل v1.0.
+- لا تحذف reconstruction history قبل قرار حوكمة صريح.
+- لا تعتبر Emulator شهادة ARM/OEM.
+- لا تدّع نجاح Signed Release أو install/upgrade أو production E2E قبل تشغيلها فعليًا.
+- لا تبدأ Feature كبيرة قبل v1.0.

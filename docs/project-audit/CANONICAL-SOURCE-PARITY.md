@@ -1,32 +1,33 @@
-# HULK SA Android — Canonical Source Parity
+# HULK SA Android — Canonical source governance
 
-## Scope
+## Current authority
 
-This change materializes the exact v0.9.3.17 production project reconstructed from audited head `8db147faea8fae0290bf75d53b4194de2035880f` and audit delivery head `0bc9a31a8538a8fadc1f0223d8c69d35ba17bd0a`.
+The direct Gradle project at repository root is the product source of truth. PR #22 initially materialized v0.9.3.17 and proved byte-for-byte parity with the historical reconstruction. PRs #23–#45 then intentionally evolved the canonical source with signing safeguards, adaptive fixes, recommendation-cache fixes, and durable downloads.
 
-It does not redesign the UI, change business logic, add a feature, implement signing, or remove the historical ZIP/transformation chain.
+The historical reconstruction chain did not receive those canonical-only changes. Compatibility Lab therefore became split from the actual product when PRs #50 and #51 modified reconstruction patches only.
 
-## Parity method
+## v0.9.3.18 reconciliation
 
-1. Run the audited 24-step reconstruction once without the debug Compatibility Lab injection.
-2. Run the normal Compatibility Lab reconstruction separately.
-3. Compare every file outside `app/src/debug`; all files must match byte-for-byte.
-4. Record `qa/canonical/v0.9.3.17-baseline.sha256` before canonical-only additions.
-5. Materialize the production Gradle project directly in Git.
-6. Add Gradle Wrapper 8.13.
-7. Apply one intentional source-only difference: a file-scoped AndroidX opt-in for Media3 `UnstableApi` in `PlayerScreen.kt` to clear the documented lint error. This changes no runtime behavior.
-8. Record `qa/canonical/canonical-source.sha256` for the committed source and build files.
+This reconciliation does not replace the canonical project with reconstructed files. It ports only the verified responsive changes into the current canonical source:
 
-## Required acceptance evidence
+- versionName `0.9.3.18`, versionCode `62`;
+- phone-landscape device classification and top navigation;
+- mobile navigation insets/targets;
+- TV safe-area adjustments;
+- explicit Android TV Search navigation/edit mode.
 
-- Clean checkout builds directly through `./gradlew`; no reconstruction creates `app/src/main`.
-- Debug and unsigned Release APK/AAB build successfully, including R8/resource shrinking.
-- Existing unit tests pass.
-- `lintDebug` has no error.
-- ABI verification passes exactly for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, with legacy `x86` absent.
-- Compatibility QA remains debug-only and is not copied into production source.
-- Historical ZIP, scripts, workflows, and audit evidence remain available until this parity PR is accepted.
+All canonical work merged after PR #22 remains in place, including durable downloads and signing qualification infrastructure.
 
-## Out of scope
+## Compatibility authority
 
-Release signing, install/upgrade proof, landscape navigation, TV Search focus, durable downloads, authenticated production E2E, performance qualification, and any feature work remain separate follow-up PRs.
+`qa/compatibility/prepare-project.sh` now copies the canonical checkout and injects debug-only fixtures. The previous ZIP + patch pipeline remains available as `prepare-reconstructed-project.sh` for historical audit and recovery, but it is not the active product source.
+
+## Required evidence
+
+- canonical manifest verification;
+- clean, lint, unit, debug and release/R8 builds from checkout;
+- ABI verification for APK/AAB;
+- Compatibility Lab on the canonical application across all nine profiles;
+- artifact review, not workflow color alone.
+
+Reconstruction history must remain until a separate explicit governance decision; this reconciliation does not delete it.
