@@ -14,6 +14,14 @@ class DurableDownloadActionReceiverTest {
     }
 
     @Test
+    fun `resume notification action is recognized`() {
+        assertEquals(
+            DurableDownloadNotificationAction.RESUME,
+            durableDownloadNotificationAction(ACTION_RESUME_DOWNLOAD),
+        )
+    }
+
+    @Test
     fun `unknown notification action is ignored`() {
         assertNull(durableDownloadNotificationAction("unknown"))
         assertNull(durableDownloadNotificationAction(null))
