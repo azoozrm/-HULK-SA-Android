@@ -3,7 +3,6 @@ package sa.hulksa.player
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -30,6 +29,9 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        requestDownloadNotificationPermissionIfNeeded(
+            televisionDevice = isTelevisionDevice,
+        )
         setContent {
             HulkTheme {
                 HulkApp(
