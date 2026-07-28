@@ -1,188 +1,143 @@
 # HULK SA Android — حالة المشروع المدققة
 
-تاريخ التدقيق: 2026-07-27 UTC
-المستودع: <https://github.com/azoozrm/-HULK-SA-Android>
-الفرع الرسمي الذي دُقّق: `phase-3-v0.9.3.0-adaptive-foundation`
-رأس التطبيق/المختبر الذي بُني واختُبر: `8db147faea8fae0290bf75d53b4194de2035880f`
-مرجع المستخدم: `v0.9.3.17-beta`
+تاريخ التحديث: 2026-07-28 UTC  
+المستودع: `azoozrm/-HULK-SA-Android`  
+الفرع الرسمي: `phase-3-v0.9.3.0-adaptive-foundation`  
+HEAD المعتمد بعد إغلاق عيوب التكييف: `75853490d0fd9d7a0ed523eb30133288246094ba`  
+الإصدار التحضيري: `0.9.3.18`، `versionCode 62`، وDebug يضيف `-beta`.
 
 ## قاعدة قراءة الحالة
 
-| الحالة | المعنى في هذه الحزمة |
+| الحالة | المعنى |
 |---|---|
-| `COMPLETED` | موجود في السورس النهائي المولّد، موصول بمسار التطبيق، وله دليل بناء أو اختبار مناسب |
-| `PARTIAL` | موجود ويُستخدم، لكن له عيب مؤكد أو لا يغطي السيناريو الإنتاجي كاملًا |
-| `NOT IMPLEMENTED` | لا يوجد تنفيذ فعلي في رأس الفرع المدقق |
-| `BROKEN` | موجود لكن فشل في دليل تشغيل أو بوابة لازمة |
-| `NOT VERIFIED` | قد يكون موجودًا أو مدعى به تاريخيًا، لكن لم يُشغّل أو لا توجد أدلة كافية |
+| `COMPLETED` | موجود وموصول وله دليل بناء أو تشغيل مناسب |
+| `PARTIAL` | موجود ويعمل ضمن النطاق المختبر، لكن بقيت فجوة إنتاجية أو اختبارية |
+| `BROKEN` | فشل في دليل تشغيل أو بوابة لازمة |
+| `NOT VERIFIED` | لا توجد أدلة تشغيل كافية |
+| `NOT IMPLEMENTED` | لا يوجد تنفيذ فعلي |
 
-## الملخص التنفيذي
+## الملخص التنفيذي الحالي
 
-المشروع ليس جاهزًا لإصدار v1.0. التجميع من السورس المعاد تكوينه نجح فعليًا لكل من Debug وRelease، ونجحت 14 وحدة اختبار، ونجح فحص ABI للـ APK والـ AAB. لكن Release APK وAAB غير موقعين، و`lintDebug` يفشل بخطأ واحد، والسورس الحقيقي لا يوجد كمشروع Gradle مباشر في جذر المستودع بل يُعاد توليده من ZIP قديم وسلسلة 24 أداة تحويل.
+إصلاحات التكييف المستهدفة في v0.9.3.18 اكتملت من ناحية Compatibility Lab: عيوب Phone Landscape الخمسة أغلقت، وTV Search focus trap على 720p و1080p و4K أُغلق في PR #51. Run #31 شغّل 133 حالة على 9 profiles، ونجح البناء وUnit Tests وتجهيز APK المختبر. بعد مراجعة `summary.json` والصور وFocus traces، أصبح **Product Critical المؤكد = 0**.
 
-مختبر التوافق شُغّل على GitHub Actions على 9 ملفات أجهزة/دقات، وأنتج 133 حالة التقاط و692 ملف دليل. بعد المراجعة اليدوية للأدلة:
+العداد الخام في Android TV 1080p سجل حالتين Critical في Movies (`page_marker_missing` و`empty_hierarchy`)، لكن لقطة الدليل كانت Android TV Launcher مع نافذة Google TV Shop وليست التطبيق. لذلك التصنيف الصحيح لهما `FALSE POSITIVE / LAUNCHER CONTAMINATION`، وليس عيب Product.
 
-- 132 حالة هي التقاط فعلي للتطبيق؛ حالة Android TV 720p/Series التقطت Android TV Launcher وليست التطبيق.
-- 8 عيوب تطبيق حرجة مؤكدة: 5 حالات تنقل غير قابل للوصول في Landscape على هواتف، و3 حالات Focus trap في Search على Android TV.
-- حالتا الفشل الأخريان اللتان عدّهما التقرير حرجتين في TV 720p/Series هما `INVALID / NOT TESTED` وليستا عيب تطبيق.
-- لا توجد Crash أو ANR مؤكدة في تشغيل المختبر.
-- تحذيرات الأداء البالغ عددها 133 ليست Macrobenchmark؛ اعتمدت على عدد قليل جدًا من الإطارات في Debug Emulator ولا تصلح كبوابة أداء.
+هذا لا يعني جاهزية v1.0. ما زالت بوابات حاكمة مفتوحة: السورس النهائي مولّد من ZIP وسلسلة Scripts، Gradle Wrapper غير موجود في المشروع الرسمي، `lintDebug` لم يُثبت نظافته على HEAD الحالي، Release production ما زال غير موقع وغير مثبت، ولا توجد production E2E أو physical ARM/OEM qualification.
 
-الخطوة التالية الوحيدة الموصى بها: إنشاء PR لحوكمة السورس يثبّت الناتج الدقيق لسلسلة التكوين كمشروع Gradle عادي في المستودع، ويضيف Gradle Wrapper 8.13 وWorkflow واحدًا حاكمًا يبني `lint + unit + debug + release` من هذا السورس مباشرة، من دون تغيير سلوك التطبيق.
+درجة 44/100 الواردة في التدقيق الأول أصبحت **مرجعًا تاريخيًا فقط** ولا تستخدم كتقييم حالي. لم تُنشأ درجة رقمية جديدة لأن بوابات canonical source وlint والتوقيع لم تُغلق بعد؛ الحالة الحالية تُدار بالبوابات المثبتة أدناه.
 
-## هوية Git الفعلية
+## هوية Git والإصدارات
 
-| البند | النتيجة | الدليل |
-|---|---|---|
-| الفرع الرسمي الحالي | `phase-3-v0.9.3.0-adaptive-foundation` | طلب المستخدم ورأس تشغيل المختبر |
-| الفرع الافتراضي في GitHub | `main` | GitHub repository metadata |
-| رأس الفرع الرسمي قبل Commit تقارير التدقيق | `8db147faea8fae0290bf75d53b4194de2035880f` | GitHub Actions run `30287050875` |
-| رأس `main` عند التدقيق | `6e0593881c1abd7577c2272fe930d717ee807e56` | GitHub compare metadata |
-| علاقة الرسمي بـ `main` | متفرع: الرسمي أمامه 133 Commit وخلفه 2 | GitHub compare؛ merge-base `f6bb35e13c5df442f73d44de5ca38af0a2330c56` |
-| العلاقة بفرع Phase 0 | أمامه 123 وخلفه 0 | GitHub compare |
-| العلاقة بفرع Phase 2 | أمامه 116 وخلفه 0 | GitHub compare |
-| Git tags | لا توجد Tags على remote عند التدقيق | `git ls-remote --tags origin` أعاد نتيجة فارغة |
-| عدد الفروع البعيدة | 25 | `git ls-remote --heads origin` |
-
-الفروع القديمة ليست مرجع بناء متساويًا مع الفرع الرسمي. توجد عائلات متفرعة بأسماء مثل `download-system-*` و`v091*` و`phase1/*` و`phase-3-...-adaptive-stable`. لا ينبغي دمج أي منها آليًا؛ يجب أرشفتها أو حذفها بعد مقارنة واعتماد مستقل.
-
-### آخر Commits المهمة في خط الفرع الرسمي
-
-| Commit | الغرض الذي تحقق منه التدقيق |
+| البند | الحالة الحالية |
 |---|---|
-| `8db147faea8fae0290bf75d53b4194de2035880f` | نسخة GitHub من Commit بناء Compatibility Lab الذي شُغّل |
-| `707a4087f1b0e23d8b9ce7da34ef8fe206429a5a` | Workflow وتجميع v0.9.3.17 Stability Polish |
-| `e86954e06439bef327066274cbb2207837f3941d` | تفاصيل/Favorites/Downloads v0.9.3.17 |
-| `72751e1fedeb06a0f4be915baf67102aafd9c2f6` | Player panels v0.9.3.17 |
-| `95ffcd71a73b4b966fba0dc8a4ea03c41fc11e24` | Navigation/categories v0.9.3.17 |
-| `a45094e6f290ce18f66226ba781404abdefa2989` | إصلاح تحقق episode padding في v0.9.3.16 |
-| `62b00d61821fa430d64197c59f2e074befd82b18` | نقطة بدء إصلاحات v0.9.3.16 |
-| `4b62b6f20aabe8dca7a6da3dfde58b0f94f39c45` | إدخال Adaptive Foundation الأولي؛ تلاه تحويل المصدر إلى templates/tools |
+| الفرع الرسمي | `phase-3-v0.9.3.0-adaptive-foundation` |
+| الفرع الافتراضي GitHub | `main`، لكنه ليس فرع التنفيذ الرسمي |
+| HEAD الحالي | `75853490d0fd9d7a0ed523eb30133288246094ba` |
+| PR #50 | مدموج؛ responsive/layout/focus/safe-area foundation |
+| PR #51 | مدموج؛ إغلاق TV Search focus trap |
+| versionName | `0.9.3.18` |
+| versionCode | `62` |
+| Git tag لـv0.9.3.18 | غير موجود |
+| applicationId | لم يتغير |
 
-هذه الرسائل لا تكفي وحدها لإثبات الميزات؛ جدول حالة الميزات أدناه مبني على السورس النهائي المولّد واستخدامه.
+## نتائج Compatibility Lab المعتمدة
 
-## حقيقة الإصدار
+أحدث Run معتمد: **Run #31 / ID `30377208398`** على PR #51 head `2af1356cd89bdd2d0f0cb7384791d8e8dfdf6449`. بعد ذلك دُمج نفس التغيير Squash في HEAD الحالي.
 
-لا يوجد Tag باسم `v0.9.3.17-beta` ولا GitHub Tag لأي إصدار.
+| المؤشر | النتيجة |
+|---|---:|
+| Profiles | 9 |
+| Captures | 133/133 |
+| Raw Critical | 2 |
+| Confirmed Product Critical | **0** |
+| False-positive Critical | 2، لقطة Launcher واحدة |
+| Warnings | 263 |
+| Infrastructure errors النهائية | 0 |
+| Crash مؤكد | 0 |
+| ANR مؤكد | 0 |
+| TV Search focus | PASS على 720p/1080p/4K |
+| Phone landscape navigation | PASS ضمن profiles المختبرة |
 
-| الموضع | القيمة الفعلية |
+Android TV 720p احتاج retry بسبب فشل Emulator عابر، ثم أنتج 7/7 حالات صالحة. هذا يُسجل كحدث بنية اختبار ولا يُحوّل إلى عيب Product.
+
+التحذيرات الحالية استشارية وليست عيوبًا مؤكدة تلقائيًا:
+
+- `high_emulator_jank`: 133 — Debug Emulator، غير صالح كبوابة أداء.
+- `text_at_display_edge`: 42.
+- `slow_page_start`: 39.
+- `possible_text_clipping`: 22.
+- `interactive_overlap`: 21.
+- `tv_safe_area`: 6.
+
+أي Warning بصري لا يُصلح قبل مراجعة Screenshot/XML وإثبات أثر فعلي.
+
+## حالة البناء والاختبار
+
+| البوابة | الحالة |
 |---|---|
-| `defaultConfig.versionCode` | `61` |
-| `defaultConfig.versionName` | `0.9.3.17` |
-| Debug suffix | `-beta` |
-| Debug package | `sa.hulksa.player.dev` |
-| Debug versionName المقروء من APK | `0.9.3.17-beta` |
-| Release package | `sa.hulksa.player` |
-| Release versionName المقروء من APK | `0.9.3.17` |
+| Source reconstruction | `PASS` في Run #31 |
+| Generated Source Snapshot | `PASS` في Run #8 |
+| Kotlin compile | `PASS` |
+| Unit Tests | `PASS` ضمن Workflow الحالي |
+| Lab APK assemble/package | `PASS` |
+| Compatibility matrix | `PASS` بنيويًا؛ Product Critical المصحح = 0 |
+| `lintDebug` على HEAD الحالي | `NOT VERIFIED`؛ الخطأ القديم Media3 يجب إعادة اختباره |
+| Debug APK/AAB الرسميان | البناء التاريخي نجح، لكن يلزم توحيد Workflow canonical |
+| Release APK/AAB/R8 | البناء التاريخي نجح كـunsigned؛ HEAD الحالي يحتاج qualification بعد canonical |
+| Signed Release | `NOT IMPLEMENTED / NOT VERIFIED` |
+| Install/upgrade signed Release | `NOT VERIFIED` |
+| Production E2E | `NOT IMPLEMENTED` في HEAD الحالي |
+| Physical ARM/OEM/API 23 | `NOT VERIFIED` |
 
-لذلك `v0.9.3.17-beta` هو اسم نسخة Debug/مرجع اختبار، وليس Tag ولا اسم Release production.
+## حالة المراحل الرسمية
 
-## السورس الذي يُبنى فعلًا
+### 1. استقرار البناء — `PARTIAL / ADVANCED`
 
-جذر المستودع لا يحتوي `settings.gradle*` أو `app/` أو `gradlew`. البناء الرسمي يفعل الآتي:
+تم إثبات reconstruction والبناء والاختبارات داخل المختبر. المتبقي: تثبيت السورس المولد كمشروع Gradle canonical، إضافة Gradle Wrapper 8.13، Workflow حاكم مباشر، parity، ثم lint clean.
 
-1. يفك `HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip`.
-2. يشغّل `tools/repair-v09120.py`.
-3. يشغّل أدوات Phase 2 وPhase 3 بالتتابع من `prepare-v0920-architecture.py` حتى `prepare-v0945-xiaomi-search-safeareas.py`.
-4. يشغّل أربعة محولات في `release/v0.9.3.16/`.
-5. يشغّل ثلاثة محولات في `release/v0.9.3.17/`.
-6. يبني مجلدًا مؤقتًا اسمه `project/`.
+### 2. التوقيع والتثبيت — `PARTIAL`
 
-Workflow المختبر يستخدم السلسلة الإنتاجية نفسها ثم يضيف `app/src/debug` فقط بواسطة `qa/compatibility/prepare-harness.py`. لا يضيف كود QA إلى `app/src/main`.
+معلومات المفتاح التاريخية فُحصت سابقًا، لكن لا يوجد مسار CI محمي يخرج APK/AAB production موقعًا من HEAD الحالي. لا تعرض أو تنسخ signing materials.
 
-حالة المصدر: `BROKEN GOVERNANCE / BUILDABLE`. يمكن بناؤه، لكنه ليس مصدرًا مباشرًا سهل المراجعة أو bisect أو IDE checkout. أي اختلاف في ترتيب أدوات التحويل يغيّر التطبيق النهائي.
+### 3. المعماريات — `PARTIAL`
 
-## حالة البناء التي شُغّلت
+ABI verifier التاريخي نجح لـ`arm64-v8a` و`armeabi-v7a` و`x86_64`. لا توجد شهادة عتاد ARM/OEM فعلية أو API 23 runtime.
 
-بيئة التدقيق: Temurin JDK 17.0.20، Gradle 8.13، Android SDK 36.
+### 4. التكييف — `COMPLETED WITH ADVISORIES` ضمن نطاق المختبر
 
-| العملية | النتيجة الفعلية |
-|---|---|
-| إعادة تكوين السورس | `PASS` |
-| `clean` + `compileDebugKotlin` | `PASS` |
-| `testDebugUnitTest` | `PASS` — 14/14 |
-| `assembleDebug` | `PASS` |
-| `bundleDebug` | `PASS` |
-| `lintDebug` | `FAIL` — 1 error، 32 warnings، 1 hint |
-| `assembleRelease` | `PASS` |
-| `bundleRelease` | `PASS` |
-| R8/resource shrinking | `PASS`؛ ملف mapping أُنتج |
-| Release APK signature | `FAIL` — unsigned |
-| Release AAB signature | `FAIL` — unsigned |
-| Debug APK install/run | `PASS` داخل Compatibility Lab على 9 emulator profiles |
-| Signed Release install | `NOT TESTED` — لا توجد حزمة موقعة |
+تم إغلاق العيوب الحرجة المثبتة في Phone Landscape وTV Search. بقيت warnings تحتاج triage، ولا تعتبر شهادة OEM أو Accessibility كاملة.
 
-تفاصيل الأوامر والـ SHA256 في [BUILD-AND-RELEASE-AUDIT.md](BUILD-AND-RELEASE-AUDIT.md).
+### 5. الاختبارات — `PARTIAL / ADVANCED`
 
-## الأعمال المنجزة فعليًا
+المختبر يغطي 9 profiles وDPAD/launcher/pages/evidence. المتبقي production login/catalog/playback/download E2E، process death، network/storage، screenshot regression، Macrobenchmark، وphysical devices.
 
-| العمل | الحالة | دليل الاستخدام الحقيقي |
-|---|---|---|
-| `HomeContentSnapshot` | `PARTIAL` | يُنتج في `NavigationMemoryStore.homeContent()` وتستهلكه Home؛ cache لا يدخل `favorites` في شرط invalidation |
-| Smart Home optimization | `PARTIAL` | compact catalog، history/favorites weights، continue watching، featured/popular؛ لا توجد اختبارات سلوكية وعيب cache مؤكد |
-| Recommendation improvements | `PARTIAL` | `becauseYouWatched` و`suggested` و`personalizedLive` تظهر في صفوف Home؛ قد تتقادم بعد تغيير Favorite |
-| Downloads redesign | `PARTIAL` | queue/pause/resume/priority/Wi-Fi/schedule/progress/integrity/UI موجودة؛ التنفيذ process-bound بلا Worker/Foreground Service |
-| Focus improvements | `PARTIAL` | `FocusRequester` وذاكرة موضع وD-pad handling واسعة؛ Search محبوس على TV في 720p/1080p/4K |
-| Performance improvements | `PARTIAL / NOT VERIFIED` | Lazy layouts و`remember` وcompact catalog موجودة؛ لا يوجد Macrobenchmark/Baseline Profile قياسي |
-| Adaptive phone/tablet/TV foundation | `PARTIAL` | تصنيف width/device/input حقيقي ومختبر بـ6 unit tests؛ rail يخرج عناصر من الشاشة في هواتف Landscape |
-| Credential storage | `COMPLETED` للبنية | Android Keystore AES/GCM، backup معطل؛ لم يُختبر migration/فساد المفتاح |
-| Playback lifecycle basic cleanup | `COMPLETED` للكود | ExoPlayer داخل `DisposableEffect` ويُستدعى `release()` |
-| ABI qualification | `COMPLETED` للحزم المبنية | `arm64-v8a` و`armeabi-v7a` و`x86_64` بالضبط؛ `x86` غير موجود |
+### 6. v1.0 — `NOT IMPLEMENTED`
 
-## ما لم يكتمل أو لم يُتحقق منه
+لا Release Candidate موقع ولا install/upgrade qualification ولا staged rollout.
 
-- توقيع Release، تثبيت Release موقّع، Play App Signing، ورفع Store: `NOT IMPLEMENTED / NOT TESTED`.
-- تسجيل دخول حقيقي في المختبر الحالي، backend/catalog production، تشغيل فيديو حقيقي، تنزيل ملف حقيقي: `NOT TESTED`.
-- أجهزة فعلية ARM أو OEM فعلية: `NOT TESTED`; الأسماء Galaxy/Pixel هي هندسة Emulator لا عتاد OEM.
-- API 23 الفعلي رغم أن `minSdk=23`: `NOT TESTED`; أدنى مختبر API 28.
-- Process death، background download، night schedule بعد قتل العملية: `NOT TESTED` ويكشف السورس غياب durable worker.
-- Rotation مع عملية/Activity recreation كاملة: `PARTIAL`; الـ Manifest يمتص تغييرات كثيرة عبر `configChanges`.
-- Screenshot regression بمرجع ذهبي: `NOT IMPLEMENTED`.
-- Macrobenchmark، startup profile generation، long-run playback، LeakCanary، network shaping: `NOT IMPLEMENTED`.
-- Store listing، privacy/data safety، policy review: `NOT VERIFIED`.
+### 7. الميزات الكبرى — `BLOCKED`
 
-## تقييم جاهزية v1.0
+تظل ممنوعة حتى إغلاق P0/P1 وإصدار v1.0 مستقر.
 
-| المحور | الدرجة /100 | سبب الدرجة |
-|---|---:|---|
-| Build readiness | 68 | Debug/Release وR8 نجحت، لكن lint يفشل والسورس غير مباشر ولا يوجد Wrapper |
-| Installation readiness | 55 | Debug ثبت على 9 محاكيات؛ Release غير موقع ولم يُثبت |
-| Phone readiness | 57 | Portrait مغطى، لكن 5 حالات تنقل Landscape مؤكدة عبر ثلاثة أحجام |
-| Tablet readiness | 70 | ملفا Pixel Tablet/Nexus 9 بلا عيب حرج مؤكد؛ ما زالت الأدلة Emulator وتحذيرات بصرية غير مفروزة |
-| Android TV readiness | 43 | Search focus trap مؤكد على 720p/1080p/4K وحالة Series 720p غير صالحة |
-| UI readiness | 55 | 132 لقطة صالحة، لكن عيوب تنقل/Focus و252 warning آلية تحتاج فرزًا |
-| Performance readiness | 38 | PSS المرصود ضمن 142 MiB تقريبًا، لكن لا يوجد Macrobenchmark وتحذير jank غير موثوق |
-| Release signing readiness | 5 | لا signingConfig ولا key material ولا CI signing path |
-| Store readiness | 20 | target/compile 36 وAAB يتكون، لكن unsigned، بلا Tag/Release، lint fail ومراجعة policy غير منفذة |
-| **Overall v1.0 readiness** | **44** | لا يمكن إصدار حزمة Production قابلة للتثبيت بثقة، مع عيوب UI حرجة وفجوات اختبار إنتاجية |
+## الخطوة التنفيذية التالية
 
-هذه الدرجات ليست متوسطًا حسابيًا بسيطًا؛ توقيع Release وحوكمة السورس وعيوب التنقل/Focus بوابات مانعة لا تُعوض بدرجات المجالات الأخرى.
+إنشاء PR **canonical source governance** بلا تغيير سلوك:
 
-## أهم الموانع
+1. إعادة تكوين HEAD الحالي v0.9.3.18.
+2. تثبيت الناتج كمشروع Gradle مباشر داخل Git.
+3. إضافة Gradle Wrapper 8.13.
+4. إضافة Workflow واحد يشغل مباشرة من checkout: clean، lint، unit، debug/release APK+AAB، R8، ABI verification.
+5. إثبات parity مع الناتج المعاد تكوينه.
+6. إبقاء reconstruction history مؤقتًا حتى قبول parity.
 
-1. `P0`: لا توجد حزمة Release موقعة أو مسار signing آمن.
-2. `P1`: السورس النهائي مولّد ولا يوجد كـ canonical Gradle checkout، والفرع الافتراضي ليس الفرع الرسمي.
-3. `P1`: Downloads وSettings غير قابلين للوصول في بعض هواتف Landscape.
-4. `P1`: Search يسبب Focus trap على كل دقات Android TV المختبرة.
-5. `P1`: `lintDebug` يفشل.
-6. `P1`: لا توجد اختبارات authenticated production للـ catalog/playback/downloads في رأس الفرع.
-7. `P1`: التنزيلات غير durable عند قتل العملية.
+بعده فقط: lint clean، signing، signed install/upgrade، production E2E، physical ARM/OEM، ثم Release Candidate.
 
-القائمة الكاملة مع الأدلة والتحقق المقترح في [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+## قيود إلزامية
 
-## GitHub Actions والـ Artifacts
-
-- تشغيل المختبر المكتمل: <https://github.com/azoozrm/-HULK-SA-Android/actions/runs/30287050875>
-- تقرير HTML/Markdown/JSON والأدلة: <https://github.com/azoozrm/-HULK-SA-Android/actions/runs/30287050875/artifacts/8661831141>
-- APK المختبر: <https://github.com/azoozrm/-HULK-SA-Android/actions/runs/30287050875/artifacts/8661311514>
-- صفحة Workflow البناء الحالي: <https://github.com/azoozrm/-HULK-SA-Android/actions/workflows/build-v0947-stability-polish.yml>
-
-Artifact التقرير صالح بحسب GitHub حتى 2026-08-26، وArtifacts الأجهزة/APK حتى 2026-08-10. يجب نسخ الدليل الضروري إلى Release أو تخزين طويل الأجل قبل انتهاء الصلاحية.
-
-## الملفات المرجعية التالية
-
-1. [HANDOFF-FOR-NEXT-ENGINEER.md](HANDOFF-FOR-NEXT-ENGINEER.md)
-2. [KNOWN-ISSUES.md](KNOWN-ISSUES.md)
-3. [BUILD-AND-RELEASE-AUDIT.md](BUILD-AND-RELEASE-AUDIT.md)
-4. [COMPATIBILITY-RESULTS.md](COMPATIBILITY-RESULTS.md)
-5. [ROADMAP-TO-V1.md](ROADMAP-TO-V1.md)
+- لا تبدأ من الصفر ولا تعيد تصميم المنجز.
+- لا تستخدم `main` بدل الفرع الرسمي.
+- لا تعتبر Workflow أخضر وحده Product PASS؛ اقرأ Artifacts.
+- لا تعرض endpoint أو credentials أو signing materials.
+- لا تحذف reconstruction history قبل canonical parity.
+- لا تدّع نجاح signed Release أو production E2E أو performance أو OEM قبل تشغيلها فعليًا.
+- لا تبدأ ميزة كبيرة قبل v1.0.
