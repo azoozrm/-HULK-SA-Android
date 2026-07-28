@@ -50,6 +50,7 @@ android {
         targetSdk = 36
         versionCode = 61
         versionName = "0.9.3.17"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
         buildConfigField("String", "CONFIG_URL", configUrl.get().asBuildConfigString())
@@ -151,4 +152,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
