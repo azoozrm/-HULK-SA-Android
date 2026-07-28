@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -21,6 +22,7 @@ internal data class DurableDownloadWorkPlan(
     val downloadId: Long,
     val uniqueWorkName: String,
     val initialDelayMs: Long,
+    val backoffDelayMs: Long,
     val networkRequirement: DurableDownloadNetworkRequirement,
 )
 
@@ -35,6 +37,7 @@ internal fun durableDownloadWorkPlan(
         downloadId = downloadId,
         uniqueWorkName = "$UNIQUE_WORK_PREFIX$downloadId",
         initialDelayMs = (scheduledAtEpochMs - nowEpochMs).coerceAtLeast(0L),
+        backoffDelayMs = DURABLE_DOWNLOAD_BACKOFF_MS,
         networkRequirement = if (wifiOnly) {
             DurableDownloadNetworkRequirement.UNMETERED
         } else {
@@ -89,6 +92,11 @@ private fun DurableDownloadWorkPlan.toWorkRequest(title: String?): OneTimeWorkRe
         .setInputData(input)
         .setConstraints(constraints)
         .setInitialDelay(initialDelayMs, TimeUnit.MILLISECONDS)
+        .setBackoffCriteria(
+            BackoffPolicy.EXPONENTIAL,
+            backoffDelayMs,
+            TimeUnit.MILLISECONDS,
+        )
         .addTag(DURABLE_DOWNLOAD_TAG)
         .build()
 }
@@ -120,3 +128,4 @@ internal const val KEY_DOWNLOAD_ID = "download_id"
 internal const val KEY_DOWNLOAD_TITLE = "download_title"
 internal const val DURABLE_DOWNLOAD_TAG = "hulk_durable_download"
 private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_"
+private const val DURABLE_DOWNLOAD_BACKOFF_MS = 30_000L
