@@ -54,18 +54,4 @@ replace_regex_once(
     "catalog row vertical breathing room",
 )
 
-components = "app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt"
-replace_once(
-    components,
-    "import androidx.compose.foundation.layout.heightIn\n",
-    "import androidx.compose.foundation.layout.heightIn\nimport androidx.compose.foundation.layout.widthIn\n",
-    "FocusButton widthIn import",
-)
-replace_regex_once(
-    components,
-    r"modifier\s*=\s*modifier\s*\.scale\(scale\)",
-    "modifier = modifier\n            .widthIn(min = 48.dp)\n            .heightIn(min = 48.dp)\n            .scale(scale)",
-    "FocusButton minimum adaptive bounds",
-)
-
 print("Prepared v0.9.3.18 compatibility responsive fixes")
