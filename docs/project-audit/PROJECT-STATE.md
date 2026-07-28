@@ -5,6 +5,14 @@
 الفرع الرسمي: `phase-3-v0.9.3.0-adaptive-foundation`  
 الإصدار التحضيري: `0.9.3.18`، `versionCode 62`، وDebug يضيف `-beta`.
 
+## تحديث إنقاذ الهوست والحجم
+
+Run `30400862864` أنتج APK/AAB موقعين صحيحين تشفيريًا، لكن فحص الـAPK الفعلي أثبت أن `PORTAL_URL` كان `https://hulksa.com/` و`CONFIG_URL` كان فارغًا. هذا يفسر رسالة رفض الاتصال على Galaxy: التطبيق كان يرسل Xtream login إلى موقع الويب.
+
+الـAPK الموقّع مرفوض كنسخة تشغيل. إصلاح الفرع المستقل يثبت هوست HULK التشغيلي صراحة ويضيف fail-closed checks على generated BuildConfig وDEX داخل APK/AAB.
+
+فرق الحجم ليس نقصًا مثبتًا: v0.9.3.17 المرجعي كان Debug بحجم 24,424,419 بايت و11 DEX، بينما v0.9.3.18 كان R8 Release بحجم 3,426,648 بايت وDEX واحد. native libraries والـABI والمكتبات الأساسية باقية. راجع `V09318-HOST-SIZE-RESCUE.md`.
+
 ## الملخص التنفيذي
 
 المشروع يملك سورس Gradle canonical مباشر وGradle Wrapper 8.13 منذ PR #22. الخلل الذي كُشف في هذه الجولة لم يكن غياب canonical source، بل **انقسام مسار التنفيذ**: التطبيق canonical استمر بالتطور في PRs #23–#45، بينما Compatibility Lab بقي يعيد بناء ZIP تاريخي وسلسلة patches مختلفة.
@@ -70,13 +78,14 @@ Run #31 يبقى مرجعًا تاريخيًا لإصلاحات reconstruction،
 
 ## التوقيع والإصدار
 
-Signed Release Qualification Run #14 — Run ID `30381513355`:
+Signed Release Qualification Run ID `30400862864`:
 
-- unsigned fallback يبني بنجاح.
-- أي signing configuration ناقص يفشل مبكرًا وبشكل fail-closed.
-- مهمة signed production artifacts كانت `SKIPPED` لأنها تتطلب `workflow_dispatch` وSecrets محمية.
+- APK/AAB الموقعان: PASS تشفيريًا.
+- package/version/ABI/checksums: PASS.
+- certificate SHA-256: PASS.
+- runtime host: **FAIL**؛ جُمّع `hulksa.com`.
 
-لذلك لا يوجد حتى الآن APK/AAB production موقع من v0.9.3.18، ولا clean install/upgrade qualification.
+لذلك توجد signed artifacts، لكنها ليست Production candidate صالحة. لا يوجد حتى الآن signed runtime-correct APK/AAB أو clean install/upgrade qualification.
 
 ## حالة المراحل الرسمية
 
@@ -87,7 +96,8 @@ Signed Release Qualification Run #14 — Run ID `30381513355`:
 | lint clean | `COMPLETED` |
 | Responsive Compatibility Criticals | `COMPLETED` ضمن المختبر |
 | Signing safeguards/preflight | `COMPLETED` |
-| Signed production APK/AAB | `NOT VERIFIED` |
+| Signed production APK/AAB | `BUILT / RUNTIME REJECTED` |
+| Canonical runtime host guard | `IMPLEMENTED / CI PENDING` |
 | Certificate parity + upgrade | `NOT VERIFIED` |
 | Production login/catalog/playback/download E2E | `NOT VERIFIED` |
 | Physical ARM/OEM/API 23 | `NOT VERIFIED` |
@@ -96,14 +106,16 @@ Signed Release Qualification Run #14 — Run ID `30381513355`:
 
 ## الخطوة التالية
 
-المرحلة التالية هي **Signed Release Qualification** في بيئة GitHub محمية:
+المرحلة التالية هي **Runtime-correct Signed Release Qualification** في بيئة GitHub محمية:
 
-1. تشغيل Workflow يدويًا مع Secrets الرسمية الموجودة في protected environment.
-2. إخراج APK وAAB موقعين من v0.9.3.18.
-3. التحقق من certificate fingerprint وsignature schemes وpackage/version وABI.
-4. clean install.
-5. upgrade من مرجع الاستقرار مع الحفاظ على البيانات والمسار.
-6. R8/minified runtime smoke.
+1. بناء Debug وRelease بعد حارس الهوست.
+2. إثبات `PORTAL_URL` و`CONFIG_URL` من generated BuildConfig وDEX.
+3. إخراج APK وAAB موقعين من v0.9.3.18.
+4. التحقق من certificate fingerprint وsignature schemes وpackage/version وABI.
+5. clean install وlogin على Galaxy.
+6. install/login على Xiaomi/Android TV.
+7. upgrade من مرجع الاستقرار مع الحفاظ على البيانات والمسار.
+8. R8/minified runtime smoke.
 
 بعد ذلك: production E2E، physical ARM/OEM/API 23، process/network/storage tests، Macrobenchmark، ثم Release Candidate.
 

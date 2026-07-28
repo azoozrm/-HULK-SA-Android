@@ -17,8 +17,9 @@
 | رفض signing inputs الناقصة | مكتمل | fail-closed preflight |
 | APK signature/certificate tooling | مكتمل كأداة | signed workflow run |
 | AAB signature/certificate tooling | مكتمل كأداة | signed workflow run |
-| Production signer identity | غير متحقق | approved keystore + expected SHA-256 |
-| Signed APK/AAB لـv0.9.3.18 | غير متحقق | protected signed job |
+| Production signer identity | مكتمل للـcandidate السابق | Run `30400862864` + certificate SHA-256 |
+| Signed APK/AAB لـv0.9.3.18 | مخرجان لكن مرفوضان تشغيليًا | الهوست المجمّع كان `hulksa.com` |
+| Runtime host qualification | إصلاح منفذ، CI جديد مطلوب | generated BuildConfig + APK/AAB DEX reports |
 | Clean signed installation | غير منفذ | signed APK + emulator/device evidence |
 | Upgrade من stable APK | غير منفذ | real stable baseline APK بنفس الشهادة |
 
@@ -31,9 +32,10 @@ Signed job يعمل داخل environment باسم `production-signing` ويقر�
 - `HULK_RELEASE_STORE_PASSWORD`.
 - `HULK_RELEASE_KEY_PASSWORD`.
 - `HULK_RELEASE_CERT_SHA256`.
-- `HULK_PORTAL_URL` اختياري لمسار production المعتمد.
 
 لا يجوز وضع أي قيمة سرية أو keystore أو password أو private key في Git أو PR أو Logs أو source artifacts.
+
+هوست HULK التشغيلي ليس signing secret. يثبت صراحة في مسار Release، ويجب أن يفشل البناء إذا اختلف أو كان فارغًا أو placeholder أو هوست موقع الويب. `CONFIG_URL` يجب أن يكون فارغًا في Release حتى لا يتجاوز الهوست الموثق.
 
 ## Fail-closed behavior
 
@@ -49,9 +51,11 @@ Signed job يعمل داخل environment باسم `production-signing` ويقر�
 - Version code: `62`.
 - Version name: `0.9.3.18`.
 
-## Qualification الحالية
+## نتيجة Qualification السابقة
 
-PR #54 يضيف push trigger محدودًا بالـworkflow وmarker لتشغيل qualification مرة واحدة بعد الدمج على الفرع الرسمي، داخل `production-signing`، بدون نشر عام. بعد اكتمال النتيجة يجب إزالة push trigger والmarker والإبقاء على `workflow_dispatch` كالمسار الدائم.
+Run `30400862864` نجح في package/version/signature/certificate/ABI/checksum، لكنه بنى `PORTAL_URL=https://hulksa.com/`. لذلك نجاحه يبقى دليل توقيع فقط ولا يعتمد كدليل Runtime أو Production.
+
+التشخيص الرقمي الكامل في `V09318-HOST-SIZE-RESCUE.md`.
 
 ## Upgrade qualification
 

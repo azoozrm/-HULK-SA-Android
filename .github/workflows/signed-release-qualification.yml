@@ -55,20 +55,82 @@ jobs:
           set -euo pipefail
           bash -n tools/verify-apk-signing.sh
           bash -n tools/verify-aab-signing.sh
+          python3 -m py_compile tools/verify-runtime-config.py
+          PYTHONDONTWRITEBYTECODE=1 \
+            python3 -m unittest discover -s tools/tests -v
+
+      - name: Prove invalid release runtime configuration fails closed
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-config-preflight
+
+          for case_name in empty example website; do
+            case "$case_name" in
+              empty) bad_portal='' ;;
+              example) bad_portal='https://example.invalid' ;;
+              website) bad_portal='https://hulksa.com' ;;
+            esac
+
+            set +e
+            ./gradlew --no-daemon --console=plain \
+              :app:verifyProductionRuntimeConfig \
+              -PHULK_PORTAL_URL="$bad_portal" \
+              > "runtime-config-preflight/$case_name.log" 2>&1
+            status=$?
+            set -e
+
+            if [[ "$status" -eq 0 ]]; then
+              echo "Invalid release portal case '$case_name' was accepted unexpectedly." >&2
+              exit 1
+            fi
+            grep -Fq \
+              'Release PORTAL_URL must match the canonical HULK service endpoint.' \
+              "runtime-config-preflight/$case_name.log"
+          done
+
+          set +e
+          ./gradlew --no-daemon --console=plain \
+            :app:verifyProductionRuntimeConfig \
+            -PHULK_PORTAL_URL=http://3162356.xyz:8080 \
+            -PHULK_CONFIG_URL=https://example.invalid \
+            > runtime-config-preflight/config-override.log 2>&1
+          status=$?
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo 'A non-empty release CONFIG_URL was accepted unexpectedly.' >&2
+            exit 1
+          fi
+          grep -Fq \
+            'Release CONFIG_URL must be empty' \
+            runtime-config-preflight/config-override.log
+          echo 'PASS: invalid, placeholder, website, and override runtime values fail closed'
 
       - name: Prove unsigned release fallback remains buildable
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             clean :app:assembleRelease :app:bundleRelease \
-            -PHULK_PORTAL_URL=https://example.invalid
+            -PHULK_PORTAL_URL=http://3162356.xyz:8080 \
+            -PHULK_CONFIG_URL=
 
           unsigned_apk='app/build/outputs/apk/release/app-release-unsigned.apk'
+          unsigned_aab='app/build/outputs/bundle/release/app-release.aab'
+          build_config="$(find app/build/generated/source/buildConfig/release -type f -name BuildConfig.java -print -quit)"
           test -f "$unsigned_apk"
+          test -f "$unsigned_aab"
+          test -n "$build_config"
           if apksigner verify "$unsigned_apk" >/dev/null 2>&1; then
             echo 'Unsigned fallback unexpectedly produced a signed APK' >&2
             exit 1
           fi
+          python3 tools/verify-runtime-config.py \
+            "$unsigned_apk" \
+            --build-config "$build_config" \
+            --report runtime-config-preflight/UNSIGNED-APK-RUNTIME-CONFIG.md
+          python3 tools/verify-runtime-config.py \
+            "$unsigned_aab" \
+            --build-config "$build_config" \
+            --report runtime-config-preflight/UNSIGNED-AAB-RUNTIME-CONFIG.md
           echo 'PASS: no signing inputs produces an explicitly unsigned release APK'
 
       - name: Prove incomplete signing configuration fails closed
@@ -101,7 +163,8 @@ jobs:
       ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
       EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
-      HULK_PORTAL_URL: ${{ secrets.HULK_PORTAL_URL || 'https://example.invalid' }}
+      HULK_PORTAL_URL: http://3162356.xyz:8080
+      HULK_CONFIG_URL: ''
 
     steps:
       - uses: actions/checkout@v7
@@ -126,7 +189,7 @@ jobs:
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
 
-      - name: Validate required release secrets
+      - name: Validate required release inputs
         run: |
           set -euo pipefail
           missing=()
@@ -139,7 +202,16 @@ jobs:
             printf 'Missing required release signing inputs: %s\n' "${missing[*]}" >&2
             exit 2
           fi
+          if [[ "$HULK_PORTAL_URL" != 'http://3162356.xyz:8080' ]]; then
+            echo 'Release runtime endpoint does not match the canonical HULK endpoint.' >&2
+            exit 2
+          fi
+          if [[ -n "$HULK_CONFIG_URL" ]]; then
+            echo 'Release CONFIG_URL must be empty.' >&2
+            exit 2
+          fi
           echo 'PASS: all required release signing inputs are present'
+          echo 'PASS: canonical release runtime configuration is explicit'
 
       - name: Materialize ephemeral keystore
         run: |
@@ -156,7 +228,8 @@ jobs:
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             clean :app:assembleRelease :app:bundleRelease \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
 
           test -f app/build/outputs/apk/release/app-release.apk
           test -f app/build/outputs/bundle/release/app-release.aab
@@ -184,6 +257,20 @@ jobs:
             echo "Version name: $version_name"
             echo 'Package identity: PASS'
           } > signed-release-artifacts/PACKAGE-IDENTITY.txt
+
+      - name: Verify compiled runtime configuration
+        run: |
+          set -euo pipefail
+          build_config="$(find app/build/generated/source/buildConfig/release -type f -name BuildConfig.java -print -quit)"
+          test -n "$build_config"
+          python3 tools/verify-runtime-config.py \
+            app/build/outputs/apk/release/app-release.apk \
+            --build-config "$build_config" \
+            --report signed-release-artifacts/APK-RUNTIME-CONFIG.md
+          python3 tools/verify-runtime-config.py \
+            app/build/outputs/bundle/release/app-release.aab \
+            --build-config "$build_config" \
+            --report signed-release-artifacts/AAB-RUNTIME-CONFIG.md
 
       - name: Verify signer identity and signature schemes
         run: |

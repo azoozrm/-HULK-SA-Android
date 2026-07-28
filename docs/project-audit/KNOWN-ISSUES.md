@@ -7,7 +7,7 @@
 
 | ID | المشكلة | الحالة | شرط الإغلاق |
 |---|---|---|---|
-| P0-01 | لا يوجد APK/AAB production موقع من v0.9.3.18 | `OPEN` | تشغيل Signed Release Workflow مع Secrets محمية والتحقق من artifacts |
+| P0-01 | v0.9.3.18 الموقعة جمعت هوست الموقع بدل هوست HULK التشغيلي | `FIX IMPLEMENTED / RUNTIME PENDING` | signed artifacts جديدة + فحص DEX + login فعلي |
 | P0-02 | certificate parity وupgrade path غير مثبتين | `NOT VERIFIED` | مقارنة شهادة مرجع الاستقرار واختبار upgrade فعلي |
 | P0-03 | clean install وupgrade للـsigned Release غير مختبرين | `NOT VERIFIED` | install/upgrade evidence من APK الموقع |
 
@@ -34,6 +34,7 @@
 | C-05 | TV Search focus trap على 720p/1080p/4K | `CLOSED` | Canonical Run #47: 7 unique focus targets لكل profile |
 | C-06 | Downloads process-bound فقط | `CLOSED / SUPERSEDED` | Durable WorkManager/foreground implementation موجودة في canonical source؛ بقي runtime qualification فقط |
 | C-07 | لا signing safeguards أو fail-closed path | `CLOSED` | Signed Release Qualification Run #14 preflight PASS |
+| C-08 | فرق حجم 24.4 MB إلى 3.4 MB مشتبه كنقص | `CLOSED / EXPLAINED` | Debug مقابل R8 Release؛ DEX/resources/native/dependency comparison موثق |
 
 ## P2 — جودة واعتمادية
 
@@ -73,7 +74,7 @@ Run #47: 238 warnings و0 Critical.
 
 ## غير متحقق منه حتى الآن
 
-- signed production APK/AAB لـv0.9.3.18.
+- signed runtime-correct APK/AAB بعد إصلاح الهوست.
 - certificate parity.
 - clean install وupgrade.
 - real backend/login/catalog/playback/download.

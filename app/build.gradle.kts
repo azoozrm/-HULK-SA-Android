@@ -10,8 +10,33 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse("")
+val productionPortalUrl = "http://3162356.xyz:8080"
+val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse(productionPortalUrl)
 val configUrl = providers.gradleProperty("HULK_CONFIG_URL").orElse("")
+
+val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
+    group = "verification"
+    description = "Fails release builds unless the canonical HULK runtime endpoint is compiled."
+
+    doLast {
+        if (portalUrl.get().trim() != productionPortalUrl) {
+            throw GradleException(
+                "Release PORTAL_URL must match the canonical HULK service endpoint.",
+            )
+        }
+        if (configUrl.get().trim().isNotEmpty()) {
+            throw GradleException(
+                "Release CONFIG_URL must be empty so it cannot override the canonical endpoint.",
+            )
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        dependsOn(verifyProductionRuntimeConfig)
+    }
+}
 
 val releaseSigningProperties = linkedMapOf(
     "HULK_RELEASE_KEYSTORE_FILE" to providers.gradleProperty("HULK_RELEASE_KEYSTORE_FILE"),
