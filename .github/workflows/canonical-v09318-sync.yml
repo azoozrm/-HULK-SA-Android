@@ -51,11 +51,15 @@ jobs:
             cp -a "$file" "reconciliation/files/$file"
           done < reconciliation/CHANGED-FILES.txt
           git diff --binary > reconciliation/reconciliation.patch
-          sha256sum reconciliation/reconciliation.patch > reconciliation/SHA256SUMS.txt
+          (
+            cd reconciliation
+            sha256sum reconciliation.patch > SHA256SUMS.txt
+          )
 
       - uses: actions/upload-artifact@v7
         with:
           name: HULK-SA-CANONICAL-V09318-RECONCILIATION
           path: reconciliation/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
