@@ -3,7 +3,9 @@ package sa.hulksa.player.data
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.work.ForegroundInfo
@@ -35,6 +37,7 @@ internal class DurableDownloadForeground(
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(0, 0, true)
+            .addAction(pauseAction(downloadId))
             .build()
         val notificationId = durableDownloadNotificationId(downloadId)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -46,6 +49,23 @@ internal class DurableDownloadForeground(
         } else {
             ForegroundInfo(notificationId, notification)
         }
+    }
+
+    private fun pauseAction(downloadId: Long): Notification.Action {
+        val intent = Intent(context, DurableDownloadActionReceiver::class.java)
+            .setAction(ACTION_PAUSE_DOWNLOAD)
+            .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            durableDownloadNotificationId(downloadId),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return Notification.Action.Builder(
+            android.R.drawable.ic_media_pause,
+            "ايقاف مؤقت",
+            pendingIntent,
+        ).build()
     }
 
     private fun ensureNotificationChannel() {

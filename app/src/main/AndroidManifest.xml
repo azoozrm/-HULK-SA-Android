@@ -34,6 +34,10 @@
             android:authorities="${applicationId}.durable-download-lifecycle"
             android:exported="false" />
 
+        <receiver
+            android:name=".data.DurableDownloadActionReceiver"
+            android:exported="false" />
+
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
