@@ -1,76 +1,82 @@
 # HULK SA Android — Release Signing Qualification
 
-## Scope
+تاريخ التحديث: 2026-07-28 UTC
 
-This change prepares a fail-closed release-signing path for the canonical v0.9.3.17 project. It does not create, rotate, replace, or commit a signing key.
+## النطاق
 
-The production signing identity must remain the identity already used by the installable stable application. A newly generated key must not be substituted because Android would reject an in-place upgrade from an APK signed by a different certificate.
+هذا المسار يجهز ويشغّل qualification آمنة لـv0.9.3.18. لا ينشئ أو يغير أو يستبدل signing key، ولا ينشر GitHub Release أو Play Store release.
 
-## Current status
+هوية التوقيع الإنتاجية يجب أن تبقى نفس الهوية المستخدمة في التطبيق المستقر القابل للتثبيت. لا يجوز إنشاء مفتاح جديد لمجرد جعل CI أخضر، لأن Android سيرفض upgrade من شهادة مختلفة.
 
-| Area | Status | Evidence required |
+## الحالة الحالية
+
+| المجال | الحالة | الدليل المطلوب |
 |---|---|---|
-| Canonical unsigned Release build | Complete | Governing canonical CI |
-| Secret-gated Gradle signing configuration | Complete | PR preflight |
-| Partial signing input rejection | Complete | PR preflight must fail closed |
-| APK signature and certificate verification | Complete as tooling | Signed workflow run required |
-| AAB signature and certificate verification | Complete as tooling | Signed workflow run required |
-| Production signer identity | Not verified | Real production keystore and approved SHA-256 certificate digest |
-| Clean signed installation | Not executed | Signed APK plus Android device/emulator evidence |
-| Upgrade from stable APK | Not executed | Real stable baseline APK signed with the same certificate |
+| Canonical unsigned Release | مكتمل | Canonical Build Run #89 |
+| Secret-gated Gradle signing | مكتمل كتنفيذ | signing preflight |
+| رفض signing inputs الناقصة | مكتمل | fail-closed preflight |
+| APK signature/certificate tooling | مكتمل كأداة | signed workflow run |
+| AAB signature/certificate tooling | مكتمل كأداة | signed workflow run |
+| Production signer identity | غير متحقق | approved keystore + expected SHA-256 |
+| Signed APK/AAB لـv0.9.3.18 | غير متحقق | protected signed job |
+| Clean signed installation | غير منفذ | signed APK + emulator/device evidence |
+| Upgrade من stable APK | غير منفذ | real stable baseline APK بنفس الشهادة |
 
-## Required GitHub Actions secrets
+## GitHub environment وSecrets
 
-- `HULK_RELEASE_KEYSTORE_BASE64`: base64 encoding of the approved production keystore.
-- `HULK_RELEASE_KEY_ALIAS`: approved key alias.
-- `HULK_RELEASE_STORE_PASSWORD`: keystore password.
-- `HULK_RELEASE_KEY_PASSWORD`: private-key password.
-- `HULK_RELEASE_CERT_SHA256`: expected signer certificate SHA-256 digest.
-- `HULK_PORTAL_URL`: optional production portal URL already supported by the project.
+Signed job يعمل داخل environment باسم `production-signing` ويقرأ فقط:
 
-No secret value, keystore, private key, or password belongs in Git, a PR body, logs, reports, or uploaded source artifacts.
+- `HULK_RELEASE_KEYSTORE_BASE64`.
+- `HULK_RELEASE_KEY_ALIAS`.
+- `HULK_RELEASE_STORE_PASSWORD`.
+- `HULK_RELEASE_KEY_PASSWORD`.
+- `HULK_RELEASE_CERT_SHA256`.
+- `HULK_PORTAL_URL` اختياري لمسار production المعتمد.
+
+لا يجوز وضع أي قيمة سرية أو keystore أو password أو private key في Git أو PR أو Logs أو source artifacts.
 
 ## Fail-closed behavior
 
-- With no signing inputs, normal CI still produces an explicitly unsigned verification Release.
-- If any signing property is supplied, all four signing properties become mandatory.
-- A missing keystore file aborts Gradle configuration.
-- Signed qualification compares the generated APK and AAB signer certificate with `HULK_RELEASE_CERT_SHA256`.
-- APK verification requires v1 signing for API 23 and v2 signing for modern Android.
-- Artifacts are uploaded only after package identity, version, signature, certificate, ABI, and checksum checks pass.
+- بلا signing inputs يبني CI Release غير موقع بشكل صريح.
+- عند توفير أي signing property تصبح جميع signing properties إلزامية.
+- keystore المفقود أو الفارغ يوقف Gradle configuration.
+- signed job يفشل إذا كان أي Secret مطلوب غير موجود.
+- APK/AAB لا يُرفعان إلا بعد نجاح package/version/signature/certificate/ABI/checksum checks.
 
-## Signed qualification command path
+## هوية الإصدار المتوقعة
 
-The `HULK SA Signed Release Qualification` workflow is started manually after the approved secrets are installed. Its signed job must remain blocked when any required secret is absent.
+- Application ID: `sa.hulksa.player`.
+- Version code: `62`.
+- Version name: `0.9.3.18`.
 
-Expected package identity for this release:
+## Qualification الحالية
 
-- Application ID: `sa.hulksa.player`
-- Version code: `61`
-- Version name: `0.9.3.17`
+PR #54 يضيف push trigger محدودًا بالـworkflow وmarker لتشغيل qualification مرة واحدة بعد الدمج على الفرع الرسمي، داخل `production-signing`، بدون نشر عام. بعد اكتمال النتيجة يجب إزالة push trigger والmarker والإبقاء على `workflow_dispatch` كالمسار الدائم.
 
 ## Upgrade qualification
 
-`tools/verify-upgrade-compatibility.sh` performs static eligibility checks between a baseline APK and a candidate APK:
+`tools/verify-upgrade-compatibility.sh` يفحص static eligibility بين baseline APK وcandidate APK:
 
-- identical application ID;
-- identical signer certificate SHA-256;
-- candidate `versionCode` greater than baseline;
-- both APK signatures cryptographically valid.
+- applicationId متطابق.
+- signer certificate SHA-256 متطابق.
+- candidate versionCode أعلى.
+- التوقيعان صالحان تشفيريًا.
 
-This static result is not an installation result. Final acceptance still requires:
+هذا لا يساوي install test. القبول النهائي يتطلب:
 
-1. install the real stable baseline APK;
-2. launch it successfully;
-3. install the signed candidate using Android package replacement;
-4. confirm the upgrade succeeds without uninstalling or clearing data;
-5. launch the upgraded application;
-6. record package version and signer evidence.
+1. الحصول على APK مرجع الاستقرار الحقيقي.
+2. تثبيته وتشغيله.
+3. تثبيت signed candidate باستخدام package replacement دون uninstall.
+4. التأكد من عدم مسح البيانات.
+5. تشغيل النسخة المحدثة.
+6. تسجيل version وsigner evidence.
 
-## Prohibited shortcuts
+لا يوجد baseline APK صالح داخل المستودع حاليًا؛ لذلك لا يُدعى نجاح upgrade حتى توفير المرجع الحقيقي من مصدر موثوق.
 
-- Do not generate a new production key merely to make CI green.
-- Do not sign Release with the debug key.
-- Do not report unsigned, debug-signed, or test-key artifacts as Production.
-- Do not claim upgrade compatibility from package name alone.
-- Do not expose signing material in troubleshooting output.
+## اختصارات ممنوعة
+
+- لا تولد production key جديدًا لجعل CI أخضر.
+- لا تستخدم Debug key لتسليم production.
+- لا تقدم unsigned/debug/test-key artifact على أنه Production.
+- لا تعتبر تطابق package name وحده دليل upgrade.
+- لا تعرض signing material في troubleshooting output.
