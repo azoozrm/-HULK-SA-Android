@@ -1,7 +1,9 @@
 package sa.hulksa.player.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.model.OfflineStatus
 
@@ -65,6 +67,44 @@ class DurableDownloadPreferenceStoreTest {
         assertNotEquals(
             durableDownloadSchedulingState(record, wifiOnly = false),
             durableDownloadSchedulingState(record, wifiOnly = true),
+        )
+    }
+
+    @Test
+    fun `active transport is not replaced when scheduled metadata is cleared`() {
+        val previous = DurableDownloadSchedulingState(
+            action = DurableDownloadLifecycleAction.ENQUEUE,
+            title = "Movie",
+            wifiOnly = false,
+            scheduledAtEpochMs = 25_000L,
+        )
+        val current = previous.copy(scheduledAtEpochMs = 0L)
+
+        assertFalse(
+            shouldApplyDurableDownloadSchedulingState(
+                previous = previous,
+                current = current,
+                currentStatus = OfflineStatus.CHECKING,
+            ),
+        )
+    }
+
+    @Test
+    fun `queued constraint changes still replace durable work`() {
+        val previous = DurableDownloadSchedulingState(
+            action = DurableDownloadLifecycleAction.ENQUEUE,
+            title = "Movie",
+            wifiOnly = false,
+            scheduledAtEpochMs = 0L,
+        )
+        val current = previous.copy(wifiOnly = true)
+
+        assertTrue(
+            shouldApplyDurableDownloadSchedulingState(
+                previous = previous,
+                current = current,
+                currentStatus = OfflineStatus.QUEUED,
+            ),
         )
     }
 }
