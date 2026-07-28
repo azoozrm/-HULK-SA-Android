@@ -29,6 +29,11 @@
         android:theme="@style/Theme.HulkSA"
         android:usesCleartextTraffic="true">
 
+        <provider
+            android:name=".data.DurableDownloadLifecycleProvider"
+            android:authorities="${applicationId}.durable-download-lifecycle"
+            android:exported="false" />
+
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
