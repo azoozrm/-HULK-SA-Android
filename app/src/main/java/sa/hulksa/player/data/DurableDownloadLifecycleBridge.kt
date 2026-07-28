@@ -8,11 +8,26 @@ internal class DurableDownloadLifecycleBridge(
     private val scheduler: DurableDownloadScheduler = DurableDownloadScheduler(context.applicationContext),
 ) {
     fun enqueue(item: OfflineDownload, wifiOnly: Boolean) {
-        scheduler.enqueue(
+        enqueue(
             downloadId = item.downloadId,
+            title = item.title,
             wifiOnly = wifiOnly,
             scheduledAtEpochMs = item.scheduledAtEpochMs,
-            title = item.title,
+        )
+    }
+
+    fun enqueue(
+        downloadId: Long,
+        title: String?,
+        wifiOnly: Boolean,
+        scheduledAtEpochMs: Long,
+    ) {
+        validateDurableDownloadId(downloadId)
+        scheduler.enqueue(
+            downloadId = downloadId,
+            wifiOnly = wifiOnly,
+            scheduledAtEpochMs = scheduledAtEpochMs,
+            title = title,
         )
     }
 
