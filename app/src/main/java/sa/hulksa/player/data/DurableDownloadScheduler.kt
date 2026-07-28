@@ -1,0 +1,107 @@
+package sa.hulksa.player.data
+
+import android.content.Context
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import java.util.concurrent.TimeUnit
+
+internal enum class DurableDownloadNetworkRequirement {
+    CONNECTED,
+    UNMETERED,
+}
+
+internal data class DurableDownloadWorkPlan(
+    val downloadId: Long,
+    val uniqueWorkName: String,
+    val initialDelayMs: Long,
+    val networkRequirement: DurableDownloadNetworkRequirement,
+)
+
+internal fun durableDownloadWorkPlan(
+    downloadId: Long,
+    wifiOnly: Boolean,
+    scheduledAtEpochMs: Long,
+    nowEpochMs: Long = System.currentTimeMillis(),
+): DurableDownloadWorkPlan {
+    require(downloadId > 0L) { "downloadId must be positive" }
+    return DurableDownloadWorkPlan(
+        downloadId = downloadId,
+        uniqueWorkName = "$UNIQUE_WORK_PREFIX$downloadId",
+        initialDelayMs = (scheduledAtEpochMs - nowEpochMs).coerceAtLeast(0L),
+        networkRequirement = if (wifiOnly) {
+            DurableDownloadNetworkRequirement.UNMETERED
+        } else {
+            DurableDownloadNetworkRequirement.CONNECTED
+        },
+    )
+}
+
+internal class DurableDownloadScheduler(
+    context: Context,
+    private val workManager: WorkManager = WorkManager.getInstance(context.applicationContext),
+) {
+    fun enqueue(
+        downloadId: Long,
+        wifiOnly: Boolean,
+        scheduledAtEpochMs: Long,
+    ) {
+        val plan = durableDownloadWorkPlan(
+            downloadId = downloadId,
+            wifiOnly = wifiOnly,
+            scheduledAtEpochMs = scheduledAtEpochMs,
+        )
+        workManager.enqueueUniqueWork(
+            plan.uniqueWorkName,
+            ExistingWorkPolicy.REPLACE,
+            plan.toWorkRequest(),
+        )
+    }
+
+    fun cancel(downloadId: Long) {
+        workManager.cancelUniqueWork("$UNIQUE_WORK_PREFIX$downloadId")
+    }
+}
+
+private fun DurableDownloadWorkPlan.toWorkRequest(): OneTimeWorkRequest {
+    val requiredNetworkType = when (networkRequirement) {
+        DurableDownloadNetworkRequirement.CONNECTED -> NetworkType.CONNECTED
+        DurableDownloadNetworkRequirement.UNMETERED -> NetworkType.UNMETERED
+    }
+    val constraints = Constraints.Builder()
+        .setRequiredNetworkType(requiredNetworkType)
+        .setRequiresStorageNotLow(true)
+        .build()
+    return OneTimeWorkRequestBuilder<DownloadCoordinatorWorker>()
+        .setInputData(
+            Data.Builder()
+                .putLong(KEY_DOWNLOAD_ID, downloadId)
+                .build(),
+        )
+        .setConstraints(constraints)
+        .setInitialDelay(initialDelayMs, TimeUnit.MILLISECONDS)
+        .addTag(DURABLE_DOWNLOAD_TAG)
+        .build()
+}
+
+/**
+ * Execution is intentionally introduced in the next Durable Downloads stage.
+ * This worker currently defines the persisted WorkManager contract only, so the
+ * existing in-process transport engine is not duplicated or falsely qualified.
+ */
+internal class DownloadCoordinatorWorker(
+    appContext: Context,
+    workerParameters: WorkerParameters,
+) : CoroutineWorker(appContext, workerParameters) {
+    override suspend fun doWork(): Result = Result.success()
+}
+
+internal const val KEY_DOWNLOAD_ID = "download_id"
+internal const val DURABLE_DOWNLOAD_TAG = "hulk_durable_download"
+private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_"
