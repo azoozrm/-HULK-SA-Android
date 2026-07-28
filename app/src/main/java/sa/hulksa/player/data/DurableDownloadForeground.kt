@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.work.ForegroundInfo
+import sa.hulksa.player.MainActivity
 
 internal fun durableDownloadNotificationId(downloadId: Long): Int {
     validateDurableDownloadId(downloadId)
@@ -33,6 +34,8 @@ internal class DurableDownloadForeground(
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(notificationTitle)
             .setContentText("جار التحميل وسيستمر في الخلفية.")
+            .setContentIntent(openAppIntent(downloadId))
+            .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_PROGRESS)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -50,6 +53,18 @@ internal class DurableDownloadForeground(
         } else {
             ForegroundInfo(notificationId, notification)
         }
+    }
+
+    private fun openAppIntent(downloadId: Long): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
+        return PendingIntent.getActivity(
+            context,
+            durableDownloadNotificationId(downloadId),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun downloadAction(
