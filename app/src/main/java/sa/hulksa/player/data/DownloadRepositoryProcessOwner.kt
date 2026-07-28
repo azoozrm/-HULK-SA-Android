@@ -3,6 +3,11 @@ package sa.hulksa.player.data
 import android.app.Application
 import android.content.Context
 
+/**
+ * Process-local owner for the stateful repository. WorkManager runs in the app
+ * process by default, so sharing this instance prevents parallel OkHttp writers
+ * from touching the same partial download file.
+ */
 internal object DownloadRepositoryProcessOwner {
     @Volatile
     private var instance: DownloadRepository? = null
