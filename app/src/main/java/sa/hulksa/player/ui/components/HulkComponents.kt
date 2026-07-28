@@ -228,6 +228,7 @@ fun HulkTextField(
     onValueChange: (String) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
@@ -239,6 +240,7 @@ fun HulkTextField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
+        readOnly = readOnly,
         modifier = modifier
             .onFocusChanged { focused = it.isFocused }
             .clip(shape)
@@ -483,7 +485,14 @@ fun HistoryCard(
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(10.dp)) {
             Text(entry.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(4.dp))
-            Text("استكمال المشاهدة  •  ${formatHistoryTime(entry.positionMs)}", color = colors.goldBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "استكمال المشاهدة  •  ${formatHistoryTime(entry.positionMs)}",
+                color = colors.goldBright,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 9.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 14.sp else 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
             Spacer(Modifier.height(5.dp))
             Box(Modifier.fillMaxWidth().height(3.dp).clip(CircleShape).background(Color.White.copy(.25f))) {
                 Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(colors.goldBright))
