@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -21,6 +22,7 @@ internal data class DurableDownloadWorkPlan(
     val downloadId: Long,
     val uniqueWorkName: String,
     val initialDelayMs: Long,
+    val backoffDelayMs: Long,
     val networkRequirement: DurableDownloadNetworkRequirement,
 )
 
@@ -35,6 +37,7 @@ internal fun durableDownloadWorkPlan(
         downloadId = downloadId,
         uniqueWorkName = "$UNIQUE_WORK_PREFIX$downloadId",
         initialDelayMs = (scheduledAtEpochMs - nowEpochMs).coerceAtLeast(0L),
+        backoffDelayMs = DURABLE_DOWNLOAD_BACKOFF_MS,
         networkRequirement = if (wifiOnly) {
             DurableDownloadNetworkRequirement.UNMETERED
         } else {
@@ -51,6 +54,7 @@ internal class DurableDownloadScheduler(
         downloadId: Long,
         wifiOnly: Boolean,
         scheduledAtEpochMs: Long,
+        title: String? = null,
     ) {
         val plan = durableDownloadWorkPlan(
             downloadId = downloadId,
@@ -60,7 +64,7 @@ internal class DurableDownloadScheduler(
         workManager.enqueueUniqueWork(
             plan.uniqueWorkName,
             ExistingWorkPolicy.REPLACE,
-            plan.toWorkRequest(),
+            plan.toWorkRequest(title),
         )
     }
 
@@ -69,7 +73,7 @@ internal class DurableDownloadScheduler(
     }
 }
 
-private fun DurableDownloadWorkPlan.toWorkRequest(): OneTimeWorkRequest {
+private fun DurableDownloadWorkPlan.toWorkRequest(title: String?): OneTimeWorkRequest {
     val requiredNetworkType = when (networkRequirement) {
         DurableDownloadNetworkRequirement.CONNECTED -> NetworkType.CONNECTED
         DurableDownloadNetworkRequirement.UNMETERED -> NetworkType.UNMETERED
@@ -78,14 +82,21 @@ private fun DurableDownloadWorkPlan.toWorkRequest(): OneTimeWorkRequest {
         .setRequiredNetworkType(requiredNetworkType)
         .setRequiresStorageNotLow(true)
         .build()
+    val input = Data.Builder()
+        .putLong(KEY_DOWNLOAD_ID, downloadId)
+        .apply {
+            title?.trim()?.takeIf(String::isNotEmpty)?.let { putString(KEY_DOWNLOAD_TITLE, it) }
+        }
+        .build()
     return OneTimeWorkRequestBuilder<DownloadCoordinatorWorker>()
-        .setInputData(
-            Data.Builder()
-                .putLong(KEY_DOWNLOAD_ID, downloadId)
-                .build(),
-        )
+        .setInputData(input)
         .setConstraints(constraints)
         .setInitialDelay(initialDelayMs, TimeUnit.MILLISECONDS)
+        .setBackoffCriteria(
+            BackoffPolicy.EXPONENTIAL,
+            backoffDelayMs,
+            TimeUnit.MILLISECONDS,
+        )
         .addTag(DURABLE_DOWNLOAD_TAG)
         .build()
 }
@@ -97,6 +108,12 @@ internal class DownloadCoordinatorWorker(
     override suspend fun doWork(): Result {
         val downloadId = inputData.getLong(KEY_DOWNLOAD_ID, -1L)
         if (downloadId <= 0L) return Result.failure()
+        setForeground(
+            DurableDownloadForeground(applicationContext).createInfo(
+                downloadId = downloadId,
+                title = inputData.getString(KEY_DOWNLOAD_TITLE),
+            ),
+        )
         return when (DownloadExecutionEntryPoint(applicationContext).execute(downloadId)) {
             DurableDownloadExecutionResult.COMPLETED,
             DurableDownloadExecutionResult.TERMINAL,
@@ -108,5 +125,7 @@ internal class DownloadCoordinatorWorker(
 }
 
 internal const val KEY_DOWNLOAD_ID = "download_id"
+internal const val KEY_DOWNLOAD_TITLE = "download_title"
 internal const val DURABLE_DOWNLOAD_TAG = "hulk_durable_download"
 private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_"
+private const val DURABLE_DOWNLOAD_BACKOFF_MS = 30_000L

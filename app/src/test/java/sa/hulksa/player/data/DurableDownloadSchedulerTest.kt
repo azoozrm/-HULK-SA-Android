@@ -15,6 +15,7 @@ class DurableDownloadSchedulerTest {
 
         assertEquals("hulk_durable_download_42", plan.uniqueWorkName)
         assertEquals(0L, plan.initialDelayMs)
+        assertEquals(30_000L, plan.backoffDelayMs)
         assertEquals(DurableDownloadNetworkRequirement.CONNECTED, plan.networkRequirement)
     }
 

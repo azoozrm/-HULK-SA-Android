@@ -12,6 +12,7 @@ internal class DurableDownloadLifecycleBridge(
             downloadId = item.downloadId,
             wifiOnly = wifiOnly,
             scheduledAtEpochMs = item.scheduledAtEpochMs,
+            title = item.title,
         )
     }
 
