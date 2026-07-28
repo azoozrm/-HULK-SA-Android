@@ -1,15 +1,7 @@
-# Isolated trigger for v0.9.3.13 only.
+# Historical workflow retained for manual diagnostics only.
 name: Build HULK SA v0.9.3.13 Reorder Player Back Fix
 
 on:
-  push:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
-      - '.github/workflows/build-v0943-reorder-player-back-fix.yml'
-      - 'patches/v0.9.3.0-adaptive-source/**'
-      - 'tools/**'
   workflow_dispatch:
 
 permissions:
