@@ -21,9 +21,10 @@ debug-only authenticated shell:
    buffer, window state, activity state, gfxinfo, meminfo, and launch timing.
 5. The analyzer checks display geometry, blank rendering, out-of-bounds nodes,
    collapsed nodes, actionable overlaps, edge/safe-area text, conservative text
-   height, crash/ANR signatures, navigation, D-pad focus movement, jank, launch
-   time, memory, and system error-dialog contamination. Non-HULK launcher/system
-   dialogs are dismissed and classified as infrastructure, never as app defects.
+   height, crash/ANR signatures, navigation, D-pad focus movement, and the
+   collapsed/expanded TV rail-logo geometry. Jank, launch time, and memory remain
+   emulator advisories. Non-HULK launcher/system dialogs are dismissed and
+   classified as infrastructure, never as app defects.
 6. Reports are emitted as JSON, Markdown, HTML, JUnit XML, and GitHub Actions
    job summaries.
 
@@ -71,10 +72,10 @@ capture while keeping the standard runner for the other eight stable profiles.
   failure.
 - `BLOCKED`: the emulator, capture, or report infrastructure did not complete.
 
-Push runs are report-only for application findings because this task does not
-authorize application fixes. Infrastructure errors always fail the workflow.
-Manual runs can enable `enforce_findings` to make critical application findings
-fail the workflow.
+Infrastructure errors and deterministic critical application findings fail
+push and pull-request runs. Manual runs enforce them by default and expose
+`enforce_findings` only for an intentional report-only diagnostic run. Warnings
+remain visible advisories and do not fail the workflow.
 
 ## Artifacts
 

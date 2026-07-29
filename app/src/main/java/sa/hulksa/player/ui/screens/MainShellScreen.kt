@@ -496,11 +496,7 @@ private fun CinematicNavigationRail(
             .padding(start = 10.dp, end = 10.dp, top = 24.dp, bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BrandBadge(
-            Modifier
-                .size(if (expanded) 76.dp else 50.dp)
-                .offset(x = if (expanded) 0.dp else (-4).dp),
-        )
+        BrandLogo(Modifier.size(60.dp))
         Spacer(Modifier.height(10.dp))
         destinations.filterNot { it.destination == MainDestination.SETTINGS }.forEach { entry ->
             NavigationItem(

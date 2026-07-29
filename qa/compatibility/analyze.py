@@ -28,6 +28,9 @@ RENDER_RE = re.compile(
 )
 JANK_RE = re.compile(r"Janky frames:\s*(\d+)\s*\(([\d.]+)%\)")
 TOTAL_PSS_RE = re.compile(r"TOTAL PSS:\s*([\d,]+)")
+RAIL_LOGO_MIN_DP = 56.0
+RAIL_LOGO_MAX_DP = 64.0
+RAIL_LOGO_STATE_TOLERANCE_DP = 2.0
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -702,6 +705,218 @@ def analyze_focus(
     return normalized, findings
 
 
+def rail_logo_measurement(
+    xml_path: Path,
+    width: int,
+    height: int,
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the approved logo image exposed at the top of the RTL TV rail."""
+    root = ET.parse(xml_path).getroot()
+    candidates: list[tuple[tuple[int, int, int, int], ET.Element]] = []
+    for node in app_nodes(root):
+        if (node.attrib.get("content-desc", "") or "").strip() != "HULK SA":
+            continue
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if not bounds:
+            continue
+        x1, y1, x2, y2 = bounds
+        if (
+            x1 < width * 0.60
+            or y1 > height * 0.25
+            or x2 <= x1
+            or y2 <= y1
+        ):
+            continue
+        candidates.append((bounds, node))
+    if not candidates:
+        return None
+    bounds, _ = min(
+        candidates,
+        key=lambda item: (item[0][1], -item[0][2], item[0][0]),
+    )
+    x1, y1, x2, y2 = bounds
+    scale = 160.0 / density
+    return {
+        "bounds_px": list(bounds),
+        "width_dp": round((x2 - x1) * scale, 2),
+        "height_dp": round((y2 - y1) * scale, 2),
+    }
+
+
+def analyze_rail_visual(
+    root: Path,
+    device: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Gate the collapsed and expanded TV rail logo using captured UI geometry."""
+    if not device.get("is_tv"):
+        return [], []
+
+    normalized: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    orientations = [
+        item.strip()
+        for item in str(device.get("orientations", "landscape")).split(",")
+        if item.strip()
+    ]
+    home_entries = {
+        entry.get("orientation"): entry
+        for entry in entries
+        if entry.get("page") == "home"
+    }
+
+    for orientation in orientations:
+        entry = home_entries.get(orientation)
+        item: dict[str, Any] = {
+            "orientation": orientation,
+            "page": "home",
+            "status": "PASS",
+            "states": {},
+        }
+        item_findings: list[dict[str, Any]] = []
+        if entry is None:
+            item["status"] = "BLOCKED"
+            item_findings.append(
+                finding(
+                    "infrastructure",
+                    "rail_visual_audit_missing",
+                    f"{orientation} / home: no rail visual audit was produced",
+                    page="home",
+                )
+            )
+            normalized.append(item)
+            findings.extend(item_findings)
+            continue
+
+        width, height = expected_dimensions(device, orientation)
+        density = int(device["requested_density"])
+        rail_visual = entry.get("rail_visual", {})
+        for state in ("collapsed", "expanded"):
+            files = relative_files(root, rail_visual.get(state, {}))
+            state_result: dict[str, Any] = {
+                "files": files,
+                "measurement": None,
+            }
+            item["states"][state] = state_result
+            evidence = {
+                key: value
+                for key, value in files.items()
+                if key in {"screenshot", "xml"}
+            }
+            missing = sorted({"screenshot", "xml"} - files.keys())
+            if missing:
+                item_findings.append(
+                    finding(
+                        "infrastructure",
+                        "rail_visual_state_missing",
+                        f"{orientation} / home / {state}: missing {', '.join(missing)}",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            try:
+                measurement = rail_logo_measurement(
+                    root / files["xml"],
+                    width,
+                    height,
+                    density,
+                )
+            except Exception as exc:
+                item_findings.append(
+                    finding(
+                        "infrastructure",
+                        "rail_visual_xml_error",
+                        f"{orientation} / home / {state}: cannot inspect logo geometry: {exc}",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            state_result["measurement"] = measurement
+            if measurement is None:
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_missing",
+                        f"{orientation} / home / {state}: approved HULK SA logo is not visible "
+                        "at the top of the navigation rail",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            logo_width = float(measurement["width_dp"])
+            logo_height = float(measurement["height_dp"])
+            if abs(logo_width - logo_height) > RAIL_LOGO_STATE_TOLERANCE_DP:
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_not_square",
+                        f"{orientation} / home / {state}: logo measures "
+                        f"{logo_width:.1f}×{logo_height:.1f} dp",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+            if (
+                logo_width < RAIL_LOGO_MIN_DP
+                or logo_width > RAIL_LOGO_MAX_DP
+                or logo_height < RAIL_LOGO_MIN_DP
+                or logo_height > RAIL_LOGO_MAX_DP
+            ):
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_size_out_of_policy",
+                        f"{orientation} / home / {state}: logo measures "
+                        f"{logo_width:.1f}×{logo_height:.1f} dp; expected "
+                        f"{RAIL_LOGO_MIN_DP:.0f}–{RAIL_LOGO_MAX_DP:.0f} dp",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+
+        collapsed = item["states"].get("collapsed", {}).get("measurement")
+        expanded = item["states"].get("expanded", {}).get("measurement")
+        if collapsed and expanded:
+            width_delta = abs(
+                float(collapsed["width_dp"]) - float(expanded["width_dp"])
+            )
+            height_delta = abs(
+                float(collapsed["height_dp"]) - float(expanded["height_dp"])
+            )
+            item["state_delta_dp"] = round(max(width_delta, height_delta), 2)
+            if max(width_delta, height_delta) > RAIL_LOGO_STATE_TOLERANCE_DP:
+                expanded_files = item["states"]["expanded"]["files"]
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_size_instability",
+                        f"{orientation} / home: collapsed logo is "
+                        f"{collapsed['width_dp']:.1f}×{collapsed['height_dp']:.1f} dp, "
+                        f"expanded is {expanded['width_dp']:.1f}×{expanded['height_dp']:.1f} dp",
+                        page="home",
+                        evidence={
+                            key: value
+                            for key, value in expanded_files.items()
+                            if key in {"screenshot", "xml"}
+                        },
+                    )
+                )
+
+        severities = {entry["severity"] for entry in item_findings}
+        if "infrastructure" in severities:
+            item["status"] = "BLOCKED"
+        elif "critical" in severities:
+            item["status"] = "FAIL"
+        normalized.append(item)
+        findings.extend(item_findings)
+
+    return normalized, findings
+
+
 def report_markdown(summary: dict[str, Any]) -> str:
     device = summary["device"]
     lines = [
@@ -773,6 +988,44 @@ def report_markdown(summary: dict[str, Any]) -> str:
                 f"{entry.get('unique_focus_targets', 0)} |"
             )
 
+        lines += [
+            "",
+            "## Navigation rail logo",
+            "",
+            "| Orientation | Status | Collapsed | Expanded | State delta | Evidence |",
+            "|---|---|---:|---:|---:|---|",
+        ]
+        for entry in summary["rail_visual"]:
+            states = entry.get("states", {})
+            collapsed = states.get("collapsed", {})
+            expanded = states.get("expanded", {})
+            collapsed_measurement = collapsed.get("measurement") or {}
+            expanded_measurement = expanded.get("measurement") or {}
+            collapsed_size = (
+                f"{collapsed_measurement.get('width_dp')}×"
+                f"{collapsed_measurement.get('height_dp')} dp"
+                if collapsed_measurement
+                else "missing"
+            )
+            expanded_size = (
+                f"{expanded_measurement.get('width_dp')}×"
+                f"{expanded_measurement.get('height_dp')} dp"
+                if expanded_measurement
+                else "missing"
+            )
+            links = []
+            for label, state in (("collapsed", collapsed), ("expanded", expanded)):
+                screenshot = state.get("files", {}).get("screenshot")
+                if screenshot:
+                    links.append(f"[{label}]({screenshot})")
+            delta = entry.get("state_delta_dp")
+            lines.append(
+                f"| {entry.get('orientation')} | **{entry.get('status')}** | "
+                f"{collapsed_size} | {expanded_size} | "
+                f"{f'{delta} dp' if delta is not None else 'n/a'} | "
+                f"{' · '.join(links)} |"
+            )
+
     lines += ["", "## Findings", ""]
     if not summary["findings"]:
         lines.append("- No findings.")
@@ -790,7 +1043,8 @@ def report_markdown(summary: dict[str, Any]) -> str:
     lines += [
         "",
         "> Performance values come from a software-rendered emulator and are advisory. "
-        "Crash, ANR, hierarchy, bounds, navigation and focus failures are deterministic gates.",
+        "Crash, ANR, hierarchy, bounds, navigation, focus and rail-logo geometry failures "
+        "are deterministic gates.",
         "",
     ]
     return "\n".join(lines)
@@ -823,6 +1077,36 @@ def report_html(summary: dict[str, Any]) -> str:
             f"<td>{ui.get('node_count', 0)}</td>"
             f"<td>{thumb}</td>"
             f"<td>{' · '.join(evidence)}</td>"
+            "</tr>"
+        )
+    rail_rows = []
+    for entry in summary.get("rail_visual", []):
+        states = entry.get("states", {})
+        cells = []
+        for state_name in ("collapsed", "expanded"):
+            state = states.get(state_name, {})
+            measurement = state.get("measurement") or {}
+            screenshot = state.get("files", {}).get("screenshot")
+            size = (
+                f"{measurement.get('width_dp')}×{measurement.get('height_dp')} dp"
+                if measurement
+                else "missing"
+            )
+            preview = (
+                f'<a href="{escape(screenshot)}"><img loading="lazy" '
+                f'src="{escape(screenshot)}" alt="{escape(state_name)} rail"></a>'
+                if screenshot
+                else "—"
+            )
+            cells.append(f"<td>{size}<br>{preview}</td>")
+        delta = entry.get("state_delta_dp")
+        rail_rows.append(
+            "<tr>"
+            f"<td>{escape(entry.get('orientation', ''))}</td>"
+            f'<td><span class="badge {entry.get("status", "blocked").lower()}">'
+            f'{escape(entry.get("status", "BLOCKED"))}</span></td>'
+            f"{''.join(cells)}"
+            f"<td>{f'{delta} dp' if delta is not None else 'n/a'}</td>"
             "</tr>"
         )
     finding_cards = []
@@ -894,6 +1178,13 @@ a {{ color:var(--gold) }} code {{ word-break:break-word }}
 <h2>Page captures</h2>
 <table><thead><tr><th>Case</th><th>Status</th><th>Resolution</th><th>Nodes</th><th>Preview</th><th>Files</th></tr></thead>
 <tbody>{''.join(case_rows)}</tbody></table>
+{(
+    '<h2>Navigation rail logo</h2>'
+    '<table><thead><tr><th>Orientation</th><th>Status</th><th>Collapsed</th>'
+    '<th>Expanded</th><th>State delta</th></tr></thead><tbody>'
+    + ''.join(rail_rows)
+    + '</tbody></table>'
+) if rail_rows else ''}
 <h2>Findings</h2>
 {''.join(finding_cards) if finding_cards else '<p>No findings.</p>'}
 <p class="muted">Performance values are advisory on software-rendered emulators. Raw PNG, XML,
@@ -1015,6 +1306,13 @@ def analyze_run(root: Path) -> dict[str, Any]:
             )
         )
 
+    rail_visual, rail_visual_findings = analyze_rail_visual(
+        root,
+        device,
+        manifest.get("focus", []),
+    )
+    findings.extend(rail_visual_findings)
+
     critical_count = sum(1 for item in findings if item["severity"] == "critical")
     warning_count = sum(1 for item in findings if item["severity"] == "warning")
     infrastructure_count = sum(
@@ -1041,6 +1339,7 @@ def analyze_run(root: Path) -> dict[str, Any]:
         "cases": cases,
         "navigation": navigation,
         "focus": focus,
+        "rail_visual": rail_visual,
         "findings": findings,
     }
 

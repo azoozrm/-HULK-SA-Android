@@ -45,7 +45,7 @@ on:
         description: Fail jobs when the app has critical compatibility findings
         required: false
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -357,6 +357,16 @@ jobs:
           }
           JSON
           fi
+
+      - name: Enforce infrastructure and critical findings
+        if: always()
+        env:
+          ENFORCE_FINDINGS: ${{ github.event_name != 'workflow_dispatch' || inputs.enforce_findings }}
+        run: |
+          set -euo pipefail
+          python3 qa/compatibility/gate.py \
+            'compatibility-results/${{ matrix.id }}/summary.json' \
+            --enforce-findings "$ENFORCE_FINDINGS"
 
       - name: Upload device artifacts
         if: always()

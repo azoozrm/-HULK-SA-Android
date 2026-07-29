@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 LAB_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB_ROOT))
 
-from analyze import analyze_run  # noqa: E402
+from analyze import analyze_rail_visual, analyze_run  # noqa: E402
 from lab_config import DEVICES, PAGES, matrix_json, validate  # noqa: E402
 
 RUN_LAB_SPEC = importlib.util.spec_from_file_location(
@@ -28,6 +28,7 @@ sys.modules[RUN_LAB_SPEC.name] = RUN_LAB_MODULE
 RUN_LAB_SPEC.loader.exec_module(RUN_LAB_MODULE)
 png_dimensions = RUN_LAB_MODULE.png_dimensions
 external_error_dialog_center = RUN_LAB_MODULE.external_error_dialog_center
+is_expanded_rail_focus = RUN_LAB_MODULE.is_expanded_rail_focus
 
 
 class ConfigTests(unittest.TestCase):
@@ -82,6 +83,20 @@ class ConfigTests(unittest.TestCase):
             'bounds="[20,40][220,140]" /></hierarchy>'
         ).encode()
         self.assertEqual((120, 90), external_error_dialog_center(xml))
+
+    def test_expanded_rtl_rail_focus_is_detected_from_geometry(self) -> None:
+        self.assertTrue(
+            is_expanded_rail_focus(
+                {"bounds": [1536, 420, 1900, 516]},
+                1920,
+            )
+        )
+        self.assertFalse(
+            is_expanded_rail_focus(
+                {"bounds": [1788, 420, 1888, 516]},
+                1920,
+            )
+        )
 
 
 class AnalyzerTests(unittest.TestCase):
@@ -161,6 +176,56 @@ class AnalyzerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def create_rail_visual(
+        self,
+        root: Path,
+        collapsed_size_px: int,
+        expanded_size_px: int,
+    ) -> tuple[dict[str, object], list[dict[str, object]]]:
+        rail_root = root / "focus/landscape/home"
+        rail_root.mkdir(parents=True)
+        states: dict[str, dict[str, str]] = {}
+        for state, size in (
+            ("collapsed", collapsed_size_px),
+            ("expanded", expanded_size_px),
+        ):
+            screenshot = rail_root / f"rail-{state}.png"
+            xml = rail_root / f"rail-{state}.xml"
+            screenshot.write_bytes(b"visual evidence")
+            x2 = 1880
+            x1 = x2 - size
+            y1 = 48
+            y2 = y1 + size
+            xml.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<hierarchy rotation="0">'
+                '<node package="sa.hulksa.player.dev" class="android.view.View" '
+                'bounds="[0,0][1920,1080]">'
+                '<node package="sa.hulksa.player.dev" class="android.widget.ImageView" '
+                f'content-desc="HULK SA" bounds="[{x1},{y1}][{x2},{y2}]" />'
+                "</node></hierarchy>",
+                encoding="utf-8",
+            )
+            states[state] = {
+                "screenshot": screenshot.relative_to(root).as_posix(),
+                "xml": xml.relative_to(root).as_posix(),
+            }
+        device: dict[str, object] = {
+            "is_tv": True,
+            "orientations": "landscape",
+            "requested_width": 1920,
+            "requested_height": 1080,
+            "requested_density": 320,
+        }
+        entries: list[dict[str, object]] = [
+            {
+                "orientation": "landscape",
+                "page": "home",
+                "rail_visual": states,
+            }
+        ]
+        return device, entries
+
     def test_clean_capture_passes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -209,6 +274,25 @@ class AnalyzerTests(unittest.TestCase):
                 "external_system_error_dialog",
                 {item["code"] for item in summary["findings"]},
             )
+
+    def test_unstable_rail_logo_is_a_critical_visual_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            device, entries = self.create_rail_visual(root, 80, 132)
+            visual, findings = analyze_rail_visual(root, device, entries)
+            self.assertEqual("FAIL", visual[0]["status"])
+            codes = {item["code"] for item in findings}
+            self.assertIn("rail_logo_size_out_of_policy", codes)
+            self.assertIn("rail_logo_size_instability", codes)
+
+    def test_stable_60dp_rail_logo_passes_visual_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            device, entries = self.create_rail_visual(root, 120, 120)
+            visual, findings = analyze_rail_visual(root, device, entries)
+            self.assertEqual("PASS", visual[0]["status"])
+            self.assertEqual([], findings)
+            self.assertEqual(0.0, visual[0]["state_delta_dp"])
 
 
 if __name__ == "__main__":
