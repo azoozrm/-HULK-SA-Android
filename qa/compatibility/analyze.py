@@ -28,6 +28,10 @@ RENDER_RE = re.compile(
 )
 JANK_RE = re.compile(r"Janky frames:\s*(\d+)\s*\(([\d.]+)%\)")
 TOTAL_PSS_RE = re.compile(r"TOTAL PSS:\s*([\d,]+)")
+TOP_RESUMED_PACKAGE_RE = re.compile(
+    r"(?:topResumedActivity=|mResumedActivity:)\s*ActivityRecord\{"
+    r"[^\n]*?\bu\d+\s+([A-Za-z0-9_.]+)/"
+)
 RAIL_LOGO_MIN_SCREEN_RATIO = 0.028
 RAIL_LOGO_MAX_SCREEN_RATIO = 0.035
 RAIL_LOGO_STATE_TOLERANCE_DP = 2.0
@@ -401,6 +405,27 @@ def android_error_dialog_title(path: Path) -> str | None:
     return title if title and has_error_action else None
 
 
+def foreground_package(path: Path) -> str | None:
+    """Read the actually resumed package from one captured activity dump."""
+    match = TOP_RESUMED_PACKAGE_RE.search(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    return match.group(1) if match else None
+
+
+def hierarchy_packages(path: Path) -> list[str]:
+    """Return visible package owners represented in one UI hierarchy."""
+    root = ET.parse(path).getroot()
+    return sorted(
+        {
+            package
+            for node in root.iter("node")
+            if (package := node.attrib.get("package", "").strip())
+            and node.attrib.get("visible-to-user", "true") != "false"
+        }
+    )
+
+
 def analyze_performance(
     root: Path,
     case: dict[str, Any],
@@ -460,7 +485,16 @@ def add_case_findings(
     evidence = {
         key: value
         for key, value in files.items()
-        if key in {"screenshot", "xml", "logcat", "crash_log", "system_events"}
+        if key
+        in {
+            "screenshot",
+            "xml",
+            "logcat",
+            "crash_log",
+            "system_events",
+            "activity",
+            "window",
+        }
     }
 
     if case.get("capture_error"):
@@ -547,6 +581,43 @@ def add_case_findings(
             )
         )
         result["status"] = "FAIL" if is_app_dialog else "BLOCKED"
+        return result, findings
+
+    activity_path = root / files["activity"] if "activity" in files else None
+    try:
+        resumed_package = (
+            foreground_package(activity_path)
+            if activity_path is not None and activity_path.is_file()
+            else None
+        )
+    except Exception:
+        resumed_package = None
+    try:
+        xml_packages = hierarchy_packages(root / files["xml"])
+    except Exception:
+        xml_packages = []
+    result["foreground_package"] = resumed_package
+    result["hierarchy_packages"] = xml_packages
+    foreground_mismatch = bool(
+        resumed_package and resumed_package != PACKAGE
+    )
+    hierarchy_mismatch = bool(
+        not resumed_package and xml_packages and PACKAGE not in xml_packages
+    )
+    if foreground_mismatch or hierarchy_mismatch:
+        observed = resumed_package or ", ".join(xml_packages)
+        findings.append(
+            finding(
+                "infrastructure",
+                "foreground_package_mismatch",
+                f"{case_id}: expected foreground package {PACKAGE!r}, "
+                f"observed {observed!r}; product analysis was skipped",
+                case_id=case_id,
+                page=page,
+                evidence=evidence,
+            )
+        )
+        result["status"] = "BLOCKED"
         return result, findings
 
     if not case.get("marker_found"):

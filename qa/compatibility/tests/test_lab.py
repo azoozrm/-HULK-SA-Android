@@ -450,6 +450,43 @@ class AnalyzerTests(unittest.TestCase):
                 {item["code"] for item in summary["findings"]},
             )
 
+    def test_launcher_capture_is_blocked_before_product_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            case = manifest["cases"][0]
+            case["marker_found"] = False
+            case_root = root / "raw/portrait/font-100/home"
+            activity_path = case_root / "activity.txt"
+            activity_path.write_text(
+                "topResumedActivity=ActivityRecord{123 u0 "
+                "com.google.android.tvlauncher/.dialog.ShowDialogsActivity t5}\n",
+                encoding="utf-8",
+            )
+            case["files"]["activity"] = (
+                "raw/portrait/font-100/home/activity.txt"
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            xml_path = case_root / "ui.xml"
+            xml_path.write_text(
+                '<hierarchy><node package="com.google.android.tvlauncher" '
+                'text="Buy and rent movies on your TV" '
+                'bounds="[0,0][100,200]" /></hierarchy>',
+                encoding="utf-8",
+            )
+
+            summary = analyze_run(root)
+
+            self.assertEqual("BLOCKED", summary["overall_status"])
+            self.assertEqual(0, summary["critical_count"])
+            self.assertEqual(1, summary["infrastructure_error_count"])
+            codes = {item["code"] for item in summary["findings"]}
+            self.assertIn("foreground_package_mismatch", codes)
+            self.assertNotIn("page_marker_missing", codes)
+            self.assertNotIn("empty_hierarchy", codes)
+
     def test_unstable_rail_logo_is_a_critical_visual_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
