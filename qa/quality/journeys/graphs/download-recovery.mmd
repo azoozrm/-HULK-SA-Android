@@ -1,0 +1,14 @@
+flowchart TD
+  n_details["details"]
+  n_queued["queued"]
+  n_downloading["downloading"]
+  n_paused["paused"]
+  n_resumed["resumed"]
+  n_completed["completed"]
+  n_play_offline["play-offline"]
+  n_details -->|click| n_queued
+  n_queued -->|system| n_downloading
+  n_downloading -->|click| n_paused
+  n_paused -->|click| n_resumed
+  n_resumed -->|system| n_completed
+  n_completed -->|click| n_play_offline

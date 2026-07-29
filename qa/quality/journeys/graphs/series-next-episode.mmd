@@ -1,0 +1,12 @@
+flowchart TD
+  n_series["series"]
+  n_series_details["series-details"]
+  n_season["season"]
+  n_episode["episode"]
+  n_player["player"]
+  n_next_episode["next-episode"]
+  n_series -->|click| n_series_details
+  n_series_details -->|click| n_season
+  n_season -->|click| n_episode
+  n_episode -->|click| n_player
+  n_player -->|system| n_next_episode

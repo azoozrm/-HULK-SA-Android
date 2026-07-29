@@ -1,0 +1,2 @@
+"""Approved-baseline visual regression."""
+
