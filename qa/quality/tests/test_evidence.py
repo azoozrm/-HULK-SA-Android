@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import zlib
@@ -187,6 +189,17 @@ class DownloadEvidenceTest(unittest.TestCase):
 
 
 class AggregateReporterTest(unittest.TestCase):
+    def test_reporter_direct_cli_is_loadable(self) -> None:
+        script = Path(__file__).resolve().parents[1] / "reporters" / "aggregate.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--expected-devices", result.stdout)
+
     def test_preserved_retry_attempt_is_not_mistaken_for_duplicate_final_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

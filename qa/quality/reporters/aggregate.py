@@ -8,8 +8,12 @@ from html import escape
 import json
 from pathlib import Path
 import shutil
+import sys
 from typing import Any
 import xml.etree.ElementTree as ET
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from qa.quality.core.models import stable_fingerprint
 from qa.quality.analyzers.evidence import file_sha256

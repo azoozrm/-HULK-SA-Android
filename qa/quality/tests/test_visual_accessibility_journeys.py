@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -59,6 +61,17 @@ class VisualRegressionTest(unittest.TestCase):
 
 
 class AccessibilityAuditTest(unittest.TestCase):
+    def test_accessibility_audit_direct_cli_is_loadable(self) -> None:
+        script = ROOT / "qa/quality/accessibility/audit.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--density", result.stdout)
+
     def test_missing_label_is_critical_and_small_target_is_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             hierarchy = Path(temp) / "hierarchy.xml"
