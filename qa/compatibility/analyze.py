@@ -1297,6 +1297,7 @@ def report_markdown(summary: dict[str, Any]) -> str:
         f"- Requested display: {device['requested_width']}×{device['requested_height']} @ "
         f"{device['requested_density']} dpi",
         f"- Captures: {summary['case_count']} / expected {summary['expected_case_count']}",
+        f"- Infrastructure retries: {summary['retry_count']}",
         f"- Critical: {summary['critical_count']}",
         f"- Warnings: {summary['warning_count']}",
         f"- Infrastructure errors: {summary['infrastructure_error_count']}",
@@ -1540,6 +1541,7 @@ a {{ color:var(--gold) }} code {{ word-break:break-word }}
 </section>
 <section class="metrics">
   <div class="metric"><span class="muted">Captures</span><strong>{summary['case_count']}</strong></div>
+  <div class="metric"><span class="muted">Infra retries</span><strong>{summary['retry_count']}</strong></div>
   <div class="metric"><span class="muted">Critical</span><strong>{summary['critical_count']}</strong></div>
   <div class="metric"><span class="muted">Warnings</span><strong>{summary['warning_count']}</strong></div>
   <div class="metric"><span class="muted">Infrastructure</span><strong>{summary['infrastructure_error_count']}</strong></div>
@@ -1702,6 +1704,10 @@ def analyze_run(root: Path) -> dict[str, Any]:
         "overall_status": overall,
         "expected_case_count": expected_case_count,
         "case_count": len(cases),
+        "retry_count": sum(
+            int(case.get("retry_count", 0))
+            for case in manifest.get("cases", [])
+        ),
         "critical_count": critical_count,
         "warning_count": warning_count,
         "infrastructure_error_count": infrastructure_count,
@@ -1725,6 +1731,7 @@ def analyze_run(root: Path) -> dict[str, Any]:
             f"## {device['name']} — {overall}",
             "",
             f"- Captures: {len(cases)} / {expected_case_count}",
+            f"- Infrastructure retries: {summary['retry_count']}",
             f"- Critical: {critical_count}",
             f"- Warnings: {warning_count}",
             f"- Infrastructure errors: {infrastructure_count}",

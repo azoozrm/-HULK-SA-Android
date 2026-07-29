@@ -37,6 +37,7 @@ RUN_LAB_SPEC.loader.exec_module(RUN_LAB_MODULE)
 png_dimensions = RUN_LAB_MODULE.png_dimensions
 external_error_dialog_center = RUN_LAB_MODULE.external_error_dialog_center
 is_expanded_rail_focus = RUN_LAB_MODULE.is_expanded_rail_focus
+visible_package_names = RUN_LAB_MODULE.visible_package_names
 
 
 class ConfigTests(unittest.TestCase):
@@ -100,6 +101,18 @@ class ConfigTests(unittest.TestCase):
             'bounds="[20,40][220,140]" /></hierarchy>'
         ).encode()
         self.assertEqual((120, 90), external_error_dialog_center(xml))
+
+    def test_visible_package_names_exposes_launcher_contamination(self) -> None:
+        xml = (
+            '<hierarchy><node package="com.google.android.tvlauncher" '
+            'visible-to-user="true" bounds="[0,0][1280,720]" />'
+            '<node package="sa.hulksa.player.dev" visible-to-user="false" '
+            'bounds="[0,0][1280,720]" /></hierarchy>'
+        ).encode()
+        self.assertEqual(
+            ["com.google.android.tvlauncher"],
+            visible_package_names(xml),
+        )
 
     def test_expanded_rtl_rail_focus_is_detected_from_geometry(self) -> None:
         self.assertTrue(

@@ -285,6 +285,22 @@ def external_error_dialog_center(xml_bytes: bytes) -> tuple[int, int] | None:
     return ((x1 + x2) // 2, (y1 + y2) // 2)
 
 
+def visible_package_names(xml_bytes: bytes) -> list[str]:
+    """Identify who owns the visible hierarchy before product assertions run."""
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+    return sorted(
+        {
+            package
+            for node in root.iter("node")
+            if (package := node.attrib.get("package", "").strip())
+            and node.attrib.get("visible-to-user", "true") != "false"
+        }
+    )
+
+
 def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
     try:
         root = ET.fromstring(xml_bytes)
@@ -525,11 +541,71 @@ class DeviceLab:
             "marker_found": False,
             "files": {},
             "capture_error": None,
+            "retry_count": 0,
+            "attempts": [],
         }
         try:
             start_text, marker_found = self.start_page(page, case_dir)
             record["marker_found"] = marker_found
             record["start_metrics_ms"] = parse_start_metrics(start_text)
+            if not marker_found:
+                attempt_dir = case_dir / "attempts" / "1"
+                attempt_xml = dump_xml(self.adb, attempt_dir / "ui.xml")
+                observed_packages = visible_package_names(attempt_xml)
+                if observed_packages and PACKAGE not in observed_packages:
+                    attempt_files = {
+                        "screenshot": attempt_dir / "screenshot.png",
+                        "xml": attempt_dir / "ui.xml",
+                        "logcat": attempt_dir / "logcat.txt",
+                        "window": attempt_dir / "window.txt",
+                        "activity": attempt_dir / "activity.txt",
+                    }
+                    capture_png(self.adb, attempt_files["screenshot"])
+                    safe_write(
+                        attempt_files["logcat"],
+                        command_text(
+                            self.adb,
+                            ["logcat", "-d", "-v", "threadtime"],
+                            shell=False,
+                            timeout=90,
+                        ),
+                    )
+                    safe_write(
+                        attempt_files["window"],
+                        command_text(
+                            self.adb,
+                            ["dumpsys", "window", "windows"],
+                            timeout=90,
+                        ),
+                    )
+                    safe_write(
+                        attempt_files["activity"],
+                        command_text(
+                            self.adb,
+                            ["dumpsys", "activity", "activities"],
+                            timeout=90,
+                        ),
+                    )
+                    record["attempts"].append(
+                        {
+                            "number": 1,
+                            "classification": "infrastructure",
+                            "reason": "foreground_package_mismatch",
+                            "observed_packages": observed_packages,
+                            "start_metrics_ms": parse_start_metrics(start_text),
+                            "files": {
+                                key: path.relative_to(self.out).as_posix()
+                                for key, path in attempt_files.items()
+                            },
+                        }
+                    )
+                    record["retry_count"] = 1
+                    self.adb.shell(["input", "keyevent", "4"])
+                    time.sleep(0.8)
+                    retry_dir = case_dir / "attempts" / "2-launch"
+                    start_text, marker_found = self.start_page(page, retry_dir)
+                    record["marker_found"] = marker_found
+                    record["start_metrics_ms"] = parse_start_metrics(start_text)
 
             file_map = {
                 "screenshot": case_dir / "screenshot.png",
