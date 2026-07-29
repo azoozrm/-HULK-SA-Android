@@ -1,0 +1,484 @@
+{
+  "schema_version": 1,
+  "screens": [
+    {
+      "id": "composable:CinemaHomeScreen",
+      "name": "CinemaHomeScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 696,
+      "route": "home",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:DetailsNavigationDrawer",
+      "name": "DetailsNavigationDrawer",
+      "kind": "drawer",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/DetailsNavigationDrawer.kt",
+      "line": 33,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:DownloadsScreen",
+      "name": "DownloadsScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1495,
+      "route": "downloads",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:FavoritesScreen",
+      "name": "FavoritesScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1321,
+      "route": "favorites",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:HomeScreen",
+      "name": "HomeScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/HomeScreen.kt",
+      "line": 57,
+      "route": "home",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:HulkApp",
+      "name": "HulkApp",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt",
+      "line": 28,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:LiveCatalogScreen",
+      "name": "LiveCatalogScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1146,
+      "route": "live",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:LiveStage",
+      "name": "LiveStage",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1266,
+      "route": "live",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:LoginScreen",
+      "name": "LoginScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt",
+      "line": 69,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:MainShellScreen",
+      "name": "MainShellScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 360,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:MovieDetailsScreen",
+      "name": "MovieDetailsScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt",
+      "line": 53,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:PlayerScreen",
+      "name": "PlayerScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt",
+      "line": 126,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:PosterCatalogScreen",
+      "name": "PosterCatalogScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1082,
+      "route": null,
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "composable:SeriesScreen",
+      "name": "SeriesScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt",
+      "line": 68,
+      "route": "series",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:SettingsScreen",
+      "name": "SettingsScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1996,
+      "route": "settings",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "composable:UnifiedSearchScreen",
+      "name": "UnifiedSearchScreen",
+      "kind": "composable",
+      "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+      "line": 1350,
+      "route": "search",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:downloads",
+      "name": "DOWNLOADS",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "downloads",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:favorites",
+      "name": "FAVORITES",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "favorites",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:home",
+      "name": "HOME",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "home",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:live",
+      "name": "LIVE",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "live",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:movies",
+      "name": "MOVIES",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "movies",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:search",
+      "name": "SEARCH",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "search",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:series",
+      "name": "SERIES",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "series",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "destination:settings",
+      "name": "SETTINGS",
+      "kind": "navigation-destination",
+      "source": "app/src/main/java/sa/hulksa/player/HulkViewModel.kt",
+      "line": null,
+      "route": "settings",
+      "states": [
+        "loading",
+        "error",
+        "empty",
+        "content"
+      ],
+      "test": "compatibility-runtime",
+      "review_required": false
+    },
+    {
+      "id": "mainactivity",
+      "name": "MainActivity",
+      "kind": "activity",
+      "source": "app/src/main/java/sa/hulksa/player/MainActivity.kt",
+      "line": 18,
+      "route": null,
+      "states": [
+        "created",
+        "resumed",
+        "recreated"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    },
+    {
+      "id": "state:empty-state",
+      "name": "Empty state",
+      "kind": "cross-screen-state",
+      "source": "static-required-state",
+      "line": null,
+      "route": null,
+      "states": [
+        "empty-state"
+      ],
+      "test": "fixture-state",
+      "review_required": true
+    },
+    {
+      "id": "state:error-state",
+      "name": "Error state",
+      "kind": "cross-screen-state",
+      "source": "static-required-state",
+      "line": null,
+      "route": null,
+      "states": [
+        "error-state"
+      ],
+      "test": "fixture-state",
+      "review_required": true
+    },
+    {
+      "id": "state:loading-state",
+      "name": "Loading state",
+      "kind": "cross-screen-state",
+      "source": "static-required-state",
+      "line": null,
+      "route": null,
+      "states": [
+        "loading-state"
+      ],
+      "test": "fixture-state",
+      "review_required": true
+    },
+    {
+      "id": "state:permission-prompt",
+      "name": "Permission prompt",
+      "kind": "cross-screen-state",
+      "source": "static-required-state",
+      "line": null,
+      "route": null,
+      "states": [
+        "permission-prompt"
+      ],
+      "test": "fixture-state",
+      "review_required": true
+    },
+    {
+      "id": "state:resume-dialog",
+      "name": "Resume / restart dialog",
+      "kind": "cross-screen-state",
+      "source": "static-required-state",
+      "line": null,
+      "route": null,
+      "states": [
+        "resume-dialog"
+      ],
+      "test": "fixture-state",
+      "review_required": true
+    },
+    {
+      "id": "tvmainactivity",
+      "name": "TvMainActivity",
+      "kind": "activity",
+      "source": "app/src/main/java/sa/hulksa/player/TvMainActivity.kt",
+      "line": 13,
+      "route": null,
+      "states": [
+        "created",
+        "resumed",
+        "recreated"
+      ],
+      "test": "not-covered",
+      "review_required": true
+    }
+  ]
+}
