@@ -8,6 +8,26 @@ on:
         required: false
         type: boolean
         default: true
+      source_head_sha:
+        description: Exact source commit under qualification
+        required: false
+        type: string
+        default: ''
+      base_sha:
+        description: Pull request base commit when applicable
+        required: false
+        type: string
+        default: ''
+      pr_number:
+        description: Pull request number when applicable
+        required: false
+        type: string
+        default: ''
+      test_variant:
+        description: Calling quality gate variant
+        required: false
+        type: string
+        default: compatibility-runtime
   workflow_dispatch:
     inputs:
       enforce_findings:
@@ -403,6 +423,13 @@ jobs:
           python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
 
       - name: Build Compatibility and Quality Lab reports
+        env:
+          QUALITY_BUILD_SHA: ${{ inputs.source_head_sha || github.sha }}
+          QUALITY_SOURCE_HEAD_SHA: ${{ inputs.source_head_sha || github.sha }}
+          QUALITY_BASE_SHA: ${{ inputs.base_sha }}
+          QUALITY_PR_NUMBER: ${{ inputs.pr_number }}
+          QUALITY_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+          QUALITY_TEST_VARIANT: ${{ inputs.test_variant || 'compatibility-runtime' }}
         run: |
           set -euo pipefail
           python3 qa/compatibility/aggregate.py device-artifacts aggregate-report
@@ -412,10 +439,15 @@ jobs:
           python3 -m qa.quality.reporters.aggregate \
             --input device-artifacts \
             --output quality-report \
-            --build-sha "$GITHUB_SHA" \
-            --source-branch "$GITHUB_REF_NAME" \
+            --build-sha "$QUALITY_BUILD_SHA" \
+            --source-branch "$QUALITY_SOURCE_BRANCH" \
             --workflow "$GITHUB_WORKFLOW" \
             --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --pr-number "$QUALITY_PR_NUMBER" \
+            --source-head-sha "$QUALITY_SOURCE_HEAD_SHA" \
+            --base-sha "$QUALITY_BASE_SHA" \
+            --test-variant "$QUALITY_TEST_VARIANT" \
             --expected-devices "$expected_devices"
           cat aggregate-report/GITHUB_STEP_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
 

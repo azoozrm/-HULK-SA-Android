@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import zlib
 
 from qa.quality.analyzers.evidence import (
@@ -310,6 +311,75 @@ class AggregateReporterTest(unittest.TestCase):
                 "مراجعة محاذاة",
                 (root / "output" / "REPORT.md").read_text(encoding="utf-8"),
             )
+
+    def test_expected_matrix_gaps_and_warning_cases_are_counted_truthfully(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            blocked = root / "input" / "tv"
+            warning = root / "input" / "phone"
+            blocked.mkdir(parents=True)
+            warning.mkdir(parents=True)
+            (blocked / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "device": {"id": "tv", "api": 35},
+                        "overall_status": "BLOCKED",
+                        "expected_case_count": 8,
+                        "case_count": 0,
+                        "cases": [],
+                        "findings": [
+                            {
+                                "severity": "infrastructure",
+                                "finding_type": "Infrastructure",
+                                "code": "emulator_boot_failed",
+                                "message": "emulator did not become usable",
+                            }
+                        ],
+                        "infrastructure_error_count": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (warning / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "device": {"id": "phone", "api": 35},
+                        "overall_status": "WARN",
+                        "expected_case_count": 1,
+                        "case_count": 1,
+                        "cases": [{"status": "WARN", "page": "home"}],
+                        "findings": [
+                            {
+                                "severity": "warning",
+                                "code": "advisory_geometry",
+                                "message": "manual geometry review",
+                            }
+                        ],
+                        "infrastructure_error_count": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = aggregate(
+                root / "input",
+                root / "output",
+                build_sha="e" * 40,
+                source_branch="test",
+                workflow="unit",
+                run_id="matrix-counts",
+                expected_devices=["tv", "phone"],
+                impact={"schema_version": 1},
+            )
+            self.assertEqual(result["release_recommendation"], "BLOCKED")
+            self.assertEqual(result["planned"], 9)
+            self.assertEqual(result["executed"], 1)
+            self.assertEqual(result["passed"], 1)
+            self.assertEqual(result["failed"], 0)
+            self.assertEqual(result["skipped"], 8)
+            self.assertEqual(result["infrastructure"], 1)
+            suite = ET.parse(root / "output" / "junit.xml").getroot()
+            self.assertEqual(suite.attrib["tests"], "9")
+            self.assertEqual(suite.attrib["skipped"], "8")
 
 
 class StaticSummaryTest(unittest.TestCase):

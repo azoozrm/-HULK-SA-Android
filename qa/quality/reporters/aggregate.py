@@ -145,7 +145,7 @@ def _junit(summary: dict[str, Any], findings: list[dict[str, Any]]) -> str:
     suite = ET.Element(
         "testsuite",
         name="HULK-SA-Quality-Lab",
-        tests=str(max(summary["executed"], 1)),
+        tests=str(max(summary["planned"], 1)),
         failures=str(summary["failed"]),
         errors=str(summary["infrastructure"]),
         skipped=str(summary["skipped"]),
@@ -210,11 +210,23 @@ def aggregate(
     devices: list[dict[str, Any]] = []
     for device, data in sorted(summaries.items()):
         cases = data.get("cases", [])
-        planned += int(data.get("planned_case_count", len(cases)))
-        executed += int(data.get("case_count", len(cases)))
-        passed += sum(case.get("status") == "PASS" for case in cases)
+        device_planned = int(
+            data.get(
+                "planned_case_count",
+                data.get("expected_case_count", len(cases)),
+            )
+        )
+        device_executed = int(data.get("case_count", len(cases)))
+        planned += device_planned
+        executed += device_executed
+        # WARN is an executed case that completed without a deterministic
+        # product failure. Its advisory findings remain counted separately.
+        passed += sum(case.get("status") in {"PASS", "WARN"} for case in cases)
         failed += sum(case.get("status") == "FAIL" for case in cases)
         skipped += sum(case.get("status") in {"SKIPPED", "BLOCKED"} for case in cases)
+        # A blocked device can legitimately contain no case rows. Preserve the
+        # expected matrix gap instead of silently reporting zero skipped cases.
+        skipped += max(0, device_planned - device_executed)
         retried += int(data.get("retry_count", 0))
         infrastructure += int(data.get("infrastructure_error_count", 0))
         devices.append(
@@ -222,7 +234,8 @@ def aggregate(
                 "id": device,
                 "api": data.get("device", {}).get("api") or data.get("api"),
                 "status": data.get("overall_status") or data.get("status") or "UNKNOWN",
-                "case_count": int(data.get("case_count", len(cases))),
+                "planned_case_count": device_planned,
+                "case_count": device_executed,
             }
         )
         findings.extend(_finding(item, device, build_sha) for item in data.get("findings", []))

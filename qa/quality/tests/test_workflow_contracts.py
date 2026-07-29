@@ -33,6 +33,15 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("attempts/attempt-1", source)
         self.assertIn("aggregate-evidence:", source)
         self.assertIn("Final fail-closed enforcement", source)
+        for trace_field in (
+            "source_head_sha:",
+            "base_sha:",
+            "pr_number:",
+            "test_variant:",
+            "--run-attempt",
+            "--source-head-sha",
+        ):
+            self.assertIn(trace_field, source)
 
     def test_pr_workflows_do_not_receive_signing_or_production_credentials(self) -> None:
         for filename in ("quality-pr.yml", "quality-ui.yml", "quality-pr-intelligence.yml"):
@@ -90,6 +99,8 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("steps.instrumented.outcome", source)
         self.assertIn("'.overall_status == \"PASS\"'", source)
         self.assertIn("if-no-files-found: error", source)
+        self.assertIn("github.event.pull_request.head.sha || github.sha", source)
+        self.assertIn("test_variant: quality-ui", source)
 
     def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
         source = self.source("quality-pr.yml")

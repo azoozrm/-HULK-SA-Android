@@ -161,6 +161,10 @@ jobs:
     uses: ./.github/workflows/compatibility-lab.yml
     with:
       enforce_findings: true
+      source_head_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      base_sha: ${{ github.event.pull_request.base.sha || '' }}
+      pr_number: ${{ github.event.pull_request.number || '' }}
+      test_variant: quality-ui
 
   enforce:
     name: Final UI evidence enforcement
