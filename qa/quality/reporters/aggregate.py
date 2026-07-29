@@ -90,6 +90,9 @@ def _markdown(summary: dict[str, Any], findings: list[dict[str, Any]]) -> str:
         "",
         f"- Recommendation: **{summary['release_recommendation']}**",
         f"- Build SHA: `{summary['build_sha']}`",
+        f"- Source head: `{summary['source_head_sha'] or 'not-provided'}`",
+        f"- Pull request: {summary['pr_number'] or 'not-applicable'}",
+        f"- Test variant: `{summary['test_variant']}`",
         f"- Planned / executed / skipped: {summary['planned']} / {summary['executed']} / {summary['skipped']}",
         f"- Passed / failed: {summary['passed']} / {summary['failed']}",
         f"- Retries: {summary['retried']}",
@@ -175,6 +178,11 @@ def aggregate(
     run_id: str,
     expected_devices: list[str],
     impact: dict[str, Any],
+    pr_number: str = "",
+    source_head_sha: str = "",
+    base_sha: str = "",
+    test_variant: str = "unspecified",
+    run_attempt: str = "1",
 ) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     summaries: dict[str, dict[str, Any]] = {}
@@ -258,9 +266,14 @@ def aggregate(
         "schema_version": 1,
         "release_recommendation": recommendation,
         "build_sha": build_sha,
+        "source_head_sha": source_head_sha,
+        "base_sha": base_sha,
         "source_branch": source_branch,
+        "pr_number": pr_number,
         "workflow": workflow,
         "run_id": run_id,
+        "run_attempt": run_attempt,
+        "test_variant": test_variant,
         "planned": planned,
         "executed": executed,
         "passed": passed,
@@ -279,15 +292,23 @@ def aggregate(
         "schema_version": 1,
         "planned": planned,
         "executed": executed,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
         "devices_expected": expected_devices,
         "devices_observed": sorted(summaries),
     }
     run_manifest = {
         "schema_version": 1,
         "build_sha": build_sha,
+        "source_head_sha": source_head_sha,
+        "base_sha": base_sha,
         "source_branch": source_branch,
+        "pr_number": pr_number,
         "workflow": workflow,
         "run_id": run_id,
+        "run_attempt": run_attempt,
+        "test_variant": test_variant,
         "expected_devices": expected_devices,
         "artifact_contract": list(REQUIRED_OUTPUTS) + ["SHA256SUMS"],
     }
@@ -320,6 +341,11 @@ def main() -> int:
     parser.add_argument("--source-branch", required=True)
     parser.add_argument("--workflow", required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-attempt", default="1")
+    parser.add_argument("--pr-number", default="")
+    parser.add_argument("--source-head-sha", default="")
+    parser.add_argument("--base-sha", default="")
+    parser.add_argument("--test-variant", default="unspecified")
     parser.add_argument("--expected-devices", default="")
     parser.add_argument("--impact", type=Path)
     args = parser.parse_args()
@@ -337,6 +363,11 @@ def main() -> int:
         run_id=args.run_id,
         expected_devices=[item for item in args.expected_devices.split(",") if item],
         impact=impact,
+        pr_number=args.pr_number,
+        source_head_sha=args.source_head_sha,
+        base_sha=args.base_sha,
+        test_variant=args.test_variant,
+        run_attempt=args.run_attempt,
     )
     print(
         f"{summary['release_recommendation']}: "

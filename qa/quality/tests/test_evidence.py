@@ -23,6 +23,7 @@ from qa.quality.analyzers.evidence import (
     xml_interactive_overlaps,
 )
 from qa.quality.reporters.aggregate import REQUIRED_OUTPUTS, aggregate
+from qa.quality.reporters.static_summary import build_summary
 
 
 def png_bytes(width: int, height: int) -> bytes:
@@ -290,11 +291,68 @@ class AggregateReporterTest(unittest.TestCase):
                 run_id="2",
                 expected_devices=["phone"],
                 impact={"schema_version": 1},
+                pr_number="59",
+                source_head_sha="c" * 40,
+                base_sha="d" * 40,
+                test_variant="unit-fixture",
+                run_attempt="3",
             )
             self.assertEqual(result["release_recommendation"], "PASS WITH WARNINGS")
+            self.assertEqual(result["pr_number"], "59")
+            self.assertEqual(result["source_head_sha"], "c" * 40)
+            self.assertEqual(result["test_variant"], "unit-fixture")
+            manifest = json.loads(
+                (root / "output" / "run-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["base_sha"], "d" * 40)
+            self.assertEqual(manifest["run_attempt"], "3")
             self.assertIn(
                 "مراجعة محاذاة",
                 (root / "output" / "REPORT.md").read_text(encoding="utf-8"),
+            )
+
+
+class StaticSummaryTest(unittest.TestCase):
+    def test_lint_and_unexecuted_vulnerability_are_not_silent_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            lint = root / "lint.xml"
+            lint.write_text(
+                '<issues><issue id="A" severity="Warning"/>'
+                '<issue id="B" severity="Information"/></issues>',
+                encoding="utf-8",
+            )
+            vulnerability = root / "vulnerability.json"
+            vulnerability.write_text(
+                json.dumps({"status": "NOT_EXECUTED", "reason": "scanner absent"}),
+                encoding="utf-8",
+            )
+            summary = build_summary(
+                gradle_outcome="success",
+                package_outcome="success",
+                lint_path=lint,
+                vulnerability_path=vulnerability,
+            )
+            self.assertEqual(summary["infrastructure_error_count"], 0)
+            self.assertEqual(
+                {item["code"] for item in summary["findings"]},
+                {"android_lint_advisories", "vulnerability_scan_not_executed"},
+            )
+            self.assertIn("2 warning/advisory", summary["findings"][0]["message"])
+
+    def test_missing_expected_static_evidence_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            summary = build_summary(
+                gradle_outcome="success",
+                package_outcome="success",
+                lint_path=root / "missing-lint.xml",
+                vulnerability_path=root / "missing-vulnerability.json",
+            )
+            self.assertEqual(summary["infrastructure_error_count"], 2)
+            self.assertEqual(
+                {item["finding_type"] for item in summary["findings"]},
+                {"Infrastructure"},
             )
 
 

@@ -74,6 +74,18 @@ class WorkflowContractTest(unittest.TestCase):
                 ),
             )
 
+    def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
+        source = self.source("quality-pr.yml")
+        for expected in (
+            "quick-impact/impact.json",
+            "--pr-number",
+            "--source-head-sha",
+            "--base-sha",
+            "--test-variant",
+            "qa.quality.reporters.static_summary",
+        ):
+            self.assertIn(expected, source)
+
 
 if __name__ == "__main__":
     unittest.main()
