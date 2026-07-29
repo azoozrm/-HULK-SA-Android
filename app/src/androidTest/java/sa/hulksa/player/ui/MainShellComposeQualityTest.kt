@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
@@ -77,7 +78,9 @@ class MainShellComposeQualityTest {
             }
         }
 
-        compose.onNodeWithText("التنزيلات").performClick()
+        // The collapsed TV rail intentionally hides text labels. The production
+        // icon's accessibility label is the stable user-facing semantic target.
+        compose.onNodeWithContentDescription("التنزيلات").performClick()
         compose.waitForIdle()
 
         assertEquals(MainDestination.DOWNLOADS, selectedDestination)
