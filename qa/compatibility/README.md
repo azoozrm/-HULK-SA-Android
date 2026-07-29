@@ -15,15 +15,19 @@ debug-only authenticated shell:
 2. `prepare-harness.py` adds `QaActivity` only under `src/debug` and verifies
    that `src/main` has the same SHA-256 tree digest before and after injection.
 3. `QaActivity` renders the real `MainShellScreen` and its real Home, Live,
-   Movies, Series, Search, Downloads, and Settings content with deterministic
-   fixture data.
+   Movies, Series, Favorites, Search, Downloads, and Settings content with
+   deterministic fixture data. Downloads additionally use a debug-only
+   loopback byte-range origin and the production `DownloadRepository`.
 4. Each emulator captures a screenshot, UI hierarchy XML, app logcat, crash
    buffer, window state, activity state, gfxinfo, meminfo, and launch timing.
 5. The analyzer checks display geometry, blank rendering, out-of-bounds nodes,
    collapsed nodes, actionable overlaps, edge/safe-area text, conservative text
-   height, crash/ANR signatures, navigation, D-pad focus movement, jank, launch
-   time, memory, and system error-dialog contamination. Non-HULK launcher/system
-   dialogs are dismissed and classified as infrastructure, never as app defects.
+   height, crash/ANR signatures, navigation, D-pad focus movement, and the
+   collapsed/expanded TV rail-logo geometry, every TV page's rail/outer gutter,
+   the live action-row bottom clearance, two-card download fit, and real
+   download byte progress. Jank, launch time, and memory remain emulator
+   advisories. Non-HULK launcher/system dialogs are dismissed and classified as
+   infrastructure, never as app defects.
 6. Reports are emitted as JSON, Markdown, HTML, JUnit XML, and GitHub Actions
    job summaries.
 
@@ -71,10 +75,24 @@ capture while keeping the standard runner for the other eight stable profiles.
   failure.
 - `BLOCKED`: the emulator, capture, or report infrastructure did not complete.
 
-Push runs are report-only for application findings because this task does not
-authorize application fixes. Infrastructure errors always fail the workflow.
-Manual runs can enable `enforce_findings` to make critical application findings
-fail the workflow.
+Infrastructure errors and deterministic critical application findings fail
+push and pull-request runs. Manual runs enforce them by default and expose
+`enforce_findings` only for an intentional report-only diagnostic run. Warnings
+remain visible advisories and do not fail the workflow.
+
+For Android TV, every page audit measures the authenticated content surface
+against the navigation rail. The captured `qa-tv-page-content:<page>` and
+`qa-tv-rail` bounds fail qualification when any outer gutter exceeds 12dp, so
+the former 23dp frame cannot pass merely because every node remains inside the
+physical display. Live additionally requires at least 14dp physical clearance
+below the action row. The rail logo is qualified at 2.8–3.5% of screen width,
+not at a fixed dp size, so receiver density differences cannot silently double
+its optical size.
+
+The Downloads scenario is not a static progress mock. It starts three records
+through the production repository against a loopback origin that serves bounded
+ranges but deliberately stalls an open-ended `bytes=N-` request. Qualification
+requires observed byte progress plus two complete, non-overlapping TV cards.
 
 ## Artifacts
 

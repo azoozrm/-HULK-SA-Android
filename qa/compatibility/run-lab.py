@@ -304,6 +304,22 @@ def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
     return None
 
 
+def is_expanded_rail_focus(
+    node: dict[str, Any] | None,
+    display_width: int,
+) -> bool:
+    """Recognize a focused item after the RTL TV navigation rail expands."""
+    if not node or not node.get("bounds") or display_width <= 0:
+        return False
+    x1, _, x2, _ = node["bounds"]
+    node_width = x2 - x1
+    return (
+        x1 >= display_width * 0.65
+        and x2 >= display_width * 0.90
+        and node_width >= display_width * 0.14
+    )
+
+
 def parse_start_metrics(text: str) -> dict[str, int]:
     result: dict[str, int] = {}
     for key in ("ThisTime", "TotalTime", "WaitTime"):
@@ -489,7 +505,10 @@ class DeviceLab:
                 f"{observed_label}"
             )
         marker_scratch.unlink(missing_ok=True)
-        time.sleep(0.8)
+        # Downloads use a debug-only loopback origin and must prove actual byte
+        # progress. Give the repository enough time to probe and receive at
+        # least one bounded chunk before capturing the hierarchy.
+        time.sleep(3.0 if page == "downloads" else 0.8)
         return start_text, marker_found
 
     def capture_case(self, page: str, orientation: str, font_scale: float) -> None:
@@ -706,16 +725,51 @@ class DeviceLab:
             ("DOWN", 20),
         ]
         trace: list[dict[str, Any]] = []
+        rail_visual: dict[str, dict[str, str]] = {}
         error: str | None = None
         try:
             self.start_page(page, audit_dir)
-            initial = dump_xml(self.adb, audit_dir / ".focus.xml")
+            is_home_tv = page == "home" and self.args.is_tv
+            initial_xml_path = (
+                audit_dir / "rail-collapsed.xml"
+                if is_home_tv
+                else audit_dir / ".focus.xml"
+            )
+            initial = dump_xml(self.adb, initial_xml_path)
+            if is_home_tv:
+                collapsed_png = audit_dir / "rail-collapsed.png"
+                capture_png(self.adb, collapsed_png)
+                rail_visual["collapsed"] = {
+                    "screenshot": collapsed_png.relative_to(self.out).as_posix(),
+                    "xml": initial_xml_path.relative_to(self.out).as_posix(),
+                }
             trace.append({"step": 0, "key": "INITIAL", "focused": focused_node(initial)})
+            display_width, _ = oriented_dimensions(
+                self.args.width,
+                self.args.height,
+                orientation,
+            )
             for index, (name, code) in enumerate(key_sequence, start=1):
                 self.adb.shell(["input", "keyevent", str(code)])
                 time.sleep(0.25)
                 xml = dump_xml(self.adb, audit_dir / ".focus.xml", attempts=2)
-                trace.append({"step": index, "key": name, "focused": focused_node(xml)})
+                focused = focused_node(xml)
+                trace.append({"step": index, "key": name, "focused": focused})
+                if (
+                    is_home_tv
+                    and "expanded" not in rail_visual
+                    and is_expanded_rail_focus(focused, display_width)
+                ):
+                    time.sleep(0.35)
+                    expanded_xml_path = audit_dir / "rail-expanded.xml"
+                    expanded_xml = dump_xml(self.adb, expanded_xml_path, attempts=2)
+                    if is_expanded_rail_focus(focused_node(expanded_xml), display_width):
+                        expanded_png = audit_dir / "rail-expanded.png"
+                        capture_png(self.adb, expanded_png)
+                        rail_visual["expanded"] = {
+                            "screenshot": expanded_png.relative_to(self.out).as_posix(),
+                            "xml": expanded_xml_path.relative_to(self.out).as_posix(),
+                        }
             capture_png(self.adb, audit_dir / "screenshot.png")
             final_xml = dump_xml(self.adb, audit_dir / "ui.xml")
             safe_write(
@@ -741,6 +795,7 @@ class DeviceLab:
                 "orientation": orientation,
                 "page": page,
                 "trace": trace,
+                "rail_visual": rail_visual,
                 "error": error,
                 "files": {
                     key: (audit_dir / filename).relative_to(self.out).as_posix()

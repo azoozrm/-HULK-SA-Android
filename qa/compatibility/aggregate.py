@@ -272,7 +272,16 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
         else "PASS"
     )
     page_coverage: dict[str, dict[str, int]] = {}
-    for page in ("home", "live", "movies", "series", "search", "downloads", "settings"):
+    for page in (
+        "home",
+        "live",
+        "movies",
+        "series",
+        "favorites",
+        "search",
+        "downloads",
+        "settings",
+    ):
         counts = page_counts[page]
         page_coverage[page] = {
             key: int(counts.get(key, 0))
