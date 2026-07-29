@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.delay
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
@@ -87,7 +88,7 @@ class QaActivity : ComponentActivity() {
         val configTv =
             (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
                 Configuration.UI_MODE_TYPE_TELEVISION
-        val downloadRepository = if (scenario == "downloads") {
+        val downloadHarness = if (scenario == "downloads") {
             prepareDownloadHarness()
         } else {
             null
@@ -97,7 +98,7 @@ class QaActivity : ComponentActivity() {
                 QaAuthenticatedShell(
                     initialDestination = scenario.toDestination(),
                     isTv = forcedTv || configTv,
-                    downloadRepository = downloadRepository,
+                    downloadHarness = downloadHarness,
                 )
             }
         }
@@ -109,7 +110,7 @@ class QaActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun prepareDownloadHarness(): DownloadRepository {
+    private fun prepareDownloadHarness(): QaDownloadHarness {
         getSharedPreferences("hulk_downloads", Context.MODE_PRIVATE)
             .edit()
             .clear()
@@ -123,37 +124,58 @@ class QaActivity : ComponentActivity() {
                             file.name.startsWith("$QA_DOWNLOAD_FILE_PREFIX.")
                     }
                     ?.forEach { file -> file.delete() }
-            }
+        }
         val server = QaRangeServer().also(QaRangeServer::start)
         downloadServer = server
-        return DownloadRepositoryProcessOwner.get(applicationContext).also { repository ->
-            repository.setWifiOnly(false)
-            repository.setScheduleMode(DownloadScheduleMode.NOW)
-            repository.setConcurrentDownloads(2)
-            repeat(3) { index ->
-                val number = index + 1
-                repository.enqueue(
-                    PlaybackRequest(
-                        title = "${QA_DOWNLOAD_FILE_PREFIX}_$number تنزيل تجريبي بعنوان عربي طويل",
-                        posterUrl = null,
-                        candidates = listOf("${server.baseUrl}/fixture-$number.mp4"),
-                        isLive = false,
-                        historyKey = "QA_DOWNLOAD:$number",
-                        streamKind = "movie",
-                        streamId = 9_000 + number,
-                        extension = "mp4",
-                    ),
-                )
+        val repository = DownloadRepositoryProcessOwner.get(applicationContext)
+
+        /*
+         * WorkManager can restore a previous debug-fixture worker before this
+         * Activity starts. In that order, the process owner has already loaded
+         * the previous loopback URL even though SharedPreferences was cleared
+         * above. Remove those fixture records through the owner itself before
+         * enqueueing the new server URLs; production records are never touched.
+         */
+        repository.downloads()
+            .filter { item ->
+                item.historyKey.startsWith("$QA_DOWNLOAD_HISTORY_PREFIX:") ||
+                    item.title.startsWith(QA_DOWNLOAD_FILE_PREFIX)
             }
+            .map(OfflineDownload::downloadId)
+            .forEach { downloadId -> repository.remove(downloadId) }
+
+        repository.setWifiOnly(false)
+        repository.setScheduleMode(DownloadScheduleMode.NOW)
+        repository.setConcurrentDownloads(2)
+        repeat(3) { index ->
+            val number = index + 1
+            repository.enqueue(
+                PlaybackRequest(
+                    title = "${QA_DOWNLOAD_FILE_PREFIX}_$number تنزيل تجريبي بعنوان عربي طويل",
+                    posterUrl = null,
+                    candidates = listOf("${server.baseUrl}/fixture-$number.mp4"),
+                    isLive = false,
+                    historyKey = "$QA_DOWNLOAD_HISTORY_PREFIX:$number",
+                    streamKind = "movie",
+                    streamId = 9_000 + number,
+                    extension = "mp4",
+                ),
+            )
         }
+        return QaDownloadHarness(repository, server)
     }
 }
+
+private data class QaDownloadHarness(
+    val repository: DownloadRepository,
+    val origin: QaRangeServer,
+)
 
 @Composable
 private fun QaAuthenticatedShell(
     initialDestination: MainDestination,
     isTv: Boolean,
-    downloadRepository: DownloadRepository?,
+    downloadHarness: QaDownloadHarness?,
 ) {
     val (adaptiveUi, inputController) = rememberAdaptiveUiState(isTv)
     CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
@@ -165,7 +187,7 @@ private fun QaAuthenticatedShell(
             FixtureMain(
                 initialDestination = initialDestination,
                 isTv = isTv,
-                downloadRepository = downloadRepository,
+                downloadHarness = downloadHarness,
             )
         }
     }
@@ -175,8 +197,9 @@ private fun QaAuthenticatedShell(
 private fun FixtureMain(
     initialDestination: MainDestination,
     isTv: Boolean,
-    downloadRepository: DownloadRepository?,
+    downloadHarness: QaDownloadHarness?,
 ) {
+    val downloadRepository = downloadHarness?.repository
     var favorites by remember {
         mutableStateOf(setOf("MOVIE:101", "SERIES:301", "LIVE:501"))
     }
@@ -185,15 +208,20 @@ private fun FixtureMain(
     }
     val navigationMemory = remember { NavigationMemoryStore() }
     val pageMarker = "qa-page:${state.destination.name.lowercase(Locale.ROOT)}"
+    var originBytesServed by remember(downloadHarness) {
+        mutableStateOf(downloadHarness?.origin?.bytesServed() ?: 0L)
+    }
     val hasRealDownloadProgress =
         downloadRepository != null && state.downloads.any { it.bytesDownloaded > 0L }
+    val hasOriginByteProgress = originBytesServed > 0L
 
-    LaunchedEffect(downloadRepository) {
-        while (downloadRepository != null) {
+    LaunchedEffect(downloadHarness) {
+        while (downloadHarness != null) {
             state = state.copy(
-                downloads = downloadRepository.downloads(),
-                downloadSettings = downloadRepository.settings(),
+                downloads = downloadHarness.repository.downloads(),
+                downloadSettings = downloadHarness.repository.settings(),
             )
+            originBytesServed = downloadHarness.origin.bytesServed()
             delay(QA_DOWNLOAD_POLL_MS)
         }
     }
@@ -202,11 +230,16 @@ private fun FixtureMain(
         Modifier
             .fillMaxSize()
             .semantics(mergeDescendants = false) {
-                contentDescription = if (hasRealDownloadProgress) {
-                    "$pageMarker,$QA_DOWNLOAD_PROGRESS_MARKER"
-                } else {
-                    pageMarker
+                contentDescription = buildList {
+                    add(pageMarker)
+                    if (hasOriginByteProgress) {
+                        add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
+                    }
+                    if (hasRealDownloadProgress) {
+                        add(QA_DOWNLOAD_PROGRESS_MARKER)
+                    }
                 }
+                    .joinToString(",")
             },
     ) {
         MainShellScreen(
@@ -501,7 +534,9 @@ private fun live(
 )
 
 private const val QA_DOWNLOAD_FILE_PREFIX = "QA_DOWNLOAD"
+private const val QA_DOWNLOAD_HISTORY_PREFIX = "QA_DOWNLOAD"
 private const val QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
+private const val QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes-positive"
 private const val QA_DOWNLOAD_POLL_MS = 100L
 private const val QA_DOWNLOAD_TOTAL_BYTES = 64L * 1024L * 1024L
 private const val QA_DOWNLOAD_WRITE_BLOCK = 64 * 1024
@@ -515,6 +550,7 @@ private const val QA_DOWNLOAD_WRITE_DELAY_MS = 10L
  */
 private class QaRangeServer : Closeable {
     private val running = AtomicBoolean(false)
+    private val transferredBytes = AtomicLong(0L)
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val workers = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "hulk-qa-range-client").apply { isDaemon = true }
@@ -522,6 +558,8 @@ private class QaRangeServer : Closeable {
     private var acceptThread: Thread? = null
 
     val baseUrl: String = "http://127.0.0.1:${server.localPort}"
+
+    fun bytesServed(): Long = transferredBytes.get()
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -629,6 +667,7 @@ private class QaRangeServer : Closeable {
             val count = minOf(block.size.toLong(), remaining).toInt()
             output.write(block, 0, count)
             output.flush()
+            transferredBytes.addAndGet(count.toLong())
             remaining -= count
             Thread.sleep(QA_DOWNLOAD_WRITE_DELAY_MS)
         }

@@ -85,6 +85,16 @@ jobs:
 
       - uses: android-actions/setup-android@v4
 
+      - name: Prepare fail-closed instrumentation evidence
+        run: |
+          set -euo pipefail
+          python3 -m qa.quality.scripts.instrumentation_evidence \
+            --out quality-evidence/instrumentation \
+            --head-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --step-outcome not_started
+
       - name: Run isolated instrumentation on API 35
         id: instrumented
         uses: reactivecircus/android-emulator-runner@v2
@@ -108,10 +118,27 @@ jobs:
             -PHULK_CONFIG_URL=
             --stacktrace
 
+      - name: Finalize instrumentation evidence
+        if: always()
+        env:
+          EMULATOR_STEP_OUTCOME: ${{ steps.instrumented.outcome }}
+        run: |
+          set -euo pipefail
+          python3 -m qa.quality.scripts.instrumentation_evidence \
+            --out quality-evidence/instrumentation \
+            --head-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --step-outcome "$EMULATOR_STEP_OUTCOME" \
+            --results-root app/build/outputs/androidTest-results \
+            --reports-root app/build/reports/androidTests
+
       - name: Verify instrumentation evidence exists
         if: always()
         run: |
           set -euo pipefail
+          jq -e '.overall_status == "PASS"' \
+            quality-evidence/instrumentation/SUMMARY.json
           find app/build/outputs/androidTest-results -type f -name '*.xml' -print -quit |
             grep -q .
           find app/build/reports/androidTests -type f -print -quit | grep -q .
@@ -122,6 +149,7 @@ jobs:
         with:
           name: HULK-SA-COMPOSE-INSTRUMENTATION
           path: |
+            quality-evidence/instrumentation/
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
           if-no-files-found: error
@@ -156,4 +184,3 @@ jobs:
           [[ "$POLICY" = 'success' ]]
           [[ "$INSTRUMENTATION" = 'success' ]]
           [[ "$COMPATIBILITY" = 'success' ]]
-

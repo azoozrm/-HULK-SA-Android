@@ -43,6 +43,7 @@ QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"
 QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
 QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
 QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
+QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes-positive"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -279,6 +280,11 @@ def analyze_xml(
         in (node.attrib.get("content-desc", "") or "")
         for node in nodes
     )
+    download_origin_progress = any(
+        QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER
+        in (node.attrib.get("content-desc", "") or "")
+        for node in nodes
+    )
 
     for node in nodes:
         bounds = parse_bounds(node.attrib.get("bounds", ""))
@@ -370,6 +376,7 @@ def analyze_xml(
         "live_actions": live_actions,
         "download_layout": download_layout,
         "download_transfer_progress": download_transfer_progress,
+        "download_origin_progress": download_origin_progress,
     }
 
 
@@ -774,17 +781,39 @@ def add_case_findings(
                             evidence=evidence,
                         )
                     )
-            if page == "downloads" and not ui.get("download_transfer_progress"):
-                findings.append(
-                    finding(
-                        "critical",
-                        "download_transfer_no_byte_progress",
-                        f"{case_id}: the real download fixture did not transfer any bytes",
-                        case_id=case_id,
-                        page=page,
-                        evidence=evidence,
+            if page == "downloads":
+                repository_progress = bool(ui.get("download_transfer_progress"))
+                origin_progress = bool(ui.get("download_origin_progress"))
+                if not repository_progress:
+                    boundary = (
+                        "the loopback origin served body bytes, but the production "
+                        "repository exposed zero transferred bytes"
+                        if origin_progress
+                        else "the production transport did not receive body bytes "
+                        "from the loopback origin"
                     )
-                )
+                    findings.append(
+                        finding(
+                            "critical",
+                            "download_transfer_no_byte_progress",
+                            f"{case_id}: {boundary}",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+                elif not origin_progress:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "download_transfer_evidence_mismatch",
+                            f"{case_id}: repository progress was reported without "
+                            "matching bytes from the deterministic origin",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
             if is_tv_page and page == "downloads":
                 layout = ui.get("download_layout")
                 if layout is None:

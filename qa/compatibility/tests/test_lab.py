@@ -18,6 +18,7 @@ sys.path.insert(0, str(LAB_ROOT))
 
 from analyze import (  # noqa: E402
     add_case_findings,
+    analyze_xml,
     analyze_rail_visual,
     analyze_run,
     download_layout_measurement,
@@ -149,6 +150,23 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("timeout=15", start_page)
         self.assertNotIn("3.0 if page == \"downloads\"", start_page)
 
+    def test_download_fixture_removes_process_owner_records_before_enqueue(self) -> None:
+        source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        prepare = source.split(
+            "    private fun prepareDownloadHarness(): QaDownloadHarness",
+            maxsplit=1,
+        )[1].split(
+            "\n    }\n}\n\nprivate data class QaDownloadHarness",
+            maxsplit=1,
+        )[0]
+
+        cleanup = "repository.remove(downloadId)"
+        enqueue = "repeat(3) { index ->"
+        self.assertIn("WorkManager can restore a previous debug-fixture worker", prepare)
+        self.assertIn(cleanup, prepare)
+        self.assertIn(enqueue, prepare)
+        self.assertLess(prepare.index(cleanup), prepare.index(enqueue))
+
 
 class AnalyzerTests(unittest.TestCase):
     def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:
@@ -277,6 +295,29 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(2, measurement["visible_card_count"])
         self.assertEqual([], measurement["overlaps"])
         self.assertTrue(measurement["transfer_progress"])
+
+    def test_download_origin_and_repository_progress_are_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            xml = Path(temporary) / "ui.xml"
+            xml.write_text(
+                '<hierarchy><node package="sa.hulksa.player.dev" '
+                'content-desc="qa-page:downloads,qa-download-origin:bytes-positive" '
+                'bounds="[0,0][1080,1920]" /></hierarchy>',
+                encoding="utf-8",
+            )
+
+            result = analyze_xml(
+                xml,
+                width=1080,
+                height=1920,
+                density=420,
+                font_scale=1.0,
+                is_tv=False,
+                page="downloads",
+            )
+
+        self.assertTrue(result["download_origin_progress"])
+        self.assertFalse(result["download_transfer_progress"])
 
     def test_partially_scrolled_download_card_does_not_count_as_fitted(self) -> None:
         nodes = list(

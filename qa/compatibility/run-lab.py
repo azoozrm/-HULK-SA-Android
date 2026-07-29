@@ -526,7 +526,8 @@ class DeviceLab:
         # progress. Synchronize on the semantic marker instead of a fixed sleep:
         # high-density emulators can start WorkManager after the old three-second
         # window. A timeout does not turn the case green; the final hierarchy is
-        # still captured and the analyzer emits download_transfer_no_byte_progress.
+        # still captured. The final hierarchy carries independent origin and
+        # repository markers so the analyzer can locate the failed boundary.
         if page == "downloads":
             wait_for_marker(
                 self.adb,
@@ -630,6 +631,13 @@ class DeviceLab:
                 "window": case_dir / "window.txt",
                 "activity": case_dir / "activity.txt",
             }
+            if page == "downloads":
+                file_map.update(
+                    {
+                        "download_state": case_dir / "download-state.xml",
+                        "download_files": case_dir / "download-files.txt",
+                    }
+                )
             capture_png(self.adb, file_map["screenshot"])
             dump_xml(self.adb, file_map["xml"])
             pid = self.adb.shell(["pidof", PACKAGE]).text.strip().split()
@@ -672,6 +680,34 @@ class DeviceLab:
                 file_map["activity"],
                 command_text(self.adb, ["dumpsys", "activity", "activities"], timeout=90),
             )
+            if page == "downloads":
+                safe_write(
+                    file_map["download_state"],
+                    command_text(
+                        self.adb,
+                        [
+                            "run-as",
+                            PACKAGE,
+                            "cat",
+                            "shared_prefs/hulk_downloads.xml",
+                        ],
+                        timeout=30,
+                    ),
+                )
+                safe_write(
+                    file_map["download_files"],
+                    command_text(
+                        self.adb,
+                        [
+                            "run-as",
+                            PACKAGE,
+                            "ls",
+                            "-lnR",
+                            f"/sdcard/Android/data/{PACKAGE}/files/Movies",
+                        ],
+                        timeout=30,
+                    ),
+                )
             for key, path in file_map.items():
                 record["files"][key] = path.relative_to(self.out).as_posix()
         except Exception as exc:

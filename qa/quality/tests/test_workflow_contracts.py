@@ -82,6 +82,15 @@ class WorkflowContractTest(unittest.TestCase):
                 ),
             )
 
+    def test_instrumentation_layer_uploads_fail_closed_evidence_before_asserting(self) -> None:
+        source = self.source("quality-ui.yml")
+        self.assertIn("Prepare fail-closed instrumentation evidence", source)
+        self.assertIn("Finalize instrumentation evidence", source)
+        self.assertIn("quality-evidence/instrumentation/", source)
+        self.assertIn("steps.instrumented.outcome", source)
+        self.assertIn("'.overall_status == \"PASS\"'", source)
+        self.assertIn("if-no-files-found: error", source)
+
     def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
         source = self.source("quality-pr.yml")
         for expected in (
