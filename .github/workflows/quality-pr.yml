@@ -73,8 +73,10 @@ jobs:
             --screens generated-inventory/screens.json \
             --actions generated-inventory/actions.json \
             --documentation generated-inventory/UI-COVERAGE.md
-          diff -u qa/quality/inventory/screens.json generated-inventory/screens.json
-          diff -u qa/quality/inventory/actions.json generated-inventory/actions.json
+          python3 qa/quality/inventory/compare.py \
+            qa/quality/inventory/screens.json generated-inventory/screens.json
+          python3 qa/quality/inventory/compare.py \
+            qa/quality/inventory/actions.json generated-inventory/actions.json
 
       - name: Upload governance evidence
         if: always()
