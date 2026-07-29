@@ -13,6 +13,27 @@ from typing import Any
 import xml.etree.ElementTree as ET
 
 
+ROTATION_ATTEMPTS = 3
+ROTATION_ATTEMPT_TIMEOUT_SECONDS = 12.0
+
+
+def rotation_for(is_tv: bool, orientation: str) -> int:
+    if is_tv:
+        return 0
+    return 0 if orientation == "portrait" else 1
+
+
+def rotation_commands(rotation: int, font_scale: float) -> tuple[list[str], ...]:
+    value = str(rotation)
+    return (
+        ["settings", "put", "system", "accelerometer_rotation", "0"],
+        ["settings", "put", "system", "font_scale", f"{font_scale:.2f}"],
+        ["settings", "put", "system", "user_rotation", value],
+        ["wm", "user-rotation", "lock", value],
+        ["cmd", "window", "user-rotation", "lock", value],
+    )
+
+
 def load_qualified() -> ModuleType:
     path = Path(__file__).with_name("run-lab-qualified.py")
     spec = importlib.util.spec_from_file_location("hulk_compatibility_run_lab_qualified", path)
@@ -69,33 +90,81 @@ def install_isolation_layer(qualified: ModuleType) -> None:
 
     def install(core: ModuleType) -> None:
         original_install(core)
-        qualified_set_variant = core.DeviceLab.set_variant
         qualified_start_page = core.DeviceLab.start_page
         qualified_capture_case = core.DeviceLab.capture_case
 
         def set_variant(self: Any, orientation: str, font_scale: float) -> None:
-            qualified_set_variant(self, orientation, font_scale)
+            self.current_orientation = orientation
+            rotation = rotation_for(self.args.is_tv, orientation)
+            expected = core.oriented_dimensions(
+                self.args.width,
+                self.args.height,
+                orientation,
+            )
+            stable = False
+            observed = None
+            attempts: list[dict[str, Any]] = []
+            for attempt in range(1, ROTATION_ATTEMPTS + 1):
+                command_results: list[dict[str, Any]] = []
+                for command in rotation_commands(rotation, font_scale):
+                    result = self.adb.shell(command, timeout=45)
+                    command_results.append(
+                        {
+                            "command": command,
+                            "returncode": result.returncode,
+                            "output": (result.text + result.error_text).strip()[-500:],
+                        }
+                    )
+                self.adb.shell(["am", "force-stop", core.PACKAGE])
+                core.time.sleep(1.0)
+                stable, observed = qualified.wait_for_stable_geometry(
+                    core,
+                    self.adb,
+                    expected,
+                    timeout=ROTATION_ATTEMPT_TIMEOUT_SECONDS,
+                    stable_reads=qualified.VARIANT_GEOMETRY_STABLE_READS,
+                )
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "rotation": rotation,
+                        "expected": list(expected),
+                        "observed": list(observed) if observed else None,
+                        "stable": stable,
+                        "commands": command_results,
+                    }
+                )
+                if stable:
+                    break
+                self.adb.shell(["wm", "user-rotation", "free"])
+                core.time.sleep(0.5)
+
             self.adb.shell(["am", "force-stop", core.PACKAGE])
             clear = self.adb.shell(["pm", "clear", core.PACKAGE], timeout=90)
             clear_text = (clear.text + clear.error_text).strip()
             reset_root = self.out / "variant-resets"
             reset_root.mkdir(parents=True, exist_ok=True)
             reset_path = reset_root / f"{orientation}-font-{int(round(font_scale * 100)):03d}.json"
-            core.safe_write(
-                reset_path,
-                json.dumps(
-                    {
-                        "orientation": orientation,
-                        "font_scale": font_scale,
-                        "package": core.PACKAGE,
-                        "pm_clear_returncode": clear.returncode,
-                        "pm_clear_output": clear_text,
-                        "fixture_reinitialized": clear.returncode == 0 and "Success" in clear_text,
-                    },
-                    indent=2,
+            evidence = {
+                "orientation": orientation,
+                "font_scale": font_scale,
+                "rotation": rotation,
+                "expected_geometry": list(expected),
+                "observed_geometry": list(observed) if observed else None,
+                "geometry_stable": stable,
+                "rotation_attempts": attempts,
+                "package": core.PACKAGE,
+                "pm_clear_returncode": clear.returncode,
+                "pm_clear_output": clear_text,
+                "fixture_reinitialized": clear.returncode == 0 and "Success" in clear_text,
+            }
+            core.safe_write(reset_path, json.dumps(evidence, indent=2) + "\n")
+            if not stable:
+                observed_label = f"{observed[0]}x{observed[1]}" if observed else "unavailable"
+                raise core.LabError(
+                    f"display did not stabilize at {expected[0]}x{expected[1]} after "
+                    f"{ROTATION_ATTEMPTS} rotation attempts; last screenshot was {observed_label}"
                 )
-                + "\n",
-            )
             if clear.returncode != 0 or "Success" not in clear_text:
                 raise core.LabError(
                     f"failed to reinitialize fixture for {orientation}/{font_scale}: "

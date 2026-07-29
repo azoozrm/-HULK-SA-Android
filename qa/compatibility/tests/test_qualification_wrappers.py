@@ -34,6 +34,18 @@ class QualifiedAnalyzerTests(unittest.TestCase):
         device = ANALYZE.normalize_device({"orientations": "landscape"})
         self.assertEqual("landscape", device["orientations"])
 
+    def test_manifest_normalizes_all_sequence_fields_before_reporting(self) -> None:
+        manifest = ANALYZE.normalize_manifest(
+            {
+                "device": {
+                    "orientations": ["portrait", "landscape"],
+                    "font_scales": [1.0, 1.3],
+                }
+            }
+        )
+        self.assertEqual("portrait,landscape", manifest["device"]["orientations"])
+        self.assertEqual("1.0,1.3", manifest["device"]["font_scales"])
+
 
 class QualifiedRunnerTests(unittest.TestCase):
     def write_manifest(self, root: Path, case_count: int) -> None:
