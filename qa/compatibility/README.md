@@ -77,6 +77,13 @@ push and pull-request runs. Manual runs enforce them by default and expose
 `enforce_findings` only for an intentional report-only diagnostic run. Warnings
 remain visible advisories and do not fail the workflow.
 
+For Android TV, the live-page audit also measures the authenticated content
+surface against the navigation rail. The captured `qa-tv-live-content` and
+`qa-tv-rail` bounds fail qualification when any outer gutter exceeds 12dp, so
+the former 23dp frame cannot pass merely because every node remains inside the
+physical display. A TV live capture also fails if either measurement marker is
+missing, preventing a silent pass when the visual measurement did not run.
+
 ## Artifacts
 
 Each device artifact contains every raw capture and:

@@ -6,12 +6,12 @@ on:
       expected_version_code:
         description: Expected Android versionCode
         required: true
-        default: '62'
+        default: '63'
         type: string
       expected_version_name:
         description: Expected Android versionName
         required: true
-        default: '0.9.3.18'
+        default: '0.9.3.19'
         type: string
 
 permissions:
@@ -264,8 +264,8 @@ jobs:
 
       - name: Verify package identity and version
         env:
-          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '62' }}
-          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.18' }}
+          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '63' }}
+          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.19' }}
         run: |
           set -euo pipefail
           apk='app/build/outputs/apk/release/app-release.apk'
@@ -284,6 +284,31 @@ jobs:
             echo "Version name: $version_name"
             echo 'Package identity: PASS'
           } > signed-release-artifacts/PACKAGE-IDENTITY.txt
+
+      - name: Verify production upgrade eligibility
+        run: |
+          set -euo pipefail
+          apk='app/build/outputs/apk/release/app-release.apk'
+          package_id="$(apkanalyzer manifest application-id "$apk")"
+          version_code="$(apkanalyzer manifest version-code "$apk")"
+          version_name="$(apkanalyzer manifest version-name "$apk")"
+
+          test "$package_id" = 'sa.hulksa.player'
+          if ! [[ "$version_code" =~ ^[0-9]+$ ]] || (( version_code <= 62 )); then
+            echo "Candidate versionCode must be newer than production baseline 62." >&2
+            exit 1
+          fi
+
+          {
+            echo 'Production application ID: sa.hulksa.player'
+            echo 'Production baseline: 0.9.3.18 (62)'
+            echo "Candidate: $version_name ($version_code)"
+            echo 'Candidate versionCode is newer: PASS'
+            echo 'Signer equality: verified separately against the approved production certificate'
+            echo 'Static upgrade eligibility over the production package: PASS'
+            echo 'Legacy sa.hulksa.player.dev debug builds require one-time removal and are not an upgrade baseline'
+            echo 'Physical adb/package-installer upgrade: NOT PERFORMED BY THIS CHECK'
+          } > signed-release-artifacts/UPGRADE-ELIGIBILITY.txt
 
       - name: Verify compiled runtime configuration
         run: |

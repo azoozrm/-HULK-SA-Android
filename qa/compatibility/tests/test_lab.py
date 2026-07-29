@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import xml.etree.ElementTree as ET
 
 from PIL import Image, ImageDraw
 
@@ -15,7 +16,12 @@ from PIL import Image, ImageDraw
 LAB_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB_ROOT))
 
-from analyze import analyze_rail_visual, analyze_run  # noqa: E402
+from analyze import (  # noqa: E402
+    add_case_findings,
+    analyze_rail_visual,
+    analyze_run,
+    tv_content_gutter_measurement,
+)
 from lab_config import DEVICES, PAGES, matrix_json, validate  # noqa: E402
 
 RUN_LAB_SPEC = importlib.util.spec_from_file_location(
@@ -100,6 +106,85 @@ class ConfigTests(unittest.TestCase):
 
 
 class AnalyzerTests(unittest.TestCase):
+    def tv_gutter_xml(self, content_bounds: str) -> ET.Element:
+        return ET.fromstring(
+            '<hierarchy>'
+            '<node package="sa.hulksa.player.dev" class="android.view.View" '
+            'content-desc="qa-tv-live-content" '
+            f'bounds="{content_bounds}" />'
+            '<node package="sa.hulksa.player.dev" class="android.view.View" '
+            'content-desc="qa-tv-rail" bounds="[1740,0][1920,1080]" />'
+            '</hierarchy>'
+        )
+
+    def test_tv_live_content_gutter_measurement_accepts_eight_dp(self) -> None:
+        measurement = tv_content_gutter_measurement(
+            list(self.tv_gutter_xml("[16,16][1724,1064]").iter("node")),
+            width=1920,
+            height=1080,
+            density=320,
+        )
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(8.0, measurement["maximum_dp"])
+
+    def test_tv_live_content_gutter_measurement_exposes_old_twenty_three_dp_frame(self) -> None:
+        measurement = tv_content_gutter_measurement(
+            list(self.tv_gutter_xml("[46,36][1694,1044]").iter("node")),
+            width=1920,
+            height=1080,
+            density=320,
+        )
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(23.0, measurement["maximum_dp"])
+        self.assertGreater(measurement["maximum_dp"], measurement["limit_dp"])
+
+    def test_tv_live_capture_fails_when_gutter_markers_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case_root = root / "raw/landscape/font-100/live"
+            case_root.mkdir(parents=True)
+            image = Image.new("RGB", (1920, 1080), "#090a07")
+            ImageDraw.Draw(image).rectangle((100, 100, 1820, 980), fill="#80661f")
+            image.save(case_root / "screenshot.png")
+            (case_root / "ui.xml").write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<hierarchy rotation="0">'
+                '<node package="sa.hulksa.player.dev" class="android.view.View" '
+                'bounds="[0,0][1920,1080]" content-desc="qa-page:live" />'
+                "</hierarchy>",
+                encoding="utf-8",
+            )
+            (case_root / "logcat.txt").write_text("", encoding="utf-8")
+            result, findings = add_case_findings(
+                root,
+                {
+                    "is_tv": True,
+                    "requested_width": 1920,
+                    "requested_height": 1080,
+                    "requested_density": 320,
+                },
+                {
+                    "id": "landscape/font-100/live",
+                    "page": "live",
+                    "orientation": "landscape",
+                    "font_scale": 1.0,
+                    "marker_found": True,
+                    "files": {
+                        "screenshot": "raw/landscape/font-100/live/screenshot.png",
+                        "xml": "raw/landscape/font-100/live/ui.xml",
+                        "logcat": "raw/landscape/font-100/live/logcat.txt",
+                    },
+                },
+            )
+
+        self.assertEqual("FAIL", result["status"])
+        self.assertIn(
+            "tv_live_content_gutter_not_measured",
+            {item["code"] for item in findings},
+        )
+
     def create_run(self, root: Path, *, out_of_bounds: bool = False) -> None:
         case_root = root / "raw/portrait/font-100/home"
         case_root.mkdir(parents=True)

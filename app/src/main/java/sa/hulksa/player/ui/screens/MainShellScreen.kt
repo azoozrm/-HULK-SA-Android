@@ -97,6 +97,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -486,6 +488,7 @@ private fun CinematicNavigationRail(
         modifier = Modifier
             .width(railWidth)
             .fillMaxHeight()
+            .semantics { contentDescription = "qa-tv-rail" }
             .focusGroup()
             .onFocusChanged { railHasFocus = it.hasFocus }
             .background(
@@ -1144,7 +1147,21 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(
+                horizontal = if (isTv) 8.dp else 12.dp,
+                vertical = if (isTv) 8.dp else 11.dp,
+            )
+            .then(
+                if (isTv) {
+                    Modifier.semantics { contentDescription = "qa-tv-live-content" }
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
         Spacer(Modifier.height(10.dp))
@@ -2594,7 +2611,7 @@ private fun ReorderableLiveCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
     ) {
         item {
             FocusButton(

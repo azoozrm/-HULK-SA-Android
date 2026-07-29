@@ -31,6 +31,7 @@ TOTAL_PSS_RE = re.compile(r"TOTAL PSS:\s*([\d,]+)")
 RAIL_LOGO_MIN_DP = 56.0
 RAIL_LOGO_MAX_DP = 64.0
 RAIL_LOGO_STATE_TOLERANCE_DP = 2.0
+TV_CONTENT_GUTTER_MAX_DP = 12.0
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -81,6 +82,65 @@ def app_nodes(root: ET.Element) -> Iterable[ET.Element]:
         yield node
 
 
+def tv_content_gutter_measurement(
+    nodes: Iterable[ET.Element],
+    width: int,
+    height: int,
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the live-page content inset against the adjacent TV rail."""
+    content_bounds = None
+    rail_bounds = None
+    for node in nodes:
+        description = (node.attrib.get("content-desc", "") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if not bounds:
+            continue
+        if description == "qa-tv-live-content":
+            content_bounds = bounds
+        elif description == "qa-tv-rail":
+            rail_bounds = bounds
+    if content_bounds is None or rail_bounds is None:
+        return None
+
+    content_x1, content_y1, content_x2, content_y2 = content_bounds
+    rail_x1, _, rail_x2, _ = rail_bounds
+    pixels_per_dp = max(density / 160.0, 0.01)
+    if rail_x1 >= width / 2:
+        horizontal = {
+            "outer_px": content_x1,
+            "rail_px": rail_x1 - content_x2,
+        }
+        rail_side = "right"
+    elif rail_x2 <= width / 2:
+        horizontal = {
+            "outer_px": width - content_x2,
+            "rail_px": content_x1 - rail_x2,
+        }
+        rail_side = "left"
+    else:
+        return None
+
+    gaps_px = {
+        **horizontal,
+        "top_px": content_y1,
+        "bottom_px": height - content_y2,
+    }
+    gaps_dp = {
+        key.replace("_px", "_dp"): round(max(0, value) / pixels_per_dp, 2)
+        for key, value in gaps_px.items()
+    }
+    return {
+        "content_bounds_px": list(content_bounds),
+        "rail_bounds_px": list(rail_bounds),
+        "rail_side": rail_side,
+        **gaps_px,
+        **gaps_dp,
+        "maximum_dp": max(gaps_dp.values()),
+        "limit_dp": TV_CONTENT_GUTTER_MAX_DP,
+    }
+
+
 def analyze_xml(
     xml_path: Path,
     width: int,
@@ -102,6 +162,11 @@ def analyze_xml(
     safe_x = max(2, int(width * 0.025))
     safe_y = max(2, int(height * 0.025))
     minimum_text_height = 8.0 * density / 160.0 * font_scale * 0.70
+    tv_content_gutter = (
+        tv_content_gutter_measurement(nodes, width, height, density)
+        if is_tv
+        else None
+    )
 
     for node in nodes:
         bounds = parse_bounds(node.attrib.get("bounds", ""))
@@ -189,6 +254,7 @@ def analyze_xml(
         "unsafe_tv_text": unsafe_tv_text,
         "undersized_text": undersized_text,
         "interactive_overlaps": overlaps,
+        "tv_content_gutter": tv_content_gutter,
     }
 
 
@@ -468,6 +534,32 @@ def add_case_findings(
                         "warning",
                         "possible_text_clipping",
                         f"{case_id}: {len(ui['undersized_text'])} text bounds are smaller than the conservative font-height threshold",
+                        case_id=case_id,
+                        page=page,
+                        evidence=evidence,
+                    )
+                )
+            gutter = ui.get("tv_content_gutter")
+            is_tv_live_page = bool(device["is_tv"]) and page == "live"
+            if is_tv_live_page and gutter is None:
+                findings.append(
+                    finding(
+                        "critical",
+                        "tv_live_content_gutter_not_measured",
+                        f"{case_id}: TV live content/rail gutter markers were not captured",
+                        case_id=case_id,
+                        page=page,
+                        evidence=evidence,
+                    )
+                )
+            elif gutter and gutter["maximum_dp"] > gutter["limit_dp"]:
+                findings.append(
+                    finding(
+                        "critical",
+                        "tv_live_excessive_content_gutter",
+                        f"{case_id}: live content leaves up to "
+                        f"{gutter['maximum_dp']:.1f}dp of unused outer space; "
+                        f"limit is {gutter['limit_dp']:.1f}dp",
                         case_id=case_id,
                         page=page,
                         evidence=evidence,

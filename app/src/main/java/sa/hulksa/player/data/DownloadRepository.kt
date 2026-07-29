@@ -43,7 +43,9 @@ class DownloadRepository(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        // OkHttp resets this timeout whenever bytes arrive, so long downloads keep
+        // running while a transport that sends headers and then stalls is retried.
+        .readTimeout(DOWNLOAD_STALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .followRedirects(true)
@@ -576,13 +578,7 @@ class DownloadRepository(context: Context) {
     }
 
     private fun executeDownloadCall(downloadId: Long, url: String, offset: Long, useRange: Boolean): Response {
-        val builder = Request.Builder()
-            .url(url)
-            .get()
-            .header("User-Agent", USER_AGENT)
-            .header("Accept-Encoding", "identity")
-        if (offset > 0L && useRange) builder.header("Range", "bytes=$offset-")
-        val call = client.newCall(builder.build())
+        val call = client.newCall(buildDownloadRequest(url, offset, useRange))
         calls[downloadId] = call
         return call.execute()
     }
@@ -1051,7 +1047,7 @@ class DownloadRepository(context: Context) {
         const val PROGRESS_CHUNK_BYTES = 512 * 1024L
         const val MINIMUM_START_SPACE_BYTES = 64L * 1024L * 1024L
         const val MINIMUM_SAFETY_BYTES = 96L * 1024L * 1024L
-        const val USER_AGENT = "HULK-SA-Android/0.9.3"
+        const val USER_AGENT = DOWNLOAD_USER_AGENT
 
         val ACTIVE_STATUSES = setOf(
             OfflineStatus.QUEUED,
@@ -1069,6 +1065,26 @@ class DownloadRepository(context: Context) {
         )
     }
 }
+
+internal const val DOWNLOAD_STALL_TIMEOUT_SECONDS = 30L
+internal const val DOWNLOAD_USER_AGENT = "HULK-SA-Android/0.9.3"
+
+internal fun downloadRangeHeader(offset: Long, supportsRange: Boolean): String? =
+    if (supportsRange) "bytes=${offset.coerceAtLeast(0L)}-" else null
+
+internal fun buildDownloadRequest(
+    url: String,
+    offset: Long,
+    supportsRange: Boolean,
+): Request = Request.Builder()
+    .url(url)
+    .get()
+    .header("User-Agent", DOWNLOAD_USER_AGENT)
+    .header("Accept-Encoding", "identity")
+    .apply {
+        downloadRangeHeader(offset, supportsRange)?.let { header("Range", it) }
+    }
+    .build()
 
 private fun JSONObject.optNullableString(name: String): String? = if (isNull(name)) null else optString(name).takeIf(String::isNotBlank)
 
