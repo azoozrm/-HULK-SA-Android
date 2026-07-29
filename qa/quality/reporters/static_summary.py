@@ -91,21 +91,25 @@ def build_summary(
             }
         )
 
+    cases = [
+        {
+            "page": "build",
+            "status": "PASS" if gradle_outcome == "success" else "FAIL",
+        },
+        {
+            "page": "package",
+            "status": "PASS" if package_outcome == "success" else "FAIL",
+        },
+        {"page": "vulnerability", "status": "SKIPPED"},
+    ]
     return {
         "device": {"id": "static-build", "api": 36},
-        "planned_case_count": 3,
-        "case_count": 2,
-        "cases": [
-            {
-                "page": "build",
-                "status": "PASS" if gradle_outcome == "success" else "FAIL",
-            },
-            {
-                "page": "package",
-                "status": "PASS" if package_outcome == "success" else "FAIL",
-            },
-            {"page": "vulnerability", "status": "SKIPPED"},
-        ],
+        "planned_case_count": len(cases),
+        # The reporter's executed count represents emitted case evidence rows.
+        # A SKIPPED row is still explicit evidence and must not create a second
+        # synthetic matrix gap during aggregation.
+        "case_count": len(cases),
+        "cases": cases,
         "findings": findings,
         "infrastructure_error_count": infrastructure_errors,
     }
