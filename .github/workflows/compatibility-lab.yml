@@ -102,7 +102,20 @@ jobs:
           set -euo pipefail
           bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/project"
           test -f project/app/src/debug/java/sa/hulksa/player/qa/QaActivity.kt
+          test -s project/app/src/debug/quality-marker-injection.json
           test ! -e project/app/src/main/java/sa/hulksa/player/qa
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(
+              Path('project/app/src/debug/quality-marker-injection.json').read_text()
+          )
+          assert report['schema_version'] == 1
+          assert report['replacement_count'] == 13
+          assert report['original_sha256'] != report['instrumented_sha256']
+          assert report['markers']
+          print('PASS: disposable marker injection report is complete')
+          PY
 
       - name: Compile, unit test and assemble lab APK
         working-directory: project
@@ -122,6 +135,7 @@ jobs:
           test -s "$APK"
           cp "$APK" lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
           cp compatibility-lab-build.log lab-apk/
+          cp project/app/src/debug/quality-marker-injection.json lab-apk/
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" > lab-apk/APK-BADGING.txt
           grep -q "package: name='sa.hulksa.player.dev'" lab-apk/APK-BADGING.txt
           grep -q "sa.hulksa.player.qa.QaActivity" <(
@@ -129,7 +143,12 @@ jobs:
           )
           (
             cd lab-apk
-            sha256sum HULK-SA-COMPATIBILITY-LAB-debug.apk > SHA256SUMS.txt
+            sha256sum \
+              HULK-SA-COMPATIBILITY-LAB-debug.apk \
+              compatibility-lab-build.log \
+              APK-BADGING.txt \
+              quality-marker-injection.json \
+              > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
 
@@ -163,6 +182,23 @@ jobs:
           name: HULK-SA-COMPATIBILITY-LAB-APK
           path: lab-apk
 
+      - name: Validate packaged debug marker evidence
+        run: |
+          set -euo pipefail
+          test -s lab-apk/quality-marker-injection.json
+          (
+            cd lab-apk
+            sha256sum -c SHA256SUMS.txt
+          )
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lab-apk/quality-marker-injection.json').read_text())
+          assert report['replacement_count'] == 13
+          assert report['original_sha256'] != report['instrumented_sha256']
+          print('PASS: packaged marker evidence verified')
+          PY
+
       - name: Install report dependencies
         run: |
           set -euo pipefail
@@ -175,46 +211,8 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Capture pages, hierarchy, focus, logs and performance
+      - name: Capture pages after stable Android service boot
         id: emulator
-        if: matrix.id != 'android-tv-4k-api36'
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
-          arch: ${{ matrix.arch }}
-          profile: ${{ matrix.profile }}
-          cores: 2
-          ram-size: 4096M
-          heap-size: 768M
-          disk-size: 8G
-          disable-animations: true
-          emulator-boot-timeout: 900
-          emulator-options: >-
-            -no-window -gpu swiftshader -noaudio -no-boot-anim
-            -camera-back none -camera-front none -no-snapshot
-            -skin ${{ matrix.boot_skin }}
-          script: >-
-            python3 qa/compatibility/run-lab.py
-            --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
-            --device-id '${{ matrix.id }}'
-            --device-name '${{ matrix.name }}'
-            --family '${{ matrix.family }}'
-            --api '${{ matrix.api }}'
-            --target '${{ matrix.target }}'
-            --arch '${{ matrix.arch }}'
-            --profile '${{ matrix.profile }}'
-            --width '${{ matrix.width }}'
-            --height '${{ matrix.height }}'
-            --density '${{ matrix.density }}'
-            --orientations '${{ matrix.orientations }}'
-            --font-scales '${{ matrix.font_scales }}'
-            --is-tv '${{ matrix.is_tv }}'
-            --out 'compatibility-results/${{ matrix.id }}'
-
-      - name: Capture native Android TV 4K after stable ADB boot
-        if: matrix.id == 'android-tv-4k-api36'
         continue-on-error: true
         run: |
           bash qa/compatibility/run-native-emulator.sh \
@@ -286,49 +284,8 @@ jobs:
           mv "$PRESERVED" "$OUT/attempts/attempt-1"
           echo 'PASS: first failed attempt retained under attempts/attempt-1'
 
-      - name: Retry capture after transient emulator failure
-        if: >-
-          steps.retry-check.outputs.needed == 'true' &&
-          matrix.id != 'android-tv-4k-api36'
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
-          arch: ${{ matrix.arch }}
-          profile: ${{ matrix.profile }}
-          cores: 2
-          ram-size: 4096M
-          heap-size: 768M
-          disk-size: 8G
-          disable-animations: true
-          emulator-boot-timeout: 900
-          emulator-options: >-
-            -no-window -gpu swiftshader -noaudio -no-boot-anim
-            -camera-back none -camera-front none -no-snapshot
-            -skin ${{ matrix.boot_skin }}
-          script: >-
-            python3 qa/compatibility/run-lab.py
-            --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
-            --device-id '${{ matrix.id }}'
-            --device-name '${{ matrix.name }}'
-            --family '${{ matrix.family }}'
-            --api '${{ matrix.api }}'
-            --target '${{ matrix.target }}'
-            --arch '${{ matrix.arch }}'
-            --profile '${{ matrix.profile }}'
-            --width '${{ matrix.width }}'
-            --height '${{ matrix.height }}'
-            --density '${{ matrix.density }}'
-            --orientations '${{ matrix.orientations }}'
-            --font-scales '${{ matrix.font_scales }}'
-            --is-tv '${{ matrix.is_tv }}'
-            --out 'compatibility-results/${{ matrix.id }}'
-
-      - name: Retry native Android TV 4K after transient failure
-        if: >-
-          steps.retry-check.outputs.needed == 'true' &&
-          matrix.id == 'android-tv-4k-api36'
+      - name: Retry after transient emulator infrastructure failure
+        if: steps.retry-check.outputs.needed == 'true'
         continue-on-error: true
         run: |
           bash qa/compatibility/run-native-emulator.sh \
@@ -357,7 +314,7 @@ jobs:
               --out 'compatibility-results/${{ matrix.id }}' \
               --serial emulator-5554
 
-      - name: Preserve result even when emulator setup is blocked
+      - name: Preserve final result and marker provenance
         if: always()
         run: |
           set -euo pipefail
@@ -381,6 +338,8 @@ jobs:
               --is-tv '${{ matrix.is_tv }}' \
               --reason 'Emulator or capture driver produced no final summary.'
           fi
+          cp lab-apk/quality-marker-injection.json "$OUT/quality-marker-injection.json"
+          test -s "$OUT/quality-marker-injection.json"
 
       - name: Enforce infrastructure and critical findings
         if: always()
