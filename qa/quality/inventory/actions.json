@@ -23,7 +23,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 820
+      "line": 819
     },
     {
       "id": "CatalogHeader:onRefresh",
@@ -47,7 +47,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2486
+      "line": 2485
     },
     {
       "id": "CatalogHeader:onSearch",
@@ -71,7 +71,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2486
+      "line": 2485
     },
     {
       "id": "CategoryBar:onSelect",
@@ -95,7 +95,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2506
+      "line": 2505
     },
     {
       "id": "CategoryRow:onSelect",
@@ -215,7 +215,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 878
+      "line": 877
     },
     {
       "id": "CinemaHero:onOpen",
@@ -239,7 +239,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 878
+      "line": 877
     },
     {
       "id": "CinemaHero:onRefresh",
@@ -263,7 +263,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 878
+      "line": 877
     },
     {
       "id": "CinemaHero:onToggleFavorite",
@@ -287,7 +287,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 878
+      "line": 877
     },
     {
       "id": "CinemaHomeScreen:onOpen",
@@ -311,7 +311,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 701
+      "line": 700
     },
     {
       "id": "CinemaHomeScreen:onOpenDownloads",
@@ -335,7 +335,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 701
+      "line": 700
     },
     {
       "id": "CinemaHomeScreen:onOpenHistory",
@@ -359,7 +359,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 701
+      "line": 700
     },
     {
       "id": "CinemaHomeScreen:onRefresh",
@@ -383,7 +383,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 701
+      "line": 700
     },
     {
       "id": "CinemaHomeScreen:onToggleFavorite",
@@ -407,7 +407,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 701
+      "line": 700
     },
     {
       "id": "CinematicNavigationRail:onSelect",
@@ -431,7 +431,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 513
+      "line": 512
     },
     {
       "id": "CompactPosterCard:onClick",
@@ -527,7 +527,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1905
+      "line": 1904
     },
     {
       "id": "ContentGrid:onToggleFavorite",
@@ -551,7 +551,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1905
+      "line": 1904
     },
     {
       "id": "DestinationContent:onClearHistory",
@@ -575,7 +575,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onCycleConcurrentDownloads",
@@ -599,7 +599,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onCycleDownloadPriority",
@@ -623,7 +623,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onDeleteDownload",
@@ -647,7 +647,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onLogout",
@@ -671,7 +671,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onOpen",
@@ -695,7 +695,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onOpenHistory",
@@ -719,7 +719,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onPlayDownload",
@@ -743,7 +743,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onRefresh",
@@ -767,7 +767,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onRetryDownload",
@@ -791,7 +791,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onRunDiagnostics",
@@ -815,7 +815,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onSearch",
@@ -839,7 +839,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onSelectCategory",
@@ -863,7 +863,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onSelectDestination",
@@ -887,7 +887,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onToggleDownloadSchedule",
@@ -911,7 +911,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onToggleFavorite",
@@ -935,7 +935,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DestinationContent:onToggleWifiOnly",
@@ -959,7 +959,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 643
+      "line": 642
     },
     {
       "id": "DetailsNavigationDrawer:onClose",
@@ -1031,7 +1031,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2116
+      "line": 2115
     },
     {
       "id": "DiagnosticsCenter:onShare",
@@ -1055,7 +1055,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2116
+      "line": 2115
     },
     {
       "id": "DownloadCard:onCyclePriority",
@@ -1079,7 +1079,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1640
+      "line": 1639
     },
     {
       "id": "DownloadCard:onDelete",
@@ -1103,7 +1103,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1640
+      "line": 1639
     },
     {
       "id": "DownloadCard:onFocused",
@@ -1127,7 +1127,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1640
+      "line": 1639
     },
     {
       "id": "DownloadCard:onPlay",
@@ -1151,7 +1151,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1640
+      "line": 1639
     },
     {
       "id": "DownloadCard:onRetry",
@@ -1175,7 +1175,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1640
+      "line": 1639
     },
     {
       "id": "DownloadsScreen:onCycleConcurrent",
@@ -1199,7 +1199,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "DownloadsScreen:onCyclePriority",
@@ -1223,7 +1223,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "DownloadsScreen:onDelete",
@@ -1247,7 +1247,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "DownloadsScreen:onPlay",
@@ -1271,7 +1271,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "DownloadsScreen:onRetry",
@@ -1295,7 +1295,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "DownloadsScreen:onToggleSchedule",
@@ -1319,7 +1319,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "DownloadsScreen:onToggleWifiOnly",
@@ -1343,7 +1343,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1515
+      "line": 1514
     },
     {
       "id": "EmptyState:onReset",
@@ -1487,7 +1487,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1341
+      "line": 1340
     },
     {
       "id": "FavoritesScreen:onToggleFavorite",
@@ -1511,7 +1511,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1341
+      "line": 1340
     },
     {
       "id": "FeaturedHero:onToggleFavorite",
@@ -1703,7 +1703,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1985
+      "line": 1984
     },
     {
       "id": "HistorySection:onOpen",
@@ -1727,7 +1727,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1044
+      "line": 1043
     },
     {
       "id": "HomePlaceholder:onRefresh",
@@ -1751,7 +1751,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 980
+      "line": 979
     },
     {
       "id": "HomeScreen:onLogout",
@@ -1967,7 +1967,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1161
+      "line": 1160
     },
     {
       "id": "LiveCatalogScreen:onRefresh",
@@ -1991,7 +1991,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1161
+      "line": 1160
     },
     {
       "id": "LiveCatalogScreen:onSearch",
@@ -2015,7 +2015,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1161
+      "line": 1160
     },
     {
       "id": "LiveCatalogScreen:onSelectCategory",
@@ -2039,7 +2039,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1161
+      "line": 1160
     },
     {
       "id": "LiveCatalogScreen:onToggleFavorite",
@@ -2063,7 +2063,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1161
+      "line": 1160
     },
     {
       "id": "LiveCategoryChip:onClick",
@@ -2087,7 +2087,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2740
+      "line": 2739
     },
     {
       "id": "LiveCategoryChip:onLongClick",
@@ -2111,7 +2111,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2740
+      "line": 2739
     },
     {
       "id": "LiveCategoryChip:onMoveLeft",
@@ -2135,7 +2135,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2740
+      "line": 2739
     },
     {
       "id": "LiveCategoryChip:onMoveRight",
@@ -2159,7 +2159,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2740
+      "line": 2739
     },
     {
       "id": "LiveChannelBrowser:onClose",
@@ -2255,7 +2255,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1284
+      "line": 1283
     },
     {
       "id": "LiveStage:onWatch",
@@ -2279,7 +2279,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1284
+      "line": 1283
     },
     {
       "id": "LoginOption:onClick",
@@ -2543,7 +2543,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onCycleConcurrentDownloads",
@@ -2567,7 +2567,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onCycleDownloadPriority",
@@ -2591,7 +2591,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onDeleteDownload",
@@ -2615,7 +2615,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onLogout",
@@ -2639,7 +2639,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onOpen",
@@ -2663,7 +2663,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onOpenHistory",
@@ -2687,7 +2687,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onPlayDownload",
@@ -2711,7 +2711,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onRefresh",
@@ -2735,7 +2735,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onRetryDownload",
@@ -2759,7 +2759,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onRunDiagnostics",
@@ -2783,7 +2783,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onSearch",
@@ -2807,7 +2807,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onSelectCategory",
@@ -2831,7 +2831,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onSelectDestination",
@@ -2855,7 +2855,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onToggleDownloadSchedule",
@@ -2879,7 +2879,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onToggleFavorite",
@@ -2903,7 +2903,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MainShellScreen:onToggleWifiOnly",
@@ -2927,7 +2927,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 367
+      "line": 366
     },
     {
       "id": "MobileNavigation:onSelect",
@@ -2951,7 +2951,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 612
+      "line": 611
     },
     {
       "id": "ModernLiveControls:onAudio",
@@ -3695,7 +3695,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 563
+      "line": 562
     },
     {
       "id": "NextEpisodePrompt:onCancel",
@@ -4079,7 +4079,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1087
+      "line": 1086
     },
     {
       "id": "PosterCatalogScreen:onOpenHistory",
@@ -4103,7 +4103,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1087
+      "line": 1086
     },
     {
       "id": "PosterCatalogScreen:onRefresh",
@@ -4127,7 +4127,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1087
+      "line": 1086
     },
     {
       "id": "PosterCatalogScreen:onSearch",
@@ -4151,7 +4151,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1087
+      "line": 1086
     },
     {
       "id": "PosterCatalogScreen:onSelectCategory",
@@ -4175,7 +4175,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1087
+      "line": 1086
     },
     {
       "id": "PosterCatalogScreen:onToggleFavorite",
@@ -4199,7 +4199,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1087
+      "line": 1086
     },
     {
       "id": "PosterSection:onOpen",
@@ -4223,7 +4223,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 996
+      "line": 995
     },
     {
       "id": "PosterSection:onToggleFavorite",
@@ -4247,7 +4247,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 996
+      "line": 995
     },
     {
       "id": "QualitySelectionPanel:onAuto",
@@ -4391,7 +4391,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2548
+      "line": 2547
     },
     {
       "id": "ReorderableLiveCategoryBar:onSelect",
@@ -4415,7 +4415,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2648
+      "line": 2647
     },
     {
       "id": "ResumePrompt:onRestart",
@@ -4487,7 +4487,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2894
+      "line": 2893
     },
     {
       "id": "SeekableProgressBar:onSeekTo",
@@ -4799,7 +4799,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2029
+      "line": 2028
     },
     {
       "id": "SettingsScreen:onLogout",
@@ -4823,7 +4823,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2029
+      "line": 2028
     },
     {
       "id": "SettingsScreen:onRefreshAll",
@@ -4847,7 +4847,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2029
+      "line": 2028
     },
     {
       "id": "SettingsScreen:onRunDiagnostics",
@@ -4871,7 +4871,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2029
+      "line": 2028
     },
     {
       "id": "SimpleOptionsPanel:onClose",
@@ -5135,7 +5135,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1430
+      "line": 1429
     },
     {
       "id": "UnifiedSearchScreen:onOpen",
@@ -5159,7 +5159,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1370
+      "line": 1369
     },
     {
       "id": "UnifiedSearchScreen:onSearch",
@@ -5183,7 +5183,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1370
+      "line": 1369
     },
     {
       "id": "UnifiedSearchScreen:onToggleFavorite",
@@ -5207,7 +5207,7 @@
       "exclusion_reason": null,
       "review_required": false,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1370
+      "line": 1369
     },
     {
       "id": "UnlockPrompt:onKeepLocked",
@@ -5279,7 +5279,7 @@
       "exclusion_reason": "Reusable component action requires journey-level binding",
       "review_required": true,
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2448
+      "line": 2447
     }
   ]
 }

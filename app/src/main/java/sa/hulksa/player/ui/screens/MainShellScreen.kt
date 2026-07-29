@@ -93,7 +93,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -518,7 +517,7 @@ private fun CinematicNavigationRail(
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
     val railWidth by animateDpAsState(if (expanded) 202.dp else 90.dp, label = "railWidth")
-    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val screenWidthDp = LocalAdaptiveUi.current.screenWidthDp
     val railLogoSize = tvRailLogoSizeDp(screenWidthDp).dp
 
     Column(
