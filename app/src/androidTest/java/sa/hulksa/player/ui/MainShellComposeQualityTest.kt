@@ -5,13 +5,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertExists
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
@@ -75,10 +74,14 @@ class MainShellComposeQualityTest {
             }
         }
 
-        compose.onNodeWithContentDescription("qa-tv-page-content:home").assertExists()
+        compose.onNodeWithContentDescription("qa-tv-page-content:home").fetchSemanticsNode()
         compose.onNodeWithText("التنزيلات").performClick()
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("qa-tv-page-content:downloads").assertExists()
-        compose.onNodeWithContentDescription("qa-tv-download-list").assertDoesNotExist()
+        compose.onNodeWithContentDescription("qa-tv-page-content:downloads").fetchSemanticsNode()
+        assertTrue(
+            runCatching {
+                compose.onNodeWithContentDescription("qa-tv-download-list").fetchSemanticsNode()
+            }.isFailure,
+        )
     }
 }

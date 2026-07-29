@@ -12,6 +12,10 @@ DOWNLOAD_TEST = (
     ROOT
     / "app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt"
 )
+SMOKE_TEST = (
+    ROOT
+    / "app/src/androidTest/java/sa/hulksa/player/CompatibilitySmokeTest.kt"
+)
 
 
 class AndroidTestContractTest(unittest.TestCase):
@@ -25,8 +29,16 @@ class AndroidTestContractTest(unittest.TestCase):
         source = COMPOSE_TEST.read_text(encoding="utf-8")
         self.assertIn("createComposeRule", source)
         self.assertIn("onNodeWithContentDescription", source)
+        self.assertIn("fetchSemanticsNode", source)
+        self.assertNotIn("import androidx.compose.ui.test.assertExists", source)
+        self.assertNotIn("import androidx.compose.ui.test.assertDoesNotExist", source)
         self.assertNotIn("performTouchInput", source)
         self.assertNotIn("click(", source)
+
+    def test_smoke_test_uses_public_activity_state(self) -> None:
+        source = SMOKE_TEST.read_text(encoding="utf-8")
+        self.assertNotIn("activity.resultCode", source)
+        self.assertIn("assertFalse(activity.isFinishing)", source)
 
     def test_download_test_uses_production_repository_and_loopback_fixture(self) -> None:
         source = DOWNLOAD_TEST.read_text(encoding="utf-8")

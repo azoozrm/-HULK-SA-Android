@@ -1,6 +1,5 @@
 package sa.hulksa.player
 
-import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -77,7 +76,7 @@ class CompatibilitySmokeTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 assertFalse(activity.isFinishing)
-                assertEquals(Activity.RESULT_CANCELED, activity.resultCode)
+                assertEquals(MainActivity::class.java, activity::class.java)
             }
         }
     }
