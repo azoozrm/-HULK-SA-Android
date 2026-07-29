@@ -22,8 +22,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ref-policy:
+    name: Require an approved signing branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Reject default and unapproved refs before signing
+        env:
+          SIGNING_REF_TYPE: ${{ github.ref_type }}
+          SIGNING_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$SIGNING_REF_TYPE" != 'branch' ]]; then
+            echo 'Signed release qualification must run from an approved branch.' >&2
+            exit 2
+          fi
+          case "$SIGNING_REF_NAME" in
+            phase-3-v0.9.3.0-adaptive-foundation|fix/v09318-production-host-qualification)
+              echo "PASS: approved signing branch '$SIGNING_REF_NAME'"
+              ;;
+            *)
+              echo "Branch '$SIGNING_REF_NAME' is not approved for production signing." >&2
+              exit 2
+              ;;
+          esac
+
   signing-preflight:
     name: Unsigned fallback and signing fail-closed preflight
+    needs: ref-policy
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
