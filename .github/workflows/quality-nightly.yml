@@ -48,6 +48,8 @@ jobs:
         run: |
           set -euo pipefail
           export PYTHONDONTWRITEBYTECODE=1
+          python3 -m pip install --disable-pip-version-check \
+            -r qa/compatibility/requirements.txt
           python3 -m unittest discover -s qa/quality/tests -p 'test_*.py' -v \
             2>&1 | tee nightly-self-tests.log
           python3 qa/quality/config/schema_validator.py \
@@ -104,4 +106,3 @@ jobs:
           set -euo pipefail
           [[ "$UI_RESULT" = 'success' ]]
           [[ "$CONTRACT_RESULT" = 'success' ]]
-

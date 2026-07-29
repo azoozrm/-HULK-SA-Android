@@ -62,6 +62,18 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotIn("if: inputs.report_only", source)
             self.assertNotIn("if: ${{ inputs.report_only", source)
 
+    def test_full_python_self_test_jobs_install_visual_dependencies(self) -> None:
+        for filename in ("quality-pr.yml", "quality-nightly.yml"):
+            source = self.source(filename)
+            requirements = "-r qa/compatibility/requirements.txt"
+            self.assertIn(requirements, source)
+            self.assertLess(
+                source.index(requirements),
+                source.index(
+                    "python3 -m unittest discover -s qa/quality/tests"
+                ),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
