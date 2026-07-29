@@ -48,6 +48,14 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("verify-runtime-config.py", source)
         self.assertIn("HULK_CONFIG_URL: ''", source)
 
+    def test_canonical_release_uses_verified_production_endpoint(self) -> None:
+        source = self.source("canonical-build.yml")
+        self.assertNotIn("example.invalid", source)
+        self.assertIn("HULK_PORTAL_URL: http://3162356.xyz:8080", source)
+        self.assertIn("HULK_CONFIG_URL: ''", source)
+        self.assertIn("verify-runtime-config.py", source)
+        self.assertIn("build/reports/runtime-config", source)
+
     def test_release_gate_requires_external_evidence_and_never_claims_it(self) -> None:
         source = self.source("quality-release.yml")
         self.assertIn("physical_evidence_run_id", source)
