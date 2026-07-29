@@ -104,14 +104,15 @@ jobs:
           arch: x86_64
           profile: pixel_6
           cores: 4
-          ram-size: 6144M
-          heap-size: 1024M
+          ram-size: 4096M
+          heap-size: 768M
           disable-animations: true
           emulator-boot-timeout: 1200
           emulator-options: >-
             -no-window -gpu swiftshader -noaudio -no-boot-anim
             -camera-back none -camera-front none -no-snapshot -no-metrics
           script: |
+            bash <<'BASH'
             set -euo pipefail
 
             runtime_evidence="quality-evidence/instrumentation/runtime"
@@ -207,6 +208,7 @@ jobs:
             retry_status=$?
             capture_device_evidence "$runtime_evidence/attempts/attempt-2"
             exit "$retry_status"
+            BASH
 
       - name: Finalize instrumentation evidence
         if: always()
