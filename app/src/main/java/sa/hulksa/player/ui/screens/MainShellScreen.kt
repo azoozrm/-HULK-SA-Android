@@ -93,6 +93,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -105,6 +106,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.BuildConfig
@@ -156,6 +158,11 @@ private const val QA_TV_PAGE_CONTENT_PREFIX = "qa-tv-page-content:"
 private const val QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"
 private const val QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
 private const val QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
+private val TV_PAGE_GUTTER = 8.dp
+private val TV_LIVE_ACTION_INSET = 8.dp
+
+internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
+    (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
 private fun Modifier.qaTvPageContent(
     isTv: Boolean,
@@ -511,6 +518,8 @@ private fun CinematicNavigationRail(
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
     val railWidth by animateDpAsState(if (expanded) 202.dp else 90.dp, label = "railWidth")
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val railLogoSize = tvRailLogoSizeDp(screenWidthDp).dp
 
     Column(
         modifier = Modifier
@@ -527,11 +536,7 @@ private fun CinematicNavigationRail(
             .padding(start = 10.dp, end = 10.dp, top = 24.dp, bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BrandBadge(
-            Modifier
-                .size(if (expanded) 76.dp else 50.dp)
-                .offset(x = if (expanded) 0.dp else (-4).dp),
-        )
+        BrandLogo(Modifier.size(railLogoSize))
         Spacer(Modifier.height(10.dp))
         destinations.filterNot { it.destination == MainDestination.SETTINGS }.forEach { entry ->
             NavigationItem(
@@ -760,9 +765,9 @@ private fun CinemaHomeScreen(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(bottom = if (isTv) 32.dp else 0.dp) // compatibilityTvBottomPadding
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)
             .qaTvPageContent(isTv, MainDestination.HOME),
-        contentPadding = PaddingValues(bottom = 48.dp),
+        contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
         item {
@@ -783,31 +788,31 @@ private fun CinemaHomeScreen(
             item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
         }
         if (continueWatching.isNotEmpty()) {
-            item { HomeSectionPadding { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
+            item { HomeSectionPadding(isTv) { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
         }
-        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
+        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (suggested.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (lastLive != null) {
-            item { HomeSectionPadding { HistorySection("اخر قناة شاهدتها", "last-live", liveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
+            item { HomeSectionPadding(isTv) { HistorySection("اخر قناة شاهدتها", "last-live", liveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
         } else if (live.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("قنوات مقترحة لك", "popular-live", liveRow, personalizedLive.take(20), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", liveRow, personalizedLive.take(20), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
     }
 }
@@ -866,8 +871,8 @@ private fun ActiveDownloadsSection(
 }
 
 @Composable
-private fun HomeSectionPadding(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 25.dp)) { content() }
+private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 25.dp)) { content() }
 }
 
 @Composable
@@ -1115,13 +1120,23 @@ private fun PosterCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = if (isTv) 24.dp else 13.dp, vertical = if (isTv) 19.dp else 12.dp)
+            .padding(
+                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
+            )
             .qaTvPageContent(isTv, destination),
     ) {
         CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
         Spacer(Modifier.height(11.dp))
-        ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory)
+        ReorderableCatalogCategoryBar(
+            type,
+            catalog?.categories.orEmpty(),
+            ordered,
+            state.selectedCategoryId,
+            onSelectCategory,
+            isTv,
+        )
         CatalogInteractionHints(isTv)
         Spacer(Modifier.height(9.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -1188,7 +1203,10 @@ private fun LiveCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = if (isTv) 23.dp else 12.dp, vertical = if (isTv) 18.dp else 11.dp)
+            .padding(
+                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
+            )
             .qaTvPageContent(isTv, MainDestination.LIVE),
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
@@ -1294,24 +1312,26 @@ private fun LiveStage(
                 Text("على الهواء الان", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(item.name, color = colors.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .qaMarker(enabled = true, description = QA_TV_LIVE_ACTIONS),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    FocusButton(
-                        "تشغيل القناة", onWatch,
-                        modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester).focusProperties {
-                            left = favoriteRequester; right = channelRequester
-                        }, compact = true,
-                    )
-                    FocusButton(
-                        if (isFavorite) "★ في المفضلة" else "+ المفضلة", onToggleFavorite,
-                        modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
-                            left = channelRequester; right = playRequester
-                        }, primary = false, compact = true,
-                    )
+                Box(Modifier.fillMaxWidth().padding(bottom = TV_LIVE_ACTION_INSET)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .qaMarker(enabled = true, description = QA_TV_LIVE_ACTIONS),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        FocusButton(
+                            "تشغيل القناة", onWatch,
+                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester).focusProperties {
+                                left = favoriteRequester; right = channelRequester
+                            }, compact = true,
+                        )
+                        FocusButton(
+                            if (isFavorite) "★ في المفضلة" else "+ المفضلة", onToggleFavorite,
+                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
+                                left = channelRequester; right = playRequester
+                            }, primary = false, compact = true,
+                        )
+                    }
                 }
             }
         }
@@ -1334,7 +1354,7 @@ private fun FavoritesScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) 24.dp else 13.dp)
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
             .qaTvPageContent(isTv, MainDestination.FAVORITES),
     ) {
         PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
@@ -1369,7 +1389,7 @@ private fun UnifiedSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) 24.dp else 13.dp)
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
             .qaTvPageContent(isTv, MainDestination.SEARCH),
     ) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
@@ -1522,6 +1542,8 @@ private fun DownloadsScreen(
     val remembered = navigationMemory.position(MainDestination.DOWNLOADS)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, downloads.lastIndex.coerceAtLeast(0))
     val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    val downloadsFocusScope = rememberCoroutineScope()
+    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
@@ -1530,7 +1552,7 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) 24.dp else 13.dp)
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
             .qaTvPageContent(isTv, MainDestination.DOWNLOADS),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
@@ -1589,7 +1611,18 @@ private fun DownloadsScreen(
                         item = item,
                         isTv = isTv,
                         restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
-                        onFocused = { navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index) },
+                        onFocused = {
+                            navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
+                            if (isTv) {
+                                downloadsFocusJob?.cancel()
+                                downloadsFocusJob = downloadsFocusScope.launch {
+                                    delay(120)
+                                    runCatching {
+                                        downloadsState.scrollToItem(index, scrollOffset = 0)
+                                    }
+                                }
+                            }
+                        },
                         onPlay = onPlay,
                         onDelete = onDelete,
                         onRetry = onRetry,
@@ -1626,7 +1659,7 @@ private fun DownloadCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (isTv) 220.dp else 220.dp)
+            .height(if (isTv) 164.dp else 220.dp)
             .qaMarker(isTv, "$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}")
             .clip(shape)
             .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
@@ -2023,13 +2056,13 @@ private fun SettingsScreen(
         state = settingsListState,
         modifier = Modifier
             .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)
             .qaTvPageContent(isTv, MainDestination.SETTINGS),
-        contentPadding = PaddingValues(
-            start = if (isTv) 27.dp else 15.dp,
-            top = if (isTv) 36.dp else 15.dp,
-            end = if (isTv) 27.dp else 15.dp,
-            bottom = if (isTv) 32.dp else 15.dp,
-        ),
+        contentPadding = if (isTv) {
+            PaddingValues(bottom = 24.dp)
+        } else {
+            PaddingValues(15.dp)
+        },
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item { PageTitle("الحساب والاعدادات", "ادارة اشتراكك وتجربة المشاهدة", 0, Icons.Rounded.Settings) }
@@ -2519,6 +2552,7 @@ private fun ReorderableCatalogCategoryBar(
     items: List<ContentItem>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
+    isTv: Boolean,
 ) {
     val context = LocalContext.current
     val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
@@ -2571,7 +2605,10 @@ private fun ReorderableCatalogCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            horizontal = if (isTv) TV_PAGE_GUTTER else 24.dp,
+            vertical = 8.dp,
+        ),
     ) {
         item { FocusButton("الكل", { onSelect(null) }, primary = selectedId == null, compact = true) }
         item { FocusButton("★ المفضلة", { onSelect(FAVORITES_CATEGORY_ID) }, primary = selectedId == FAVORITES_CATEGORY_ID, compact = true) }
@@ -2665,7 +2702,7 @@ private fun ReorderableLiveCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = TV_PAGE_GUTTER, vertical = 8.dp),
     ) {
         item {
             FocusButton(
