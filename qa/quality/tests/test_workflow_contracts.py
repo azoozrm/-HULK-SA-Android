@@ -101,6 +101,8 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("if-no-files-found: error", source)
         self.assertIn("github.event.pull_request.head.sha || github.sha", source)
         self.assertIn("test_variant: quality-ui", source)
+        self.assertIn("bash <<'BASH'", source)
+        self.assertIn("set -euo pipefail", source)
 
     def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
         source = self.source("quality-pr.yml")
