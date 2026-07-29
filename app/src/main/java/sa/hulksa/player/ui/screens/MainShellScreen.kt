@@ -106,6 +106,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.BuildConfig
@@ -1531,6 +1532,8 @@ private fun DownloadsScreen(
     val remembered = navigationMemory.position(MainDestination.DOWNLOADS)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, downloads.lastIndex.coerceAtLeast(0))
     val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    val downloadsFocusScope = rememberCoroutineScope()
+    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
@@ -1598,7 +1601,21 @@ private fun DownloadsScreen(
                         item = item,
                         isTv = isTv,
                         restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
-                        onFocused = { navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index) },
+                        onFocused = {
+                            navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
+                            if (isTv) {
+                                downloadsFocusJob?.cancel()
+                                downloadsFocusJob = downloadsFocusScope.launch {
+                                    // Compose's TV focus relocation can pivot a focused action
+                                    // above the LazyColumn viewport. Re-anchor the owning card
+                                    // after that relocation so its top edge is never clipped.
+                                    delay(120)
+                                    runCatching {
+                                        downloadsState.scrollToItem(index, scrollOffset = 0)
+                                    }
+                                }
+                            }
+                        },
                         onPlay = onPlay,
                         onDelete = onDelete,
                         onRetry = onRetry,

@@ -121,6 +121,16 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("catch (_: IOException)", source)
         self.assertIn("catch (_: InterruptedException)", source)
 
+    def test_tv_download_focus_reanchors_the_visible_card(self) -> None:
+        source = (
+            LAB_ROOT.parents[1]
+            / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "downloadsState.scrollToItem(index, scrollOffset = 0)",
+            source,
+        )
+
 
 class AnalyzerTests(unittest.TestCase):
     def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:

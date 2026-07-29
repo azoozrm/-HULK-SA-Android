@@ -104,6 +104,24 @@
   في Pixel 6 وPixel 8 Pro، وكلتاهما
   `download_transfer_no_byte_progress`. هذا الفصل في الأدلة هو الذي أثبت
   خطأ سياق الإلغاء الإنتاجي أعلاه بدل إخفائه كـflakiness.
+- Run 63 أثبت انتقال البايتات بعد إصلاح السياق؛ مثال Pixel 8 Pro سجّل
+  `43–45 MB / 64 MB` رأسيًا و`8 MB / 64 MB` أفقيًا، وانتهت وظائف الهواتف
+  والأجهزة اللوحية الستة بنجاح.
+- التقطت وظائف Android TV الثلاث الصفحات الثماني كاملة بلا خطأ بنية
+  تحتية، لكنها فشلت جميعًا في Finding واحدة:
+  `tv_download_card_clipped`. أظهر الـhierarchy أن استعادة التركيز حرّكت
+  البطاقة الأولى فوق بداية `LazyColumn` بمقدار يقارب `29–44dp`؛ فأصبح
+  ارتفاعها المرئي `120–135.5dp` بدل `164dp` ودخلت البطاقة التالية جزئيًا.
+  هذا يطابق العطل الفيزيائي بدل اعتباره تمريرًا طبيعيًا.
+
+## إصلاح قص بطاقة التنزيل المكتشف في Run 63
+
+- عند انتقال تركيز D-pad إلى بطاقة تنزيل على التلفزيون، يحفظ التطبيق موضع
+  التنقل كما كان.
+- بعد اكتمال نقل التركيز الداخلي، يعيد `LazyColumn` تثبيت البطاقة المالكة
+  عند إزاحة صفر عبر `scrollToItem(index, scrollOffset = 0)`.
+- لم يتغير تصميم البطاقة أو ارتفاعها أو ترتيب أزرارها، ولم تُضعف بوابة
+  المختبر؛ يبقى وجود بطاقتين كاملتين بارتفاع لا يقل عن `150dp` شرطًا حرجًا.
 
 ## بوابات المختبر الجديدة
 
@@ -125,13 +143,13 @@
 | البند | الحالة |
 |---|---|
 | تفسير قصور المختبر السابق | `COMPLETED` |
-| توحيد حواف الصفحات الثماني | `IMPLEMENTED / CI LAB PENDING` |
-| حماية أزرار البث من الأسفل | `IMPLEMENTED / CI LAB PENDING` |
-| تكيف الشعار دون تغيير الأصل | `IMPLEMENTED / CI + XIAOMI PENDING` |
-| نقل تنزيل bounded-range وسياق الإلغاء الأصلي | `IMPLEMENTED / CI + SERVER RUNTIME PENDING` |
-| بطاقتان كاملتان بلا تداخل | `IMPLEMENTED / CI LAB PENDING` |
-| Python analyzer tests | `18/18 PASS` |
-| Android Kotlin/unit/build/R8 | `BLOCKED LOCALLY BY GRADLE NETWORK / CI PENDING` |
+| توحيد حواف الصفحات الثماني | `CI LAB MEASURED / PHYSICAL PENDING` |
+| حماية أزرار البث من الأسفل | `CI LAB MEASURED / PHYSICAL PENDING` |
+| تكيف الشعار دون تغيير الأصل | `CI LAB MEASURED / XIAOMI PENDING` |
+| نقل تنزيل bounded-range وسياق الإلغاء الأصلي | `CI BYTE PROGRESS PROVEN / PRODUCTION SERVER PENDING` |
+| بطاقتان كاملتان بلا تداخل | `RUN 63 FAILURE DIAGNOSED / RE-ANCHOR CI PENDING` |
+| Python analyzer tests | `19/19 PASS` |
+| Android Kotlin/unit/build/R8 | `PREVIOUS COMMIT CI PASS / RE-ANCHOR CI PENDING` |
 | Signed APK/AAB | `PENDING` |
 | اختبار Xiaomi الفيزيائي | `PENDING` |
 | اختبار TCL الفيزيائي | `PENDING` |
