@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "minimum_api": 23,
+  "current_api": 36,
+  "profiles": [
+    {
+      "id": "phone-small-320dp-api23",
+      "label": "Small phone 320dp",
+      "family": "phone",
+      "api": 23,
+      "width_px": 720,
+      "height_px": 1280,
+      "density_dpi": 360,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.3, 1.5],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "phone-360dp-api29",
+      "label": "Phone 360dp",
+      "family": "phone",
+      "api": 29,
+      "width_px": 1080,
+      "height_px": 2340,
+      "density_dpi": 480,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.3, 2.0],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "phone-393dp-api35",
+      "label": "Phone 393dp",
+      "family": "phone",
+      "api": 35,
+      "width_px": 1080,
+      "height_px": 2400,
+      "density_dpi": 440,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.15, 1.5],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "phone-411dp-api36",
+      "label": "Phone 411dp",
+      "family": "phone",
+      "api": 36,
+      "width_px": 1080,
+      "height_px": 2400,
+      "density_dpi": 420,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.3],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "phone-480dp-api35",
+      "label": "Large phone 480dp",
+      "family": "phone",
+      "api": 35,
+      "width_px": 1440,
+      "height_px": 2960,
+      "density_dpi": 480,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.5],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tablet-599dp-api29",
+      "label": "Tablet below 600dp",
+      "family": "tablet",
+      "api": 29,
+      "width_px": 1198,
+      "height_px": 1920,
+      "density_dpi": 320,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.3],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tablet-600dp-api31",
+      "label": "Tablet 600dp boundary",
+      "family": "tablet",
+      "api": 31,
+      "width_px": 1200,
+      "height_px": 1920,
+      "density_dpi": 320,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.5],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tablet-839dp-api35",
+      "label": "Tablet below 840dp",
+      "family": "tablet",
+      "api": 35,
+      "width_px": 1678,
+      "height_px": 2560,
+      "density_dpi": 320,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.3],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tablet-840dp-api35",
+      "label": "Tablet 840dp boundary",
+      "family": "tablet",
+      "api": 35,
+      "width_px": 1680,
+      "height_px": 2560,
+      "density_dpi": 320,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.5],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tablet-wide-1000dp-api36",
+      "label": "Wide resizable tablet",
+      "family": "tablet",
+      "api": 36,
+      "width_px": 2000,
+      "height_px": 2560,
+      "density_dpi": 320,
+      "orientations": ["portrait", "landscape"],
+      "font_scales": [1.0, 1.3],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tv-720p-api36",
+      "label": "Android TV 720p",
+      "family": "tv",
+      "api": 36,
+      "width_px": 1280,
+      "height_px": 720,
+      "density_dpi": 213,
+      "orientations": ["landscape"],
+      "font_scales": [1.0, 1.15],
+      "evidence_level": "emulator"
+    },
+    {
+      "id": "tv-tcl-like-1080p-api36",
+      "label": "TCL-like density simulation",
+      "family": "tv",
+      "api": 36,
+      "width_px": 1920,
+      "height_px": 1080,
+      "density_dpi": 320,
+      "orientations": ["landscape"],
+      "font_scales": [1.0, 1.3],
+      "evidence_level": "simulation"
+    },
+    {
+      "id": "tv-xiaomi-density-1080p-api36",
+      "label": "Xiaomi-density simulation",
+      "family": "tv",
+      "api": 36,
+      "width_px": 1920,
+      "height_px": 1080,
+      "density_dpi": 213,
+      "orientations": ["landscape"],
+      "font_scales": [1.0, 1.15],
+      "evidence_level": "simulation"
+    },
+    {
+      "id": "tv-google-like-1080p-api36",
+      "label": "Google TV-like density simulation",
+      "family": "tv",
+      "api": 36,
+      "width_px": 1920,
+      "height_px": 1080,
+      "density_dpi": 240,
+      "orientations": ["landscape"],
+      "font_scales": [1.0, 1.3],
+      "evidence_level": "simulation"
+    },
+    {
+      "id": "tv-4k-api36",
+      "label": "Android TV 4K",
+      "family": "tv",
+      "api": 36,
+      "width_px": 3840,
+      "height_px": 2160,
+      "density_dpi": 640,
+      "orientations": ["landscape"],
+      "font_scales": [1.0, 1.15],
+      "evidence_level": "emulator"
+    }
+  ],
+  "tiers": {
+    "pr": [
+      "phone-small-320dp-api23",
+      "phone-393dp-api35",
+      "tv-google-like-1080p-api36"
+    ],
+    "ui": [
+      "phone-small-320dp-api23",
+      "phone-393dp-api35",
+      "tablet-600dp-api31",
+      "tablet-840dp-api35",
+      "tv-tcl-like-1080p-api36",
+      "tv-xiaomi-density-1080p-api36"
+    ],
+    "nightly": ["*"],
+    "release_emulator": [
+      "phone-360dp-api29",
+      "phone-411dp-api36",
+      "tablet-wide-1000dp-api36",
+      "tv-720p-api36",
+      "tv-4k-api36"
+    ]
+  },
+  "physical_targets": [
+    {
+      "id": "galaxy-arm64",
+      "label": "Galaxy ARM64 phone",
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "xiaomi-android-tv",
+      "label": "Xiaomi Android TV / TV box",
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "tcl-android-tv",
+      "label": "TCL Android TV",
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "low-end-arm",
+      "label": "Low-spec Android ARM device",
+      "status": "NOT_EXECUTED"
+    },
+    {
+      "id": "tablet-arm64",
+      "label": "Tablet ARM64",
+      "status": "NOT_EXECUTED"
+    }
+  ]
+}
+
