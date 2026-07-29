@@ -13,24 +13,31 @@ from typing import Any
 import xml.etree.ElementTree as ET
 
 
-ROTATION_ATTEMPTS = 3
-ROTATION_ATTEMPT_TIMEOUT_SECONDS = 12.0
+DISPLAY_ATTEMPTS = 3
+DISPLAY_ATTEMPT_TIMEOUT_SECONDS = 12.0
 
 
-def rotation_for(is_tv: bool, orientation: str) -> int:
-    if is_tv:
-        return 0
-    return 0 if orientation == "portrait" else 1
+def display_override_commands(
+    expected: tuple[int, int],
+    density: int,
+    font_scale: float,
+) -> tuple[list[str], ...]:
+    """Create an actual logical display with the requested portrait/landscape geometry.
 
-
-def rotation_commands(rotation: int, font_scale: float) -> tuple[list[str], ...]:
-    value = str(rotation)
+    The native headless emulator is booted with a fixed skin. On that surface,
+    user-rotation can return success while the display remains at rotation 0.
+    WindowManager's size override changes the real app/screenshot geometry and
+    therefore keeps the existing screenshot geometry gate meaningful.
+    """
+    width, height = expected
     return (
         ["settings", "put", "system", "accelerometer_rotation", "0"],
         ["settings", "put", "system", "font_scale", f"{font_scale:.2f}"],
-        ["settings", "put", "system", "user_rotation", value],
-        ["wm", "user-rotation", "lock", value],
-        ["cmd", "window", "user-rotation", "lock", value],
+        ["wm", "size", f"{width}x{height}"],
+        ["wm", "density", str(density)],
+        ["settings", "put", "system", "user_rotation", "0"],
+        ["wm", "user-rotation", "lock", "0"],
+        ["cmd", "window", "user-rotation", "lock", "0"],
     )
 
 
@@ -95,7 +102,6 @@ def install_isolation_layer(qualified: ModuleType) -> None:
 
         def set_variant(self: Any, orientation: str, font_scale: float) -> None:
             self.current_orientation = orientation
-            rotation = rotation_for(self.args.is_tv, orientation)
             expected = core.oriented_dimensions(
                 self.args.width,
                 self.args.height,
@@ -104,9 +110,13 @@ def install_isolation_layer(qualified: ModuleType) -> None:
             stable = False
             observed = None
             attempts: list[dict[str, Any]] = []
-            for attempt in range(1, ROTATION_ATTEMPTS + 1):
+            for attempt in range(1, DISPLAY_ATTEMPTS + 1):
                 command_results: list[dict[str, Any]] = []
-                for command in rotation_commands(rotation, font_scale):
+                for command in display_override_commands(
+                    expected,
+                    self.args.density,
+                    font_scale,
+                ):
                     result = self.adb.shell(command, timeout=45)
                     command_results.append(
                         {
@@ -121,13 +131,13 @@ def install_isolation_layer(qualified: ModuleType) -> None:
                     core,
                     self.adb,
                     expected,
-                    timeout=ROTATION_ATTEMPT_TIMEOUT_SECONDS,
+                    timeout=DISPLAY_ATTEMPT_TIMEOUT_SECONDS,
                     stable_reads=qualified.VARIANT_GEOMETRY_STABLE_READS,
                 )
                 attempts.append(
                     {
                         "attempt": attempt,
-                        "rotation": rotation,
+                        "mode": "logical_display_override",
                         "expected": list(expected),
                         "observed": list(observed) if observed else None,
                         "stable": stable,
@@ -136,6 +146,7 @@ def install_isolation_layer(qualified: ModuleType) -> None:
                 )
                 if stable:
                     break
+                self.adb.shell(["wm", "size", "reset"])
                 self.adb.shell(["wm", "user-rotation", "free"])
                 core.time.sleep(0.5)
 
@@ -148,11 +159,11 @@ def install_isolation_layer(qualified: ModuleType) -> None:
             evidence = {
                 "orientation": orientation,
                 "font_scale": font_scale,
-                "rotation": rotation,
+                "display_mode": "logical_display_override",
                 "expected_geometry": list(expected),
                 "observed_geometry": list(observed) if observed else None,
                 "geometry_stable": stable,
-                "rotation_attempts": attempts,
+                "display_attempts": attempts,
                 "package": core.PACKAGE,
                 "pm_clear_returncode": clear.returncode,
                 "pm_clear_output": clear_text,
@@ -163,7 +174,8 @@ def install_isolation_layer(qualified: ModuleType) -> None:
                 observed_label = f"{observed[0]}x{observed[1]}" if observed else "unavailable"
                 raise core.LabError(
                     f"display did not stabilize at {expected[0]}x{expected[1]} after "
-                    f"{ROTATION_ATTEMPTS} rotation attempts; last screenshot was {observed_label}"
+                    f"{DISPLAY_ATTEMPTS} logical display attempts; last screenshot was "
+                    f"{observed_label}"
                 )
             if clear.returncode != 0 or "Success" not in clear_text:
                 raise core.LabError(

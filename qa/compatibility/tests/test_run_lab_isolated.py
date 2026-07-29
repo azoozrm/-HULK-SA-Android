@@ -20,17 +20,13 @@ SPEC.loader.exec_module(RUN)
 
 
 class IsolationLayerTests(unittest.TestCase):
-    def test_rotation_policy_uses_vertical_phone_landscape_and_tv_baseline(self) -> None:
-        self.assertEqual(0, RUN.rotation_for(False, "portrait"))
-        self.assertEqual(1, RUN.rotation_for(False, "landscape"))
-        self.assertEqual(0, RUN.rotation_for(True, "landscape"))
-
-    def test_rotation_commands_cover_both_android_rotation_interfaces(self) -> None:
-        commands = RUN.rotation_commands(1, 1.3)
-        self.assertIn(["settings", "put", "system", "accelerometer_rotation", "0"], commands)
-        self.assertIn(["settings", "put", "system", "user_rotation", "1"], commands)
-        self.assertIn(["wm", "user-rotation", "lock", "1"], commands)
-        self.assertIn(["cmd", "window", "user-rotation", "lock", "1"], commands)
+    def test_display_override_uses_requested_geometry_without_faking_analyzer(self) -> None:
+        commands = RUN.display_override_commands((2400, 1080), 420, 1.3)
+        self.assertIn(["wm", "size", "2400x1080"], commands)
+        self.assertIn(["wm", "density", "420"], commands)
+        self.assertIn(["settings", "put", "system", "font_scale", "1.30"], commands)
+        self.assertIn(["wm", "user-rotation", "lock", "0"], commands)
+        self.assertNotIn(["wm", "user-rotation", "lock", "1"], commands)
 
     def test_download_state_records_bytes_and_status(self) -> None:
         xml = """<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
@@ -61,9 +57,11 @@ class IsolationLayerTests(unittest.TestCase):
         self.assertIn('"fixture_reinitialized"', source)
         self.assertIn('"download-state.json"', source)
         self.assertIn('"paired evidence satisfied the unchanged two-card gate"', source)
-        self.assertIn("ROTATION_ATTEMPTS = 3", source)
+        self.assertIn("DISPLAY_ATTEMPTS = 3", source)
         self.assertIn("qualified.wait_for_stable_geometry", source)
         self.assertIn('"geometry_stable"', source)
+        self.assertIn('"logical_display_override"', source)
+        self.assertIn('["wm", "size", "reset"]', source)
 
 
 if __name__ == "__main__":
