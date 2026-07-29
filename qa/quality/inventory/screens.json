@@ -6,7 +6,7 @@
       "name": "CinemaHomeScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 700,
+      "line": 665,
       "route": "home",
       "states": [
         "loading",
@@ -38,7 +38,7 @@
       "name": "DownloadsScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1514,
+      "line": 1438,
       "route": "downloads",
       "states": [
         "loading",
@@ -54,7 +54,7 @@
       "name": "FavoritesScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1340,
+      "line": 1274,
       "route": "favorites",
       "states": [
         "loading",
@@ -102,7 +102,7 @@
       "name": "LiveCatalogScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1160,
+      "line": 1109,
       "route": "live",
       "states": [
         "loading",
@@ -118,7 +118,7 @@
       "name": "LiveStage",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1283,
+      "line": 1224,
       "route": "live",
       "states": [
         "loading",
@@ -150,7 +150,7 @@
       "name": "MainShellScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 366,
+      "line": 330,
       "route": null,
       "states": [
         "loading",
@@ -198,7 +198,7 @@
       "name": "PosterCatalogScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1086,
+      "line": 1050,
       "route": null,
       "states": [
         "loading",
@@ -230,7 +230,7 @@
       "name": "SettingsScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 2028,
+      "line": 1931,
       "route": "settings",
       "states": [
         "loading",
@@ -246,7 +246,7 @@
       "name": "UnifiedSearchScreen",
       "kind": "composable",
       "source": "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
-      "line": 1369,
+      "line": 1298,
       "route": "search",
       "states": [
         "loading",
