@@ -8,8 +8,10 @@ Usage:
     --api API --target TARGET --arch ARCH --profile PROFILE \
     --skin WIDTHxHEIGHT --result-dir PATH -- COMMAND [ARG...]
 
-Creates a fresh AVD, waits until ADB remains stable after Android finishes
-booting, and then runs COMMAND against emulator-5554.
+Creates a fresh AVD, waits until ADB and core Android services remain stable,
+and then runs COMMAND against emulator-5554. This runner is intentionally
+used by the Compatibility Lab instead of relying on an action's transient
+post-boot ADB commands.
 EOF
 }
 
@@ -92,6 +94,14 @@ mkdir -p -- "$RESULT_DIR"
 EMULATOR_LOG="$RESULT_DIR/emulator-native.log"
 EMULATOR_PID=""
 
+capture_boot_evidence() {
+  "$ADB" devices -l > "$RESULT_DIR/adb-devices.txt" 2>&1 || true
+  "$ADB" -s "$SERIAL" shell getprop > "$RESULT_DIR/getprop.txt" 2>&1 || true
+  "$ADB" -s "$SERIAL" shell service list > "$RESULT_DIR/services.txt" 2>&1 || true
+  "$ADB" -s "$SERIAL" shell dumpsys activity activities > "$RESULT_DIR/activity.txt" 2>&1 || true
+  tail -n 400 "$EMULATOR_LOG" > "$RESULT_DIR/emulator-native-tail.log" 2>/dev/null || true
+}
+
 cleanup() {
   local pid="${EMULATOR_PID:-}"
   set +e
@@ -112,7 +122,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "Installing native emulator image: $SYSTEM_IMAGE"
+echo "Installing emulator image: $SYSTEM_IMAGE"
 yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
 "$SDKMANAGER" "platform-tools" "emulator" "$SYSTEM_IMAGE"
 
@@ -144,6 +154,7 @@ echo "Starting $PROFILE at $SKIN"
   -camera-back none \
   -camera-front none \
   -no-snapshot \
+  -no-metrics \
   -wipe-data \
   -cores 2 \
   -memory 4096 \
@@ -152,12 +163,12 @@ echo "Starting $PROFILE at $SKIN"
   >"$EMULATOR_LOG" 2>&1 &
 EMULATOR_PID="$!"
 
-deadline=$((SECONDS + 900))
+deadline=$((SECONDS + 1200))
 stable_reads=0
 while ((SECONDS < deadline)); do
   if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
-    echo "Emulator exited before Android finished booting." >&2
-    tail -n 200 "$EMULATOR_LOG" >&2 || true
+    echo "Emulator exited before Android services became ready." >&2
+    capture_boot_evidence
     exit 2
   fi
 
@@ -166,7 +177,22 @@ while ((SECONDS < deadline)); do
     timeout 10s "$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null |
       tr -d '\r' || true
   )"
-  if [[ "$state" == "device" && "$boot" == "1" ]]; then
+  package_service="$(
+    timeout 10s "$ADB" -s "$SERIAL" shell service check package 2>/dev/null || true
+  )"
+  activity_service="$(
+    timeout 10s "$ADB" -s "$SERIAL" shell service check activity 2>/dev/null || true
+  )"
+  current_user="$(
+    timeout 10s "$ADB" -s "$SERIAL" shell am get-current-user 2>/dev/null |
+      tr -d '\r' || true
+  )"
+
+  if [[ "$state" == "device" ]] &&
+     [[ "$boot" == "1" ]] &&
+     [[ "$package_service" == *"found"* ]] &&
+     [[ "$activity_service" == *"found"* ]] &&
+     [[ "$current_user" =~ ^[0-9]+$ ]]; then
     stable_reads=$((stable_reads + 1))
   else
     stable_reads=0
@@ -178,13 +204,16 @@ while ((SECONDS < deadline)); do
 done
 
 if ((stable_reads < 6)); then
-  echo "Emulator did not provide a stable ADB transport within 900 seconds." >&2
-  "$ADB" devices -l >&2 || true
-  tail -n 200 "$EMULATOR_LOG" >&2 || true
+  echo "Emulator did not provide stable Android services within 1200 seconds." >&2
+  capture_boot_evidence
   exit 2
 fi
 
-echo "ADB remained stable after boot; starting Compatibility Lab."
+echo "ADB and Android services remained stable; starting Compatibility Lab."
 timeout 20s "$ADB" -s "$SERIAL" shell input keyevent 82 >/dev/null 2>&1 || true
+timeout 20s "$ADB" -s "$SERIAL" shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
+timeout 20s "$ADB" -s "$SERIAL" shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
+timeout 20s "$ADB" -s "$SERIAL" shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
+capture_boot_evidence
 export ANDROID_SERIAL="$SERIAL"
 "$@"
