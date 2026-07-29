@@ -1,0 +1,159 @@
+name: HULK SA Quality UI Gate
+
+on:
+  workflow_call:
+    inputs:
+      full_matrix:
+        required: false
+        type: boolean
+        default: false
+      report_only:
+        required: false
+        type: boolean
+        default: false
+      update_baseline:
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - 'app/src/main/**'
+      - 'app/src/androidTest/**'
+      - 'app/build.gradle.kts'
+      - 'qa/compatibility/**'
+      - 'qa/quality/**'
+      - '.github/workflows/quality-ui.yml'
+      - '.github/workflows/compatibility-lab.yml'
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Run all qualified Compatibility Lab profiles
+        required: false
+        type: boolean
+        default: true
+      report_only:
+        description: Does not override deterministic product failures
+        required: false
+        type: boolean
+        default: false
+      update_baseline:
+        description: Baseline updates are forbidden here
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-quality-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline-policy:
+    name: Enforce visual baseline policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reject automatic visual baseline update
+        env:
+          UPDATE_BASELINE: ${{ inputs.update_baseline || false }}
+        run: |
+          set -euo pipefail
+          [[ "$UPDATE_BASELINE" = 'false' ]]
+
+  compose-instrumentation:
+    name: Compose, Android and deterministic download instrumentation
+    needs: baseline-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Run isolated instrumentation on API 35
+        id: instrumented
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          cores: 2
+          ram-size: 4096M
+          heap-size: 768M
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none -no-snapshot
+          script: >-
+            ./gradlew --no-daemon --console=plain
+            connectedDebugAndroidTest
+            -PHULK_PORTAL_URL=http://3162356.xyz:8080
+            -PHULK_CONFIG_URL=
+            --stacktrace
+
+      - name: Verify instrumentation evidence exists
+        if: always()
+        run: |
+          set -euo pipefail
+          find app/build/outputs/androidTest-results -type f -name '*.xml' -print -quit |
+            grep -q .
+          find app/build/reports/androidTests -type f -print -quit | grep -q .
+
+      - name: Upload instrumentation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-COMPOSE-INSTRUMENTATION
+          path: |
+            app/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
+          if-no-files-found: error
+          retention-days: 14
+
+  compatibility-runtime:
+    name: Compatibility runtime, visual, navigation and focus
+    needs: baseline-policy
+    uses: ./.github/workflows/compatibility-lab.yml
+    with:
+      enforce_findings: true
+
+  enforce:
+    name: Final UI evidence enforcement
+    if: always()
+    needs:
+      - baseline-policy
+      - compose-instrumentation
+      - compatibility-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce all UI layers
+        env:
+          POLICY: ${{ needs.baseline-policy.result }}
+          INSTRUMENTATION: ${{ needs.compose-instrumentation.result }}
+          COMPATIBILITY: ${{ needs.compatibility-runtime.result }}
+          REPORT_ONLY: ${{ inputs.report_only || false }}
+        run: |
+          set -euo pipefail
+          echo "report_only=$REPORT_ONLY (cannot override failures)"
+          [[ "$POLICY" = 'success' ]]
+          [[ "$INSTRUMENTATION" = 'success' ]]
+          [[ "$COMPATIBILITY" = 'success' ]]
+

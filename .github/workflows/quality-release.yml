@@ -1,0 +1,255 @@
+name: HULK SA Quality Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version_code:
+        description: Candidate versionCode; must be newer than the baseline artifact
+        required: true
+        type: string
+        default: '63'
+      expected_version_name:
+        description: Candidate versionName
+        required: true
+        type: string
+        default: '0.9.3.19'
+      baseline_signed_run_id:
+        description: Signed qualification run containing the installed production baseline APK
+        required: true
+        type: string
+      physical_evidence_run_id:
+        description: Run containing HULK-SA-PHYSICAL-DEVICE-EVIDENCE
+        required: true
+        type: string
+      protected_smoke_run_id:
+        description: Protected run containing authenticated playback/download smoke evidence
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hulk-quality-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ref-policy:
+    name: Require the official release branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_TYPE" = 'branch' ]]
+          [[ "$REF_NAME" = 'phase-3-v0.9.3.0-adaptive-foundation' ]]
+
+  signed-release:
+    name: Protected signed and minified candidate
+    needs: ref-policy
+    uses: ./.github/workflows/signed-release-qualification.yml
+    with:
+      expected_version_code: ${{ inputs.expected_version_code }}
+      expected_version_name: ${{ inputs.expected_version_name }}
+    secrets: inherit
+
+  package-upgrade:
+    name: Bundle splits, clean install and signed upgrade
+    needs: signed-release
+    runs-on: ubuntu-latest
+    environment: production-signing
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASELINE_RUN_ID: ${{ inputs.baseline_signed_run_id }}
+      HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
+      HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
+      HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
+      HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: HULK-SA-SIGNED-RELEASE-QUALIFICATION
+          path: candidate
+
+      - name: Download the explicit production baseline artifact
+        run: |
+          set -euo pipefail
+          [[ "$BASELINE_RUN_ID" =~ ^[0-9]+$ ]]
+          mkdir -p baseline
+          gh run download "$BASELINE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name HULK-SA-SIGNED-RELEASE-QUALIFICATION \
+            --dir baseline
+
+      - name: Verify static upgrade compatibility
+        run: |
+          set -euo pipefail
+          baseline_apk="$(find baseline -type f -name '*.apk' -print -quit)"
+          candidate_apk="$(find candidate -type f -name '*.apk' -print -quit)"
+          candidate_aab="$(find candidate -type f -name '*.aab' -print -quit)"
+          test -s "$baseline_apk"
+          test -s "$candidate_apk"
+          test -s "$candidate_aab"
+          mkdir -p release-evidence
+          bash tools/verify-upgrade-compatibility.sh \
+            "$baseline_apk" "$candidate_apk" \
+            release-evidence/UPGRADE-COMPATIBILITY.txt
+          cp "$baseline_apk" release-evidence/baseline.apk
+          cp "$candidate_apk" release-evidence/candidate.apk
+          cp "$candidate_aab" release-evidence/candidate.aab
+
+      - name: Build production-signed bundletool APK splits
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/bundletool.jar" \
+            https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          sha256sum "$RUNNER_TEMP/bundletool.jar" > release-evidence/BUNDLETOOL-SHA256.txt
+          keystore="$RUNNER_TEMP/hulk-sa-release.jks"
+          printf '%s' "$HULK_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          java -jar "$RUNNER_TEMP/bundletool.jar" build-apks \
+            --bundle=release-evidence/candidate.aab \
+            --output=release-evidence/candidate.apks \
+            --mode=universal \
+            --ks="$keystore" \
+            --ks-key-alias="$HULK_RELEASE_KEY_ALIAS" \
+            --ks-pass="pass:$HULK_RELEASE_STORE_PASSWORD" \
+            --key-pass="pass:$HULK_RELEASE_KEY_PASSWORD"
+          java -jar "$RUNNER_TEMP/bundletool.jar" validate \
+            --bundle=release-evidence/candidate.aab
+          unzip -l release-evidence/candidate.apks \
+            > release-evidence/BUNDLETOOL-CONTENTS.txt
+
+      - name: Exercise clean install, in-place upgrade and split install
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none -no-snapshot
+          script: |
+            set -euo pipefail
+            adb install release-evidence/baseline.apk
+            adb install -r release-evidence/candidate.apk
+            adb shell dumpsys package sa.hulksa.player \
+              > release-evidence/PACKAGE-AFTER-UPGRADE.txt
+            grep -q "versionCode=${{ inputs.expected_version_code }}" \
+              release-evidence/PACKAGE-AFTER-UPGRADE.txt
+            adb uninstall sa.hulksa.player
+            java -jar "$RUNNER_TEMP/bundletool.jar" install-apks \
+              --apks=release-evidence/candidate.apks
+            adb shell pm path sa.hulksa.player \
+              > release-evidence/SPLIT-INSTALL-PATHS.txt
+            grep -q '^package:' release-evidence/SPLIT-INSTALL-PATHS.txt
+
+      - name: Package upgrade evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          (
+            cd release-evidence
+            sha256sum baseline.apk candidate.apk candidate.aab candidate.apks \
+              > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-RELEASE-PACKAGE-UPGRADE-EVIDENCE
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  external-evidence:
+    name: Require physical OEM and protected production smoke
+    needs: package-upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PHYSICAL_RUN_ID: ${{ inputs.physical_evidence_run_id }}
+      SMOKE_RUN_ID: ${{ inputs.protected_smoke_run_id }}
+    steps:
+      - name: Download externally executed protected evidence
+        run: |
+          set -euo pipefail
+          [[ "$PHYSICAL_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh run download "$PHYSICAL_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name HULK-SA-PHYSICAL-DEVICE-EVIDENCE \
+            --dir physical
+          gh run download "$SMOKE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name HULK-SA-PROTECTED-PRODUCTION-SMOKE \
+            --dir protected-smoke
+
+      - name: Enforce physical and protected evidence contracts
+        run: |
+          set -euo pipefail
+          test -s physical/run-manifest.json
+          test -s protected-smoke/run-manifest.json
+          jq -e '.status == "PASS" and .device_type == "physical"' \
+            physical/run-manifest.json >/dev/null
+          jq -e \
+            '.status == "PASS" and .authentication == "protected" and .real_download_bytes > 0' \
+            protected-smoke/run-manifest.json >/dev/null
+          find physical -type f -iname '*.png' -print -quit | grep -q .
+          find physical -type f -iname '*logcat*' -print -quit | grep -q .
+          find protected-smoke -type f -iname '*download*' -print -quit | grep -q .
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-RELEASE-EXTERNAL-EVIDENCE
+          path: |
+            physical/
+            protected-smoke/
+          if-no-files-found: error
+          retention-days: 30
+
+  enforce:
+    name: Final release recommendation
+    if: always()
+    needs:
+      - ref-policy
+      - signed-release
+      - package-upgrade
+      - external-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          REF_RESULT: ${{ needs.ref-policy.result }}
+          SIGNED_RESULT: ${{ needs.signed-release.result }}
+          PACKAGE_RESULT: ${{ needs.package-upgrade.result }}
+          EXTERNAL_RESULT: ${{ needs.external-evidence.result }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_RESULT" = 'success' ]]
+          [[ "$SIGNED_RESULT" = 'success' ]]
+          [[ "$PACKAGE_RESULT" = 'success' ]]
+          [[ "$EXTERNAL_RESULT" = 'success' ]]
+          echo 'PASS: signed, package, upgrade, physical, and protected smoke evidence are complete.'
+
