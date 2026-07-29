@@ -72,8 +72,9 @@ capture_device_evidence "$runtime_evidence/pre-test"
 if run_instrumentation; then
   capture_device_evidence "$runtime_evidence/success"
   exit 0
+else
+  first_status=$?
 fi
-first_status=$?
 capture_device_evidence "$runtime_evidence/attempts/attempt-1"
 
 # Retry only a proven zero-test infrastructure failure. A real assertion or
@@ -94,7 +95,8 @@ sleep 10
 if run_instrumentation; then
   capture_device_evidence "$runtime_evidence/success-after-infrastructure-retry"
   exit 0
+else
+  retry_status=$?
 fi
-retry_status=$?
 capture_device_evidence "$runtime_evidence/attempts/attempt-2"
 exit "$retry_status"
