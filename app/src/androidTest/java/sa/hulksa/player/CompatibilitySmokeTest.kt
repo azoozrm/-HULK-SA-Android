@@ -10,6 +10,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.lifecycle.Lifecycle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -77,6 +78,19 @@ class CompatibilitySmokeTest {
             scenario.onActivity { activity ->
                 assertFalse(activity.isFinishing)
                 assertEquals(Activity.RESULT_CANCELED, activity.resultCode)
+            }
+        }
+    }
+
+    @Test
+    fun mainActivitySurvivesRecreationAndBackgroundForeground() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.moveToState(Lifecycle.State.CREATED)
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertFalse(activity.isFinishing)
+                assertTrue(activity.window.decorView.isShown)
             }
         }
     }
