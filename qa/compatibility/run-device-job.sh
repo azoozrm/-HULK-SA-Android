@@ -83,7 +83,7 @@ capture_attempt() {
     --skin "$SKIN" \
     --result-dir "$runtime" \
     -- \
-    python3 qa/compatibility/run-lab-qualified.py \
+    python3 qa/compatibility/run-lab-isolated.py \
       --apk "$APK" \
       --device-id "$DEVICE_ID" \
       --device-name "$DEVICE_NAME" \

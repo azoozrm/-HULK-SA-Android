@@ -88,7 +88,9 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("run-device-job.sh", workflow)
         self.assertNotIn("reactivecircus/android-emulator-runner", workflow)
         runner = (LAB_ROOT / "run-device-job.sh").read_text(encoding="utf-8")
-        self.assertIn("run-lab-qualified.py", runner)
+        self.assertIn("run-lab-isolated.py", runner)
+        isolated = (LAB_ROOT / "run-lab-isolated.py").read_text(encoding="utf-8")
+        self.assertIn("run-lab-qualified.py", isolated)
         self.assertIn("analyze-qualified.py", runner)
 
 
