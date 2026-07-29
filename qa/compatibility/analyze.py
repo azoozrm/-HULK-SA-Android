@@ -731,9 +731,9 @@ def rail_logo_measurement(
         candidates.append((bounds, node))
     if not candidates:
         return None
-    bounds, _ = min(
+    bounds, _ = max(
         candidates,
-        key=lambda item: (item[0][1], -item[0][2], item[0][0]),
+        key=lambda item: (item[0][2], -item[0][1], item[0][0]),
     )
     x1, y1, x2, y2 = bounds
     scale = 160.0 / density

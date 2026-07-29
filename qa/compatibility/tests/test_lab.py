@@ -202,6 +202,8 @@ class AnalyzerTests(unittest.TestCase):
                 '<node package="sa.hulksa.player.dev" class="android.view.View" '
                 'bounds="[0,0][1920,1080]">'
                 '<node package="sa.hulksa.player.dev" class="android.widget.ImageView" '
+                'content-desc="HULK SA" bounds="[1166,0][1318,81]" />'
+                '<node package="sa.hulksa.player.dev" class="android.widget.ImageView" '
                 f'content-desc="HULK SA" bounds="[{x1},{y1}][{x2},{y2}]" />'
                 "</node></hierarchy>",
                 encoding="utf-8",
