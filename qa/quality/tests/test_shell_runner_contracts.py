@@ -36,6 +36,15 @@ class ShellRunnerContractTest(unittest.TestCase):
         self.assertIn("runtime_evidence/attempts/attempt-2", source)
         self.assertNotIn("|| true\n  ./gradlew", source)
 
+    def test_instrumentation_preserves_failed_command_status(self) -> None:
+        source = INSTRUMENTATION.read_text(encoding="utf-8")
+        self.assertIn("else\n  first_status=$?\nfi", source)
+        self.assertIn("else\n  retry_status=$?\nfi", source)
+        self.assertNotIn("fi\nfirst_status=$?", source)
+        self.assertNotIn("fi\nretry_status=$?", source)
+        self.assertIn('exit "$first_status"', source)
+        self.assertIn('exit "$retry_status"', source)
+
     def test_native_runner_requires_stable_android_services(self) -> None:
         source = NATIVE_EMULATOR.read_text(encoding="utf-8")
         for expected in (
