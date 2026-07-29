@@ -107,7 +107,7 @@ class WorkflowContractTest(unittest.TestCase):
                 ),
             )
 
-    def test_instrumentation_layer_uses_standalone_bash_and_fail_closed_evidence(self) -> None:
+    def test_instrumentation_layer_uses_stable_native_emulator_and_fail_closed_evidence(self) -> None:
         source = self.source("quality-ui.yml")
         self.assertIn("Prepare fail-closed instrumentation evidence", source)
         self.assertIn("Finalize instrumentation evidence", source)
@@ -118,7 +118,14 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("github.event.pull_request.head.sha || github.sha", source)
         self.assertIn("test_variant: quality-ui", source)
         self.assertIn("bash -n qa/quality/scripts/run_instrumentation.sh", source)
-        self.assertIn("script: bash qa/quality/scripts/run_instrumentation.sh", source)
+        self.assertIn("bash -n qa/compatibility/run-native-emulator.sh", source)
+        self.assertIn("Run isolated instrumentation after stable Android service boot", source)
+        self.assertIn("bash qa/compatibility/run-native-emulator.sh", source)
+        self.assertIn("--api 35", source)
+        self.assertIn("--skin 1080x2400", source)
+        self.assertIn("bash qa/quality/scripts/run_instrumentation.sh", source)
+        self.assertIn("continue-on-error: true", source)
+        self.assertNotIn("reactivecircus/android-emulator-runner", source)
         self.assertNotIn("bash <<'BASH'", source)
 
     def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
