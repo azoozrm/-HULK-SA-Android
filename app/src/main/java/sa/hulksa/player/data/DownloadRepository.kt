@@ -453,102 +453,205 @@ class DownloadRepository(context: Context) {
             )
         }
 
-        var response = executeDownloadCall(downloadId, probe.url, existingBytes, probe.supportsRange)
-        if (existingBytes > 0L && response.code == 416 && totalBytes > 0L && existingBytes == totalBytes) {
-            response.close()
-            finalizePart(downloadId, partFile, finalFile, totalBytes, probe.supportsRange)
-            return
-        }
-        if (existingBytes > 0L && response.code == 200) {
-            response.close()
-            partFile.delete()
-            existingBytes = 0L
-            checkAvailableSpace(target.directory, totalBytes, existingBytes)
-            response = executeDownloadCall(downloadId, probe.url, 0L, false)
-        }
+        var downloaded = existingBytes
+        var lastReportedBytes = downloaded
+        var lastReportedAt = System.nanoTime()
+        var smoothedSpeed = item(downloadId)?.bytesPerSecond?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
 
-        response.use { activeResponse ->
-            if (!activeResponse.isSuccessful) {
-                if (activeResponse.code in 400..499 && activeResponse.code !in setOf(408, 429)) {
-                    throw PermanentDownloadException("الخادم رفض التحميل برمز ${activeResponse.code}.")
-                }
-                throw IOException("HTTP ${activeResponse.code}")
+        while (totalBytes <= 0L || downloaded < totalBytes) {
+            var response = executeDownloadCall(
+                downloadId = downloadId,
+                url = probe.url,
+                offset = downloaded,
+                useRange = probe.supportsRange,
+                totalBytes = totalBytes,
+            )
+            if (downloaded > 0L && response.code == 416 && totalBytes > 0L && downloaded == totalBytes) {
+                response.close()
+                finalizePart(downloadId, partFile, finalFile, totalBytes, probe.supportsRange)
+                return
             }
-            val body = activeResponse.body ?: throw IOException("Empty response body")
-            if (totalBytes <= 0L) {
-                val responseLength = body.contentLength()
-                if (responseLength > 0L) {
-                    totalBytes = existingBytes + responseLength
-                    checkAvailableSpace(target.directory, totalBytes, existingBytes)
+            if (downloaded > 0L && response.code == 200) {
+                response.close()
+                partFile.delete()
+                downloaded = 0L
+                lastReportedBytes = 0L
+                checkAvailableSpace(target.directory, totalBytes, downloaded)
+                mutate(downloadId) {
+                    it.copy(
+                        bytesDownloaded = 0L,
+                        bytesPerSecond = 0L,
+                        etaSeconds = -1L,
+                    )
+                }
+                response = executeDownloadCall(
+                    downloadId = downloadId,
+                    url = probe.url,
+                    offset = 0L,
+                    useRange = false,
+                    totalBytes = totalBytes,
+                )
+            }
+
+            var bytesReadFromResponse = 0L
+            response.use { activeResponse ->
+                if (!activeResponse.isSuccessful) {
+                    if (activeResponse.code in 400..499 && activeResponse.code !in setOf(408, 429)) {
+                        throw PermanentDownloadException("الخادم رفض التحميل برمز ${activeResponse.code}.")
+                    }
+                    throw IOException("HTTP ${activeResponse.code}")
+                }
+                val body = activeResponse.body ?: throw IOException("Empty response body")
+                val responseRangeStart = parseContentRangeStart(activeResponse.header("Content-Range"))
+                if (activeResponse.code == 206 && responseRangeStart != downloaded) {
+                    throw IOException(
+                        "Missing or unexpected Content-Range start $responseRangeStart for offset $downloaded",
+                    )
+                }
+                val responseTotal = parseTotalFromContentRange(activeResponse.header("Content-Range"))
+                if (responseTotal > 0L && responseTotal != totalBytes) {
+                    totalBytes = responseTotal
+                    checkAvailableSpace(target.directory, totalBytes, downloaded)
                     mutate(downloadId) { it.copy(totalBytes = totalBytes) }
+                } else if (totalBytes <= 0L) {
+                    val responseLength = body.contentLength()
+                    if (responseLength > 0L && activeResponse.code != 206) {
+                        totalBytes = downloaded + responseLength
+                        checkAvailableSpace(target.directory, totalBytes, downloaded)
+                        mutate(downloadId) { it.copy(totalBytes = totalBytes) }
+                    }
+                }
+
+                val declaredResponseBytes = body.contentLength().takeIf { it > 0L }
+                val boundedRangeBytes = downloadByteRange(
+                    offset = downloaded,
+                    supportsRange = probe.supportsRange && activeResponse.code == 206,
+                    totalBytes = totalBytes,
+                )?.let { range -> range.last - range.first + 1L }
+                val maximumResponseBytes = when {
+                    declaredResponseBytes != null -> declaredResponseBytes
+                    boundedRangeBytes != null -> boundedRangeBytes
+                    totalBytes > 0L -> totalBytes - downloaded
+                    else -> Long.MAX_VALUE
+                }.coerceAtLeast(0L)
+
+                FileOutputStream(partFile, downloaded > 0L).use { output ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(BUFFER_SIZE)
+                        while (bytesReadFromResponse < maximumResponseBytes) {
+                            currentCoroutineContextBlockingCheck()
+                            networkConstraintMessage()?.let { throw NetworkUnavailableException() }
+                            if (!target.directory.exists()) throw StorageUnavailableException()
+                            if (totalBytes > 0L && downloaded >= totalBytes) break
+
+                            val responseRemaining = maximumResponseBytes - bytesReadFromResponse
+                            val totalRemaining = if (totalBytes > 0L) {
+                                totalBytes - downloaded
+                            } else {
+                                Long.MAX_VALUE
+                            }
+                            val bytesToRead = minOf(
+                                buffer.size.toLong(),
+                                responseRemaining,
+                                totalRemaining,
+                            ).toInt()
+                            if (bytesToRead <= 0) break
+                            val count = input.read(buffer, 0, bytesToRead)
+                            if (count < 0) break
+                            if (count == 0) {
+                                throw IOException("Download response returned an empty read")
+                            }
+                            output.write(buffer, 0, count)
+                            downloaded += count
+                            bytesReadFromResponse += count
+
+                            val now = System.nanoTime()
+                            val elapsedNanos = now - lastReportedAt
+                            if (
+                                elapsedNanos >= PROGRESS_INTERVAL_NANOS ||
+                                downloaded - lastReportedBytes >= PROGRESS_CHUNK_BYTES
+                            ) {
+                                val seconds = elapsedNanos / 1_000_000_000.0
+                                val instantSpeed = if (seconds > 0.0) {
+                                    (downloaded - lastReportedBytes) / seconds
+                                } else {
+                                    0.0
+                                }
+                                smoothedSpeed = if (smoothedSpeed <= 0.0) {
+                                    instantSpeed
+                                } else {
+                                    (smoothedSpeed * 0.68) + (instantSpeed * 0.32)
+                                }
+                                val speed = smoothedSpeed.toLong().coerceAtLeast(0L)
+                                val eta = if (totalBytes > downloaded && speed > 0L) {
+                                    (totalBytes - downloaded) / speed
+                                } else {
+                                    -1L
+                                }
+                                mutate(downloadId) {
+                                    it.copy(
+                                        status = OfflineStatus.DOWNLOADING,
+                                        bytesDownloaded = downloaded,
+                                        totalBytes = totalBytes,
+                                        bytesPerSecond = speed,
+                                        etaSeconds = eta,
+                                        errorMessage = null,
+                                    )
+                                }
+                                lastReportedAt = now
+                                lastReportedBytes = downloaded
+                            }
+                        }
+                        output.flush()
+                        output.fd.sync()
+                    }
+                }
+
+                if (bytesReadFromResponse <= 0L) {
+                    throw IOException("Download response ended before the first byte")
+                }
+                val expectedResponseBytes = declaredResponseBytes ?: boundedRangeBytes
+                if (
+                    activeResponse.code == 206 &&
+                    expectedResponseBytes != null &&
+                    bytesReadFromResponse < expectedResponseBytes
+                ) {
+                    throw IOException(
+                        "Partial response ended at $bytesReadFromResponse of $expectedResponseBytes bytes",
+                    )
+                }
+                val speed = smoothedSpeed.toLong().coerceAtLeast(0L)
+                mutate(downloadId) {
+                    it.copy(
+                        status = OfflineStatus.DOWNLOADING,
+                        bytesDownloaded = downloaded,
+                        totalBytes = totalBytes,
+                        bytesPerSecond = speed,
+                        etaSeconds = if (totalBytes > downloaded && speed > 0L) {
+                            (totalBytes - downloaded) / speed
+                        } else {
+                            -1L
+                        },
+                        errorMessage = null,
+                    )
                 }
             }
+            calls.remove(downloadId)
 
-            FileOutputStream(partFile, existingBytes > 0L).use { output ->
-                body.byteStream().use { input ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var downloaded = existingBytes
-                    var lastReportedBytes = downloaded
-                    var lastReportedAt = System.nanoTime()
-                    var smoothedSpeed = item(downloadId)?.bytesPerSecond?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
-
-                    while (true) {
-                        currentCoroutineContextBlockingCheck()
-                        networkConstraintMessage()?.let { throw NetworkUnavailableException() }
-                        if (!target.directory.exists()) throw StorageUnavailableException()
-
-                        if (totalBytes > 0L && downloaded >= totalBytes) break
-                        val bytesToRead = if (totalBytes > 0L) {
-                            minOf(buffer.size.toLong(), totalBytes - downloaded).toInt()
-                        } else {
-                            buffer.size
-                        }
-                        if (bytesToRead <= 0) break
-                        val count = input.read(buffer, 0, bytesToRead)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        downloaded += count
-
-                        val now = System.nanoTime()
-                        val elapsedNanos = now - lastReportedAt
-                        if (elapsedNanos >= PROGRESS_INTERVAL_NANOS || downloaded - lastReportedBytes >= PROGRESS_CHUNK_BYTES) {
-                            val seconds = elapsedNanos / 1_000_000_000.0
-                            val instantSpeed = if (seconds > 0.0) (downloaded - lastReportedBytes) / seconds else 0.0
-                            smoothedSpeed = if (smoothedSpeed <= 0.0) instantSpeed else (smoothedSpeed * 0.68) + (instantSpeed * 0.32)
-                            val speed = smoothedSpeed.toLong().coerceAtLeast(0L)
-                            val eta = if (totalBytes > downloaded && speed > 0L) {
-                                (totalBytes - downloaded) / speed
-                            } else {
-                                -1L
-                            }
-                            mutate(downloadId) {
-                                it.copy(
-                                    status = OfflineStatus.DOWNLOADING,
-                                    bytesDownloaded = downloaded,
-                                    totalBytes = totalBytes,
-                                    bytesPerSecond = speed,
-                                    etaSeconds = eta,
-                                    errorMessage = null,
-                                )
-                            }
-                            lastReportedAt = now
-                            lastReportedBytes = downloaded
-                        }
-                    }
-                    output.flush()
-                    output.fd.sync()
-                    mutate(downloadId) {
-                        it.copy(
-                            bytesDownloaded = downloaded,
-                            totalBytes = if (totalBytes > 0L) totalBytes else downloaded,
-                            bytesPerSecond = 0L,
-                            etaSeconds = 0L,
-                        )
-                    }
-                }
+            if (!probe.supportsRange || totalBytes <= 0L) {
+                if (totalBytes <= 0L) totalBytes = downloaded
+                break
             }
         }
-        calls.remove(downloadId)
+
+        mutate(downloadId) {
+            it.copy(
+                bytesDownloaded = downloaded,
+                totalBytes = if (totalBytes > 0L) totalBytes else downloaded,
+                bytesPerSecond = 0L,
+                etaSeconds = 0L,
+            )
+        }
         val expected = if (totalBytes > 0L) totalBytes else partFile.length()
         finalizePart(downloadId, partFile, finalFile, expected, probe.supportsRange)
     }
@@ -577,8 +680,14 @@ class DownloadRepository(context: Context) {
         }.getOrDefault(false)
     }
 
-    private fun executeDownloadCall(downloadId: Long, url: String, offset: Long, useRange: Boolean): Response {
-        val call = client.newCall(buildDownloadRequest(url, offset, useRange))
+    private fun executeDownloadCall(
+        downloadId: Long,
+        url: String,
+        offset: Long,
+        useRange: Boolean,
+        totalBytes: Long,
+    ): Response {
+        val call = client.newCall(buildDownloadRequest(url, offset, useRange, totalBytes))
         calls[downloadId] = call
         return call.execute()
     }
@@ -985,6 +1094,15 @@ class DownloadRepository(context: Context) {
         return value.substringAfterLast('/', "").toLongOrNull() ?: -1L
     }
 
+    private fun parseContentRangeStart(value: String?): Long? {
+        if (value.isNullOrBlank()) return null
+        return Regex("""bytes\s+(\d+)-""", RegexOption.IGNORE_CASE)
+            .find(value)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+    }
+
     private fun safeExtension(raw: String?): String = raw.orEmpty()
         .trim()
         .lowercase()
@@ -1068,21 +1186,50 @@ class DownloadRepository(context: Context) {
 
 internal const val DOWNLOAD_STALL_TIMEOUT_SECONDS = 30L
 internal const val DOWNLOAD_USER_AGENT = "HULK-SA-Android/0.9.3"
+internal const val DOWNLOAD_RANGE_CHUNK_BYTES = 4L * 1024L * 1024L
 
-internal fun downloadRangeHeader(offset: Long, supportsRange: Boolean): String? =
-    if (supportsRange) "bytes=${offset.coerceAtLeast(0L)}-" else null
+internal fun downloadByteRange(
+    offset: Long,
+    supportsRange: Boolean,
+    totalBytes: Long = -1L,
+    chunkBytes: Long = DOWNLOAD_RANGE_CHUNK_BYTES,
+): LongRange? {
+    if (!supportsRange || chunkBytes <= 0L) return null
+    val start = offset.coerceAtLeast(0L)
+    if (totalBytes > 0L && start >= totalBytes) return null
+    val unboundedEnd = if (start > Long.MAX_VALUE - (chunkBytes - 1L)) {
+        Long.MAX_VALUE
+    } else {
+        start + chunkBytes - 1L
+    }
+    val end = if (totalBytes > 0L) {
+        minOf(unboundedEnd, totalBytes - 1L)
+    } else {
+        unboundedEnd
+    }
+    return start..end
+}
+
+internal fun downloadRangeHeader(
+    offset: Long,
+    supportsRange: Boolean,
+    totalBytes: Long = -1L,
+    chunkBytes: Long = DOWNLOAD_RANGE_CHUNK_BYTES,
+): String? = downloadByteRange(offset, supportsRange, totalBytes, chunkBytes)
+    ?.let { range -> "bytes=${range.first}-${range.last}" }
 
 internal fun buildDownloadRequest(
     url: String,
     offset: Long,
     supportsRange: Boolean,
+    totalBytes: Long = -1L,
 ): Request = Request.Builder()
     .url(url)
     .get()
     .header("User-Agent", DOWNLOAD_USER_AGENT)
     .header("Accept-Encoding", "identity")
     .apply {
-        downloadRangeHeader(offset, supportsRange)?.let { header("Range", it) }
+        downloadRangeHeader(offset, supportsRange, totalBytes)?.let { header("Range", it) }
     }
     .build()
 

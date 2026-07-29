@@ -2,7 +2,11 @@
 
 ## الحكم الحالي
 
-الاختبارات الحالية تثبت قابلية التجميع وبعض منطق parsing/classification، وتقدم Compatibility Lab واسعًا للواجهة على Emulator. لا تثبت production readiness: لا توجد Android instrumentation tests في التطبيق، ولا signed Release install، ولا backend/playback/download E2E، ولا Macrobenchmark.
+الاختبارات الحالية تثبت قابلية التجميع وبعض منطق parsing/classification،
+وتقدم Compatibility Lab واسعًا للواجهة على Emulator. مرشح v0.9.3.20 يضيف
+تنزيل loopback فعليًا للحارس، لكنه لا يثبت production readiness: لا توجد
+Android instrumentation tests كاملة، ولا backend/playback/download production
+E2E، ولا Macrobenchmark.
 
 ## ما يوجد فعليًا
 
@@ -23,7 +27,7 @@ gradle testDebugUnitTest
 
 ### اختبارات أدوات Compatibility Lab
 
-7 Python unittest:
+17 Python unittest، ومنها:
 
 - clean capture.
 - external Android error dialog classification.
@@ -46,7 +50,8 @@ bash -n qa/compatibility/run-native-emulator.sh
 
 - 9 emulator profiles.
 - 133 planned captures؛ 132 valid app captures.
-- 7 pages.
+- التشغيل السابق: 7 صفحات و133 لقطة مخططة.
+- مرشح v0.9.3.20: 8 صفحات و152 لقطة مخططة بعد إضافة «قائمتي».
 - screenshots/XML/logcat and diagnostics.
 - 8 confirmed product critical findings.
 - 1 invalid capture produced 2 false critical findings.
@@ -60,7 +65,7 @@ bash -n qa/compatibility/run-native-emulator.sh
 - Movie/Series details production.
 - Media3 playback على stream فعلي.
 - HLS/TS fallback، subtitles/audio tracks/codecs/HDR.
-- download bytes/range/integrity/storage/process death.
+- download against production origin/integrity/storage/process death.
 - signed/minified Release runtime.
 - Compose semantics/navigation assertions.
 - screenshot visual regression مقابل approved baseline.
@@ -118,8 +123,8 @@ Shot ليس الخيار الأول هنا لأن Compose وruntime TV focus ه�
 
 1. fixture يتجاوز loading/error/backend states.
 2. الصور placeholders ثابتة ولا تمثل artwork dimensions الحقيقية.
-3. لا network latency/failure.
-4. لا actual download/player surfaces.
+3. لا network latency/failure خارج سيناريو تنزيل loopback المحدد.
+4. تنزيل المختبر فعلي محليًا، لكنه لا يمثل production origin؛ player ليس فعليًا.
 5. emulator profile لا يحاكي Samsung/TCL firmware.
 6. كل runtime images x86_64.
 7. screenshots لا تختبر overscan الفعلي.

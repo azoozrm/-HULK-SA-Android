@@ -505,7 +505,10 @@ class DeviceLab:
                 f"{observed_label}"
             )
         marker_scratch.unlink(missing_ok=True)
-        time.sleep(0.8)
+        # Downloads use a debug-only loopback origin and must prove actual byte
+        # progress. Give the repository enough time to probe and receive at
+        # least one bounded chunk before capturing the hierarchy.
+        time.sleep(3.0 if page == "downloads" else 0.8)
         return start_text, marker_found
 
     def capture_case(self, page: str, orientation: str, font_scale: float) -> None:

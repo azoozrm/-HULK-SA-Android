@@ -20,6 +20,8 @@ from analyze import (  # noqa: E402
     add_case_findings,
     analyze_rail_visual,
     analyze_run,
+    download_layout_measurement,
+    live_action_measurement,
     tv_content_gutter_measurement,
 )
 from lab_config import DEVICES, PAGES, matrix_json, validate  # noqa: E402
@@ -47,7 +49,16 @@ class ConfigTests(unittest.TestCase):
             for family in ("phone", "tablet", "tv")
         })
         self.assertEqual(
-            ["home", "live", "movies", "series", "search", "downloads", "settings"],
+            [
+                "home",
+                "live",
+                "movies",
+                "series",
+                "favorites",
+                "search",
+                "downloads",
+                "settings",
+            ],
             [page["id"] for page in PAGES],
         )
         tv_4k = next(device for device in DEVICES if device["id"] == "android-tv-4k-api36")
@@ -106,11 +117,11 @@ class ConfigTests(unittest.TestCase):
 
 
 class AnalyzerTests(unittest.TestCase):
-    def tv_gutter_xml(self, content_bounds: str) -> ET.Element:
+    def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:
         return ET.fromstring(
             '<hierarchy>'
             '<node package="sa.hulksa.player.dev" class="android.view.View" '
-            'content-desc="qa-tv-live-content" '
+            f'content-desc="qa-tv-page-content:{page}" '
             f'bounds="{content_bounds}" />'
             '<node package="sa.hulksa.player.dev" class="android.view.View" '
             'content-desc="qa-tv-rail" bounds="[1740,0][1920,1080]" />'
@@ -140,7 +151,7 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(23.0, measurement["maximum_dp"])
         self.assertGreater(measurement["maximum_dp"], measurement["limit_dp"])
 
-    def test_tv_live_capture_fails_when_gutter_markers_are_missing(self) -> None:
+    def test_tv_page_capture_fails_when_gutter_markers_are_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             case_root = root / "raw/landscape/font-100/live"
@@ -181,9 +192,57 @@ class AnalyzerTests(unittest.TestCase):
 
         self.assertEqual("FAIL", result["status"])
         self.assertIn(
-            "tv_live_content_gutter_not_measured",
+            "tv_page_content_gutter_not_measured",
             {item["code"] for item in findings},
         )
+
+    def test_tv_favorites_content_gutter_is_measured(self) -> None:
+        measurement = tv_content_gutter_measurement(
+            list(self.tv_gutter_xml("[16,16][1724,1064]", "favorites").iter("node")),
+            width=1920,
+            height=1080,
+            density=320,
+            page="favorites",
+        )
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(8.0, measurement["maximum_dp"])
+
+    def test_live_actions_require_physical_bottom_clearance(self) -> None:
+        nodes = list(
+            ET.fromstring(
+                '<hierarchy><node package="sa.hulksa.player.dev" '
+                'content-desc="qa-tv-live-actions" bounds="[100,900][1000,1060]" />'
+                "</hierarchy>"
+            ).iter("node")
+        )
+        measurement = live_action_measurement(nodes, height=1080, density=320)
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(10.0, measurement["bottom_dp"])
+        self.assertLess(measurement["bottom_dp"], measurement["minimum_dp"])
+
+    def test_two_download_cards_fit_without_overlap(self) -> None:
+        nodes = list(
+            ET.fromstring(
+                '<hierarchy>'
+                '<node package="sa.hulksa.player.dev" content-desc="qa-download-transfer:bytes-positive" '
+                'bounds="[0,0][1920,1080]" />'
+                '<node package="sa.hulksa.player.dev" content-desc="qa-tv-download-list" '
+                'bounds="[20,340][1700,1080]" />'
+                '<node package="sa.hulksa.player.dev" content-desc="qa-tv-download-card:1" '
+                'bounds="[20,340][1500,668]" />'
+                '<node package="sa.hulksa.player.dev" content-desc="qa-tv-download-card:2" '
+                'bounds="[20,696][1500,1024]" />'
+                "</hierarchy>"
+            ).iter("node")
+        )
+        measurement = download_layout_measurement(nodes, density=320)
+        self.assertIsNotNone(measurement)
+        assert measurement is not None
+        self.assertEqual(2, measurement["visible_card_count"])
+        self.assertEqual([], measurement["overlaps"])
+        self.assertTrue(measurement["transfer_progress"])
 
     def create_run(self, root: Path, *, out_of_bounds: bool = False) -> None:
         case_root = root / "raw/portrait/font-100/home"
@@ -365,17 +424,28 @@ class AnalyzerTests(unittest.TestCase):
     def test_unstable_rail_logo_is_a_critical_visual_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            device, entries = self.create_rail_visual(root, 80, 132)
+            device, entries = self.create_rail_visual(root, 60, 132)
             visual, findings = analyze_rail_visual(root, device, entries)
             self.assertEqual("FAIL", visual[0]["status"])
             codes = {item["code"] for item in findings}
             self.assertIn("rail_logo_size_out_of_policy", codes)
             self.assertIn("rail_logo_size_instability", codes)
 
-    def test_stable_60dp_rail_logo_passes_visual_gate(self) -> None:
+    def test_fixed_60dp_logo_fails_xiaomi_density_ratio_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             device, entries = self.create_rail_visual(root, 120, 120)
+            visual, findings = analyze_rail_visual(root, device, entries)
+            self.assertEqual("FAIL", visual[0]["status"])
+            self.assertIn(
+                "rail_logo_size_out_of_policy",
+                {item["code"] for item in findings},
+            )
+
+    def test_stable_three_percent_rail_logo_passes_visual_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            device, entries = self.create_rail_visual(root, 60, 60)
             visual, findings = analyze_rail_visual(root, device, entries)
             self.assertEqual("PASS", visual[0]["status"])
             self.assertEqual([], findings)

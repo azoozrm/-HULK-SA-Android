@@ -1,5 +1,9 @@
 # HULK SA Android — v0.9.3.19 Runtime, TV and Download Rescue
 
+> نتيجة لاحقة: الاختبار الفيزيائي أثبت أن إصلاح `bytes=0-` والحافة الخاصة
+> بالبث غير كافيين. التشخيص الأحدث المعتمد موثق في
+> `V09320-PHYSICAL-TV-DOWNLOAD-RESCUE.md`.
+
 تاريخ التشخيص: 2026-07-29 UTC
 
 المرشح: `0.9.3.19` / `versionCode 63`

@@ -28,10 +28,17 @@ RENDER_RE = re.compile(
 )
 JANK_RE = re.compile(r"Janky frames:\s*(\d+)\s*\(([\d.]+)%\)")
 TOTAL_PSS_RE = re.compile(r"TOTAL PSS:\s*([\d,]+)")
-RAIL_LOGO_MIN_DP = 56.0
-RAIL_LOGO_MAX_DP = 64.0
+RAIL_LOGO_MIN_SCREEN_RATIO = 0.028
+RAIL_LOGO_MAX_SCREEN_RATIO = 0.035
 RAIL_LOGO_STATE_TOLERANCE_DP = 2.0
 TV_CONTENT_GUTTER_MAX_DP = 12.0
+TV_LIVE_ACTION_BOTTOM_MIN_DP = 14.0
+TV_DOWNLOAD_CARD_MIN_HEIGHT_DP = 150.0
+QA_TV_PAGE_CONTENT_PREFIX = "qa-tv-page-content:"
+QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"
+QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
+QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
+QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -87,16 +94,18 @@ def tv_content_gutter_measurement(
     width: int,
     height: int,
     density: int,
+    page: str = "live",
 ) -> dict[str, Any] | None:
-    """Measure the live-page content inset against the adjacent TV rail."""
+    """Measure one page's content inset against the adjacent TV rail."""
     content_bounds = None
     rail_bounds = None
+    expected_marker = f"{QA_TV_PAGE_CONTENT_PREFIX}{page}"
     for node in nodes:
         description = (node.attrib.get("content-desc", "") or "").strip()
         bounds = parse_bounds(node.attrib.get("bounds", ""))
         if not bounds:
             continue
-        if description == "qa-tv-live-content":
+        if expected_marker in description:
             content_bounds = bounds
         elif description == "qa-tv-rail":
             rail_bounds = bounds
@@ -141,6 +150,89 @@ def tv_content_gutter_measurement(
     }
 
 
+def live_action_measurement(
+    nodes: Iterable[ET.Element],
+    height: int,
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the physical bottom clearance below the TV live action row."""
+    for node in nodes:
+        description = (node.attrib.get("content-desc", "") or "").strip()
+        if QA_TV_LIVE_ACTIONS not in description:
+            continue
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if not bounds:
+            continue
+        bottom_px = height - bounds[3]
+        bottom_dp = max(0, bottom_px) / max(density / 160.0, 0.01)
+        return {
+            "bounds_px": list(bounds),
+            "bottom_px": bottom_px,
+            "bottom_dp": round(bottom_dp, 2),
+            "minimum_dp": TV_LIVE_ACTION_BOTTOM_MIN_DP,
+        }
+    return None
+
+
+def download_layout_measurement(
+    nodes: Iterable[ET.Element],
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the real multi-download viewport and visible card geometry."""
+    list_bounds = None
+    card_bounds: list[tuple[int, int, int, int]] = []
+    transfer_progress = False
+    for node in nodes:
+        description = (node.attrib.get("content-desc", "") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if QA_DOWNLOAD_PROGRESS_MARKER in description:
+            transfer_progress = True
+        if bounds is None:
+            continue
+        if QA_TV_DOWNLOAD_LIST in description:
+            list_bounds = bounds
+        if QA_TV_DOWNLOAD_CARD_PREFIX in description:
+            card_bounds.append(bounds)
+    if list_bounds is None:
+        return None
+
+    pixels_per_dp = max(density / 160.0, 0.01)
+    cards = sorted(set(card_bounds), key=lambda bounds: (bounds[1], bounds[0]))
+    lx1, ly1, lx2, ly2 = list_bounds
+    visible_cards = [
+        bounds
+        for bounds in cards
+        if bounds[0] >= lx1 - 1
+        and bounds[1] >= ly1 - 1
+        and bounds[2] <= lx2 + 1
+        and bounds[3] <= ly2 + 1
+    ]
+    heights_dp = [
+        round((bounds[3] - bounds[1]) / pixels_per_dp, 2)
+        for bounds in visible_cards
+    ]
+    overlaps = []
+    for first, second in zip(visible_cards, visible_cards[1:]):
+        overlap_px = first[3] - second[1]
+        if overlap_px > 1:
+            overlaps.append(
+                {
+                    "first_bounds_px": list(first),
+                    "second_bounds_px": list(second),
+                    "overlap_px": overlap_px,
+                }
+            )
+    return {
+        "list_bounds_px": list(list_bounds),
+        "card_bounds_px": [list(bounds) for bounds in cards],
+        "visible_card_count": len(visible_cards),
+        "visible_card_heights_dp": heights_dp,
+        "minimum_card_height_dp": TV_DOWNLOAD_CARD_MIN_HEIGHT_DP,
+        "overlaps": overlaps,
+        "transfer_progress": transfer_progress,
+    }
+
+
 def analyze_xml(
     xml_path: Path,
     width: int,
@@ -148,6 +240,7 @@ def analyze_xml(
     density: int,
     font_scale: float,
     is_tv: bool,
+    page: str,
 ) -> dict[str, Any]:
     tree = ET.parse(xml_path)
     nodes = list(app_nodes(tree.getroot()))
@@ -163,9 +256,24 @@ def analyze_xml(
     safe_y = max(2, int(height * 0.025))
     minimum_text_height = 8.0 * density / 160.0 * font_scale * 0.70
     tv_content_gutter = (
-        tv_content_gutter_measurement(nodes, width, height, density)
+        tv_content_gutter_measurement(nodes, width, height, density, page)
         if is_tv
         else None
+    )
+    live_actions = (
+        live_action_measurement(nodes, height, density)
+        if is_tv and page == "live"
+        else None
+    )
+    download_layout = (
+        download_layout_measurement(nodes, density)
+        if is_tv and page == "downloads"
+        else None
+    )
+    download_transfer_progress = any(
+        QA_DOWNLOAD_PROGRESS_MARKER
+        in (node.attrib.get("content-desc", "") or "")
+        for node in nodes
     )
 
     for node in nodes:
@@ -255,6 +363,9 @@ def analyze_xml(
         "undersized_text": undersized_text,
         "interactive_overlaps": overlaps,
         "tv_content_gutter": tv_content_gutter,
+        "live_actions": live_actions,
+        "download_layout": download_layout,
+        "download_transfer_progress": download_transfer_progress,
     }
 
 
@@ -460,6 +571,7 @@ def add_case_findings(
                 int(device["requested_density"]),
                 float(case["font_scale"]),
                 bool(device["is_tv"]),
+                page,
             )
             result["ui"] = ui
             if ui["node_count"] == 0:
@@ -540,13 +652,13 @@ def add_case_findings(
                     )
                 )
             gutter = ui.get("tv_content_gutter")
-            is_tv_live_page = bool(device["is_tv"]) and page == "live"
-            if is_tv_live_page and gutter is None:
+            is_tv_page = bool(device["is_tv"])
+            if is_tv_page and gutter is None:
                 findings.append(
                     finding(
                         "critical",
-                        "tv_live_content_gutter_not_measured",
-                        f"{case_id}: TV live content/rail gutter markers were not captured",
+                        "tv_page_content_gutter_not_measured",
+                        f"{case_id}: TV {page} content/rail gutter markers were not captured",
                         case_id=case_id,
                         page=page,
                         evidence=evidence,
@@ -556,8 +668,8 @@ def add_case_findings(
                 findings.append(
                     finding(
                         "critical",
-                        "tv_live_excessive_content_gutter",
-                        f"{case_id}: live content leaves up to "
+                        "tv_page_excessive_content_gutter",
+                        f"{case_id}: {page} content leaves up to "
                         f"{gutter['maximum_dp']:.1f}dp of unused outer space; "
                         f"limit is {gutter['limit_dp']:.1f}dp",
                         case_id=case_id,
@@ -565,6 +677,95 @@ def add_case_findings(
                         evidence=evidence,
                     )
                 )
+            if is_tv_page and page == "live":
+                live_actions = ui.get("live_actions")
+                if live_actions is None:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "tv_live_actions_not_measured",
+                            f"{case_id}: live action-row safe inset marker was not captured",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+                elif live_actions["bottom_dp"] < live_actions["minimum_dp"]:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "tv_live_actions_unsafe_bottom",
+                            f"{case_id}: live action row has only "
+                            f"{live_actions['bottom_dp']:.1f}dp bottom clearance; "
+                            f"minimum is {live_actions['minimum_dp']:.1f}dp",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+            if page == "downloads" and not ui.get("download_transfer_progress"):
+                findings.append(
+                    finding(
+                        "critical",
+                        "download_transfer_no_byte_progress",
+                        f"{case_id}: the real download fixture did not transfer any bytes",
+                        case_id=case_id,
+                        page=page,
+                        evidence=evidence,
+                    )
+                )
+            if is_tv_page and page == "downloads":
+                layout = ui.get("download_layout")
+                if layout is None:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "tv_download_layout_not_measured",
+                            f"{case_id}: download-list/card geometry markers were not captured",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+                else:
+                    if layout["visible_card_count"] < 2:
+                        findings.append(
+                            finding(
+                                "critical",
+                                "tv_download_cards_do_not_fit",
+                                f"{case_id}: only {layout['visible_card_count']} complete "
+                                "download card(s) fit in the list viewport; expected at least 2",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
+                    if any(
+                        height_dp < layout["minimum_card_height_dp"]
+                        for height_dp in layout["visible_card_heights_dp"]
+                    ):
+                        findings.append(
+                            finding(
+                                "critical",
+                                "tv_download_card_clipped",
+                                f"{case_id}: a visible download card is shorter than "
+                                f"{layout['minimum_card_height_dp']:.0f}dp",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
+                    if layout["overlaps"]:
+                        findings.append(
+                            finding(
+                                "critical",
+                                "tv_download_cards_overlap",
+                                f"{case_id}: {len(layout['overlaps'])} download cards overlap",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
         except Exception as exc:
             findings.append(
                 finding(
@@ -833,6 +1034,8 @@ def rail_logo_measurement(
         "bounds_px": list(bounds),
         "width_dp": round((x2 - x1) * scale, 2),
         "height_dp": round((y2 - y1) * scale, 2),
+        "width_screen_ratio": round((x2 - x1) / max(width, 1), 5),
+        "height_screen_ratio": round((y2 - y1) / max(width, 1), 5),
     }
 
 
@@ -941,6 +1144,8 @@ def analyze_rail_visual(
                 continue
             logo_width = float(measurement["width_dp"])
             logo_height = float(measurement["height_dp"])
+            logo_width_ratio = float(measurement["width_screen_ratio"])
+            logo_height_ratio = float(measurement["height_screen_ratio"])
             if abs(logo_width - logo_height) > RAIL_LOGO_STATE_TOLERANCE_DP:
                 item_findings.append(
                     finding(
@@ -953,18 +1158,19 @@ def analyze_rail_visual(
                     )
                 )
             if (
-                logo_width < RAIL_LOGO_MIN_DP
-                or logo_width > RAIL_LOGO_MAX_DP
-                or logo_height < RAIL_LOGO_MIN_DP
-                or logo_height > RAIL_LOGO_MAX_DP
+                logo_width_ratio < RAIL_LOGO_MIN_SCREEN_RATIO
+                or logo_width_ratio > RAIL_LOGO_MAX_SCREEN_RATIO
+                or logo_height_ratio < RAIL_LOGO_MIN_SCREEN_RATIO
+                or logo_height_ratio > RAIL_LOGO_MAX_SCREEN_RATIO
             ):
                 item_findings.append(
                     finding(
                         "critical",
                         "rail_logo_size_out_of_policy",
                         f"{orientation} / home / {state}: logo measures "
-                        f"{logo_width:.1f}×{logo_height:.1f} dp; expected "
-                        f"{RAIL_LOGO_MIN_DP:.0f}–{RAIL_LOGO_MAX_DP:.0f} dp",
+                        f"{logo_width_ratio:.2%}×{logo_height_ratio:.2%} of screen width; "
+                        f"expected {RAIL_LOGO_MIN_SCREEN_RATIO:.1%}–"
+                        f"{RAIL_LOGO_MAX_SCREEN_RATIO:.1%}",
                         page="home",
                         evidence=evidence,
                     )

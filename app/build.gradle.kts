@@ -73,8 +73,8 @@ android {
         applicationId = "sa.hulksa.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 63
-        versionName = "0.9.3.19"
+        versionCode = 64
+        versionName = "0.9.3.20"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
