@@ -43,6 +43,22 @@ class WorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(trace_field, source)
 
+    def test_compatibility_matrix_uses_stable_native_runner_and_marker_provenance(self) -> None:
+        source = self.source("compatibility-lab.yml")
+        self.assertNotIn("reactivecircus/android-emulator-runner", source)
+        self.assertGreaterEqual(
+            source.count("bash qa/compatibility/run-native-emulator.sh"),
+            2,
+        )
+        self.assertIn("quality-marker-injection.json", source)
+        self.assertIn(
+            'cp lab-apk/quality-marker-injection.json "$OUT/quality-marker-injection.json"',
+            source,
+        )
+        self.assertIn("replacement_count", source)
+        self.assertIn("original_sha256", source)
+        self.assertIn("instrumented_sha256", source)
+
     def test_pr_workflows_do_not_receive_signing_or_production_credentials(self) -> None:
         for filename in ("quality-pr.yml", "quality-ui.yml", "quality-pr-intelligence.yml"):
             source = self.source(filename)
@@ -91,7 +107,7 @@ class WorkflowContractTest(unittest.TestCase):
                 ),
             )
 
-    def test_instrumentation_layer_uploads_fail_closed_evidence_before_asserting(self) -> None:
+    def test_instrumentation_layer_uses_standalone_bash_and_fail_closed_evidence(self) -> None:
         source = self.source("quality-ui.yml")
         self.assertIn("Prepare fail-closed instrumentation evidence", source)
         self.assertIn("Finalize instrumentation evidence", source)
@@ -101,8 +117,9 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("if-no-files-found: error", source)
         self.assertIn("github.event.pull_request.head.sha || github.sha", source)
         self.assertIn("test_variant: quality-ui", source)
-        self.assertIn("bash <<'BASH'", source)
-        self.assertIn("set -euo pipefail", source)
+        self.assertIn("bash -n qa/quality/scripts/run_instrumentation.sh", source)
+        self.assertIn("script: bash qa/quality/scripts/run_instrumentation.sh", source)
+        self.assertNotIn("bash <<'BASH'", source)
 
     def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
         source = self.source("quality-pr.yml")
