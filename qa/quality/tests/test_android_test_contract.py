@@ -28,8 +28,9 @@ class AndroidTestContractTest(unittest.TestCase):
     def test_compose_test_uses_semantics_not_coordinates(self) -> None:
         source = COMPOSE_TEST.read_text(encoding="utf-8")
         self.assertIn("createComposeRule", source)
-        self.assertIn("onNodeWithContentDescription", source)
+        self.assertIn("onNodeWithText", source)
         self.assertIn("fetchSemanticsNode", source)
+        self.assertNotIn("onNodeWithContentDescription", source)
         self.assertNotIn("import androidx.compose.ui.test.assertExists", source)
         self.assertNotIn("import androidx.compose.ui.test.assertDoesNotExist", source)
         self.assertNotIn("performTouchInput", source)
