@@ -1,44 +1,13 @@
 name: HULK SA Compatibility Lab
 
 on:
-  push:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - '.github/workflows/compatibility-lab.yml'
-      - 'qa/compatibility/**'
-      - 'app/**'
-      - 'gradle/**'
-      - 'gradlew'
-      - 'gradlew.bat'
-      - 'build.gradle*'
-      - 'settings.gradle*'
-      - 'gradle.properties'
-      - 'release/v0.9.3.16/**'
-      - 'release/v0.9.3.17/**'
-      - 'release/v0.9.3.18/**'
-      - 'tools/prepare-v09*.py'
-      - 'tools/repair-v09120.py'
-      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
-  pull_request:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - '.github/workflows/compatibility-lab.yml'
-      - 'qa/compatibility/**'
-      - 'app/**'
-      - 'gradle/**'
-      - 'gradlew'
-      - 'gradlew.bat'
-      - 'build.gradle*'
-      - 'settings.gradle*'
-      - 'gradle.properties'
-      - 'release/v0.9.3.16/**'
-      - 'release/v0.9.3.17/**'
-      - 'release/v0.9.3.18/**'
-      - 'tools/prepare-v09*.py'
-      - 'tools/repair-v09120.py'
-      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+  workflow_call:
+    inputs:
+      enforce_findings:
+        description: Fail when deterministic application findings are critical
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       enforce_findings:
@@ -267,6 +236,36 @@ jobs:
             echo 'needed=false' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Preserve first failed attempt before infrastructure retry
+        if: steps.retry-check.outputs.needed == 'true'
+        run: |
+          set -euo pipefail
+          OUT='compatibility-results/${{ matrix.id }}'
+          PRESERVED="$RUNNER_TEMP/${{ matrix.id }}-attempt-1"
+          mkdir -p "$OUT"
+          if [[ ! -s "$OUT/summary.json" ]]; then
+            python3 qa/compatibility/make-blocked-result.py \
+              --out "$OUT" \
+              --device-id '${{ matrix.id }}' \
+              --device-name '${{ matrix.name }}' \
+              --family '${{ matrix.family }}' \
+              --api '${{ matrix.api }}' \
+              --target '${{ matrix.target }}' \
+              --arch '${{ matrix.arch }}' \
+              --profile '${{ matrix.profile }}' \
+              --width '${{ matrix.width }}' \
+              --height '${{ matrix.height }}' \
+              --density '${{ matrix.density }}' \
+              --orientations '${{ matrix.orientations }}' \
+              --font-scales '${{ matrix.font_scales }}' \
+              --is-tv '${{ matrix.is_tv }}' \
+              --reason 'First emulator attempt produced no summary.'
+          fi
+          cp -a "$OUT" "$PRESERVED"
+          mkdir -p "$OUT/attempts"
+          mv "$PRESERVED" "$OUT/attempts/attempt-1"
+          echo 'PASS: first failed attempt retained under attempts/attempt-1'
+
       - name: Retry capture after transient emulator failure
         if: >-
           steps.retry-check.outputs.needed == 'true' &&
@@ -345,23 +344,28 @@ jobs:
           OUT='compatibility-results/${{ matrix.id }}'
           mkdir -p "$OUT"
           if [[ ! -s "$OUT/summary.json" ]]; then
-            cat > "$OUT/summary.json" <<JSON
-          {
-            "device_id": "${{ matrix.id }}",
-            "device_name": "${{ matrix.name }}",
-            "family": "${{ matrix.family }}",
-            "api": "${{ matrix.api }}",
-            "critical_finding_count": 0,
-            "infrastructure_error_count": 1,
-            "status": "infrastructure_blocked"
-          }
-          JSON
+            python3 qa/compatibility/make-blocked-result.py \
+              --out "$OUT" \
+              --device-id '${{ matrix.id }}' \
+              --device-name '${{ matrix.name }}' \
+              --family '${{ matrix.family }}' \
+              --api '${{ matrix.api }}' \
+              --target '${{ matrix.target }}' \
+              --arch '${{ matrix.arch }}' \
+              --profile '${{ matrix.profile }}' \
+              --width '${{ matrix.width }}' \
+              --height '${{ matrix.height }}' \
+              --density '${{ matrix.density }}' \
+              --orientations '${{ matrix.orientations }}' \
+              --font-scales '${{ matrix.font_scales }}' \
+              --is-tv '${{ matrix.is_tv }}' \
+              --reason 'Emulator or capture driver produced no final summary.'
           fi
 
       - name: Enforce infrastructure and critical findings
         if: always()
         env:
-          ENFORCE_FINDINGS: ${{ github.event_name != 'workflow_dispatch' || inputs.enforce_findings }}
+          ENFORCE_FINDINGS: ${{ inputs.enforce_findings }}
         run: |
           set -euo pipefail
           python3 qa/compatibility/gate.py \
@@ -376,3 +380,76 @@ jobs:
           path: compatibility-results/${{ matrix.id }}/
           if-no-files-found: error
           retention-days: 14
+
+  aggregate-evidence:
+    name: Aggregate and enforce complete evidence
+    if: always()
+    needs:
+      - lab-plan
+      - device-lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: compatibility-*
+          path: device-artifacts
+
+      - name: Install report dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
+
+      - name: Build Compatibility and Quality Lab reports
+        run: |
+          set -euo pipefail
+          python3 qa/compatibility/aggregate.py device-artifacts aggregate-report
+          expected_devices="$(
+            python3 -c 'from qa.compatibility.lab_config import DEVICES; print(",".join(item["id"] for item in DEVICES))'
+          )"
+          python3 -m qa.quality.reporters.aggregate \
+            --input device-artifacts \
+            --output quality-report \
+            --build-sha "$GITHUB_SHA" \
+            --source-branch "$GITHUB_REF_NAME" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --expected-devices "$expected_devices"
+          cat aggregate-report/GITHUB_STEP_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify mandatory aggregate artifacts
+        run: |
+          set -euo pipefail
+          for required in \
+            SUMMARY.json REPORT.md REPORT.html junit.xml run-manifest.json \
+            findings.json coverage.json impact.json SHA256SUMS; do
+            test -s "quality-report/$required"
+          done
+          (
+            cd quality-report
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload aggregate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-LAB-AGGREGATE
+          path: |
+            aggregate-report/
+            quality-report/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Final fail-closed enforcement
+        if: always()
+        env:
+          ENFORCE_FINDINGS: ${{ inputs.enforce_findings }}
+        run: |
+          set -euo pipefail
+          test -s aggregate-report/COMPATIBILITY-LAB-SUMMARY.json
+          python3 qa/compatibility/gate.py \
+            aggregate-report/COMPATIBILITY-LAB-SUMMARY.json \
+            --enforce-findings "$ENFORCE_FINDINGS"

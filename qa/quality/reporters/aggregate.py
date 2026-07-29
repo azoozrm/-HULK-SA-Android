@@ -176,6 +176,8 @@ def aggregate(
     summaries: dict[str, dict[str, Any]] = {}
     parse_errors: list[str] = []
     for path in sorted(input_root.rglob("summary.json")):
+        if "attempts" in path.parts:
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             device = (

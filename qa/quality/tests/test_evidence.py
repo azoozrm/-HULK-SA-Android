@@ -187,6 +187,45 @@ class DownloadEvidenceTest(unittest.TestCase):
 
 
 class AggregateReporterTest(unittest.TestCase):
+    def test_preserved_retry_attempt_is_not_mistaken_for_duplicate_final_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            device = root / "input" / "phone"
+            attempt = device / "attempts" / "attempt-1"
+            attempt.mkdir(parents=True)
+            final = {
+                "device": {"id": "phone", "api": 35},
+                "case_count": 1,
+                "cases": [{"status": "PASS", "page": "home"}],
+                "findings": [],
+                "infrastructure_error_count": 0,
+            }
+            (device / "summary.json").write_text(json.dumps(final), encoding="utf-8")
+            (attempt / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "device": {"id": "phone", "api": 35},
+                        "case_count": 0,
+                        "cases": [],
+                        "findings": [],
+                        "infrastructure_error_count": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = aggregate(
+                root / "input",
+                root / "output",
+                build_sha="c" * 40,
+                source_branch="test",
+                workflow="unit",
+                run_id="retry",
+                expected_devices=["phone"],
+                impact={"schema_version": 1},
+            )
+            self.assertEqual(result["release_recommendation"], "PASS")
+            self.assertEqual(result["parse_errors"], [])
+
     def test_missing_expected_artifact_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

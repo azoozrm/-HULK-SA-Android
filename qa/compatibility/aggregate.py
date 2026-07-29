@@ -216,6 +216,8 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
     for path in sorted(input_root.rglob("summary.json")):
         if output_root in path.parents:
             continue
+        if "attempts" in path.parts:
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             device_id = data["device"]["id"]
