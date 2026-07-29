@@ -1,9 +1,11 @@
 # HULK SA Compatibility Lab
 
 This lab validates the current HULK SA production composables without changing
-production application logic, UI, branding, resources, or release behavior.
-The harness is injected into `app/src/debug` only while GitHub Actions builds the
-QA APK.
+repository production application logic, UI, branding, resources, or release
+behavior. The disposable prepared checkout receives `QaActivity` under
+`app/src/debug` plus measurement-only `BuildConfig.DEBUG` semantics in its
+temporary copy of `MainShellScreen.kt`; the repository `app/src/main` remains
+byte-identical to the official product base.
 
 ## Architecture
 
@@ -12,8 +14,11 @@ debug-only authenticated shell:
 
 1. The official source is reconstructed with the repository's approved release
    preparation chain.
-2. `prepare-harness.py` adds `QaActivity` only under `src/debug` and verifies
-   that `src/main` has the same SHA-256 tree digest before and after injection.
+2. `prepare-harness.py` adds `QaActivity` under `src/debug`, then
+   `inject_quality_markers.py` applies 13 strict measurement-only semantics
+   replacements to the disposable checkout's `MainShellScreen.kt`. It records
+   the original and instrumented SHA-256 values, rejects an unexpected source
+   shape, and verifies that no other `src/main` file changed.
 3. `QaActivity` renders the real `MainShellScreen` and its real Home, Live,
    Movies, Series, Favorites, Search, Downloads, and Settings content with
    deterministic fixture data. Downloads additionally use a debug-only
@@ -103,6 +108,7 @@ Each device artifact contains every raw capture and:
 - `summary.json`
 - `junit.xml`
 - `run-manifest.json`
+- `app/src/debug/quality-marker-injection.json` from the disposable build
 
 The aggregate artifact contains:
 
