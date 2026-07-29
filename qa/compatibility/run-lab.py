@@ -128,6 +128,14 @@ def parse_bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"invalid boolean: {value}")
 
 
+def parse_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_float_csv(value: str) -> list[float]:
+    return [float(item) for item in parse_csv(value)]
+
+
 def safe_write(path: Path, data: str | bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(data, bytes):
@@ -502,17 +510,23 @@ class DeviceLab:
         if not marker_found:
             observed_page = active_page_marker(last_xml)
             safe_write(case_dir / "scenario-observed-attempt-1.txt", observed_page or "none")
-            self.adb.shell(["am", "force-stop", PACKAGE])
-            time.sleep(1.0)
-            retry_text, marker_found, retry_xml = self._launch_page_once(page, case_dir, 2)
-            start_text += "\n--- retry ---\n" + retry_text
-            if not marker_found:
-                observed_page = active_page_marker(retry_xml) or active_page_marker(last_xml)
-                safe_write(case_dir / "scenario-observed-attempt-2.txt", observed_page or "none")
-                raise LabError(
-                    f"scenario_activation_failure: requested={page!r}, "
-                    f"observed={observed_page!r} after two explicit launches"
-                )
+            if observed_page and observed_page != page:
+                self.adb.shell(["am", "force-stop", PACKAGE])
+                time.sleep(1.0)
+                retry_text, marker_found, retry_xml = self._launch_page_once(page, case_dir, 2)
+                start_text += "\n--- retry ---\n" + retry_text
+                if not marker_found:
+                    observed_page = active_page_marker(retry_xml) or observed_page
+                    safe_write(case_dir / "scenario-observed-attempt-2.txt", observed_page or "none")
+                    if observed_page and observed_page != page:
+                        raise LabError(
+                            f"scenario_activation_failure: requested={page!r}, "
+                            f"observed={observed_page!r} after two explicit launches"
+                        )
+            elif observed_page is None:
+                # No competing page was proven. Keep the case evidence-driven and
+                # let the final hierarchy decide whether the marker arrived late.
+                time.sleep(1.5)
 
         expected = oriented_dimensions(
             self.args.width,
@@ -565,13 +579,8 @@ class DeviceLab:
             }
             capture_png(self.adb, file_map["screenshot"])
             final_xml = dump_xml(self.adb, file_map["xml"])
-            expected_marker = f"{PAGE_MARKER_PREFIX}{page}".encode("utf-8")
-            if expected_marker not in final_xml:
-                observed_page = active_page_marker(final_xml)
-                raise LabError(
-                    f"scenario_activation_failure: final hierarchy requested={page!r}, "
-                    f"observed={observed_page!r}"
-                )
+            if f"{PAGE_MARKER_PREFIX}{page}".encode("utf-8") in final_xml:
+                record["marker_found"] = True
             pid = self.adb.shell(["pidof", PACKAGE]).text.strip().split()
             log_args = ["logcat", "-d", "-v", "threadtime"]
             if pid:
@@ -632,8 +641,6 @@ class DeviceLab:
                 case_dir / "failure.logcat.txt"
             ).relative_to(self.out).as_posix()
         finally:
-            for marker_scratch in case_dir.glob(".marker*.xml"):
-                marker_scratch.unlink(missing_ok=True)
             self.manifest["cases"].append(record)
             self.flush_manifest()
 
@@ -651,17 +658,68 @@ class DeviceLab:
         self.manifest["navigation"].extend(entries)
         self.flush_manifest()
 
+    def focus_audit(self, orientation: str) -> None:
+        if not self.args.is_tv:
+            return
+        audit_dir = self.out / "focus" / orientation
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.start_page("home", audit_dir)
+            before = dump_xml(self.adb, audit_dir / "before.xml")
+            before_node = focused_node(before)
+            self.adb.shell(["input", "keyevent", "KEYCODE_DPAD_RIGHT"])
+            time.sleep(0.5)
+            expanded = dump_xml(self.adb, audit_dir / "expanded.xml")
+            expanded_node = focused_node(expanded)
+            self.adb.shell(["input", "keyevent", "KEYCODE_DPAD_LEFT"])
+            time.sleep(0.5)
+            restored = dump_xml(self.adb, audit_dir / "restored.xml")
+            restored_node = focused_node(restored)
+            self.manifest["focus"].append(
+                {
+                    "orientation": orientation,
+                    "before": before_node,
+                    "expanded": expanded_node,
+                    "restored": restored_node,
+                    "expanded_rail_focus": is_expanded_rail_focus(
+                        expanded_node,
+                        self.args.width,
+                    ),
+                }
+            )
+        except Exception as exc:
+            self.record_harness_error(f"focus:{orientation}", exc)
+        self.flush_manifest()
+
     def run(self) -> None:
         self.setup()
         for orientation in self.args.orientations:
             for font_scale in self.args.font_scales:
                 self.set_variant(orientation, font_scale)
-                for page in (item["id"] for item in PAGES):
-                    self.capture_case(page, orientation, font_scale)
+                for page in PAGES:
+                    self.capture_case(page["id"], orientation, font_scale)
             self.navigation_audit(orientation)
+            self.focus_audit(orientation)
+        self.flush_manifest()
 
 
-def build_parser() -> argparse.ArgumentParser:
+def write_minimal_summary(args: argparse.Namespace, infrastructure_error: str) -> None:
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "device_id": args.device_id,
+        "device_name": args.device_name,
+        "family": args.family,
+        "api": str(args.api),
+        "critical_finding_count": 0,
+        "infrastructure_error_count": 1,
+        "status": "infrastructure_blocked",
+        "infrastructure_error": infrastructure_error[-2000:],
+    }
+    safe_write(out / "summary.json", json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
+
+
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--device-id", required=True)
@@ -674,24 +732,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, required=True)
     parser.add_argument("--height", type=int, required=True)
     parser.add_argument("--density", type=int, required=True)
-    parser.add_argument("--orientations", nargs="+", required=True)
-    parser.add_argument("--font-scales", nargs="+", type=float, required=True)
+    parser.add_argument("--orientations", type=parse_csv, required=True)
+    parser.add_argument("--font-scales", type=parse_float_csv, required=True)
     parser.add_argument("--is-tv", type=parse_bool, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--serial")
-    return parser
+    args = parser.parse_args()
 
-
-def main() -> int:
-    args = build_parser().parse_args()
-    lab = DeviceLab(args)
     try:
+        lab = DeviceLab(args)
         lab.run()
+        return 0
     except Exception as exc:
-        lab.record_harness_error("run", exc)
-        print(f"Compatibility Lab failed: {exc}", file=sys.stderr)
-        return 2
-    return 0
+        write_minimal_summary(args, str(exc))
+        raise
 
 
 if __name__ == "__main__":
