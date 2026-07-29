@@ -591,40 +591,73 @@ class DeviceLab:
     def focus_audit(self, orientation: str) -> None:
         if not self.args.is_tv:
             return
-        audit_dir = self.out / "focus" / orientation
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            self.start_page("home", audit_dir)
-            before = dump_xml(self.adb, audit_dir / "before.xml")
-            before_node = focused_node(before)
-            self.adb.shell(["input", "keyevent", "KEYCODE_DPAD_RIGHT"])
-            time.sleep(0.5)
-            expanded = dump_xml(self.adb, audit_dir / "expanded.xml")
-            expanded_node = focused_node(expanded)
-            self.adb.shell(["input", "keyevent", "KEYCODE_DPAD_LEFT"])
-            time.sleep(0.5)
-            restored = dump_xml(self.adb, audit_dir / "restored.xml")
-            restored_node = focused_node(restored)
-            self.manifest["focus"].append({
+        audit_root = self.out / "focus" / orientation
+        audit_root.mkdir(parents=True, exist_ok=True)
+        entries: list[dict[str, Any]] = []
+        for page in PAGES:
+            page_id = page["id"]
+            page_dir = audit_root / page_id
+            page_dir.mkdir(parents=True, exist_ok=True)
+            entry: dict[str, Any] = {
                 "orientation": orientation,
-                "page": "home",
-                "trace": [
+                "page": page_id,
+                "trace": [],
+                "files": {},
+            }
+            try:
+                self.start_page(page_id, page_dir)
+                before_xml = page_dir / "before.xml"
+                before_png = page_dir / "before.png"
+                expanded_xml = page_dir / "expanded.xml"
+                expanded_png = page_dir / "expanded.png"
+                restored_xml = page_dir / "restored.xml"
+                restored_png = page_dir / "restored.png"
+
+                before = dump_xml(self.adb, before_xml)
+                capture_png(self.adb, before_png)
+                before_node = focused_node(before)
+
+                self.adb.shell(["input", "keyevent", "KEYCODE_DPAD_RIGHT"])
+                time.sleep(0.5)
+                expanded = dump_xml(self.adb, expanded_xml)
+                capture_png(self.adb, expanded_png)
+                expanded_node = focused_node(expanded)
+
+                self.adb.shell(["input", "keyevent", "KEYCODE_DPAD_LEFT"])
+                time.sleep(0.5)
+                restored = dump_xml(self.adb, restored_xml)
+                capture_png(self.adb, restored_png)
+                restored_node = focused_node(restored)
+
+                entry["trace"] = [
                     {"step": "before", "focused": before_node},
                     {"step": "expanded", "focused": expanded_node},
                     {"step": "restored", "focused": restored_node},
-                ],
-                "rail_visual": {
-                    "collapsed": {
-                        "xml": (audit_dir / "before.xml").relative_to(self.out).as_posix(),
-                    },
-                    "expanded": {
-                        "xml": (audit_dir / "expanded.xml").relative_to(self.out).as_posix(),
-                    },
-                },
-                "expanded_rail_focus": is_expanded_rail_focus(expanded_node, self.args.width),
-            })
-        except Exception as exc:
-            self.record_harness_error(f"focus:{orientation}", exc)
+                ]
+                entry["files"] = {
+                    "xml": restored_xml.relative_to(self.out).as_posix(),
+                    "screenshot": restored_png.relative_to(self.out).as_posix(),
+                }
+                if page_id == "home":
+                    entry["rail_visual"] = {
+                        "collapsed": {
+                            "xml": before_xml.relative_to(self.out).as_posix(),
+                            "screenshot": before_png.relative_to(self.out).as_posix(),
+                        },
+                        "expanded": {
+                            "xml": expanded_xml.relative_to(self.out).as_posix(),
+                            "screenshot": expanded_png.relative_to(self.out).as_posix(),
+                        },
+                    }
+                    entry["expanded_rail_focus"] = is_expanded_rail_focus(
+                        expanded_node,
+                        self.args.width,
+                    )
+            except Exception as exc:
+                entry["error"] = str(exc)[-1200:]
+                self.record_harness_error(f"focus:{orientation}:{page_id}", exc)
+            entries.append(entry)
+        self.manifest["focus"].extend(entries)
         self.flush_manifest()
 
     def run(self) -> None:
