@@ -2,7 +2,7 @@
 be84ea0d7f23b1aa8b5958470ea0f622a63aa05eefd40899e0e9c52e85924fba  app/proguard-rules.pro
 124a6fc5bae8798d4c0c6142cc94be7f9c99b9f1e20b65ede0c7bde655fecb6b  app/src/androidTest/java/sa/hulksa/player/CompatibilitySmokeTest.kt
 b6d9f1c99130f3ef9f452f148b17a3a0277566cfdefbedfae9ef2d3ee3961225  app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt
-8ec35c481873bdb13f02d0612eef3204c1f14e3d552b5c1f0ee86499d78201ca  app/src/androidTest/java/sa/hulksa/player/ui/MainShellComposeQualityTest.kt
+eddeaa96965ed09232eff50ab19fd5fba09ed97e9a703f3aa0ef6be43f596718  app/src/androidTest/java/sa/hulksa/player/ui/MainShellComposeQualityTest.kt
 7984461c4a356e5e3d0bb4e7166035eb346126577fb07039c4f6c3915c60f601  app/src/main/AndroidManifest.xml
 8cbfc148646cd02c4bc554993006f506e854e9e0b8c19d94fbedba4072bccd5a  app/src/main/java/sa/hulksa/player/DownloadNotificationPermission.kt
 c530816818aa0b879c1cde1a8439aa5722d8d2a0e11b54259a1b83790e984338  app/src/main/java/sa/hulksa/player/HulkViewModel.kt
@@ -35,7 +35,7 @@ e6354de8cd1e666d49035de3391fa12d43eaf8c5f3d537a2e05ca442c38baa84  app/src/main/j
 1ed1590beb9738ac4a3b0a56136c87d14d6527e8d2094bbac120f20c13b79bd9  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 87e0a9dfb54427781adf14991a464b8dec0ef29cc11d53840fb98cdb16107d98  app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
 8a43849b9bc6a097e7594e5ca1ceb7992157077a7a87f7e32a1e52cbe5724d2a  app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-169f06c1dc391d2533bc2573f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
+169f06c1dc391d2533f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
 cddb6a86741b7071a3806f2be3e01a87ef9a65b57293b2d8d9bba794c8f1b9e8  app/src/main/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicy.kt
 8b34550c3998a88a7c53587e303322b934417e199352a47250a0f1107b03efff  app/src/main/java/sa/hulksa/player/ui/theme/HulkTheme.kt
 2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e  app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
