@@ -134,6 +134,22 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("catch (_: IOException)", source)
         self.assertIn("catch (_: InterruptedException)", source)
 
+    def test_download_capture_waits_for_positive_byte_marker(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        start_page = source.split(
+            "    def start_page(self, page: str, case_dir: Path)",
+            maxsplit=1,
+        )[1].split(
+            "    def capture_case(self, page: str, orientation: str, font_scale: float)",
+            maxsplit=1,
+        )[0]
+
+        self.assertIn("DOWNLOAD_PROGRESS_MARKER", start_page)
+        self.assertIn("wait_for_marker(", start_page)
+        self.assertIn("timeout=15", start_page)
+        self.assertNotIn("3.0 if page == \"downloads\"", start_page)
+
+
 class AnalyzerTests(unittest.TestCase):
     def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:
         return ET.fromstring(

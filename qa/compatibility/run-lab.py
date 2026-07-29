@@ -21,6 +21,7 @@ from lab_config import PAGES
 PACKAGE = "sa.hulksa.player.dev"
 ACTIVITY = "sa.hulksa.player.qa.QaActivity"
 PAGE_MARKER_PREFIX = "qa-page:"
+DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 TRANSIENT_ADB_RE = re.compile(
     r"device offline|device ['\"][^'\"]+['\"] not found|"
@@ -522,9 +523,20 @@ class DeviceLab:
             )
         marker_scratch.unlink(missing_ok=True)
         # Downloads use a debug-only loopback origin and must prove actual byte
-        # progress. Give the repository enough time to probe and receive at
-        # least one bounded chunk before capturing the hierarchy.
-        time.sleep(3.0 if page == "downloads" else 0.8)
+        # progress. Synchronize on the semantic marker instead of a fixed sleep:
+        # high-density emulators can start WorkManager after the old three-second
+        # window. A timeout does not turn the case green; the final hierarchy is
+        # still captured and the analyzer emits download_transfer_no_byte_progress.
+        if page == "downloads":
+            wait_for_marker(
+                self.adb,
+                DOWNLOAD_PROGRESS_MARKER,
+                case_dir / ".download-progress.xml",
+                timeout=15,
+            )
+            (case_dir / ".download-progress.xml").unlink(missing_ok=True)
+        else:
+            time.sleep(0.8)
         return start_text, marker_found
 
     def capture_case(self, page: str, orientation: str, font_scale: float) -> None:
