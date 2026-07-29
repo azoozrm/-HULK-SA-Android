@@ -7,18 +7,36 @@ MAIN_SHELL = (
     ROOT
     / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
 )
+QA_ACTIVITY = ROOT / "qa/compatibility/QaActivity.kt"
 
 
 class DebugSemanticsMarkersTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.source = MAIN_SHELL.read_text(encoding="utf-8")
+        self.production_source = MAIN_SHELL.read_text(encoding="utf-8")
+        self.qa_source = QA_ACTIVITY.read_text(encoding="utf-8")
 
-    def test_markers_are_debug_only(self) -> None:
-        self.assertIn("isTv && BuildConfig.DEBUG", self.source)
-        self.assertIn("enabled && BuildConfig.DEBUG", self.source)
-        self.assertNotIn("testTag(", self.source)
+    def test_production_shell_contains_no_quality_only_semantics(self) -> None:
+        for marker in (
+            "qa-page:",
+            "qa-tv-page-content:",
+            "qa-tv-rail",
+            "qa-tv-live-actions",
+            "qa-tv-download-list",
+            "qa-tv-download-card:",
+            ".qaTvPageContent(",
+        ):
+            self.assertNotIn(marker, self.production_source)
 
-    def test_all_shell_destinations_have_page_geometry_marker(self) -> None:
+    def test_debug_harness_owns_page_and_download_progress_markers(self) -> None:
+        for marker in (
+            'val pageMarker = "qa-page:',
+            "QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER",
+            "QA_DOWNLOAD_PROGRESS_MARKER",
+            ".semantics(mergeDescendants = false)",
+        ):
+            self.assertIn(marker, self.qa_source)
+
+    def test_debug_harness_maps_every_shell_destination(self) -> None:
         for destination in (
             "HOME",
             "LIVE",
@@ -31,24 +49,9 @@ class DebugSemanticsMarkersTest(unittest.TestCase):
         ):
             self.assertIn(
                 f"MainDestination.{destination}",
-                self.source,
-                msg=f"missing destination reference for {destination}",
+                self.qa_source,
+                msg=f"missing debug destination mapping for {destination}",
             )
-
-        self.assertEqual(
-            self.source.count(".qaTvPageContent("),
-            8,
-            msg="expected one helper plus seven explicit calls, including the two catalog destinations",
-        )
-
-    def test_download_and_live_geometry_markers_exist(self) -> None:
-        for marker in (
-            "qa-tv-rail",
-            "qa-tv-live-actions",
-            "qa-tv-download-list",
-            "qa-tv-download-card:",
-        ):
-            self.assertIn(marker, self.source)
 
 
 if __name__ == "__main__":
