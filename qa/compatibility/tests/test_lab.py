@@ -115,6 +115,12 @@ class ConfigTests(unittest.TestCase):
             )
         )
 
+    def test_download_fixture_contains_expected_client_disconnects(self) -> None:
+        source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn("workers.execute { serveSafely(socket) }", source)
+        self.assertIn("catch (_: IOException)", source)
+        self.assertIn("catch (_: InterruptedException)", source)
+
 
 class AnalyzerTests(unittest.TestCase):
     def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:

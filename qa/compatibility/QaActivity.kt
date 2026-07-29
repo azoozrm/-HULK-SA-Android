@@ -24,6 +24,7 @@ import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
+import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -528,7 +529,7 @@ private class QaRangeServer : Closeable {
             while (running.get()) {
                 try {
                     val socket = server.accept()
-                    workers.execute { serve(socket) }
+                    workers.execute { serveSafely(socket) }
                 } catch (_: Exception) {
                     if (running.get()) {
                         // The analyzer will fail the transfer marker if serving stops.
@@ -538,6 +539,18 @@ private class QaRangeServer : Closeable {
         }, "hulk-qa-range-accept").apply {
             isDaemon = true
             start()
+        }
+    }
+
+    private fun serveSafely(socket: Socket) {
+        try {
+            serve(socket)
+        } catch (_: IOException) {
+            // A downloader can close a completed or cancelled range before the
+            // fixture finishes flushing. The transfer marker remains the gate;
+            // an expected client disconnect must not terminate the app process.
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 
