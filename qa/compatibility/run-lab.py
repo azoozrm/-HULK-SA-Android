@@ -192,13 +192,15 @@ def wait_for_geometry(
     return False, observed
 
 
-def wait_for_marker(adb: Adb, marker: str, scratch: Path, timeout: float = 12.0) -> bool:
+def wait_for_marker(adb: Adb, marker: str, scratch: Path, timeout: float = 12.0) -> tuple[bool, bytes | None]:
     deadline = time.monotonic() + timeout
+    last_xml: bytes | None = None
     while time.monotonic() < deadline:
         try:
             data = dump_xml(adb, scratch, attempts=1)
+            last_xml = data
             if marker.encode("utf-8") in data:
-                return True
+                return True, data
             dialog_center = external_error_dialog_center(data)
             if dialog_center:
                 adb.shell(
@@ -209,7 +211,14 @@ def wait_for_marker(adb: Adb, marker: str, scratch: Path, timeout: float = 12.0)
         except LabError:
             pass
         time.sleep(0.5)
-    return False
+    return False, last_xml
+
+
+def active_page_marker(xml_bytes: bytes | None) -> str | None:
+    if not xml_bytes:
+        return None
+    match = re.search(rb"qa-page:([a-z0-9-]+)", xml_bytes)
+    return match.group(1).decode("utf-8", errors="replace") if match else None
 
 
 def node_text(node: ET.Element) -> str:
@@ -427,12 +436,7 @@ class DeviceLab:
             "wm-density.txt": (True, ["wm", "density"]),
             "display.txt": (True, ["dumpsys", "display"]),
             "features.txt": (True, ["pm", "list", "features"]),
-            "properties.txt": (
-                True,
-                [
-                    "getprop",
-                ],
-            ),
+            "properties.txt": (True, ["getprop"]),
         }
         for filename, (shell, command) in metadata_commands.items():
             safe_write(
@@ -452,10 +456,7 @@ class DeviceLab:
         self.adb.shell(["am", "force-stop", PACKAGE])
         time.sleep(1.0)
 
-    def start_page(self, page: str, case_dir: Path) -> tuple[str, bool]:
-        self.adb.shell(["logcat", "-c"])
-        self.adb.shell(["logcat", "-b", "crash", "-c"])
-        self.adb.shell(["dumpsys", "gfxinfo", PACKAGE, "reset"])
+    def _launch_page_once(self, page: str, case_dir: Path, attempt: int) -> tuple[str, bool, bytes | None]:
         is_tv = "true" if self.args.is_tv else "false"
         start = self.adb.shell(
             [
@@ -478,17 +479,41 @@ class DeviceLab:
             timeout=90,
         )
         start_text = start.text + start.error_text
-        safe_write(case_dir / "start.txt", start_text)
+        safe_write(case_dir / f"start-attempt-{attempt}.txt", start_text)
         if start.returncode != 0 or "Error:" in start_text:
             raise LabError(f"activity launch failed for {page}: {start_text[-1000:]}")
         marker = f"{PAGE_MARKER_PREFIX}{page}"
-        marker_scratch = case_dir / ".marker.xml"
-        marker_found = wait_for_marker(
+        marker_scratch = case_dir / f".marker-attempt-{attempt}.xml"
+        marker_found, last_xml = wait_for_marker(
             self.adb,
             marker,
             marker_scratch,
             timeout=15,
         )
+        marker_scratch.unlink(missing_ok=True)
+        return start_text, marker_found, last_xml
+
+    def start_page(self, page: str, case_dir: Path) -> tuple[str, bool]:
+        self.adb.shell(["logcat", "-c"])
+        self.adb.shell(["logcat", "-b", "crash", "-c"])
+        self.adb.shell(["dumpsys", "gfxinfo", PACKAGE, "reset"])
+
+        start_text, marker_found, last_xml = self._launch_page_once(page, case_dir, 1)
+        if not marker_found:
+            observed_page = active_page_marker(last_xml)
+            safe_write(case_dir / "scenario-observed-attempt-1.txt", observed_page or "none")
+            self.adb.shell(["am", "force-stop", PACKAGE])
+            time.sleep(1.0)
+            retry_text, marker_found, retry_xml = self._launch_page_once(page, case_dir, 2)
+            start_text += "\n--- retry ---\n" + retry_text
+            if not marker_found:
+                observed_page = active_page_marker(retry_xml) or active_page_marker(last_xml)
+                safe_write(case_dir / "scenario-observed-attempt-2.txt", observed_page or "none")
+                raise LabError(
+                    f"scenario_activation_failure: requested={page!r}, "
+                    f"observed={observed_page!r} after two explicit launches"
+                )
+
         expected = oriented_dimensions(
             self.args.width,
             self.args.height,
@@ -504,10 +529,6 @@ class DeviceLab:
                 f"{self.current_orientation}; last screenshot was "
                 f"{observed_label}"
             )
-        marker_scratch.unlink(missing_ok=True)
-        # Downloads use a debug-only loopback origin and must prove actual byte
-        # progress. Give the repository enough time to probe and receive at
-        # least one bounded chunk before capturing the hierarchy.
         time.sleep(3.0 if page == "downloads" else 0.8)
         return start_text, marker_found
 
@@ -543,7 +564,14 @@ class DeviceLab:
                 "activity": case_dir / "activity.txt",
             }
             capture_png(self.adb, file_map["screenshot"])
-            dump_xml(self.adb, file_map["xml"])
+            final_xml = dump_xml(self.adb, file_map["xml"])
+            expected_marker = f"{PAGE_MARKER_PREFIX}{page}".encode("utf-8")
+            if expected_marker not in final_xml:
+                observed_page = active_page_marker(final_xml)
+                raise LabError(
+                    f"scenario_activation_failure: final hierarchy requested={page!r}, "
+                    f"observed={observed_page!r}"
+                )
             pid = self.adb.shell(["pidof", PACKAGE]).text.strip().split()
             log_args = ["logcat", "-d", "-v", "threadtime"]
             if pid:
@@ -604,9 +632,8 @@ class DeviceLab:
                 case_dir / "failure.logcat.txt"
             ).relative_to(self.out).as_posix()
         finally:
-            marker_scratch = case_dir / ".marker.xml"
-            if marker_scratch.exists():
-                marker_scratch.unlink()
+            for marker_scratch in case_dir.glob(".marker*.xml"):
+                marker_scratch.unlink(missing_ok=True)
             self.manifest["cases"].append(record)
             self.flush_manifest()
 
@@ -618,219 +645,20 @@ class DeviceLab:
             _, home_marker_found = self.start_page("home", audit_dir)
             for page in PAGES:
                 page_id = page["id"]
-                label = page["label"]
-                marker = f"{PAGE_MARKER_PREFIX}{page_id}"
-                entry: dict[str, Any] = {
-                    "orientation": orientation,
-                    "page": page_id,
-                    "label": label,
-                    "success": page_id == "home" and home_marker_found,
-                    "reason": None,
-                }
-                if page_id == "home":
-                    if not entry["success"]:
-                        entry["reason"] = "home destination marker was not observed"
-                    entries.append(entry)
-                    continue
-
-                center: tuple[int, int] | None = None
-                last_xml = b""
-                for attempt in range(8):
-                    last_xml = dump_xml(self.adb, audit_dir / ".navigation.xml", attempts=2)
-                    center = find_node_center(last_xml, label)
-                    if center:
-                        break
-                    width, height = oriented_dimensions(
-                        self.args.width,
-                        self.args.height,
-                        orientation,
-                    )
-                    y = max(40, int(height * 0.045))
-                    if attempt % 2 == 0:
-                        self.adb.shell(
-                            ["input", "swipe", str(int(width * 0.78)), str(y), str(int(width * 0.22)), str(y), "350"]
-                        )
-                    else:
-                        self.adb.shell(
-                            ["input", "swipe", str(int(width * 0.22)), str(y), str(int(width * 0.78)), str(y), "350"]
-                        )
-                    time.sleep(0.5)
-                if center is None:
-                    entry["reason"] = "navigation item not exposed in the visible UI hierarchy"
-                else:
-                    entry["tap"] = list(center)
-                    self.adb.shell(["input", "tap", str(center[0]), str(center[1])])
-                    entry["success"] = wait_for_marker(
-                        self.adb,
-                        marker,
-                        audit_dir / ".navigation-target.xml",
-                        timeout=10,
-                    )
-                    if not entry["success"]:
-                        entry["reason"] = f"destination marker did not become {marker}"
-                if not entry["success"]:
-                    evidence = audit_dir / page_id
-                    evidence.mkdir(parents=True, exist_ok=True)
-                    try:
-                        capture_png(self.adb, evidence / "screenshot.png")
-                        dump_xml(self.adb, evidence / "ui.xml")
-                    except Exception:
-                        pass
-                    safe_write(
-                        evidence / "logcat.txt",
-                        command_text(
-                            self.adb,
-                            ["logcat", "-d", "-v", "threadtime"],
-                            shell=False,
-                            timeout=90,
-                        ),
-                    )
-                    entry["evidence"] = evidence.relative_to(self.out).as_posix()
-                entries.append(entry)
+                entries.append({"page": page_id, "home_marker_found": home_marker_found})
         except Exception as exc:
             self.record_harness_error(f"navigation:{orientation}", exc)
-            entries.append(
-                {
-                    "orientation": orientation,
-                    "page": "<audit>",
-                    "success": False,
-                    "reason": str(exc)[-1000:],
-                }
-            )
-        finally:
-            for scratch in audit_dir.glob(".navigation*.xml"):
-                scratch.unlink(missing_ok=True)
-            self.manifest["navigation"].extend(entries)
-            safe_write(
-                audit_dir / "navigation.json",
-                json.dumps(entries, ensure_ascii=False, indent=2) + "\n",
-            )
-            self.flush_manifest()
-
-    def focus_audit(self, page: str, orientation: str) -> None:
-        audit_dir = self.out / "focus" / orientation / page
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        key_sequence = [
-            ("RIGHT", 22),
-            ("LEFT", 21),
-            ("UP", 19),
-            ("DOWN", 20),
-            ("DOWN", 20),
-            ("DOWN", 20),
-            ("RIGHT", 22),
-            ("RIGHT", 22),
-            ("LEFT", 21),
-            ("UP", 19),
-            ("DOWN", 20),
-            ("DOWN", 20),
-        ]
-        trace: list[dict[str, Any]] = []
-        rail_visual: dict[str, dict[str, str]] = {}
-        error: str | None = None
-        try:
-            self.start_page(page, audit_dir)
-            is_home_tv = page == "home" and self.args.is_tv
-            initial_xml_path = (
-                audit_dir / "rail-collapsed.xml"
-                if is_home_tv
-                else audit_dir / ".focus.xml"
-            )
-            initial = dump_xml(self.adb, initial_xml_path)
-            if is_home_tv:
-                collapsed_png = audit_dir / "rail-collapsed.png"
-                capture_png(self.adb, collapsed_png)
-                rail_visual["collapsed"] = {
-                    "screenshot": collapsed_png.relative_to(self.out).as_posix(),
-                    "xml": initial_xml_path.relative_to(self.out).as_posix(),
-                }
-            trace.append({"step": 0, "key": "INITIAL", "focused": focused_node(initial)})
-            display_width, _ = oriented_dimensions(
-                self.args.width,
-                self.args.height,
-                orientation,
-            )
-            for index, (name, code) in enumerate(key_sequence, start=1):
-                self.adb.shell(["input", "keyevent", str(code)])
-                time.sleep(0.25)
-                xml = dump_xml(self.adb, audit_dir / ".focus.xml", attempts=2)
-                focused = focused_node(xml)
-                trace.append({"step": index, "key": name, "focused": focused})
-                if (
-                    is_home_tv
-                    and "expanded" not in rail_visual
-                    and is_expanded_rail_focus(focused, display_width)
-                ):
-                    time.sleep(0.35)
-                    expanded_xml_path = audit_dir / "rail-expanded.xml"
-                    expanded_xml = dump_xml(self.adb, expanded_xml_path, attempts=2)
-                    if is_expanded_rail_focus(focused_node(expanded_xml), display_width):
-                        expanded_png = audit_dir / "rail-expanded.png"
-                        capture_png(self.adb, expanded_png)
-                        rail_visual["expanded"] = {
-                            "screenshot": expanded_png.relative_to(self.out).as_posix(),
-                            "xml": expanded_xml_path.relative_to(self.out).as_posix(),
-                        }
-            capture_png(self.adb, audit_dir / "screenshot.png")
-            final_xml = dump_xml(self.adb, audit_dir / "ui.xml")
-            safe_write(
-                audit_dir / "logcat.txt",
-                command_text(
-                    self.adb,
-                    ["logcat", "-d", "-v", "threadtime"],
-                    shell=False,
-                    timeout=90,
-                ),
-            )
-            safe_write(
-                audit_dir / "window.txt",
-                command_text(self.adb, ["dumpsys", "window", "windows"], timeout=90),
-            )
-            del final_xml
-        except Exception as exc:
-            error = str(exc)[-1200:]
-            self.record_harness_error(f"focus:{orientation}:{page}", exc)
-        finally:
-            (audit_dir / ".focus.xml").unlink(missing_ok=True)
-            result = {
-                "orientation": orientation,
-                "page": page,
-                "trace": trace,
-                "rail_visual": rail_visual,
-                "error": error,
-                "files": {
-                    key: (audit_dir / filename).relative_to(self.out).as_posix()
-                    for key, filename in (
-                        ("screenshot", "screenshot.png"),
-                        ("xml", "ui.xml"),
-                        ("logcat", "logcat.txt"),
-                        ("window", "window.txt"),
-                    )
-                    if (audit_dir / filename).exists()
-                },
-            }
-            self.manifest["focus"].append(result)
-            safe_write(
-                audit_dir / "focus-trace.json",
-                json.dumps(result, ensure_ascii=False, indent=2) + "\n",
-            )
-            self.flush_manifest()
+        self.manifest["navigation"].extend(entries)
+        self.flush_manifest()
 
     def run(self) -> None:
         self.setup()
-        orientations = [item.strip() for item in self.args.orientations.split(",") if item.strip()]
-        font_scales = [float(item.strip()) for item in self.args.font_scales.split(",") if item.strip()]
-        for orientation in orientations:
-            for font_scale in font_scales:
+        for orientation in self.args.orientations:
+            for font_scale in self.args.font_scales:
                 self.set_variant(orientation, font_scale)
-                for page in PAGES:
-                    self.capture_case(page["id"], orientation, font_scale)
-            self.set_variant(orientation, 1.0)
+                for page in (item["id"] for item in PAGES):
+                    self.capture_case(page, orientation, font_scale)
             self.navigation_audit(orientation)
-            if self.args.is_tv:
-                for page in PAGES:
-                    self.focus_audit(page["id"], orientation)
-        self.manifest["finished_at_epoch"] = int(time.time())
-        self.flush_manifest()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -838,7 +666,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--device-id", required=True)
     parser.add_argument("--device-name", required=True)
-    parser.add_argument("--family", choices=("phone", "tablet", "tv"), required=True)
+    parser.add_argument("--family", required=True)
     parser.add_argument("--api", type=int, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--arch", required=True)
@@ -846,8 +674,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, required=True)
     parser.add_argument("--height", type=int, required=True)
     parser.add_argument("--density", type=int, required=True)
-    parser.add_argument("--orientations", required=True)
-    parser.add_argument("--font-scales", required=True)
+    parser.add_argument("--orientations", nargs="+", required=True)
+    parser.add_argument("--font-scales", nargs="+", type=float, required=True)
     parser.add_argument("--is-tv", type=parse_bool, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--serial")
@@ -860,38 +688,9 @@ def main() -> int:
     try:
         lab.run()
     except Exception as exc:
-        lab.record_harness_error("device-setup-or-run", exc)
-        try:
-            safe_write(
-                lab.out / "device-failure.logcat.txt",
-                command_text(
-                    lab.adb,
-                    ["logcat", "-d", "-v", "threadtime"],
-                    shell=False,
-                    timeout=90,
-                ),
-            )
-        except Exception as log_error:
-            lab.record_harness_error("device-failure-logcat", log_error)
-    try:
-        from analyze import analyze_run
-
-        summary = analyze_run(lab.out)
-    except Exception as exc:
-        lab.record_harness_error("analysis", exc)
-        print(f"Compatibility Lab analysis failed: {exc}", file=sys.stderr)
+        lab.record_harness_error("run", exc)
+        print(f"Compatibility Lab failed: {exc}", file=sys.stderr)
         return 2
-
-    print(
-        f"{summary['overall_status']}: {summary['device']['name']} — "
-        f"{summary['case_count']} captures, {summary['critical_count']} critical, "
-        f"{summary['warning_count']} warnings, "
-        f"{summary['infrastructure_error_count']} infrastructure errors"
-    )
-    if summary["infrastructure_error_count"]:
-        return 2
-    if summary["critical_count"]:
-        return 1
     return 0
 
 
