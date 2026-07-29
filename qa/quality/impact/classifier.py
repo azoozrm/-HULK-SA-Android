@@ -102,7 +102,13 @@ RULES: tuple[dict[str, object], ...] = (
     },
     {
         "id": "quality_lab",
-        "prefixes": ("qa/", "docs/quality/", ".github/workflows/quality-"),
+        "prefixes": (
+            "qa/",
+            "docs/quality/",
+            ".github/workflows/quality-",
+            ".github/workflows/compatibility-lab",
+            "tools/",
+        ),
         "tests": ("quality-self-tests", "schema-validation", "report-dry-run"),
     },
 )
@@ -270,4 +276,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

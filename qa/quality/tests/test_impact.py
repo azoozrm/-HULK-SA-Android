@@ -35,6 +35,17 @@ class ImpactClassifierTest(unittest.TestCase):
         self.assertIn("quality-self-tests", result["selected_tests"])
         self.assertIn("schema-validation", result["selected_tests"])
 
+    def test_compatibility_workflow_and_release_verifier_are_known_lab_changes(self) -> None:
+        result = classify(
+            [
+                ".github/workflows/compatibility-lab.yml",
+                "tools/verify-runtime-config.py",
+            ]
+        )
+        self.assertEqual(result["unknown_files"], [])
+        self.assertFalse(result["full_matrix"])
+        self.assertIn("quality-self-tests", result["selected_tests"])
+
 
 class UiInventoryTest(unittest.TestCase):
     def test_discovers_destinations_and_non_shell_screens(self) -> None:
