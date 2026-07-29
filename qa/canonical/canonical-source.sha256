@@ -7,7 +7,7 @@ c530816818aa0b879c1cde1a8439aa5722d8d2a0e11b54259a1b83790e984338  app/src/main/j
 5d4d585eb8b42ef2a18b5e8189d9ed520417ee1928e07465c75b059e3c38d3ea  app/src/main/java/sa/hulksa/player/MainActivity.kt
 303e31a2a395c138e3401bc71b9196b67e8afb755c1487b64164054b9c4c34d2  app/src/main/java/sa/hulksa/player/TvMainActivity.kt
 33893050141838931a91a7fe4984c548bc23408fdc681136db4dca6db6161ac3  app/src/main/java/sa/hulksa/player/data/DownloadExecutionEntryPoint.kt
-51f55274646ae669667b02e6038978dd3c6bdf6a645234d556f4769384e2d685  app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
+48c23ab13770fac6e08d17f4eccf6059f3306b1c04aacf854c9dd5954909acfa  app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
 7704d29dc56e371c7985213821b521964fb4740748ae046743e95bc6870c2f83  app/src/main/java/sa/hulksa/player/data/DownloadRepositoryProcessOwner.kt
 b349ee6742c4edc7667f6a100305079fe9b992488e8c85913299dfc82e001ec0  app/src/main/java/sa/hulksa/player/data/DownloadSchedulingPolicy.kt
 2227955fe8906d7fdba8ac35409facd2661b461d5782b57285960de6080d2bbe  app/src/main/java/sa/hulksa/player/data/DurableDownloadActionReceiver.kt
@@ -58,7 +58,7 @@ d1208b6c7c3576f4938ecaf601734f3cf785a51bac58e82175ecef432fa6aeb4  app/src/main/r
 87f7ca23172b1febd2fe77f67ade1ccdb7ab5a91ddfc64e2891b10b39418badf  app/src/test/java/sa/hulksa/player/data/ArtworkUrlTest.kt
 196d2120b12dca5f78e715612db01095ba18acad79f918389d58e1e33a2ab2df  app/src/test/java/sa/hulksa/player/data/DownloadExecutionEntryPointTest.kt
 54ed0a6e5f79c7c0fa8f2735cf8999e677b9989d9dbbabcde107c27745fe8e5c  app/src/test/java/sa/hulksa/player/data/DownloadSchedulingPolicyTest.kt
-f7f08d7064ed516cab08907834e9037556fe6d139b84bcecbedad9014e7e40e4  app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt
+fd7fb904cf2a109957fb5a2cbb1cab924075e333bd8eb4eacc1bd1f09d6b1dd3  app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt
 57440f84159ff0a092d679aa0b6ad6a3d9fdbbc1e4c3bd47d99d58e2845bd0b1  app/src/test/java/sa/hulksa/player/data/DurableDownloadActionReceiverTest.kt
 e529cb7e552d0741b5b741bae365b1bb9e61264151e40aeed2257cc9c6ceee4f  app/src/test/java/sa/hulksa/player/data/DurableDownloadForegroundTest.kt
 33f5cf769c57841466dc3777bd9c95137b63e47a194fc8f193103ea88a31d1fe  app/src/test/java/sa/hulksa/player/data/DurableDownloadLifecycleBridgeTest.kt

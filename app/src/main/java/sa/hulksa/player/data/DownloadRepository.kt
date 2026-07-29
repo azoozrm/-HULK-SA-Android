@@ -34,6 +34,7 @@ import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.CoroutineContext
 import kotlin.math.max
 
 class DownloadRepository(context: Context) {
@@ -398,7 +399,7 @@ class DownloadRepository(context: Context) {
     }
 
     @Throws(IOException::class)
-    private fun performDownload(downloadId: Long) {
+    private suspend fun performDownload(downloadId: Long) {
         val startItem = item(downloadId) ?: return
         mutate(downloadId) {
             it.copy(
@@ -539,7 +540,7 @@ class DownloadRepository(context: Context) {
                     body.byteStream().use { input ->
                         val buffer = ByteArray(BUFFER_SIZE)
                         while (bytesReadFromResponse < maximumResponseBytes) {
-                            currentCoroutineContextBlockingCheck()
+                            ensureDownloadContextActive(currentCoroutineContext())
                             networkConstraintMessage()?.let { throw NetworkUnavailableException() }
                             if (!target.directory.exists()) throw StorageUnavailableException()
                             if (totalBytes > 0L && downloaded >= totalBytes) break
@@ -1083,12 +1084,6 @@ class DownloadRepository(context: Context) {
         preferences.edit().putString(KEY_DOWNLOADS, array.toString()).apply()
     }
 
-    private fun currentCoroutineContextBlockingCheck() {
-        currentCoroutineContextBridge().ensureActive()
-    }
-
-    private fun currentCoroutineContextBridge() = kotlinx.coroutines.runBlocking { currentCoroutineContext() }
-
     private fun parseTotalFromContentRange(value: String?): Long {
         if (value.isNullOrBlank()) return -1L
         return value.substringAfterLast('/', "").toLongOrNull() ?: -1L
@@ -1187,6 +1182,10 @@ class DownloadRepository(context: Context) {
 internal const val DOWNLOAD_STALL_TIMEOUT_SECONDS = 30L
 internal const val DOWNLOAD_USER_AGENT = "HULK-SA-Android/0.9.3"
 internal const val DOWNLOAD_RANGE_CHUNK_BYTES = 4L * 1024L * 1024L
+
+internal fun ensureDownloadContextActive(context: CoroutineContext) {
+    context.ensureActive()
+}
 
 internal fun downloadByteRange(
     offset: Long,

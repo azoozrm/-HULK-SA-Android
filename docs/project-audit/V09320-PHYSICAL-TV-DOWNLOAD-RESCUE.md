@@ -84,6 +84,26 @@
 - التحقق من بداية `Content-Range` ومن اكتمال جسم كل استجابة جزئية.
 - تحديث التقدم بعد كل نطاق والاستمرار من آخر بايت مكتوب.
 - إبقاء مسار fallback للخادم الذي يعيد `200` ولا يدعم الاستكمال.
+- تحويل `performDownload` إلى مسار `suspend` حقيقي وفحص
+  `currentCoroutineContext()` الخاص بمهمة التنزيل مباشرة.
+
+كشفت Run 62 سببًا ثانيًا كان يمنع أول قراءة حتى مع النطاقات المحددة:
+الدالة القديمة كانت تنشئ `runBlocking` جديدًا للحصول على السياق، ثم تستدعي
+`ensureActive()` بعد انتهاء ذلك الـ`runBlocking`. وبذلك كان الـJob الجديد
+مكتملًا بالفعل، فتُرمى `CancellationException` قبل أول `input.read` وتبقى
+الحالة «جاري التحميل» عند صفر بايت. الإصلاح لا يلغي فحص الإلغاء؛ بل يطبقه
+على Job التنزيل الأصلي.
+
+## ملاحظات CI التي منع المختبر اعتمادها
+
+- Run 61 على Pixel 8 Pro كشفت عيبًا في سيرفر loopback الاختباري:
+  إغلاق العميل للاتصال أدى إلى `Broken pipe` غير ملتقط وأسقط تطبيق المختبر.
+  أصبح فصل العميل المتوقع محصورًا داخل worker، بينما بقي marker نقل البايتات
+  إلزاميًا.
+- Run 62 لم تعد تسجل crash أو hierarchy مفقودة. بقيت نتيجتان حرجتان فقط
+  في Pixel 6 وPixel 8 Pro، وكلتاهما
+  `download_transfer_no_byte_progress`. هذا الفصل في الأدلة هو الذي أثبت
+  خطأ سياق الإلغاء الإنتاجي أعلاه بدل إخفائه كـflakiness.
 
 ## بوابات المختبر الجديدة
 
@@ -108,9 +128,9 @@
 | توحيد حواف الصفحات الثماني | `IMPLEMENTED / CI LAB PENDING` |
 | حماية أزرار البث من الأسفل | `IMPLEMENTED / CI LAB PENDING` |
 | تكيف الشعار دون تغيير الأصل | `IMPLEMENTED / CI + XIAOMI PENDING` |
-| نقل تنزيل bounded-range | `IMPLEMENTED / CI + SERVER RUNTIME PENDING` |
+| نقل تنزيل bounded-range وسياق الإلغاء الأصلي | `IMPLEMENTED / CI + SERVER RUNTIME PENDING` |
 | بطاقتان كاملتان بلا تداخل | `IMPLEMENTED / CI LAB PENDING` |
-| Python analyzer tests | `PASS` |
+| Python analyzer tests | `18/18 PASS` |
 | Android Kotlin/unit/build/R8 | `BLOCKED LOCALLY BY GRADLE NETWORK / CI PENDING` |
 | Signed APK/AAB | `PENDING` |
 | اختبار Xiaomi الفيزيائي | `PENDING` |

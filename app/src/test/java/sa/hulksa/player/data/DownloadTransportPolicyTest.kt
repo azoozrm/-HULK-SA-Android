@@ -1,5 +1,7 @@
 package sa.hulksa.player.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -76,5 +78,24 @@ class DownloadTransportPolicyTest {
     @Test
     fun `download transport cannot wait forever for the next byte`() {
         assertTrue(DOWNLOAD_STALL_TIMEOUT_SECONDS in 1L..60L)
+    }
+
+    @Test
+    fun `active download context permits the next network read`() {
+        ensureDownloadContextActive(Job())
+    }
+
+    @Test
+    fun `cancelled download context stops before the next network read`() {
+        val job = Job().apply { cancel() }
+        var cancellationObserved = false
+
+        try {
+            ensureDownloadContextActive(job)
+        } catch (_: CancellationException) {
+            cancellationObserved = true
+        }
+
+        assertTrue(cancellationObserved)
     }
 }
