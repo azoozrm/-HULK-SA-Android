@@ -40,16 +40,19 @@ The regression test file is:
 
 - `app/src/androidTest/java/sa/hulksa/player/ui/DownloadsFocusNavigationTest.kt`
 
-Clean product-repair head before the ordinary retrigger commit: `8862bba41e710e86f68feafa4902f58a8ecd4ef2`.
+Clean formatted product-repair head before the ordinary retrigger commit: `625ad311607fda7fe77a61b9ff590774d6940f5d`.
+
+The signed APK produced before this physical finding is invalidated as an acceptance candidate. A new signed APK/AAB must be generated only after the current strict CI, strengthened Quality Lab contract and repeated physical qualification pass.
 
 ## Atomic cleanup evidence
 
 - Production source contains no `qa-tv-*`, `qaTvPageContent`, or `qaMarker` semantics.
 - Canonical hashes were rebuilt from the actual repository bytes, not copied manually.
 - `ArtworkUrlTest.kt` and `TvLayoutPolicyTest.kt` hashes match their current files.
-- Temporary repair and sanitizer workflows are absent from the final PR diff.
+- Temporary repair, formatter and sanitizer workflows are absent from the final PR diff.
 - A broad staging mistake was removed by rebuilding from clean head `c291fa7df2f3ee3a04d020cd831f02073a44d514` and preserving exactly four intended repair files.
-- The ordinary documentation commit retriggers the complete PR workflow suite because GitHub does not recursively trigger workflows from a `GITHUB_TOKEN` bot push.
+- The formatted source successfully passed marker-injection self-tests, canonical project preparation, Kotlin compile, unit tests and Android-test compilation before the bot commit.
+- This ordinary documentation commit retriggers the complete PR workflow suite because GitHub does not recursively trigger workflows from a `GITHUB_TOKEN` bot push.
 
 ## Integrity conditions
 
