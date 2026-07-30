@@ -70,6 +70,9 @@ jobs:
                       if candidate.startswith((' ', '+')):
                           new_count += 1
                       cursor += 1
+                  if source.name == 'pr68-qaactivity-focus.patch' and old_start == '566':
+                      index = cursor
+                      continue
                   output.append(
                       f'@@ -{old_start},{old_count} +{new_start},{new_count} @@{suffix}'
                   )
@@ -94,6 +97,23 @@ jobs:
             git apply --check "$patch"
             git apply "$patch"
           done
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('qa/compatibility/QaActivity.kt')
+          text = path.read_text(encoding='utf-8')
+          changes = {
+              'private const val QA_DOWNLOAD_TOTAL_BYTES = 64L * 1024L * 1024L':
+                  'private const val QA_DOWNLOAD_TOTAL_BYTES = 256L * 1024L * 1024L',
+              'private const val QA_DOWNLOAD_WRITE_DELAY_MS = 10L':
+                  'private const val QA_DOWNLOAD_WRITE_DELAY_MS = 50L',
+          }
+          for old, new in changes.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one QA server constant: {old!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
           python3 -m py_compile \
             qa/compatibility/focus_contract.py \
             qa/compatibility/run-lab.py \
