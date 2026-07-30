@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -33,7 +34,10 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
@@ -66,6 +70,7 @@ import sa.hulksa.player.ui.theme.HulkTheme
  */
 class QaActivity : ComponentActivity() {
     private var downloadServer: QaRangeServer? = null
+    private var downloadHarnessState by mutableStateOf<QaDownloadHarness?>(null)
 
     override fun attachBaseContext(newBase: Context) {
         val locale = Locale.forLanguageTag("ar-SA")
@@ -88,18 +93,20 @@ class QaActivity : ComponentActivity() {
         val configTv =
             (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
                 Configuration.UI_MODE_TYPE_TELEVISION
-        val downloadHarness = if (scenario == "downloads") {
-            prepareDownloadHarness()
-        } else {
-            null
-        }
         setContent {
             HulkTheme {
                 QaAuthenticatedShell(
                     initialDestination = scenario.toDestination(),
                     isTv = forcedTv || configTv,
-                    downloadHarness = downloadHarness,
+                    downloadHarness = downloadHarnessState,
                 )
+            }
+        }
+        if (scenario == "downloads") {
+            lifecycleScope.launch {
+                downloadHarnessState = withContext(Dispatchers.IO) {
+                    prepareDownloadHarness()
+                }
             }
         }
     }
