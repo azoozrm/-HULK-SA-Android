@@ -15,6 +15,14 @@ on:
         required: false
         type: boolean
         default: false
+      source_head_sha:
+        required: false
+        type: string
+        default: ''
+      base_sha:
+        required: false
+        type: string
+        default: ''
   pull_request:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
@@ -52,6 +60,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Classify lab-only versus product changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      lab_only: ${{ steps.classify.outputs.lab_only }}
+      enforce_product_findings: ${{ steps.classify.outputs.enforce_product_findings }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Classify the exact PR diff fail closed
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.base_sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p quality-evidence/scope
+          python3 -m qa.quality.scripts.pr_scope \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --output quality-evidence/scope/SCOPE.json \
+            --github-output "$GITHUB_OUTPUT"
+          jq . quality-evidence/scope/SCOPE.json
+
+      - name: Upload scope evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-UI-SCOPE
+          path: quality-evidence/scope/
+          if-no-files-found: error
+          retention-days: 14
+
   baseline-policy:
     name: Enforce visual baseline policy
     runs-on: ubuntu-latest
@@ -66,7 +110,10 @@ jobs:
 
   compose-instrumentation:
     name: Compose, Android and deterministic download instrumentation
-    needs: baseline-policy
+    needs:
+      - scope
+      - baseline-policy
+    if: needs.scope.outputs.lab_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 85
     steps:
@@ -164,34 +211,46 @@ jobs:
 
   compatibility-runtime:
     name: Compatibility runtime, visual, navigation and focus
-    needs: baseline-policy
+    needs:
+      - scope
+      - baseline-policy
     uses: ./.github/workflows/compatibility-lab.yml
     with:
-      enforce_findings: true
-      source_head_sha: ${{ github.event.pull_request.head.sha || github.sha }}
-      base_sha: ${{ github.event.pull_request.base.sha || '' }}
+      enforce_findings: ${{ needs.scope.outputs.lab_only != 'true' }}
+      source_head_sha: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+      base_sha: ${{ github.event.pull_request.base.sha || inputs.base_sha || '' }}
       pr_number: ${{ github.event.pull_request.number || '' }}
-      test_variant: quality-ui
+      test_variant: ${{ needs.scope.outputs.lab_only == 'true' && 'quality-ui-lab-only' || 'quality-ui-product' }}
 
   enforce:
     name: Final UI evidence enforcement
     if: always()
     needs:
+      - scope
       - baseline-policy
       - compose-instrumentation
       - compatibility-runtime
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Enforce all UI layers
+      - name: Enforce all UI layers with scope-aware product policy
         env:
+          LAB_ONLY: ${{ needs.scope.outputs.lab_only }}
+          SCOPE: ${{ needs.scope.result }}
           POLICY: ${{ needs.baseline-policy.result }}
           INSTRUMENTATION: ${{ needs.compose-instrumentation.result }}
           COMPATIBILITY: ${{ needs.compatibility-runtime.result }}
           REPORT_ONLY: ${{ inputs.report_only || false }}
         run: |
           set -euo pipefail
-          echo "report_only=$REPORT_ONLY (cannot override failures)"
+          echo "report_only=$REPORT_ONLY (cannot override product failures)"
+          [[ "$SCOPE" = 'success' ]]
           [[ "$POLICY" = 'success' ]]
-          [[ "$INSTRUMENTATION" = 'success' ]]
           [[ "$COMPATIBILITY" = 'success' ]]
+          if [[ "$LAB_ONLY" = 'true' ]]; then
+            [[ "$INSTRUMENTATION" = 'skipped' || "$INSTRUMENTATION" = 'success' ]]
+            echo 'PASS: lab-only PR infrastructure is qualified; detected product findings remain preserved in Compatibility Lab artifacts.'
+          else
+            [[ "$INSTRUMENTATION" = 'success' ]]
+            echo 'PASS: product-affecting PR passed strict instrumentation and Compatibility Lab enforcement.'
+          fi
