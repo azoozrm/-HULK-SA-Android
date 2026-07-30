@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Add measurement-only semantics to the temporary Compatibility Lab checkout.
+"""Add measurement-only semantics to a disposable Compatibility Lab checkout.
 
 The repository production source remains unchanged. This transformer runs only
-inside the disposable prepared project used to build the debug lab APK. Every
-replacement is strict and additive: an unexpected source shape fails closed.
+inside the temporary prepared project used to build the debug lab APK. Every
+replacement is strict and additive. A supported source shape must match exactly
+once; an unknown or ambiguous source shape fails closed.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 MARKERS = (
@@ -51,6 +52,8 @@ private fun Modifier.qaMarker(isTv: Boolean, description: String): Modifier = th
 )
 '''
 
+Variant = tuple[str, str, str]
+
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -67,6 +70,33 @@ def replace_once(
     if count != 1:
         raise ValueError(f"{label}: expected exactly one match, found {count}")
     changes.append(label)
+    return source.replace(old, new, 1)
+
+
+def replace_one_of(
+    source: str,
+    variants: Iterable[Variant],
+    label: str,
+    changes: list[str],
+) -> str:
+    matches: list[Variant] = []
+    counts: list[str] = []
+    for name, old, new in variants:
+        count = source.count(old)
+        counts.append(f"{name}={count}")
+        if count > 1:
+            raise ValueError(
+                f"{label}: supported source shape {name!r} is ambiguous; found {count} matches"
+            )
+        if count == 1:
+            matches.append((name, old, new))
+    if len(matches) != 1:
+        raise ValueError(
+            f"{label}: expected exactly one supported source shape, found {len(matches)} "
+            f"({', '.join(counts)})"
+        )
+    name, old, new = matches[0]
+    changes.append(f"{label}:{name}")
     return source.replace(old, new, 1)
 
 
@@ -87,6 +117,25 @@ def patch_segment(
         raise ValueError(f"{label}: end marker not found: {end_marker}")
     segment = source[start:end]
     patched = replace_once(segment, old, new, label, changes)
+    return source[:start] + patched + source[end:]
+
+
+def patch_segment_one_of(
+    source: str,
+    start_marker: str,
+    end_marker: str,
+    variants: Iterable[Variant],
+    label: str,
+    changes: list[str],
+) -> str:
+    start = source.find(start_marker)
+    if start < 0:
+        raise ValueError(f"{label}: start marker not found: {start_marker}")
+    end = source.find(end_marker, start + len(start_marker))
+    if end < 0:
+        raise ValueError(f"{label}: end marker not found: {end_marker}")
+    segment = source[start:end]
+    patched = replace_one_of(segment, variants, label, changes)
     return source[:start] + patched + source[end:]
 
 
@@ -125,51 +174,131 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "tv-rail-marker",
         changes,
     )
-    source = patch_segment(
+    source = patch_segment_one_of(
         source,
         "private fun CinemaHomeScreen(",
         "private fun HomeSectionPadding(",
-        "            .fillMaxSize()\n"
-        "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
-        "            .fillMaxSize()\n"
-        "            .qaTvPageContent(isTv, MainDestination.HOME)\n"
-        "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
+        (
+            (
+                "legacy",
+                "            .fillMaxSize()\n"
+                "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
+                "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, MainDestination.HOME)\n"
+                "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
+            ),
+            (
+                "v09320",
+                "            .fillMaxSize()\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)",
+                "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, MainDestination.HOME)\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)",
+            ),
+        ),
         "home-content-marker",
         changes,
     )
-    source = patch_segment(
+    source = patch_segment_one_of(
         source,
         "private fun PosterCatalogScreen(",
         "private fun LiveCatalogScreen(",
-        "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
-        "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {",
-        "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
-        "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)"
-        ".qaTvPageContent(isTv, destination)) {",
+        (
+            (
+                "legacy",
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
+                "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {",
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
+                "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)"
+                ".qaTvPageContent(isTv, destination)) {",
+            ),
+            (
+                "v09320",
+                "    Column(\n"
+                "        Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .padding(\n"
+                "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
+                "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+                "            ),\n"
+                "    ) {",
+                "    Column(\n"
+                "        Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, destination)\n"
+                "            .padding(\n"
+                "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
+                "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+                "            ),\n"
+                "    ) {",
+            ),
+        ),
         "poster-catalog-content-marker",
         changes,
     )
-    source = patch_segment(
+    source = patch_segment_one_of(
         source,
         "private fun LiveCatalogScreen(",
         "private fun LiveStage(",
-        "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
-        "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {",
-        "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
-        "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)"
-        ".qaTvPageContent(isTv, MainDestination.LIVE)) {",
+        (
+            (
+                "legacy",
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
+                "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {",
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
+                "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)"
+                ".qaTvPageContent(isTv, MainDestination.LIVE)) {",
+            ),
+            (
+                "v09320",
+                "    Column(\n"
+                "        Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .padding(\n"
+                "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+                "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+                "            ),\n"
+                "    ) {",
+                "    Column(\n"
+                "        Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, MainDestination.LIVE)\n"
+                "            .padding(\n"
+                "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+                "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+                "            ),\n"
+                "    ) {",
+            ),
+        ),
         "live-content-marker",
         changes,
     )
-    source = patch_segment(
+    source = patch_segment_one_of(
         source,
         "private fun LiveStage(",
         "private fun FavoritesScreen(",
-        "Row(Modifier.fillMaxWidth(), "
-        "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
-        "Row(Modifier.fillMaxWidth().qaMarker(isTv = true, "
-        "description = QA_TV_LIVE_ACTIONS), "
-        "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
+        (
+            (
+                "legacy",
+                "Row(Modifier.fillMaxWidth(), "
+                "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
+                "Row(Modifier.fillMaxWidth().qaMarker(isTv = true, "
+                "description = QA_TV_LIVE_ACTIONS), "
+                "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
+            ),
+            (
+                "v09320",
+                "                    Row(\n"
+                "                        Modifier.fillMaxWidth(),\n"
+                "                        horizontalArrangement = Arrangement.spacedBy(12.dp),\n"
+                "                    ) {",
+                "                    Row(\n"
+                "                        Modifier.fillMaxWidth()\n"
+                "                            .qaMarker(isTv = true, description = QA_TV_LIVE_ACTIONS),\n"
+                "                        horizontalArrangement = Arrangement.spacedBy(12.dp),\n"
+                "                    ) {",
+            ),
+        ),
         "live-actions-marker",
         changes,
     )
@@ -190,13 +319,32 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
             "DOWNLOADS",
         ),
     ):
-        source = patch_segment(
+        source = patch_segment_one_of(
             source,
             function_name,
             next_name,
-            "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
-            "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
-            f".qaTvPageContent(isTv, MainDestination.{destination})) {{",
+            (
+                (
+                    "legacy",
+                    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
+                    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
+                    f".qaTvPageContent(isTv, MainDestination.{destination})) {{",
+                ),
+                (
+                    "v09320",
+                    "    Column(\n"
+                    "        Modifier\n"
+                    "            .fillMaxSize()\n"
+                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
+                    "    ) {",
+                    "    Column(\n"
+                    "        Modifier\n"
+                    "            .fillMaxSize()\n"
+                    f"            .qaTvPageContent(isTv, MainDestination.{destination})\n"
+                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
+                    "    ) {",
+                ),
+            ),
             f"{destination.lower()}-content-marker",
             changes,
         )
@@ -209,26 +357,55 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "downloads-list-marker",
         changes,
     )
-    source = patch_segment(
+    source = patch_segment_one_of(
         source,
         "private fun DownloadCard(",
         "private fun DownloadProgress(",
-        "            .height(if (isTv) 220.dp else 220.dp)\n"
-        "            .clip(shape)",
-        "            .height(if (isTv) 220.dp else 220.dp)\n"
-        "            .qaMarker(isTv, "
-        "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
-        "            .clip(shape)",
+        (
+            (
+                "legacy",
+                "            .height(if (isTv) 220.dp else 220.dp)\n"
+                "            .clip(shape)",
+                "            .height(if (isTv) 220.dp else 220.dp)\n"
+                "            .qaMarker(isTv, "
+                "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
+                "            .clip(shape)",
+            ),
+            (
+                "v09320",
+                "            .height(if (isTv) 164.dp else 220.dp)\n"
+                "            .clip(shape)",
+                "            .height(if (isTv) 164.dp else 220.dp)\n"
+                "            .qaMarker(isTv, "
+                "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
+                "            .clip(shape)",
+            ),
+        ),
         "download-card-marker",
         changes,
     )
-    source = patch_segment(
+    source = patch_segment_one_of(
         source,
         "private fun SettingsScreen(",
         "private fun AccountMetric(",
-        "modifier = Modifier.fillMaxSize(),",
-        "modifier = Modifier.fillMaxSize()"
-        ".qaTvPageContent(isTv, MainDestination.SETTINGS),",
+        (
+            (
+                "legacy",
+                "modifier = Modifier.fillMaxSize(),",
+                "modifier = Modifier.fillMaxSize()"
+                ".qaTvPageContent(isTv, MainDestination.SETTINGS),",
+            ),
+            (
+                "v09320",
+                "        modifier = Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+                "        modifier = Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, MainDestination.SETTINGS)\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+            ),
+        ),
         "settings-content-marker",
         changes,
     )
