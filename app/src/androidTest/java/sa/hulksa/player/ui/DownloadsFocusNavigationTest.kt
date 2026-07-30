@@ -3,9 +3,11 @@ package sa.hulksa.player.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -40,50 +42,50 @@ class DownloadsFocusNavigationTest {
         var priorityCalls = 0
         var cancelCalls = 0
         val downloads = listOf(
-  activeDownload(1L, "الحلقة 1", 17L * 1024L * 1024L),
-  activeDownload(2L, "الحلقة 2", 9L * 1024L * 1024L),
+            activeDownload(1L, "الحلقة 1", 17L * 1024L * 1024L),
+            activeDownload(2L, "الحلقة 2", 9L * 1024L * 1024L),
         )
         compose.setContent {
-  val adaptive = AdaptiveUiState(
-      deviceClass = HulkDeviceClass.TELEVISION,
-      windowWidthClass = HulkWindowWidthClass.EXPANDED,
-      navigationType = HulkNavigationType.RAIL,
-      inputMode = HulkInputMode.REMOTE,
-      screenWidthDp = 960,
-      screenHeightDp = 540,
-  )
-  HulkTheme {
-      CompositionLocalProvider(LocalAdaptiveUi provides adaptive) {
-          MainShellScreen(
-              state = HulkUiState(
-                  screen = HulkScreen.MAIN,
-                  isStarting = false,
-                  destination = MainDestination.DOWNLOADS,
-                  downloads = downloads,
-              ),
-              isTv = true,
-              navigationMemory = NavigationMemoryStore(),
-              isFavorite = { false },
-              onSelectDestination = {},
-              onSelectCategory = {},
-              onSearch = {},
-              onOpen = {},
-              onOpenHistory = {},
-              onToggleFavorite = {},
-              onRefresh = {},
-              onClearHistory = {},
-              onPlayDownload = {},
-              onDeleteDownload = { cancelCalls += 1 },
-              onRetryDownload = { pauseResumeCalls += 1 },
-              onToggleWifiOnly = {},
-              onToggleDownloadSchedule = {},
-              onCycleConcurrentDownloads = {},
-              onCycleDownloadPriority = { priorityCalls += 1 },
-              onRunDiagnostics = {},
-              onLogout = {},
-          )
-      }
-  }
+            val adaptive = AdaptiveUiState(
+                deviceClass = HulkDeviceClass.TELEVISION,
+                windowWidthClass = HulkWindowWidthClass.EXPANDED,
+                navigationType = HulkNavigationType.RAIL,
+                inputMode = HulkInputMode.REMOTE,
+                screenWidthDp = 960,
+                screenHeightDp = 540,
+            )
+            HulkTheme {
+                CompositionLocalProvider(LocalAdaptiveUi provides adaptive) {
+                    MainShellScreen(
+                        state = HulkUiState(
+                            screen = HulkScreen.MAIN,
+                            isStarting = false,
+                            destination = MainDestination.DOWNLOADS,
+                            downloads = downloads,
+                        ),
+                        isTv = true,
+                        navigationMemory = NavigationMemoryStore(),
+                        isFavorite = { false },
+                        onSelectDestination = {},
+                        onSelectCategory = {},
+                        onSearch = {},
+                        onOpen = {},
+                        onOpenHistory = {},
+                        onToggleFavorite = {},
+                        onRefresh = {},
+                        onClearHistory = {},
+                        onPlayDownload = {},
+                        onDeleteDownload = { cancelCalls += 1 },
+                        onRetryDownload = { pauseResumeCalls += 1 },
+                        onToggleWifiOnly = {},
+                        onToggleDownloadSchedule = {},
+                        onCycleConcurrentDownloads = {},
+                        onCycleDownloadPriority = { priorityCalls += 1 },
+                        onRunDiagnostics = {},
+                        onLogout = {},
+                    )
+                }
+            }
         }
 
         compose.onAllNodesWithText("ايقاف مؤقت").assertCountEquals(2)
@@ -93,8 +95,13 @@ class DownloadsFocusNavigationTest {
         compose.onAllNodesWithText("الغاء")[1].assertIsDisplayed()
 
         val wifi = compose.onNodeWithText("كل الشبكات")
-        wifi.performSemanticsAction(SemanticsActions.RequestFocus)
+        compose.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                wifi.fetchSemanticsNode().config[SemanticsProperties.Focused]
+            }.getOrDefault(false)
+        }
         wifi.assertIsFocused()
+
         wifi.performKeyInput { pressKey(Key.DirectionDown) }
         compose.onAllNodesWithText("ايقاف مؤقت")[0].assertIsFocused()
         compose.onAllNodesWithText("ايقاف مؤقت")[0].performKeyInput { pressKey(Key.DirectionLeft) }
@@ -108,9 +115,12 @@ class DownloadsFocusNavigationTest {
         compose.onAllNodesWithText("عادية")[1].performKeyInput { pressKey(Key.DirectionRight) }
         compose.onAllNodesWithText("ايقاف مؤقت")[1].assertIsFocused()
 
-        compose.onAllNodesWithText("ايقاف مؤقت")[1].performSemanticsAction(SemanticsActions.OnClick)
-        compose.onAllNodesWithText("عادية")[1].performSemanticsAction(SemanticsActions.OnClick)
-        compose.onAllNodesWithText("الغاء")[1].performSemanticsAction(SemanticsActions.OnClick)
+        compose.onAllNodesWithText("ايقاف مؤقت")[1]
+            .performSemanticsAction(SemanticsActions.OnClick)
+        compose.onAllNodesWithText("عادية")[1]
+            .performSemanticsAction(SemanticsActions.OnClick)
+        compose.onAllNodesWithText("الغاء")[1]
+            .performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(1, pauseResumeCalls)
         assertEquals(1, priorityCalls)
         assertEquals(1, cancelCalls)
