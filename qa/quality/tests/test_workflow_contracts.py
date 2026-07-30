@@ -17,6 +17,7 @@ class WorkflowContractTest(unittest.TestCase):
             "quality-nightly.yml": "Final nightly enforcement",
             "quality-release.yml": "Final release recommendation",
             "quality-pr-intelligence.yml": "Final impact enforcement",
+            "quality-lab-self-validation.yml": "Final lab self-validation enforcement",
         }
         for filename, final_job in expectations.items():
             source = self.source(filename)
@@ -43,6 +44,18 @@ class WorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(trace_field, source)
 
+    def test_quality_lab_self_validation_is_not_a_product_bypass(self) -> None:
+        self_validation = self.source("quality-lab-self-validation.yml")
+        strict_ui = self.source("quality-ui.yml")
+        self.assertIn("enforce_findings: false", self_validation)
+        self.assertIn("test_variant: quality-lab-self-validation", self_validation)
+        self.assertIn("INSTRUMENTATION_CLASSES", self_validation)
+        self.assertIn("Prove no production source or approved logo changed", self_validation)
+        self.assertIn("Final lab self-validation enforcement", self_validation)
+        self.assertIn("enforce_findings: true", strict_ui)
+        self.assertIn("Final UI evidence enforcement", strict_ui)
+        self.assertNotIn("report_only: true", self_validation)
+
     def test_compatibility_matrix_uses_stable_native_runner_and_marker_provenance(self) -> None:
         source = self.source("compatibility-lab.yml")
         self.assertNotIn("reactivecircus/android-emulator-runner", source)
@@ -60,7 +73,12 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("instrumented_sha256", source)
 
     def test_pr_workflows_do_not_receive_signing_or_production_credentials(self) -> None:
-        for filename in ("quality-pr.yml", "quality-ui.yml", "quality-pr-intelligence.yml"):
+        for filename in (
+            "quality-pr.yml",
+            "quality-ui.yml",
+            "quality-pr-intelligence.yml",
+            "quality-lab-self-validation.yml",
+        ):
             source = self.source(filename)
             self.assertNotIn("HULK_RELEASE_KEYSTORE", source)
             self.assertNotIn("HULK_RELEASE_STORE_PASSWORD", source)
