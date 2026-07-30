@@ -1,0 +1,183 @@
+name: HULK SA Quality Lab Self Validation
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - 'app/src/androidTest/**'
+      - 'app/build.gradle.kts'
+      - 'qa/compatibility/**'
+      - 'qa/quality/**'
+      - 'docs/quality/**'
+      - '.github/workflows/compatibility-lab.yml'
+      - '.github/workflows/quality-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-quality-lab-self-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-contracts:
+    name: Validate lab-only source and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Prove no production source or approved logo changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BASE_SHA" ]]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+            if grep -qE '^app/src/main/' <<<"$changed"; then
+              echo 'FAIL: Quality Lab self-validation cannot accept production source changes.'
+              grep -E '^app/src/main/' <<<"$changed"
+              exit 1
+            fi
+            if grep -qE '^app/src/main/res/.*/(logo|ic_launcher|tv_banner)' <<<"$changed"; then
+              echo 'FAIL: approved branding assets changed.'
+              exit 1
+            fi
+          fi
+
+      - name: Run Quality Lab contract suites
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
+          python3 -m unittest discover -s qa/quality/tests -v
+          python3 -m unittest discover -s qa/compatibility/tests -v
+          python3 qa/compatibility/lab_config.py --validate
+          bash -n qa/quality/scripts/run_instrumentation.sh
+          bash -n qa/compatibility/run-native-emulator.sh
+          grep -q 'productionRepositoryTransfersPositiveBytesAndFinalFileMatchesFixture' \
+            app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt
+
+  infrastructure-instrumentation:
+    name: Run non-product instrumentation controls
+    needs: static-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run infrastructure instrumentation after stable Android boot
+        env:
+          INSTRUMENTATION_CLASSES: >-
+            sa.hulksa.player.CompatibilitySmokeTest,
+            sa.hulksa.player.ui.MainShellComposeQualityTest
+        run: |
+          set -euo pipefail
+          export INSTRUMENTATION_CLASSES="$(tr -d '[:space:]' <<<"$INSTRUMENTATION_CLASSES")"
+          bash qa/compatibility/run-native-emulator.sh \
+            --api 35 \
+            --target google_apis \
+            --arch x86_64 \
+            --profile pixel_6 \
+            --skin 1080x2400 \
+            --result-dir quality-evidence/self-validation/instrumentation/emulator \
+            -- \
+            bash qa/quality/scripts/run_instrumentation.sh
+
+      - name: Verify instrumentation executed and passed
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          files = list(Path('app/build/outputs/androidTest-results').rglob('*.xml'))
+          if not files:
+              raise SystemExit('FAIL: no instrumentation XML evidence')
+          tests = failures = errors = 0
+          for path in files:
+              root = ET.parse(path).getroot()
+              tests += int(root.attrib.get('tests', 0))
+              failures += int(root.attrib.get('failures', 0))
+              errors += int(root.attrib.get('errors', 0))
+          if tests < 11:
+              raise SystemExit(f'FAIL: expected at least 11 infrastructure tests, got {tests}')
+          if failures or errors:
+              raise SystemExit(f'FAIL: failures={failures}, errors={errors}')
+          print(f'PASS: {tests} infrastructure instrumentation tests')
+          PY
+
+      - name: Upload self-validation instrumentation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-LAB-SELF-VALIDATION-INSTRUMENTATION
+          path: |
+            quality-evidence/self-validation/
+            quality-evidence/instrumentation/
+            app/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
+          if-no-files-found: error
+          retention-days: 14
+
+  compatibility-evidence:
+    name: Prove complete Compatibility Lab evidence without masking product findings
+    needs: static-contracts
+    uses: ./.github/workflows/compatibility-lab.yml
+    with:
+      enforce_findings: false
+      source_head_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      base_sha: ${{ github.event.pull_request.base.sha || '' }}
+      pr_number: ${{ github.event.pull_request.number || '' }}
+      test_variant: quality-lab-self-validation
+
+  enforce:
+    name: Final lab self-validation enforcement
+    if: always()
+    needs:
+      - static-contracts
+      - infrastructure-instrumentation
+      - compatibility-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require complete lab infrastructure
+        env:
+          STATIC: ${{ needs.static-contracts.result }}
+          INSTRUMENTATION: ${{ needs.infrastructure-instrumentation.result }}
+          COMPATIBILITY: ${{ needs.compatibility-evidence.result }}
+        run: |
+          set -euo pipefail
+          [[ "$STATIC" = 'success' ]]
+          [[ "$INSTRUMENTATION" = 'success' ]]
+          [[ "$COMPATIBILITY" = 'success' ]]
+          echo 'PASS: Quality Lab infrastructure is independently qualified.'
+          echo 'Product findings remain enforced by HULK SA Quality UI Gate.'
