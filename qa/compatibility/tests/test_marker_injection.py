@@ -38,6 +38,15 @@ EXPECTED_REPLACEMENTS = (
     "settings-content-marker",
 )
 
+HOME_LEGACY = (
+    "            .fillMaxSize()\n"
+    "            .padding(bottom = if (isTv) 32.dp else 0.dp)"
+)
+HOME_PRODUCT = (
+    "            .fillMaxSize()\n"
+    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),"
+)
+
 
 def replace_once(source: str, old: str, new: str, label: str) -> str:
     count = source.count(old)
@@ -61,16 +70,34 @@ def patch_segment(
 
 
 def product_layout_shape(source: str) -> str:
-    """Model PR #57's supported layout anchors without importing product code."""
+    """Return a product-layout fixture from either supported source shape.
+
+    The Quality PR gate runs this test suite against the exact pull-request
+    source. A product PR can therefore already contain the v0.9.3.20 anchors.
+    Treat that as a valid fixture input instead of trying to transform it a
+    second time. Unknown or mixed home shapes still fail closed.
+    """
+
+    home_start = source.index("private fun CinemaHomeScreen(")
+    home_end = source.index("private fun HomeSectionPadding(", home_start)
+    home_segment = source[home_start:home_end]
+    legacy_count = home_segment.count(HOME_LEGACY)
+    product_count = home_segment.count(HOME_PRODUCT)
+
+    if legacy_count == 0 and product_count == 1:
+        return source
+    if legacy_count != 1 or product_count != 0:
+        raise AssertionError(
+            "home: expected exactly one legacy or product fixture anchor; "
+            f"legacy={legacy_count}, product={product_count}"
+        )
 
     source = patch_segment(
         source,
         "private fun CinemaHomeScreen(",
         "private fun HomeSectionPadding(",
-        "            .fillMaxSize()\n"
-        "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
-        "            .fillMaxSize()\n"
-        "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+        HOME_LEGACY,
+        HOME_PRODUCT,
         "home",
     )
     source = patch_segment(
@@ -220,16 +247,20 @@ class QualityMarkerInjectionTest(unittest.TestCase):
         self.assertNotIn("qa-tv-", source)
         self.assert_complete_injection(source)
 
+    def test_product_layout_fixture_builder_accepts_already_product_source(self) -> None:
+        source = product_layout_shape(SOURCE.read_text(encoding="utf-8"))
+        self.assertEqual(source, product_layout_shape(source))
+        self.assert_complete_injection(source)
+
     def test_ambiguous_supported_shape_fails_closed(self) -> None:
-        source = SOURCE.read_text(encoding="utf-8")
-        ambiguous = source.replace(
-            "            .fillMaxSize()\n"
-            "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
-            "            .fillMaxSize()\n"
-            "            .padding(bottom = if (isTv) 32.dp else 0.dp)\n"
-            "            .fillMaxSize()\n"
-            "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
-            1,
+        product = product_layout_shape(SOURCE.read_text(encoding="utf-8"))
+        ambiguous = patch_segment(
+            product,
+            "private fun CinemaHomeScreen(",
+            "private fun HomeSectionPadding(",
+            HOME_PRODUCT,
+            HOME_LEGACY + "\n" + HOME_PRODUCT,
+            "ambiguous home",
         )
         with self.assertRaisesRegex(ValueError, "supported source shape"):
             INJECTION.inject_text(ambiguous)
