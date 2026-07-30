@@ -98,8 +98,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -154,36 +152,11 @@ private const val APPS_URL = "https://hulksa.com/hulk-app/"
 private const val SUPPORT_URL = "https://wa.me/966506349935"
 private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
-private const val QA_TV_PAGE_CONTENT_PREFIX = "qa-tv-page-content:"
-private const val QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"
-private const val QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
-private const val QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
 
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
-
-private fun Modifier.qaTvPageContent(
-    isTv: Boolean,
-    destination: MainDestination,
-): Modifier = then(
-    if (isTv && BuildConfig.DEBUG) {
-        Modifier.semantics {
-            contentDescription = "$QA_TV_PAGE_CONTENT_PREFIX${destination.name.lowercase(Locale.ROOT)}"
-        }
-    } else {
-        Modifier
-    },
-)
-
-private fun Modifier.qaMarker(isTv: Boolean, description: String): Modifier = then(
-    if (isTv && BuildConfig.DEBUG) {
-        Modifier.semantics { contentDescription = description }
-    } else {
-        Modifier
-    },
-)
 
 data class NavigationPosition(
     val rowKey: String = "",
@@ -522,7 +495,6 @@ private fun CinematicNavigationRail(
         modifier = Modifier
             .width(railWidth)
             .fillMaxHeight()
-            .semantics { contentDescription = "qa-tv-rail" }
             .focusGroup()
             .onFocusChanged { railHasFocus = it.hasFocus }
             .background(
@@ -762,8 +734,7 @@ private fun CinemaHomeScreen(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)
-            .qaTvPageContent(isTv, MainDestination.HOME),
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
         contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
@@ -1120,8 +1091,7 @@ private fun PosterCatalogScreen(
             .padding(
                 horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,
                 vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
-            )
-            .qaTvPageContent(isTv, destination),
+            ),
     ) {
         CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
@@ -1196,8 +1166,7 @@ private fun LiveCatalogScreen(
             .padding(
                 horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
                 vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
-            )
-            .qaTvPageContent(isTv, MainDestination.LIVE),
+            ),
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
@@ -1304,9 +1273,7 @@ private fun LiveStage(
                 Spacer(Modifier.height(12.dp))
                 Box(Modifier.fillMaxWidth().padding(bottom = TV_LIVE_ACTION_INSET)) {
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .qaMarker(isTv = true, description = QA_TV_LIVE_ACTIONS),
+                        Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         FocusButton(
@@ -1344,8 +1311,7 @@ private fun FavoritesScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
-            .qaTvPageContent(isTv, MainDestination.FAVORITES),
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
     ) {
         PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
         Spacer(Modifier.height(18.dp))
@@ -1379,8 +1345,7 @@ private fun UnifiedSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
-            .qaTvPageContent(isTv, MainDestination.SEARCH),
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
     ) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
         Spacer(Modifier.height(14.dp))
@@ -1542,8 +1507,7 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
-            .qaTvPageContent(isTv, MainDestination.DOWNLOADS),
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
@@ -1592,9 +1556,7 @@ private fun DownloadsScreen(
                 verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
                 horizontalAlignment = Alignment.Start,
                 contentPadding = PaddingValues(bottom = 28.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .qaMarker(isTv, QA_TV_DOWNLOAD_LIST),
+                modifier = Modifier.fillMaxSize(),
             ) {
                 itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
                     DownloadCard(
@@ -1653,7 +1615,6 @@ private fun DownloadCard(
         modifier = modifier
             .fillMaxWidth()
             .height(if (isTv) 164.dp else 220.dp)
-            .qaMarker(isTv, "$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}")
             .clip(shape)
             .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
             .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .45f), shape)
@@ -2049,8 +2010,7 @@ private fun SettingsScreen(
         state = settingsListState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)
-            .qaTvPageContent(isTv, MainDestination.SETTINGS),
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
         contentPadding = if (isTv) {
             PaddingValues(bottom = 24.dp)
         } else {

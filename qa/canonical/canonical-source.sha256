@@ -32,10 +32,10 @@ e6354de8cd1e666d49035de3391fa12d43eaf8c5f3d537a2e05ca442c38baa84  app/src/main/j
 42e9c4b63707127fb868a7255188e54b911e7c045f3c323edf21bbd8930aff88  app/src/main/java/sa/hulksa/player/ui/screens/DetailsNavigationDrawer.kt
 45ee15418b4a54f2c7769dde022fb1b3a6b95c90d40392bc7f79175ad974a974  app/src/main/java/sa/hulksa/player/ui/screens/HomeScreen.kt
 28d6509550f3264fc70f7f69233ec4b3c3b3187baec880f686fe5b946d7ed57e  app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt
-2e0eed7de104e436b593ddb9b4ad4d5f9a1f068465a3307e3c3b4793b1f2621f  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+7ee74b8fdf0767a7d4ba4f4eaa6f1d3f92b7862db75404b89efba27aec373f16  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 87e0a9dfb54427781adf14991a464b8dec0ef29cc11d53840fb98cdb16107d98  app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
 8a43849b9bc6a097e7594e5ca1ceb7992157077a7a87f7e32a1e52cbe5724d2a  app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-169f06c1dc391d2533f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
+169f06c1dc391d2533bc2573f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
 cddb6a86741b7071a3806f2be3e01a87ef9a65b57293b2d8d9bba794c8f1b9e8  app/src/main/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicy.kt
 8b34550c3998a88a7c53587e303322b934417e199352a47250a0f1107b03efff  app/src/main/java/sa/hulksa/player/ui/theme/HulkTheme.kt
 2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e  app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
