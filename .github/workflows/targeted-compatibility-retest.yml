@@ -1,0 +1,147 @@
+name: HULK SA Targeted Compatibility Retest
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_id:
+        description: Exact failed device id to retest
+        required: true
+        type: choice
+        options:
+          - nexus-9-api28
+          - android-tv-720p-api36
+      source_head_sha:
+        description: Exact source commit under qualification
+        required: true
+        type: string
+      enforce_findings:
+        description: Fail when the selected device still has critical findings
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: targeted-compatibility-${{ inputs.device_id }}-${{ inputs.source_head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  targeted-device:
+    name: Targeted retest · ${{ inputs.device_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_head_sha }}
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Resolve exact selected device
+        id: device
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from qa.compatibility.lab_config import DEVICES
+
+          requested = "${{ inputs.device_id }}"
+          matches = [device for device in DEVICES if device["id"] == requested]
+          if len(matches) != 1:
+              raise SystemExit(f"device id must resolve exactly once: {requested!r}")
+          device = matches[0]
+          print("device_json=" + json.dumps(device, separators=(",", ":")))
+          PY
+
+      - name: Install Android build SDK and lab dependencies
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
+          python3 -m py_compile qa/compatibility/*.py qa/compatibility/tests/*.py
+          python3 -m unittest discover -s qa/compatibility/tests -v
+
+      - name: Build fresh debug-only lab APK from exact source SHA
+        run: |
+          set -euo pipefail
+          bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/project"
+          cd project
+          ./gradlew --no-daemon --console=plain \
+            clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug \
+            -PHULK_PORTAL_URL=https://example.invalid
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n1)"
+          test -s "$APK"
+          mkdir -p "$GITHUB_WORKSPACE/lab-apk"
+          cp "$APK" "$GITHUB_WORKSPACE/lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run only the selected failed device
+        env:
+          DEVICE_JSON: ${{ steps.device.outputs.device_json }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/device.env"
+          import json, os, shlex
+          device = json.loads(os.environ["DEVICE_JSON"])
+          for key, value in device.items():
+              print(f"{key.upper()}={shlex.quote(str(value).lower() if isinstance(value, bool) else str(value))}")
+          PY
+          source "$RUNNER_TEMP/device.env"
+          OUT="compatibility-results/$ID"
+          bash qa/compatibility/run-native-emulator.sh \
+            --api "$API" \
+            --target "$TARGET" \
+            --arch "$ARCH" \
+            --profile "$PROFILE" \
+            --skin "$BOOT_SKIN" \
+            --result-dir "$OUT" \
+            -- \
+            python3 qa/compatibility/run-lab.py \
+              --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk \
+              --device-id "$ID" \
+              --device-name "$NAME" \
+              --family "$FAMILY" \
+              --api "$API" \
+              --target "$TARGET" \
+              --arch "$ARCH" \
+              --profile "$PROFILE" \
+              --width "$WIDTH" \
+              --height "$HEIGHT" \
+              --density "$DENSITY" \
+              --orientations "$ORIENTATIONS" \
+              --font-scales "$FONT_SCALES" \
+              --is-tv "$IS_TV" \
+              --out "$OUT" \
+              --serial emulator-5554
+          python3 qa/compatibility/analyze.py "$OUT"
+          if [[ "${{ inputs.enforce_findings }}" == "true" ]]; then
+            python3 qa/compatibility/gate.py "$OUT/summary.json"
+          fi
+
+      - name: Upload selected-device evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: targeted-${{ inputs.device_id }}-${{ inputs.source_head_sha }}
+          path: compatibility-results/${{ inputs.device_id }}/
+          if-no-files-found: error
+          retention-days: 14
