@@ -54,10 +54,21 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import importlib.util
           import json
-          from qa.compatibility.lab_config import DEVICES
+          from pathlib import Path
+
+          config_path = Path("qa/compatibility/lab_config.py").resolve()
+          if not config_path.is_file():
+              raise SystemExit(f"missing lab config: {config_path}")
+          spec = importlib.util.spec_from_file_location("hulk_lab_config", config_path)
+          if spec is None or spec.loader is None:
+              raise SystemExit(f"cannot load lab config: {config_path}")
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
           requested = "${{ inputs.device_id }}"
-          matches = [device for device in DEVICES if device["id"] == requested]
+          matches = [device for device in module.DEVICES if device["id"] == requested]
           if len(matches) != 1:
               raise SystemExit(f"device id must resolve exactly once: {requested!r}")
           print("device_json=" + json.dumps(matches[0], separators=(",", ":")))
