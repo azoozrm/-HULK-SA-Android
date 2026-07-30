@@ -216,6 +216,8 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
     for path in sorted(input_root.rglob("summary.json")):
         if output_root in path.parents:
             continue
+        if "attempts" in path.parts:
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             device_id = data["device"]["id"]
@@ -272,7 +274,16 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
         else "PASS"
     )
     page_coverage: dict[str, dict[str, int]] = {}
-    for page in ("home", "live", "movies", "series", "search", "downloads", "settings"):
+    for page in (
+        "home",
+        "live",
+        "movies",
+        "series",
+        "favorites",
+        "search",
+        "downloads",
+        "settings",
+    ):
         counts = page_counts[page]
         page_coverage[page] = {
             key: int(counts.get(key, 0))

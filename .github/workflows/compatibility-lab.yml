@@ -1,51 +1,40 @@
 name: HULK SA Compatibility Lab
 
 on:
-  push:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - '.github/workflows/compatibility-lab.yml'
-      - 'qa/compatibility/**'
-      - 'app/**'
-      - 'gradle/**'
-      - 'gradlew'
-      - 'gradlew.bat'
-      - 'build.gradle*'
-      - 'settings.gradle*'
-      - 'gradle.properties'
-      - 'release/v0.9.3.16/**'
-      - 'release/v0.9.3.17/**'
-      - 'release/v0.9.3.18/**'
-      - 'tools/prepare-v09*.py'
-      - 'tools/repair-v09120.py'
-      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
-  pull_request:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - '.github/workflows/compatibility-lab.yml'
-      - 'qa/compatibility/**'
-      - 'app/**'
-      - 'gradle/**'
-      - 'gradlew'
-      - 'gradlew.bat'
-      - 'build.gradle*'
-      - 'settings.gradle*'
-      - 'gradle.properties'
-      - 'release/v0.9.3.16/**'
-      - 'release/v0.9.3.17/**'
-      - 'release/v0.9.3.18/**'
-      - 'tools/prepare-v09*.py'
-      - 'tools/repair-v09120.py'
-      - 'HULK-SA-v0.9.1.20-PHASE1-FINAL-SOURCE(1).zip'
+  workflow_call:
+    inputs:
+      enforce_findings:
+        description: Fail when deterministic application findings are critical
+        required: false
+        type: boolean
+        default: true
+      source_head_sha:
+        description: Exact source commit under qualification
+        required: false
+        type: string
+        default: ''
+      base_sha:
+        description: Pull request base commit when applicable
+        required: false
+        type: string
+        default: ''
+      pr_number:
+        description: Pull request number when applicable
+        required: false
+        type: string
+        default: ''
+      test_variant:
+        description: Calling quality gate variant
+        required: false
+        type: string
+        default: compatibility-runtime
   workflow_dispatch:
     inputs:
       enforce_findings:
         description: Fail jobs when the app has critical compatibility findings
         required: false
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -113,7 +102,20 @@ jobs:
           set -euo pipefail
           bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/project"
           test -f project/app/src/debug/java/sa/hulksa/player/qa/QaActivity.kt
+          test -s project/app/src/debug/quality-marker-injection.json
           test ! -e project/app/src/main/java/sa/hulksa/player/qa
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(
+              Path('project/app/src/debug/quality-marker-injection.json').read_text()
+          )
+          assert report['schema_version'] == 1
+          assert report['replacement_count'] == 13
+          assert report['original_sha256'] != report['instrumented_sha256']
+          assert report['markers']
+          print('PASS: disposable marker injection report is complete')
+          PY
 
       - name: Compile, unit test and assemble lab APK
         working-directory: project
@@ -133,6 +135,7 @@ jobs:
           test -s "$APK"
           cp "$APK" lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
           cp compatibility-lab-build.log lab-apk/
+          cp project/app/src/debug/quality-marker-injection.json lab-apk/
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" > lab-apk/APK-BADGING.txt
           grep -q "package: name='sa.hulksa.player.dev'" lab-apk/APK-BADGING.txt
           grep -q "sa.hulksa.player.qa.QaActivity" <(
@@ -140,7 +143,12 @@ jobs:
           )
           (
             cd lab-apk
-            sha256sum HULK-SA-COMPATIBILITY-LAB-debug.apk > SHA256SUMS.txt
+            sha256sum \
+              HULK-SA-COMPATIBILITY-LAB-debug.apk \
+              compatibility-lab-build.log \
+              APK-BADGING.txt \
+              quality-marker-injection.json \
+              > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
 
@@ -174,6 +182,23 @@ jobs:
           name: HULK-SA-COMPATIBILITY-LAB-APK
           path: lab-apk
 
+      - name: Validate packaged debug marker evidence
+        run: |
+          set -euo pipefail
+          test -s lab-apk/quality-marker-injection.json
+          (
+            cd lab-apk
+            sha256sum -c SHA256SUMS.txt
+          )
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lab-apk/quality-marker-injection.json').read_text())
+          assert report['replacement_count'] == 13
+          assert report['original_sha256'] != report['instrumented_sha256']
+          print('PASS: packaged marker evidence verified')
+          PY
+
       - name: Install report dependencies
         run: |
           set -euo pipefail
@@ -186,46 +211,8 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Capture pages, hierarchy, focus, logs and performance
+      - name: Capture pages after stable Android service boot
         id: emulator
-        if: matrix.id != 'android-tv-4k-api36'
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
-          arch: ${{ matrix.arch }}
-          profile: ${{ matrix.profile }}
-          cores: 2
-          ram-size: 4096M
-          heap-size: 768M
-          disk-size: 8G
-          disable-animations: true
-          emulator-boot-timeout: 900
-          emulator-options: >-
-            -no-window -gpu swiftshader -noaudio -no-boot-anim
-            -camera-back none -camera-front none -no-snapshot
-            -skin ${{ matrix.boot_skin }}
-          script: >-
-            python3 qa/compatibility/run-lab.py
-            --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
-            --device-id '${{ matrix.id }}'
-            --device-name '${{ matrix.name }}'
-            --family '${{ matrix.family }}'
-            --api '${{ matrix.api }}'
-            --target '${{ matrix.target }}'
-            --arch '${{ matrix.arch }}'
-            --profile '${{ matrix.profile }}'
-            --width '${{ matrix.width }}'
-            --height '${{ matrix.height }}'
-            --density '${{ matrix.density }}'
-            --orientations '${{ matrix.orientations }}'
-            --font-scales '${{ matrix.font_scales }}'
-            --is-tv '${{ matrix.is_tv }}'
-            --out 'compatibility-results/${{ matrix.id }}'
-
-      - name: Capture native Android TV 4K after stable ADB boot
-        if: matrix.id == 'android-tv-4k-api36'
         continue-on-error: true
         run: |
           bash qa/compatibility/run-native-emulator.sh \
@@ -267,49 +254,38 @@ jobs:
             echo 'needed=false' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Retry capture after transient emulator failure
-        if: >-
-          steps.retry-check.outputs.needed == 'true' &&
-          matrix.id != 'android-tv-4k-api36'
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
-          arch: ${{ matrix.arch }}
-          profile: ${{ matrix.profile }}
-          cores: 2
-          ram-size: 4096M
-          heap-size: 768M
-          disk-size: 8G
-          disable-animations: true
-          emulator-boot-timeout: 900
-          emulator-options: >-
-            -no-window -gpu swiftshader -noaudio -no-boot-anim
-            -camera-back none -camera-front none -no-snapshot
-            -skin ${{ matrix.boot_skin }}
-          script: >-
-            python3 qa/compatibility/run-lab.py
-            --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
-            --device-id '${{ matrix.id }}'
-            --device-name '${{ matrix.name }}'
-            --family '${{ matrix.family }}'
-            --api '${{ matrix.api }}'
-            --target '${{ matrix.target }}'
-            --arch '${{ matrix.arch }}'
-            --profile '${{ matrix.profile }}'
-            --width '${{ matrix.width }}'
-            --height '${{ matrix.height }}'
-            --density '${{ matrix.density }}'
-            --orientations '${{ matrix.orientations }}'
-            --font-scales '${{ matrix.font_scales }}'
-            --is-tv '${{ matrix.is_tv }}'
-            --out 'compatibility-results/${{ matrix.id }}'
+      - name: Preserve first failed attempt before infrastructure retry
+        if: steps.retry-check.outputs.needed == 'true'
+        run: |
+          set -euo pipefail
+          OUT='compatibility-results/${{ matrix.id }}'
+          PRESERVED="$RUNNER_TEMP/${{ matrix.id }}-attempt-1"
+          mkdir -p "$OUT"
+          if [[ ! -s "$OUT/summary.json" ]]; then
+            python3 qa/compatibility/make-blocked-result.py \
+              --out "$OUT" \
+              --device-id '${{ matrix.id }}' \
+              --device-name '${{ matrix.name }}' \
+              --family '${{ matrix.family }}' \
+              --api '${{ matrix.api }}' \
+              --target '${{ matrix.target }}' \
+              --arch '${{ matrix.arch }}' \
+              --profile '${{ matrix.profile }}' \
+              --width '${{ matrix.width }}' \
+              --height '${{ matrix.height }}' \
+              --density '${{ matrix.density }}' \
+              --orientations '${{ matrix.orientations }}' \
+              --font-scales '${{ matrix.font_scales }}' \
+              --is-tv '${{ matrix.is_tv }}' \
+              --reason 'First emulator attempt produced no summary.'
+          fi
+          cp -a "$OUT" "$PRESERVED"
+          mkdir -p "$OUT/attempts"
+          mv "$PRESERVED" "$OUT/attempts/attempt-1"
+          echo 'PASS: first failed attempt retained under attempts/attempt-1'
 
-      - name: Retry native Android TV 4K after transient failure
-        if: >-
-          steps.retry-check.outputs.needed == 'true' &&
-          matrix.id == 'android-tv-4k-api36'
+      - name: Retry after transient emulator infrastructure failure
+        if: steps.retry-check.outputs.needed == 'true'
         continue-on-error: true
         run: |
           bash qa/compatibility/run-native-emulator.sh \
@@ -338,25 +314,42 @@ jobs:
               --out 'compatibility-results/${{ matrix.id }}' \
               --serial emulator-5554
 
-      - name: Preserve result even when emulator setup is blocked
+      - name: Preserve final result and marker provenance
         if: always()
         run: |
           set -euo pipefail
           OUT='compatibility-results/${{ matrix.id }}'
           mkdir -p "$OUT"
           if [[ ! -s "$OUT/summary.json" ]]; then
-            cat > "$OUT/summary.json" <<JSON
-          {
-            "device_id": "${{ matrix.id }}",
-            "device_name": "${{ matrix.name }}",
-            "family": "${{ matrix.family }}",
-            "api": "${{ matrix.api }}",
-            "critical_finding_count": 0,
-            "infrastructure_error_count": 1,
-            "status": "infrastructure_blocked"
-          }
-          JSON
+            python3 qa/compatibility/make-blocked-result.py \
+              --out "$OUT" \
+              --device-id '${{ matrix.id }}' \
+              --device-name '${{ matrix.name }}' \
+              --family '${{ matrix.family }}' \
+              --api '${{ matrix.api }}' \
+              --target '${{ matrix.target }}' \
+              --arch '${{ matrix.arch }}' \
+              --profile '${{ matrix.profile }}' \
+              --width '${{ matrix.width }}' \
+              --height '${{ matrix.height }}' \
+              --density '${{ matrix.density }}' \
+              --orientations '${{ matrix.orientations }}' \
+              --font-scales '${{ matrix.font_scales }}' \
+              --is-tv '${{ matrix.is_tv }}' \
+              --reason 'Emulator or capture driver produced no final summary.'
           fi
+          cp lab-apk/quality-marker-injection.json "$OUT/quality-marker-injection.json"
+          test -s "$OUT/quality-marker-injection.json"
+
+      - name: Enforce infrastructure and critical findings
+        if: always()
+        env:
+          ENFORCE_FINDINGS: ${{ inputs.enforce_findings }}
+        run: |
+          set -euo pipefail
+          python3 qa/compatibility/gate.py \
+            'compatibility-results/${{ matrix.id }}/summary.json' \
+            --enforce-findings "$ENFORCE_FINDINGS"
 
       - name: Upload device artifacts
         if: always()
@@ -366,3 +359,88 @@ jobs:
           path: compatibility-results/${{ matrix.id }}/
           if-no-files-found: error
           retention-days: 14
+
+  aggregate-evidence:
+    name: Aggregate and enforce complete evidence
+    if: always()
+    needs:
+      - lab-plan
+      - device-lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: compatibility-*
+          path: device-artifacts
+
+      - name: Install report dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
+
+      - name: Build Compatibility and Quality Lab reports
+        env:
+          QUALITY_BUILD_SHA: ${{ inputs.source_head_sha || github.sha }}
+          QUALITY_SOURCE_HEAD_SHA: ${{ inputs.source_head_sha || github.sha }}
+          QUALITY_BASE_SHA: ${{ inputs.base_sha }}
+          QUALITY_PR_NUMBER: ${{ inputs.pr_number }}
+          QUALITY_SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+          QUALITY_TEST_VARIANT: ${{ inputs.test_variant || 'compatibility-runtime' }}
+        run: |
+          set -euo pipefail
+          python3 qa/compatibility/aggregate.py device-artifacts aggregate-report
+          expected_devices="$(
+            python3 -c 'from qa.compatibility.lab_config import DEVICES; print(",".join(item["id"] for item in DEVICES))'
+          )"
+          python3 -m qa.quality.reporters.aggregate \
+            --input device-artifacts \
+            --output quality-report \
+            --build-sha "$QUALITY_BUILD_SHA" \
+            --source-branch "$QUALITY_SOURCE_BRANCH" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --pr-number "$QUALITY_PR_NUMBER" \
+            --source-head-sha "$QUALITY_SOURCE_HEAD_SHA" \
+            --base-sha "$QUALITY_BASE_SHA" \
+            --test-variant "$QUALITY_TEST_VARIANT" \
+            --expected-devices "$expected_devices"
+          cat aggregate-report/GITHUB_STEP_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify mandatory aggregate artifacts
+        run: |
+          set -euo pipefail
+          for required in \
+            SUMMARY.json REPORT.md REPORT.html junit.xml run-manifest.json \
+            findings.json coverage.json impact.json SHA256SUMS; do
+            test -s "quality-report/$required"
+          done
+          (
+            cd quality-report
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload aggregate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-LAB-AGGREGATE
+          path: |
+            aggregate-report/
+            quality-report/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Final fail-closed enforcement
+        if: always()
+        env:
+          ENFORCE_FINDINGS: ${{ inputs.enforce_findings }}
+        run: |
+          set -euo pipefail
+          test -s aggregate-report/COMPATIBILITY-LAB-SUMMARY.json
+          python3 qa/compatibility/gate.py \
+            aggregate-report/COMPATIBILITY-LAB-SUMMARY.json \
+            --enforce-findings "$ENFORCE_FINDINGS"

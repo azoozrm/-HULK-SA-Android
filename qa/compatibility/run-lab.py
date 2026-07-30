@@ -21,6 +21,7 @@ from lab_config import PAGES
 PACKAGE = "sa.hulksa.player.dev"
 ACTIVITY = "sa.hulksa.player.qa.QaActivity"
 PAGE_MARKER_PREFIX = "qa-page:"
+DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 TRANSIENT_ADB_RE = re.compile(
     r"device offline|device ['\"][^'\"]+['\"] not found|"
@@ -285,6 +286,22 @@ def external_error_dialog_center(xml_bytes: bytes) -> tuple[int, int] | None:
     return ((x1 + x2) // 2, (y1 + y2) // 2)
 
 
+def visible_package_names(xml_bytes: bytes) -> list[str]:
+    """Identify who owns the visible hierarchy before product assertions run."""
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return []
+    return sorted(
+        {
+            package
+            for node in root.iter("node")
+            if (package := node.attrib.get("package", "").strip())
+            and node.attrib.get("visible-to-user", "true") != "false"
+        }
+    )
+
+
 def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
     try:
         root = ET.fromstring(xml_bytes)
@@ -302,6 +319,22 @@ def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
             "focusable": node.attrib.get("focusable") == "true",
         }
     return None
+
+
+def is_expanded_rail_focus(
+    node: dict[str, Any] | None,
+    display_width: int,
+) -> bool:
+    """Recognize a focused item after the RTL TV navigation rail expands."""
+    if not node or not node.get("bounds") or display_width <= 0:
+        return False
+    x1, _, x2, _ = node["bounds"]
+    node_width = x2 - x1
+    return (
+        x1 >= display_width * 0.65
+        and x2 >= display_width * 0.90
+        and node_width >= display_width * 0.14
+    )
 
 
 def parse_start_metrics(text: str) -> dict[str, int]:
@@ -489,7 +522,22 @@ class DeviceLab:
                 f"{observed_label}"
             )
         marker_scratch.unlink(missing_ok=True)
-        time.sleep(0.8)
+        # Downloads use a debug-only loopback origin and must prove actual byte
+        # progress. Synchronize on the semantic marker instead of a fixed sleep:
+        # high-density emulators can start WorkManager after the old three-second
+        # window. A timeout does not turn the case green; the final hierarchy is
+        # still captured. The final hierarchy carries independent origin and
+        # repository markers so the analyzer can locate the failed boundary.
+        if page == "downloads":
+            wait_for_marker(
+                self.adb,
+                DOWNLOAD_PROGRESS_MARKER,
+                case_dir / ".download-progress.xml",
+                timeout=15,
+            )
+            (case_dir / ".download-progress.xml").unlink(missing_ok=True)
+        else:
+            time.sleep(0.8)
         return start_text, marker_found
 
     def capture_case(self, page: str, orientation: str, font_scale: float) -> None:
@@ -506,11 +554,71 @@ class DeviceLab:
             "marker_found": False,
             "files": {},
             "capture_error": None,
+            "retry_count": 0,
+            "attempts": [],
         }
         try:
             start_text, marker_found = self.start_page(page, case_dir)
             record["marker_found"] = marker_found
             record["start_metrics_ms"] = parse_start_metrics(start_text)
+            if not marker_found:
+                attempt_dir = case_dir / "attempts" / "1"
+                attempt_xml = dump_xml(self.adb, attempt_dir / "ui.xml")
+                observed_packages = visible_package_names(attempt_xml)
+                if observed_packages and PACKAGE not in observed_packages:
+                    attempt_files = {
+                        "screenshot": attempt_dir / "screenshot.png",
+                        "xml": attempt_dir / "ui.xml",
+                        "logcat": attempt_dir / "logcat.txt",
+                        "window": attempt_dir / "window.txt",
+                        "activity": attempt_dir / "activity.txt",
+                    }
+                    capture_png(self.adb, attempt_files["screenshot"])
+                    safe_write(
+                        attempt_files["logcat"],
+                        command_text(
+                            self.adb,
+                            ["logcat", "-d", "-v", "threadtime"],
+                            shell=False,
+                            timeout=90,
+                        ),
+                    )
+                    safe_write(
+                        attempt_files["window"],
+                        command_text(
+                            self.adb,
+                            ["dumpsys", "window", "windows"],
+                            timeout=90,
+                        ),
+                    )
+                    safe_write(
+                        attempt_files["activity"],
+                        command_text(
+                            self.adb,
+                            ["dumpsys", "activity", "activities"],
+                            timeout=90,
+                        ),
+                    )
+                    record["attempts"].append(
+                        {
+                            "number": 1,
+                            "classification": "infrastructure",
+                            "reason": "foreground_package_mismatch",
+                            "observed_packages": observed_packages,
+                            "start_metrics_ms": parse_start_metrics(start_text),
+                            "files": {
+                                key: path.relative_to(self.out).as_posix()
+                                for key, path in attempt_files.items()
+                            },
+                        }
+                    )
+                    record["retry_count"] = 1
+                    self.adb.shell(["input", "keyevent", "4"])
+                    time.sleep(0.8)
+                    retry_dir = case_dir / "attempts" / "2-launch"
+                    start_text, marker_found = self.start_page(page, retry_dir)
+                    record["marker_found"] = marker_found
+                    record["start_metrics_ms"] = parse_start_metrics(start_text)
 
             file_map = {
                 "screenshot": case_dir / "screenshot.png",
@@ -523,6 +631,13 @@ class DeviceLab:
                 "window": case_dir / "window.txt",
                 "activity": case_dir / "activity.txt",
             }
+            if page == "downloads":
+                file_map.update(
+                    {
+                        "download_state": case_dir / "download-state.xml",
+                        "download_files": case_dir / "download-files.txt",
+                    }
+                )
             capture_png(self.adb, file_map["screenshot"])
             dump_xml(self.adb, file_map["xml"])
             pid = self.adb.shell(["pidof", PACKAGE]).text.strip().split()
@@ -565,6 +680,34 @@ class DeviceLab:
                 file_map["activity"],
                 command_text(self.adb, ["dumpsys", "activity", "activities"], timeout=90),
             )
+            if page == "downloads":
+                safe_write(
+                    file_map["download_state"],
+                    command_text(
+                        self.adb,
+                        [
+                            "run-as",
+                            PACKAGE,
+                            "cat",
+                            "shared_prefs/hulk_downloads.xml",
+                        ],
+                        timeout=30,
+                    ),
+                )
+                safe_write(
+                    file_map["download_files"],
+                    command_text(
+                        self.adb,
+                        [
+                            "run-as",
+                            PACKAGE,
+                            "ls",
+                            "-lnR",
+                            f"/sdcard/Android/data/{PACKAGE}/files/Movies",
+                        ],
+                        timeout=30,
+                    ),
+                )
             for key, path in file_map.items():
                 record["files"][key] = path.relative_to(self.out).as_posix()
         except Exception as exc:
@@ -706,16 +849,51 @@ class DeviceLab:
             ("DOWN", 20),
         ]
         trace: list[dict[str, Any]] = []
+        rail_visual: dict[str, dict[str, str]] = {}
         error: str | None = None
         try:
             self.start_page(page, audit_dir)
-            initial = dump_xml(self.adb, audit_dir / ".focus.xml")
+            is_home_tv = page == "home" and self.args.is_tv
+            initial_xml_path = (
+                audit_dir / "rail-collapsed.xml"
+                if is_home_tv
+                else audit_dir / ".focus.xml"
+            )
+            initial = dump_xml(self.adb, initial_xml_path)
+            if is_home_tv:
+                collapsed_png = audit_dir / "rail-collapsed.png"
+                capture_png(self.adb, collapsed_png)
+                rail_visual["collapsed"] = {
+                    "screenshot": collapsed_png.relative_to(self.out).as_posix(),
+                    "xml": initial_xml_path.relative_to(self.out).as_posix(),
+                }
             trace.append({"step": 0, "key": "INITIAL", "focused": focused_node(initial)})
+            display_width, _ = oriented_dimensions(
+                self.args.width,
+                self.args.height,
+                orientation,
+            )
             for index, (name, code) in enumerate(key_sequence, start=1):
                 self.adb.shell(["input", "keyevent", str(code)])
                 time.sleep(0.25)
                 xml = dump_xml(self.adb, audit_dir / ".focus.xml", attempts=2)
-                trace.append({"step": index, "key": name, "focused": focused_node(xml)})
+                focused = focused_node(xml)
+                trace.append({"step": index, "key": name, "focused": focused})
+                if (
+                    is_home_tv
+                    and "expanded" not in rail_visual
+                    and is_expanded_rail_focus(focused, display_width)
+                ):
+                    time.sleep(0.35)
+                    expanded_xml_path = audit_dir / "rail-expanded.xml"
+                    expanded_xml = dump_xml(self.adb, expanded_xml_path, attempts=2)
+                    if is_expanded_rail_focus(focused_node(expanded_xml), display_width):
+                        expanded_png = audit_dir / "rail-expanded.png"
+                        capture_png(self.adb, expanded_png)
+                        rail_visual["expanded"] = {
+                            "screenshot": expanded_png.relative_to(self.out).as_posix(),
+                            "xml": expanded_xml_path.relative_to(self.out).as_posix(),
+                        }
             capture_png(self.adb, audit_dir / "screenshot.png")
             final_xml = dump_xml(self.adb, audit_dir / "ui.xml")
             safe_write(
@@ -741,6 +919,7 @@ class DeviceLab:
                 "orientation": orientation,
                 "page": page,
                 "trace": trace,
+                "rail_visual": rail_visual,
                 "error": error,
                 "files": {
                     key: (audit_dir / filename).relative_to(self.out).as_posix()

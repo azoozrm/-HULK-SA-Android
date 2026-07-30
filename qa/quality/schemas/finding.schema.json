@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "fingerprint", "code", "severity", "finding_type", "message",
+    "expected", "actual", "device", "screen", "journey", "build_sha",
+    "reproduction", "suggested_owner", "evidence"
+  ],
+  "properties": {
+    "fingerprint": {"type": "string", "minLength": 12},
+    "code": {"type": "string", "minLength": 1},
+    "severity": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+    "finding_type": {
+      "type": "string",
+      "enum": ["Product", "Infrastructure", "Test harness", "Flaky", "False positive", "Needs human review"]
+    },
+    "message": {"type": "string", "minLength": 1},
+    "expected": {"type": "string", "minLength": 1},
+    "actual": {"type": "string", "minLength": 1},
+    "device": {"type": "string", "minLength": 1},
+    "api": {"type": ["integer", "null"]},
+    "orientation": {"type": "string"},
+    "density": {"type": ["integer", "null"]},
+    "font_scale": {"type": ["number", "null"]},
+    "screen": {"type": "string", "minLength": 1},
+    "journey": {"type": "string", "minLength": 1},
+    "build_sha": {"type": "string", "minLength": 7},
+    "reproduction": {"type": "array", "items": {"type": "string"}},
+    "suggested_owner": {"type": "string", "minLength": 1},
+    "regression_test_id": {"type": ["string", "null"]},
+    "root_cause": {"type": ["string", "null"]},
+    "evidence": {"type": "object"}
+  }
+}
+

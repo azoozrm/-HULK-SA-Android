@@ -1,0 +1,9 @@
+flowchart TD
+  n_login["login"]
+  n_auth_loading["auth-loading"]
+  n_home["home"]
+  n_auth_error["auth-error"]
+  n_login -->|click| n_auth_loading
+  n_auth_loading -->|system| n_home
+  n_auth_loading -->|system| n_auth_error
+  n_auth_error -->|back| n_login

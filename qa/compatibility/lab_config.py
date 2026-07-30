@@ -15,6 +15,7 @@ PAGES: tuple[dict[str, str], ...] = (
     {"id": "live", "label": "البث المباشر"},
     {"id": "movies", "label": "الافلام"},
     {"id": "series", "label": "المسلسلات"},
+    {"id": "favorites", "label": "قائمتي"},
     {"id": "search", "label": "البحث"},
     {"id": "downloads", "label": "التنزيلات"},
     {"id": "settings", "label": "الاعدادات"},

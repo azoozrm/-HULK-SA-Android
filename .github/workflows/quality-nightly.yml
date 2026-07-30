@@ -1,0 +1,108 @@
+name: HULK SA Quality Nightly
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Full emulator compatibility matrix
+        required: false
+        type: boolean
+        default: true
+      report_only:
+        description: Advisory mode never masks P0/P1 or missing evidence
+        required: false
+        type: boolean
+        default: false
+      update_baseline:
+        description: Baseline updates require a different protected workflow
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-quality-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-ui:
+    name: Full UI and Compatibility Lab
+    uses: ./.github/workflows/quality-ui.yml
+    with:
+      full_matrix: true
+      report_only: ${{ inputs.report_only || false }}
+      update_baseline: false
+
+  nightly-contracts:
+    name: Network, lifecycle, download and performance contract status
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run deterministic analyzer and fixture contracts
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 -m pip install --disable-pip-version-check \
+            -r qa/compatibility/requirements.txt
+          python3 -m unittest discover -s qa/quality/tests -p 'test_*.py' -v \
+            2>&1 | tee nightly-self-tests.log
+          python3 qa/quality/config/schema_validator.py \
+            qa/quality/config/matrix.json \
+            qa/quality/schemas/matrix.schema.json \
+            --matrix-contract
+
+      - name: Record boundaries that require physical infrastructure
+        run: |
+          set -euo pipefail
+          mkdir -p nightly-status
+          python3 - <<'PY'
+          import json
+          status = {
+              "schema_version": 1,
+              "macrobenchmark": {
+                  "status": "NOT_EXECUTED",
+                  "reason": "No approved physical performance runner is connected; emulator timing is not a release blocker."
+              },
+              "device_reboot_download_recovery": {
+                  "status": "NOT_EXECUTED",
+                  "reason": "Requires a managed or physical reboot-capable device."
+              },
+              "oem_runtime": {"status": "NOT_EXECUTED"},
+              "arm_runtime": {"status": "NOT_EXECUTED"}
+          }
+          with open("nightly-status/NOT-EXECUTED.json", "w", encoding="utf-8") as handle:
+              json.dump(status, handle, ensure_ascii=False, indent=2)
+          PY
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-NIGHTLY-CONTRACTS
+          path: |
+            nightly-self-tests.log
+            nightly-status/
+          if-no-files-found: error
+          retention-days: 30
+
+  enforce:
+    name: Final nightly enforcement
+    if: always()
+    needs:
+      - full-ui
+      - nightly-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          UI_RESULT: ${{ needs.full-ui.result }}
+          CONTRACT_RESULT: ${{ needs.nightly-contracts.result }}
+        run: |
+          set -euo pipefail
+          [[ "$UI_RESULT" = 'success' ]]
+          [[ "$CONTRACT_RESULT" = 'success' ]]

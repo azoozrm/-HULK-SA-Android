@@ -14,6 +14,7 @@ on:
       - 'gradle.properties'
       - 'qa/canonical/**'
       - 'tools/verify-android-architectures.py'
+      - 'tools/verify-runtime-config.py'
       - '.github/workflows/canonical-build.yml'
   pull_request:
     branches:
@@ -28,6 +29,7 @@ on:
       - 'gradle.properties'
       - 'qa/canonical/**'
       - 'tools/verify-android-architectures.py'
+      - 'tools/verify-runtime-config.py'
       - '.github/workflows/canonical-build.yml'
   workflow_dispatch:
 
@@ -40,7 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
-      HULK_PORTAL_URL: https://example.invalid
+      HULK_PORTAL_URL: http://3162356.xyz:8080
+      HULK_CONFIG_URL: ''
 
     steps:
       - uses: actions/checkout@v7
@@ -79,27 +82,36 @@ jobs:
           set -euo pipefail
           sha256sum -c qa/canonical/canonical-source.sha256
 
+      - name: Verify explicit runtime configuration inputs
+        run: |
+          set -euo pipefail
+          [[ "$HULK_PORTAL_URL" = 'http://3162356.xyz:8080' ]]
+          [[ -z "$HULK_CONFIG_URL" ]]
+
       - name: Debug and unit tests
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             clean :app:compileDebugKotlin testDebugUnitTest \
             :app:assembleDebug :app:bundleDebug \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
 
       - name: Lint
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             :app:lintDebug \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
 
       - name: Release and R8
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             :app:assembleRelease :app:bundleRelease \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL"
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
 
       - name: Verify APK and AAB architectures
         run: |
@@ -116,6 +128,22 @@ jobs:
           done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
           test "$count" -ge 4
 
+      - name: Verify compiled release runtime configuration
+        run: |
+          set -euo pipefail
+          mkdir -p build/reports/runtime-config
+          build_config="$(find app/build/generated/source/buildConfig/release \
+            -type f -name BuildConfig.java -print -quit)"
+          test -n "$build_config"
+          python3 tools/verify-runtime-config.py \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            --build-config "$build_config" \
+            --report build/reports/runtime-config/APK.md
+          python3 tools/verify-runtime-config.py \
+            app/build/outputs/bundle/release/app-release.aab \
+            --build-config "$build_config" \
+            --report build/reports/runtime-config/AAB.md
+
       - name: Package unsigned verification artifacts
         run: |
           set -euo pipefail
@@ -123,6 +151,7 @@ jobs:
           find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) \
             -exec cp {} canonical-artifacts/ \;
           cp -a build/reports/architecture canonical-artifacts/
+          cp -a build/reports/runtime-config canonical-artifacts/
           (
             cd canonical-artifacts
             sha256sum *.apk *.aab > SHA256SUMS.txt

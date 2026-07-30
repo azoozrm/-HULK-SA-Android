@@ -1,0 +1,256 @@
+name: HULK SA Quality PR Gate
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Select the full matrix in impact evidence
+        required: false
+        type: boolean
+        default: false
+      report_only:
+        description: Never converts a product failure to success
+        required: false
+        type: boolean
+        default: false
+      update_baseline:
+        description: Baseline updates are forbidden in the PR gate
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-quality-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  HULK_PORTAL_URL: http://3162356.xyz:8080
+  HULK_CONFIG_URL: ''
+
+jobs:
+  governance:
+    name: Source, schemas and lab self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Reject automatic baseline mutation
+        if: inputs.update_baseline
+        run: |
+          echo 'update_baseline is accepted only by a protected manual baseline workflow.' >&2
+          exit 2
+
+      - name: Validate canonical source and approved logo assets
+        run: |
+          set -euo pipefail
+          sha256sum -c qa/canonical/canonical-source.sha256
+          python3 qa/quality/release/logo_integrity.py
+
+      - name: Validate schemas, inventory and analyzers
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 -m pip install --disable-pip-version-check \
+            -r qa/compatibility/requirements.txt
+          python3 qa/quality/config/schema_validator.py \
+            qa/quality/config/matrix.json \
+            qa/quality/schemas/matrix.schema.json \
+            --matrix-contract
+          python3 -m unittest discover -s qa/quality/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s qa/compatibility/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
+          python3 qa/quality/inventory/ui_inventory.py \
+            --root . \
+            --screens generated-inventory/screens.json \
+            --actions generated-inventory/actions.json \
+            --documentation generated-inventory/UI-COVERAGE.md
+          python3 qa/quality/inventory/compare.py \
+            qa/quality/inventory/screens.json generated-inventory/screens.json
+          python3 qa/quality/inventory/compare.py \
+            qa/quality/inventory/actions.json generated-inventory/actions.json
+
+      - name: Upload governance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-GOVERNANCE
+          path: |
+            qa/quality/baseline-manifest.json
+            qa/quality/release/approved-logo-assets.sha256
+            generated-inventory/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-static:
+    name: Clean, unit, lint, debug, release and package audit
+    needs: governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android build tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
+
+      - name: Generate current change-impact evidence
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          base="${BASE_SHA:-$(git merge-base HEAD origin/phase-3-v0.9.3.0-adaptive-foundation)}"
+          head="${HEAD_SHA:-HEAD}"
+          python3 qa/quality/impact/classifier.py \
+            --root . \
+            --base "$base" \
+            --head "$head" \
+            --output quick-impact/impact.json \
+            --selected-output quick-impact/selected-tests.json \
+            --summary quick-impact/STEP-SUMMARY.md
+
+      - name: Build and run static gates
+        id: gradle
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain \
+            clean :app:compileDebugKotlin testDebugUnitTest :app:lintDebug \
+            :app:assembleDebug :app:bundleDebug \
+            :app:assembleRelease :app:bundleRelease \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL" \
+            --stacktrace 2>&1 | tee quality-gradle.log
+
+      - name: Qualify generated packages
+        id: packages
+        run: |
+          set -euo pipefail
+          mkdir -p quality-build architecture runtime-config
+          release_apk='app/build/outputs/apk/release/app-release-unsigned.apk'
+          release_aab='app/build/outputs/bundle/release/app-release.aab'
+          build_config="$(find app/build/generated/source/buildConfig/release -type f -name BuildConfig.java -print -quit)"
+          test -s "$release_apk"
+          test -s "$release_aab"
+          test -n "$build_config"
+          python3 tools/verify-runtime-config.py "$release_apk" \
+            --build-config "$build_config" \
+            --report runtime-config/APK.md
+          python3 tools/verify-runtime-config.py "$release_aab" \
+            --build-config "$build_config" \
+            --report runtime-config/AAB.md
+          python3 tools/verify-android-architectures.py "$release_apk" \
+            --require-native-libs --report architecture/APK.md
+          python3 tools/verify-android-architectures.py "$release_aab" \
+            --require-native-libs --report architecture/AAB.md
+          aapt dump badging "$release_apk" > quality-build/APK-BADGING.txt
+          grep -q "package: name='sa.hulksa.player'" quality-build/APK-BADGING.txt
+          cp "$release_apk" "$release_aab" quality-build/
+          du -b quality-build/* > quality-build/SIZES.txt
+          ./gradlew --no-daemon --console=plain :app:dependencies \
+            > quality-build/DEPENDENCY-TREE.txt
+          printf '%s\n' \
+            '{"status":"NOT_EXECUTED","reason":"No approved vulnerability scanner is configured; dependency tree is retained for review."}' \
+            > quality-build/VULNERABILITY-REPORT.json
+          (
+            cd quality-build
+            sha256sum * > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Generate mandatory quick-gate report
+        if: always()
+        env:
+          GRADLE_OUTCOME: ${{ steps.gradle.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.packages.outcome }}
+          QUALITY_PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUALITY_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          QUALITY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          QUALITY_SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p quick-evidence/static
+          python3 -m qa.quality.reporters.static_summary \
+            --gradle-outcome "$GRADLE_OUTCOME" \
+            --package-outcome "$PACKAGE_OUTCOME" \
+            --lint app/build/reports/lint-results-debug.xml \
+            --vulnerability quality-build/VULNERABILITY-REPORT.json \
+            --output quick-evidence/static/summary.json
+          python3 -m qa.quality.reporters.aggregate \
+            --input quick-evidence \
+            --output quality-report \
+            --build-sha "$GITHUB_SHA" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --pr-number "$QUALITY_PR_NUMBER" \
+            --source-head-sha "$QUALITY_SOURCE_HEAD_SHA" \
+            --base-sha "$QUALITY_BASE_SHA" \
+            --source-branch "$QUALITY_SOURCE_BRANCH" \
+            --test-variant pr-static-release-like \
+            --expected-devices static-build \
+            --impact quick-impact/impact.json || true
+          cat quality-report/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build and report evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-PR-BUILD
+          path: |
+            quality-gradle.log
+            quality-build/
+            architecture/
+            runtime-config/
+            quick-impact/
+            app/build/reports/
+            app/build/test-results/
+            quality-report/
+          if-no-files-found: error
+          retention-days: 14
+
+  enforce:
+    name: Final PR quality enforcement
+    if: always()
+    needs:
+      - governance
+      - build-static
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail when evidence-producing jobs did not succeed
+        env:
+          GOVERNANCE_RESULT: ${{ needs.governance.result }}
+          BUILD_RESULT: ${{ needs.build-static.result }}
+          REPORT_ONLY: ${{ inputs.report_only || false }}
+        run: |
+          set -euo pipefail
+          echo "report_only=$REPORT_ONLY (does not override failures)"
+          [[ "$GOVERNANCE_RESULT" = 'success' ]]
+          [[ "$BUILD_RESULT" = 'success' ]]

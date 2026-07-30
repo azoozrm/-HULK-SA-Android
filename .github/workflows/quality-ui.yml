@@ -1,0 +1,256 @@
+name: HULK SA Quality UI Gate
+
+on:
+  workflow_call:
+    inputs:
+      full_matrix:
+        required: false
+        type: boolean
+        default: false
+      report_only:
+        required: false
+        type: boolean
+        default: false
+      update_baseline:
+        required: false
+        type: boolean
+        default: false
+      source_head_sha:
+        required: false
+        type: string
+        default: ''
+      base_sha:
+        required: false
+        type: string
+        default: ''
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - 'app/src/main/**'
+      - 'app/src/androidTest/**'
+      - 'app/build.gradle.kts'
+      - 'qa/compatibility/**'
+      - 'qa/quality/**'
+      - '.github/workflows/quality-ui.yml'
+      - '.github/workflows/compatibility-lab.yml'
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Run all qualified Compatibility Lab profiles
+        required: false
+        type: boolean
+        default: true
+      report_only:
+        description: Does not override deterministic product failures
+        required: false
+        type: boolean
+        default: false
+      update_baseline:
+        description: Baseline updates are forbidden here
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-quality-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: Classify lab-only versus product changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      lab_only: ${{ steps.classify.outputs.lab_only }}
+      enforce_product_findings: ${{ steps.classify.outputs.enforce_product_findings }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Classify the exact PR diff fail closed
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.base_sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p quality-evidence/scope
+          python3 -m qa.quality.scripts.pr_scope \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --output quality-evidence/scope/SCOPE.json \
+            --github-output "$GITHUB_OUTPUT"
+          jq . quality-evidence/scope/SCOPE.json
+
+      - name: Upload scope evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-UI-SCOPE
+          path: quality-evidence/scope/
+          if-no-files-found: error
+          retention-days: 14
+
+  baseline-policy:
+    name: Enforce visual baseline policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reject automatic visual baseline update
+        env:
+          UPDATE_BASELINE: ${{ inputs.update_baseline || false }}
+        run: |
+          set -euo pipefail
+          [[ "$UPDATE_BASELINE" = 'false' ]]
+
+  compose-instrumentation:
+    name: Compose, Android and deterministic download instrumentation
+    needs:
+      - scope
+      - baseline-policy
+    if: needs.scope.outputs.lab_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Prepare fail-closed instrumentation evidence
+        run: |
+          set -euo pipefail
+          python3 -m qa.quality.scripts.instrumentation_evidence \
+            --out quality-evidence/instrumentation \
+            --head-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --step-outcome not_started
+
+      - name: Validate instrumentation and emulator runner scripts
+        run: |
+          set -euo pipefail
+          bash -n qa/quality/scripts/run_instrumentation.sh
+          bash -n qa/compatibility/run-native-emulator.sh
+          chmod +x \
+            qa/quality/scripts/run_instrumentation.sh \
+            qa/compatibility/run-native-emulator.sh
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run isolated instrumentation after stable Android service boot
+        id: instrumented
+        continue-on-error: true
+        run: |
+          bash qa/compatibility/run-native-emulator.sh \
+            --api 35 \
+            --target google_apis \
+            --arch x86_64 \
+            --profile pixel_6 \
+            --skin 1080x2400 \
+            --result-dir quality-evidence/instrumentation/runtime/emulator \
+            -- \
+            bash qa/quality/scripts/run_instrumentation.sh
+
+      - name: Finalize instrumentation evidence
+        if: always()
+        env:
+          EMULATOR_STEP_OUTCOME: ${{ steps.instrumented.outcome }}
+        run: |
+          set -euo pipefail
+          python3 -m qa.quality.scripts.instrumentation_evidence \
+            --out quality-evidence/instrumentation \
+            --head-sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --step-outcome "$EMULATOR_STEP_OUTCOME" \
+            --results-root app/build/outputs/androidTest-results \
+            --reports-root app/build/reports/androidTests
+
+      - name: Verify instrumentation evidence exists
+        if: always()
+        run: |
+          set -euo pipefail
+          jq -e '.overall_status == "PASS"' \
+            quality-evidence/instrumentation/SUMMARY.json
+          find app/build/outputs/androidTest-results -type f -name '*.xml' -print -quit |
+            grep -q .
+          find app/build/reports/androidTests -type f -print -quit | grep -q .
+
+      - name: Upload instrumentation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-COMPOSE-INSTRUMENTATION
+          path: |
+            quality-evidence/instrumentation/
+            app/build/outputs/androidTest-results/
+            app/build/reports/androidTests/
+          if-no-files-found: error
+          retention-days: 14
+
+  compatibility-runtime:
+    name: Compatibility runtime, visual, navigation and focus
+    needs:
+      - scope
+      - baseline-policy
+    uses: ./.github/workflows/compatibility-lab.yml
+    with:
+      enforce_findings: ${{ needs.scope.outputs.lab_only != 'true' }}
+      source_head_sha: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+      base_sha: ${{ github.event.pull_request.base.sha || inputs.base_sha || '' }}
+      pr_number: ${{ github.event.pull_request.number || '' }}
+      test_variant: ${{ needs.scope.outputs.lab_only == 'true' && 'quality-ui-lab-only' || 'quality-ui-product' }}
+
+  enforce:
+    name: Final UI evidence enforcement
+    if: always()
+    needs:
+      - scope
+      - baseline-policy
+      - compose-instrumentation
+      - compatibility-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce all UI layers with scope-aware product policy
+        env:
+          LAB_ONLY: ${{ needs.scope.outputs.lab_only }}
+          SCOPE: ${{ needs.scope.result }}
+          POLICY: ${{ needs.baseline-policy.result }}
+          INSTRUMENTATION: ${{ needs.compose-instrumentation.result }}
+          COMPATIBILITY: ${{ needs.compatibility-runtime.result }}
+          REPORT_ONLY: ${{ inputs.report_only || false }}
+        run: |
+          set -euo pipefail
+          echo "report_only=$REPORT_ONLY (cannot override product failures)"
+          [[ "$SCOPE" = 'success' ]]
+          [[ "$POLICY" = 'success' ]]
+          [[ "$COMPATIBILITY" = 'success' ]]
+          if [[ "$LAB_ONLY" = 'true' ]]; then
+            [[ "$INSTRUMENTATION" = 'skipped' || "$INSTRUMENTATION" = 'success' ]]
+            echo 'PASS: lab-only PR infrastructure is qualified; detected product findings remain preserved in Compatibility Lab artifacts.'
+          else
+            [[ "$INSTRUMENTATION" = 'success' ]]
+            echo 'PASS: product-affecting PR passed strict instrumentation and Compatibility Lab enforcement.'
+          fi

@@ -1,0 +1,178 @@
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[3]
+WORKFLOWS = ROOT / ".github/workflows"
+
+
+class WorkflowContractTest(unittest.TestCase):
+    def source(self, name: str) -> str:
+        return (WORKFLOWS / name).read_text(encoding="utf-8")
+
+    def test_required_quality_workflows_exist_with_final_enforcement(self) -> None:
+        expectations = {
+            "quality-pr.yml": "Final PR quality enforcement",
+            "quality-ui.yml": "Final UI evidence enforcement",
+            "quality-nightly.yml": "Final nightly enforcement",
+            "quality-release.yml": "Final release recommendation",
+            "quality-pr-intelligence.yml": "Final impact enforcement",
+            "quality-lab-self-validation.yml": "Final lab self-validation enforcement",
+        }
+        for filename, final_job in expectations.items():
+            source = self.source(filename)
+            self.assertIn(final_job, source)
+            self.assertIn("timeout-minutes:", source)
+            self.assertIn("concurrency:", source)
+
+    def test_compatibility_lab_is_reusable_and_aggregates_all_device_evidence(self) -> None:
+        source = self.source("compatibility-lab.yml")
+        trigger = source.split("permissions:", 1)[0]
+        self.assertIn("workflow_call:", trigger)
+        self.assertNotIn("pull_request:", trigger)
+        self.assertNotIn("\n  push:", trigger)
+        self.assertIn("attempts/attempt-1", source)
+        self.assertIn("aggregate-evidence:", source)
+        self.assertIn("Final fail-closed enforcement", source)
+        for trace_field in (
+            "source_head_sha:",
+            "base_sha:",
+            "pr_number:",
+            "test_variant:",
+            "--run-attempt",
+            "--source-head-sha",
+        ):
+            self.assertIn(trace_field, source)
+
+    def test_quality_lab_self_validation_is_not_a_product_bypass(self) -> None:
+        self_validation = self.source("quality-lab-self-validation.yml")
+        strict_ui = self.source("quality-ui.yml")
+        self.assertNotIn("enforce_findings: false", self_validation)
+        self.assertNotIn("uses: ./.github/workflows/compatibility-lab.yml", self_validation)
+        self.assertIn("INSTRUMENTATION_CLASSES", self_validation)
+        self.assertIn("Prove no production source or approved logo changed", self_validation)
+        self.assertIn("Final lab self-validation enforcement", self_validation)
+        self.assertIn("Classify lab-only versus product changes", strict_ui)
+        self.assertIn("qa.quality.scripts.pr_scope", strict_ui)
+        self.assertIn(
+            "enforce_findings: ${{ needs.scope.outputs.lab_only != 'true' }}",
+            strict_ui,
+        )
+        self.assertIn("if: needs.scope.outputs.lab_only != 'true'", strict_ui)
+        self.assertIn("product-affecting PR passed strict instrumentation", strict_ui)
+        self.assertNotIn("report_only: true", self_validation)
+
+    def test_scope_classifier_is_fail_closed_and_gradle_test_only(self) -> None:
+        source = (ROOT / "qa/quality/scripts/pr_scope.py").read_text(encoding="utf-8")
+        self.assertIn("No diff evidence was available", source)
+        self.assertIn("enforce_product_findings", source)
+        self.assertIn("restricted_gradle_lines", source)
+        self.assertIn("app/src/androidTest/", source)
+        self.assertIn("app/build.gradle.kts", source)
+        self.assertIn("ANDROIDX_TEST_ORCHESTRATOR", source)
+
+    def test_compatibility_matrix_uses_stable_native_runner_and_marker_provenance(self) -> None:
+        source = self.source("compatibility-lab.yml")
+        self.assertNotIn("reactivecircus/android-emulator-runner", source)
+        self.assertGreaterEqual(
+            source.count("bash qa/compatibility/run-native-emulator.sh"),
+            2,
+        )
+        self.assertIn("quality-marker-injection.json", source)
+        self.assertIn(
+            'cp lab-apk/quality-marker-injection.json "$OUT/quality-marker-injection.json"',
+            source,
+        )
+        self.assertIn("replacement_count", source)
+        self.assertIn("original_sha256", source)
+        self.assertIn("instrumented_sha256", source)
+
+    def test_pr_workflows_do_not_receive_signing_or_production_credentials(self) -> None:
+        for filename in (
+            "quality-pr.yml",
+            "quality-ui.yml",
+            "quality-pr-intelligence.yml",
+            "quality-lab-self-validation.yml",
+        ):
+            source = self.source(filename)
+            self.assertNotIn("HULK_RELEASE_KEYSTORE", source)
+            self.assertNotIn("HULK_RELEASE_STORE_PASSWORD", source)
+            self.assertNotIn("production-signing", source)
+
+    def test_signed_workflow_has_no_placeholder_fallback(self) -> None:
+        source = self.source("signed-release-qualification.yml")
+        self.assertNotIn("example.invalid", source)
+        self.assertIn("http://3162356.xyz:8080", source)
+        self.assertIn("verify-runtime-config.py", source)
+        self.assertIn("HULK_CONFIG_URL: ''", source)
+
+    def test_canonical_release_uses_verified_production_endpoint(self) -> None:
+        source = self.source("canonical-build.yml")
+        self.assertNotIn("example.invalid", source)
+        self.assertIn("HULK_PORTAL_URL: http://3162356.xyz:8080", source)
+        self.assertIn("HULK_CONFIG_URL: ''", source)
+        self.assertIn("verify-runtime-config.py", source)
+        self.assertIn("build/reports/runtime-config", source)
+
+    def test_release_gate_requires_external_evidence_and_never_claims_it(self) -> None:
+        source = self.source("quality-release.yml")
+        self.assertIn("physical_evidence_run_id", source)
+        self.assertIn("protected_smoke_run_id", source)
+        self.assertIn('device_type == "physical"', source)
+        self.assertIn("real_download_bytes > 0", source)
+        self.assertNotIn("continue-on-error:", source)
+
+    def test_report_only_is_never_used_to_skip_final_assertions(self) -> None:
+        for filename in ("quality-pr.yml", "quality-ui.yml", "quality-nightly.yml"):
+            source = self.source(filename)
+            self.assertNotIn("if: inputs.report_only", source)
+            self.assertNotIn("if: ${{ inputs.report_only", source)
+
+    def test_full_python_self_test_jobs_install_visual_dependencies(self) -> None:
+        for filename in ("quality-pr.yml", "quality-nightly.yml"):
+            source = self.source(filename)
+            requirements = "-r qa/compatibility/requirements.txt"
+            self.assertIn(requirements, source)
+            self.assertLess(
+                source.index(requirements),
+                source.index(
+                    "python3 -m unittest discover -s qa/quality/tests"
+                ),
+            )
+
+    def test_instrumentation_layer_uses_stable_native_emulator_and_fail_closed_evidence(self) -> None:
+        source = self.source("quality-ui.yml")
+        self.assertIn("Prepare fail-closed instrumentation evidence", source)
+        self.assertIn("Finalize instrumentation evidence", source)
+        self.assertIn("quality-evidence/instrumentation/", source)
+        self.assertIn("steps.instrumented.outcome", source)
+        self.assertIn("'.overall_status == \"PASS\"'", source)
+        self.assertIn("if-no-files-found: error", source)
+        self.assertIn("github.event.pull_request.head.sha || inputs.source_head_sha || github.sha", source)
+        self.assertIn("quality-ui-product", source)
+        self.assertIn("bash -n qa/quality/scripts/run_instrumentation.sh", source)
+        self.assertIn("bash -n qa/compatibility/run-native-emulator.sh", source)
+        self.assertIn("Run isolated instrumentation after stable Android service boot", source)
+        self.assertIn("bash qa/compatibility/run-native-emulator.sh", source)
+        self.assertIn("--api 35", source)
+        self.assertIn("--skin 1080x2400", source)
+        self.assertIn("bash qa/quality/scripts/run_instrumentation.sh", source)
+        self.assertIn("continue-on-error: true", source)
+        self.assertNotIn("reactivecircus/android-emulator-runner", source)
+        self.assertNotIn("bash <<'BASH'", source)
+
+    def test_pr_report_records_real_impact_and_pr_traceability(self) -> None:
+        source = self.source("quality-pr.yml")
+        for expected in (
+            "quick-impact/impact.json",
+            "--pr-number",
+            "--source-head-sha",
+            "--base-sha",
+            "--test-variant",
+            "qa.quality.reporters.static_summary",
+        ):
+            self.assertIn(expected, source)
+
+
+if __name__ == "__main__":
+    unittest.main()

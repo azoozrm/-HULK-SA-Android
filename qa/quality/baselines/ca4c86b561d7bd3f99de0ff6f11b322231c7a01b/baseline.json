@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "repository": "azoozrm/-HULK-SA-Android",
+  "branch": "phase-3-v0.9.3.0-adaptive-foundation",
+  "build_sha": "ca4c86b561d7bd3f99de0ff6f11b322231c7a01b",
+  "applies_to_source_sha": "55ee9a136d3557a97daa9b9c2a4821de75108652",
+  "workflow_run_id": 30383727238,
+  "workflow_run_number": 55,
+  "captured_at": "2026-07-28T17:37:25Z",
+  "status": "BLOCKED",
+  "counts": {
+    "devices_planned": 9,
+    "devices_executed": 8,
+    "devices_blocked": 1,
+    "cases_planned": 133,
+    "cases_executed": 126,
+    "cases_skipped": 7,
+    "cases_passed": 0,
+    "cases_warned": 126,
+    "critical": 0,
+    "warning": 222,
+    "infrastructure": 1,
+    "confirmed_false_positive_pairs": 24,
+    "retries": 1
+  },
+  "finding_codes": {
+    "high_emulator_jank": 126,
+    "text_at_display_edge": 34,
+    "slow_page_start": 28,
+    "interactive_overlap": 20,
+    "possible_text_clipping": 12,
+    "tv_safe_area": 2
+  },
+  "artifacts": [
+    {
+      "id": 8698175721,
+      "name": "HULK-SA-COMPATIBILITY-LAB-APK",
+      "size_bytes": 24195965,
+      "sha256": "eca6a977df455a6deacc47a58ce00a6de270b16c15a00dd71f773ba76c623c3b"
+    },
+    {
+      "id": 8698377528,
+      "name": "compatibility-pixel-4a-api29",
+      "size_bytes": 6445520,
+      "sha256": "fa73138b7c77798e12735124a6f3f64755412841c9057b23a7d734c6a3e67b5b"
+    },
+    {
+      "id": 8698363303,
+      "name": "compatibility-pixel-6-api31",
+      "size_bytes": 4454238,
+      "sha256": "bbb25f1bf85552fa061cc488b89f6a6a33ea8cbf4eb86128ce65794ac98ddb8a"
+    },
+    {
+      "id": 8698388098,
+      "name": "compatibility-pixel-8-pro-api35",
+      "size_bytes": 5127538,
+      "sha256": "6fde71b30f416f1a3718d78a377f98bcedca7729279f7f28bada7f0051a3b6a9"
+    },
+    {
+      "id": 8698378510,
+      "name": "compatibility-galaxy-s24-ultra-api35",
+      "size_bytes": 5185868,
+      "sha256": "8015b3926579e81af8ac3ce7b7dbd4f571c23f9552cd5a1aa60b161cbb5ecad9"
+    },
+    {
+      "id": 8698468972,
+      "name": "compatibility-pixel-tablet-api35",
+      "size_bytes": 10259462,
+      "sha256": "16f9470934d50a338d968edfe59122dbbc488205506a2b95dae30b5c4d9b6d4f"
+    },
+    {
+      "id": 8698367232,
+      "name": "compatibility-nexus-9-api28",
+      "size_bytes": 3264439,
+      "sha256": "b9dce477439975323cae96af783e4f864a4434bfb4d5cfc67b094e6f7ba63ac3"
+    },
+    {
+      "id": 8698656843,
+      "name": "compatibility-android-tv-720p-api36",
+      "size_bytes": 2065976,
+      "sha256": "9e00efdccbf71aa24b5bc4937132ba89b7fa52599c79bf0fa86edbb8a80c050f"
+    },
+    {
+      "id": 8698457455,
+      "name": "compatibility-android-tv-1080p-api36",
+      "size_bytes": 280,
+      "sha256": "03d718e5df1d4ef14f23fb8a872d174a1a72cff5d962d2d1fd4b485b2bbf1ed1",
+      "status": "BLOCKED"
+    },
+    {
+      "id": 8698666295,
+      "name": "compatibility-android-tv-4k-api36",
+      "size_bytes": 8282886,
+      "sha256": "90f962586f13db53030f27694dd2cf635362cc9313cb8dde82e410adf5659c05"
+    }
+  ],
+  "known_false_negatives": [
+    "missing final fail-closed enforcement",
+    "favorites page absent",
+    "visible text overlap not classified",
+    "TV content gutters not measured",
+    "collapsed and expanded rail logo not compared",
+    "download bytes and final file integrity not proven"
+  ]
+}
+

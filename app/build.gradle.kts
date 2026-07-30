@@ -51,6 +51,7 @@ android {
         versionCode = 62
         versionName = "0.9.3.18"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
 
         buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
         buildConfigField("String", "CONFIG_URL", configUrl.get().asBuildConfigString())
@@ -122,6 +123,10 @@ android {
             "META-INF/DEPENDENCIES",
         )
     }
+
+    testOptions {
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
+    }
 }
 
 dependencies {
@@ -156,5 +161,7 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestUtil("androidx.test:orchestrator:1.6.1")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

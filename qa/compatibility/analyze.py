@@ -28,6 +28,22 @@ RENDER_RE = re.compile(
 )
 JANK_RE = re.compile(r"Janky frames:\s*(\d+)\s*\(([\d.]+)%\)")
 TOTAL_PSS_RE = re.compile(r"TOTAL PSS:\s*([\d,]+)")
+TOP_RESUMED_PACKAGE_RE = re.compile(
+    r"(?:topResumedActivity=|mResumedActivity:)\s*ActivityRecord\{"
+    r"[^\n]*?\bu\d+\s+([A-Za-z0-9_.]+)/"
+)
+RAIL_LOGO_MIN_SCREEN_RATIO = 0.028
+RAIL_LOGO_MAX_SCREEN_RATIO = 0.035
+RAIL_LOGO_STATE_TOLERANCE_DP = 2.0
+TV_CONTENT_GUTTER_MAX_DP = 12.0
+TV_LIVE_ACTION_BOTTOM_MIN_DP = 14.0
+TV_DOWNLOAD_CARD_MIN_HEIGHT_DP = 150.0
+QA_TV_PAGE_CONTENT_PREFIX = "qa-tv-page-content:"
+QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"
+QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
+QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
+QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
+QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes-positive"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -78,6 +94,150 @@ def app_nodes(root: ET.Element) -> Iterable[ET.Element]:
         yield node
 
 
+def tv_content_gutter_measurement(
+    nodes: Iterable[ET.Element],
+    width: int,
+    height: int,
+    density: int,
+    page: str = "live",
+) -> dict[str, Any] | None:
+    """Measure one page's content inset against the adjacent TV rail."""
+    content_bounds = None
+    rail_bounds = None
+    expected_marker = f"{QA_TV_PAGE_CONTENT_PREFIX}{page}"
+    for node in nodes:
+        description = (node.attrib.get("content-desc", "") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if not bounds:
+            continue
+        if expected_marker in description:
+            content_bounds = bounds
+        elif description == "qa-tv-rail":
+            rail_bounds = bounds
+    if content_bounds is None or rail_bounds is None:
+        return None
+
+    content_x1, content_y1, content_x2, content_y2 = content_bounds
+    rail_x1, _, rail_x2, _ = rail_bounds
+    pixels_per_dp = max(density / 160.0, 0.01)
+    if rail_x1 >= width / 2:
+        horizontal = {
+            "outer_px": content_x1,
+            "rail_px": rail_x1 - content_x2,
+        }
+        rail_side = "right"
+    elif rail_x2 <= width / 2:
+        horizontal = {
+            "outer_px": width - content_x2,
+            "rail_px": content_x1 - rail_x2,
+        }
+        rail_side = "left"
+    else:
+        return None
+
+    gaps_px = {
+        **horizontal,
+        "top_px": content_y1,
+        "bottom_px": height - content_y2,
+    }
+    gaps_dp = {
+        key.replace("_px", "_dp"): round(max(0, value) / pixels_per_dp, 2)
+        for key, value in gaps_px.items()
+    }
+    return {
+        "content_bounds_px": list(content_bounds),
+        "rail_bounds_px": list(rail_bounds),
+        "rail_side": rail_side,
+        **gaps_px,
+        **gaps_dp,
+        "maximum_dp": max(gaps_dp.values()),
+        "limit_dp": TV_CONTENT_GUTTER_MAX_DP,
+    }
+
+
+def live_action_measurement(
+    nodes: Iterable[ET.Element],
+    height: int,
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the physical bottom clearance below the TV live action row."""
+    for node in nodes:
+        description = (node.attrib.get("content-desc", "") or "").strip()
+        if QA_TV_LIVE_ACTIONS not in description:
+            continue
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if not bounds:
+            continue
+        bottom_px = height - bounds[3]
+        bottom_dp = max(0, bottom_px) / max(density / 160.0, 0.01)
+        return {
+            "bounds_px": list(bounds),
+            "bottom_px": bottom_px,
+            "bottom_dp": round(bottom_dp, 2),
+            "minimum_dp": TV_LIVE_ACTION_BOTTOM_MIN_DP,
+        }
+    return None
+
+
+def download_layout_measurement(
+    nodes: Iterable[ET.Element],
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the real multi-download viewport and visible card geometry."""
+    list_bounds = None
+    card_bounds: list[tuple[int, int, int, int]] = []
+    transfer_progress = False
+    for node in nodes:
+        description = (node.attrib.get("content-desc", "") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if QA_DOWNLOAD_PROGRESS_MARKER in description:
+            transfer_progress = True
+        if bounds is None:
+            continue
+        if QA_TV_DOWNLOAD_LIST in description:
+            list_bounds = bounds
+        if QA_TV_DOWNLOAD_CARD_PREFIX in description:
+            card_bounds.append(bounds)
+    if list_bounds is None:
+        return None
+
+    pixels_per_dp = max(density / 160.0, 0.01)
+    cards = sorted(set(card_bounds), key=lambda bounds: (bounds[1], bounds[0]))
+    lx1, ly1, lx2, ly2 = list_bounds
+    visible_cards = [
+        bounds
+        for bounds in cards
+        if bounds[0] >= lx1 - 1
+        and bounds[1] >= ly1 - 1
+        and bounds[2] <= lx2 + 1
+        and bounds[3] <= ly2 + 1
+    ]
+    heights_dp = [
+        round((bounds[3] - bounds[1]) / pixels_per_dp, 2)
+        for bounds in visible_cards
+    ]
+    overlaps = []
+    for first, second in zip(visible_cards, visible_cards[1:]):
+        overlap_px = first[3] - second[1]
+        if overlap_px > 1:
+            overlaps.append(
+                {
+                    "first_bounds_px": list(first),
+                    "second_bounds_px": list(second),
+                    "overlap_px": overlap_px,
+                }
+            )
+    return {
+        "list_bounds_px": list(list_bounds),
+        "card_bounds_px": [list(bounds) for bounds in cards],
+        "visible_card_count": len(visible_cards),
+        "visible_card_heights_dp": heights_dp,
+        "minimum_card_height_dp": TV_DOWNLOAD_CARD_MIN_HEIGHT_DP,
+        "overlaps": overlaps,
+        "transfer_progress": transfer_progress,
+    }
+
+
 def analyze_xml(
     xml_path: Path,
     width: int,
@@ -85,6 +245,7 @@ def analyze_xml(
     density: int,
     font_scale: float,
     is_tv: bool,
+    page: str,
 ) -> dict[str, Any]:
     tree = ET.parse(xml_path)
     nodes = list(app_nodes(tree.getroot()))
@@ -99,6 +260,31 @@ def analyze_xml(
     safe_x = max(2, int(width * 0.025))
     safe_y = max(2, int(height * 0.025))
     minimum_text_height = 8.0 * density / 160.0 * font_scale * 0.70
+    tv_content_gutter = (
+        tv_content_gutter_measurement(nodes, width, height, density, page)
+        if is_tv
+        else None
+    )
+    live_actions = (
+        live_action_measurement(nodes, height, density)
+        if is_tv and page == "live"
+        else None
+    )
+    download_layout = (
+        download_layout_measurement(nodes, density)
+        if is_tv and page == "downloads"
+        else None
+    )
+    download_transfer_progress = any(
+        QA_DOWNLOAD_PROGRESS_MARKER
+        in (node.attrib.get("content-desc", "") or "")
+        for node in nodes
+    )
+    download_origin_progress = any(
+        QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER
+        in (node.attrib.get("content-desc", "") or "")
+        for node in nodes
+    )
 
     for node in nodes:
         bounds = parse_bounds(node.attrib.get("bounds", ""))
@@ -186,6 +372,11 @@ def analyze_xml(
         "unsafe_tv_text": unsafe_tv_text,
         "undersized_text": undersized_text,
         "interactive_overlaps": overlaps,
+        "tv_content_gutter": tv_content_gutter,
+        "live_actions": live_actions,
+        "download_layout": download_layout,
+        "download_transfer_progress": download_transfer_progress,
+        "download_origin_progress": download_origin_progress,
     }
 
 
@@ -219,6 +410,27 @@ def android_error_dialog_title(path: Path) -> str | None:
         elif resource_id in {"android:id/aerr_close", "android:id/aerr_wait"}:
             has_error_action = True
     return title if title and has_error_action else None
+
+
+def foreground_package(path: Path) -> str | None:
+    """Read the actually resumed package from one captured activity dump."""
+    match = TOP_RESUMED_PACKAGE_RE.search(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    return match.group(1) if match else None
+
+
+def hierarchy_packages(path: Path) -> list[str]:
+    """Return visible package owners represented in one UI hierarchy."""
+    root = ET.parse(path).getroot()
+    return sorted(
+        {
+            package
+            for node in root.iter("node")
+            if (package := node.attrib.get("package", "").strip())
+            and node.attrib.get("visible-to-user", "true") != "false"
+        }
+    )
 
 
 def analyze_performance(
@@ -280,7 +492,16 @@ def add_case_findings(
     evidence = {
         key: value
         for key, value in files.items()
-        if key in {"screenshot", "xml", "logcat", "crash_log", "system_events"}
+        if key
+        in {
+            "screenshot",
+            "xml",
+            "logcat",
+            "crash_log",
+            "system_events",
+            "activity",
+            "window",
+        }
     }
 
     if case.get("capture_error"):
@@ -369,6 +590,43 @@ def add_case_findings(
         result["status"] = "FAIL" if is_app_dialog else "BLOCKED"
         return result, findings
 
+    activity_path = root / files["activity"] if "activity" in files else None
+    try:
+        resumed_package = (
+            foreground_package(activity_path)
+            if activity_path is not None and activity_path.is_file()
+            else None
+        )
+    except Exception:
+        resumed_package = None
+    try:
+        xml_packages = hierarchy_packages(root / files["xml"])
+    except Exception:
+        xml_packages = []
+    result["foreground_package"] = resumed_package
+    result["hierarchy_packages"] = xml_packages
+    foreground_mismatch = bool(
+        resumed_package and resumed_package != PACKAGE
+    )
+    hierarchy_mismatch = bool(
+        not resumed_package and xml_packages and PACKAGE not in xml_packages
+    )
+    if foreground_mismatch or hierarchy_mismatch:
+        observed = resumed_package or ", ".join(xml_packages)
+        findings.append(
+            finding(
+                "infrastructure",
+                "foreground_package_mismatch",
+                f"{case_id}: expected foreground package {PACKAGE!r}, "
+                f"observed {observed!r}; product analysis was skipped",
+                case_id=case_id,
+                page=page,
+                evidence=evidence,
+            )
+        )
+        result["status"] = "BLOCKED"
+        return result, findings
+
     if not case.get("marker_found"):
         findings.append(
             finding(
@@ -391,6 +649,7 @@ def add_case_findings(
                 int(device["requested_density"]),
                 float(case["font_scale"]),
                 bool(device["is_tv"]),
+                page,
             )
             result["ui"] = ui
             if ui["node_count"] == 0:
@@ -470,6 +729,143 @@ def add_case_findings(
                         evidence=evidence,
                     )
                 )
+            gutter = ui.get("tv_content_gutter")
+            is_tv_page = bool(device["is_tv"])
+            if is_tv_page and gutter is None:
+                findings.append(
+                    finding(
+                        "critical",
+                        "tv_page_content_gutter_not_measured",
+                        f"{case_id}: TV {page} content/rail gutter markers were not captured",
+                        case_id=case_id,
+                        page=page,
+                        evidence=evidence,
+                    )
+                )
+            elif gutter and gutter["maximum_dp"] > gutter["limit_dp"]:
+                findings.append(
+                    finding(
+                        "critical",
+                        "tv_page_excessive_content_gutter",
+                        f"{case_id}: {page} content leaves up to "
+                        f"{gutter['maximum_dp']:.1f}dp of unused outer space; "
+                        f"limit is {gutter['limit_dp']:.1f}dp",
+                        case_id=case_id,
+                        page=page,
+                        evidence=evidence,
+                    )
+                )
+            if is_tv_page and page == "live":
+                live_actions = ui.get("live_actions")
+                if live_actions is None:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "tv_live_actions_not_measured",
+                            f"{case_id}: live action-row safe inset marker was not captured",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+                elif live_actions["bottom_dp"] < live_actions["minimum_dp"]:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "tv_live_actions_unsafe_bottom",
+                            f"{case_id}: live action row has only "
+                            f"{live_actions['bottom_dp']:.1f}dp bottom clearance; "
+                            f"minimum is {live_actions['minimum_dp']:.1f}dp",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+            if page == "downloads":
+                repository_progress = bool(ui.get("download_transfer_progress"))
+                origin_progress = bool(ui.get("download_origin_progress"))
+                if not repository_progress:
+                    boundary = (
+                        "the loopback origin served body bytes, but the production "
+                        "repository exposed zero transferred bytes"
+                        if origin_progress
+                        else "the production transport did not receive body bytes "
+                        "from the loopback origin"
+                    )
+                    findings.append(
+                        finding(
+                            "critical",
+                            "download_transfer_no_byte_progress",
+                            f"{case_id}: {boundary}",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+                elif not origin_progress:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "download_transfer_evidence_mismatch",
+                            f"{case_id}: repository progress was reported without "
+                            "matching bytes from the deterministic origin",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+            if is_tv_page and page == "downloads":
+                layout = ui.get("download_layout")
+                if layout is None:
+                    findings.append(
+                        finding(
+                            "critical",
+                            "tv_download_layout_not_measured",
+                            f"{case_id}: download-list/card geometry markers were not captured",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                        )
+                    )
+                else:
+                    if layout["visible_card_count"] < 2:
+                        findings.append(
+                            finding(
+                                "critical",
+                                "tv_download_cards_do_not_fit",
+                                f"{case_id}: only {layout['visible_card_count']} complete "
+                                "download card(s) fit in the list viewport; expected at least 2",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
+                    if any(
+                        height_dp < layout["minimum_card_height_dp"]
+                        for height_dp in layout["visible_card_heights_dp"]
+                    ):
+                        findings.append(
+                            finding(
+                                "critical",
+                                "tv_download_card_clipped",
+                                f"{case_id}: a visible download card is shorter than "
+                                f"{layout['minimum_card_height_dp']:.0f}dp",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
+                    if layout["overlaps"]:
+                        findings.append(
+                            finding(
+                                "critical",
+                                "tv_download_cards_overlap",
+                                f"{case_id}: {len(layout['overlaps'])} download cards overlap",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
         except Exception as exc:
             findings.append(
                 finding(
@@ -702,6 +1098,223 @@ def analyze_focus(
     return normalized, findings
 
 
+def rail_logo_measurement(
+    xml_path: Path,
+    width: int,
+    height: int,
+    density: int,
+) -> dict[str, Any] | None:
+    """Measure the approved logo image exposed at the top of the RTL TV rail."""
+    root = ET.parse(xml_path).getroot()
+    candidates: list[tuple[tuple[int, int, int, int], ET.Element]] = []
+    for node in app_nodes(root):
+        if (node.attrib.get("content-desc", "") or "").strip() != "HULK SA":
+            continue
+        bounds = parse_bounds(node.attrib.get("bounds", ""))
+        if not bounds:
+            continue
+        x1, y1, x2, y2 = bounds
+        if (
+            x1 < width * 0.60
+            or y1 > height * 0.25
+            or x2 <= x1
+            or y2 <= y1
+        ):
+            continue
+        candidates.append((bounds, node))
+    if not candidates:
+        return None
+    bounds, _ = max(
+        candidates,
+        key=lambda item: (item[0][2], -item[0][1], item[0][0]),
+    )
+    x1, y1, x2, y2 = bounds
+    scale = 160.0 / density
+    return {
+        "bounds_px": list(bounds),
+        "width_dp": round((x2 - x1) * scale, 2),
+        "height_dp": round((y2 - y1) * scale, 2),
+        "width_screen_ratio": round((x2 - x1) / max(width, 1), 5),
+        "height_screen_ratio": round((y2 - y1) / max(width, 1), 5),
+    }
+
+
+def analyze_rail_visual(
+    root: Path,
+    device: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Gate the collapsed and expanded TV rail logo using captured UI geometry."""
+    if not device.get("is_tv"):
+        return [], []
+
+    normalized: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    orientations = [
+        item.strip()
+        for item in str(device.get("orientations", "landscape")).split(",")
+        if item.strip()
+    ]
+    home_entries = {
+        entry.get("orientation"): entry
+        for entry in entries
+        if entry.get("page") == "home"
+    }
+
+    for orientation in orientations:
+        entry = home_entries.get(orientation)
+        item: dict[str, Any] = {
+            "orientation": orientation,
+            "page": "home",
+            "status": "PASS",
+            "states": {},
+        }
+        item_findings: list[dict[str, Any]] = []
+        if entry is None:
+            item["status"] = "BLOCKED"
+            item_findings.append(
+                finding(
+                    "infrastructure",
+                    "rail_visual_audit_missing",
+                    f"{orientation} / home: no rail visual audit was produced",
+                    page="home",
+                )
+            )
+            normalized.append(item)
+            findings.extend(item_findings)
+            continue
+
+        width, height = expected_dimensions(device, orientation)
+        density = int(device["requested_density"])
+        rail_visual = entry.get("rail_visual", {})
+        for state in ("collapsed", "expanded"):
+            files = relative_files(root, rail_visual.get(state, {}))
+            state_result: dict[str, Any] = {
+                "files": files,
+                "measurement": None,
+            }
+            item["states"][state] = state_result
+            evidence = {
+                key: value
+                for key, value in files.items()
+                if key in {"screenshot", "xml"}
+            }
+            missing = sorted({"screenshot", "xml"} - files.keys())
+            if missing:
+                item_findings.append(
+                    finding(
+                        "infrastructure",
+                        "rail_visual_state_missing",
+                        f"{orientation} / home / {state}: missing {', '.join(missing)}",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            try:
+                measurement = rail_logo_measurement(
+                    root / files["xml"],
+                    width,
+                    height,
+                    density,
+                )
+            except Exception as exc:
+                item_findings.append(
+                    finding(
+                        "infrastructure",
+                        "rail_visual_xml_error",
+                        f"{orientation} / home / {state}: cannot inspect logo geometry: {exc}",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            state_result["measurement"] = measurement
+            if measurement is None:
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_missing",
+                        f"{orientation} / home / {state}: approved HULK SA logo is not visible "
+                        "at the top of the navigation rail",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+                continue
+            logo_width = float(measurement["width_dp"])
+            logo_height = float(measurement["height_dp"])
+            logo_width_ratio = float(measurement["width_screen_ratio"])
+            logo_height_ratio = float(measurement["height_screen_ratio"])
+            if abs(logo_width - logo_height) > RAIL_LOGO_STATE_TOLERANCE_DP:
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_not_square",
+                        f"{orientation} / home / {state}: logo measures "
+                        f"{logo_width:.1f}×{logo_height:.1f} dp",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+            if (
+                logo_width_ratio < RAIL_LOGO_MIN_SCREEN_RATIO
+                or logo_width_ratio > RAIL_LOGO_MAX_SCREEN_RATIO
+                or logo_height_ratio < RAIL_LOGO_MIN_SCREEN_RATIO
+                or logo_height_ratio > RAIL_LOGO_MAX_SCREEN_RATIO
+            ):
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_size_out_of_policy",
+                        f"{orientation} / home / {state}: logo measures "
+                        f"{logo_width_ratio:.2%}×{logo_height_ratio:.2%} of screen width; "
+                        f"expected {RAIL_LOGO_MIN_SCREEN_RATIO:.1%}–"
+                        f"{RAIL_LOGO_MAX_SCREEN_RATIO:.1%}",
+                        page="home",
+                        evidence=evidence,
+                    )
+                )
+
+        collapsed = item["states"].get("collapsed", {}).get("measurement")
+        expanded = item["states"].get("expanded", {}).get("measurement")
+        if collapsed and expanded:
+            width_delta = abs(
+                float(collapsed["width_dp"]) - float(expanded["width_dp"])
+            )
+            height_delta = abs(
+                float(collapsed["height_dp"]) - float(expanded["height_dp"])
+            )
+            item["state_delta_dp"] = round(max(width_delta, height_delta), 2)
+            if max(width_delta, height_delta) > RAIL_LOGO_STATE_TOLERANCE_DP:
+                expanded_files = item["states"]["expanded"]["files"]
+                item_findings.append(
+                    finding(
+                        "critical",
+                        "rail_logo_size_instability",
+                        f"{orientation} / home: collapsed logo is "
+                        f"{collapsed['width_dp']:.1f}×{collapsed['height_dp']:.1f} dp, "
+                        f"expanded is {expanded['width_dp']:.1f}×{expanded['height_dp']:.1f} dp",
+                        page="home",
+                        evidence={
+                            key: value
+                            for key, value in expanded_files.items()
+                            if key in {"screenshot", "xml"}
+                        },
+                    )
+                )
+
+        severities = {entry["severity"] for entry in item_findings}
+        if "infrastructure" in severities:
+            item["status"] = "BLOCKED"
+        elif "critical" in severities:
+            item["status"] = "FAIL"
+        normalized.append(item)
+        findings.extend(item_findings)
+
+    return normalized, findings
+
+
 def report_markdown(summary: dict[str, Any]) -> str:
     device = summary["device"]
     lines = [
@@ -713,6 +1326,7 @@ def report_markdown(summary: dict[str, Any]) -> str:
         f"- Requested display: {device['requested_width']}×{device['requested_height']} @ "
         f"{device['requested_density']} dpi",
         f"- Captures: {summary['case_count']} / expected {summary['expected_case_count']}",
+        f"- Infrastructure retries: {summary['retry_count']}",
         f"- Critical: {summary['critical_count']}",
         f"- Warnings: {summary['warning_count']}",
         f"- Infrastructure errors: {summary['infrastructure_error_count']}",
@@ -773,6 +1387,44 @@ def report_markdown(summary: dict[str, Any]) -> str:
                 f"{entry.get('unique_focus_targets', 0)} |"
             )
 
+        lines += [
+            "",
+            "## Navigation rail logo",
+            "",
+            "| Orientation | Status | Collapsed | Expanded | State delta | Evidence |",
+            "|---|---|---:|---:|---:|---|",
+        ]
+        for entry in summary["rail_visual"]:
+            states = entry.get("states", {})
+            collapsed = states.get("collapsed", {})
+            expanded = states.get("expanded", {})
+            collapsed_measurement = collapsed.get("measurement") or {}
+            expanded_measurement = expanded.get("measurement") or {}
+            collapsed_size = (
+                f"{collapsed_measurement.get('width_dp')}×"
+                f"{collapsed_measurement.get('height_dp')} dp"
+                if collapsed_measurement
+                else "missing"
+            )
+            expanded_size = (
+                f"{expanded_measurement.get('width_dp')}×"
+                f"{expanded_measurement.get('height_dp')} dp"
+                if expanded_measurement
+                else "missing"
+            )
+            links = []
+            for label, state in (("collapsed", collapsed), ("expanded", expanded)):
+                screenshot = state.get("files", {}).get("screenshot")
+                if screenshot:
+                    links.append(f"[{label}]({screenshot})")
+            delta = entry.get("state_delta_dp")
+            lines.append(
+                f"| {entry.get('orientation')} | **{entry.get('status')}** | "
+                f"{collapsed_size} | {expanded_size} | "
+                f"{f'{delta} dp' if delta is not None else 'n/a'} | "
+                f"{' · '.join(links)} |"
+            )
+
     lines += ["", "## Findings", ""]
     if not summary["findings"]:
         lines.append("- No findings.")
@@ -790,7 +1442,8 @@ def report_markdown(summary: dict[str, Any]) -> str:
     lines += [
         "",
         "> Performance values come from a software-rendered emulator and are advisory. "
-        "Crash, ANR, hierarchy, bounds, navigation and focus failures are deterministic gates.",
+        "Crash, ANR, hierarchy, bounds, navigation, focus and rail-logo geometry failures "
+        "are deterministic gates.",
         "",
     ]
     return "\n".join(lines)
@@ -823,6 +1476,36 @@ def report_html(summary: dict[str, Any]) -> str:
             f"<td>{ui.get('node_count', 0)}</td>"
             f"<td>{thumb}</td>"
             f"<td>{' · '.join(evidence)}</td>"
+            "</tr>"
+        )
+    rail_rows = []
+    for entry in summary.get("rail_visual", []):
+        states = entry.get("states", {})
+        cells = []
+        for state_name in ("collapsed", "expanded"):
+            state = states.get(state_name, {})
+            measurement = state.get("measurement") or {}
+            screenshot = state.get("files", {}).get("screenshot")
+            size = (
+                f"{measurement.get('width_dp')}×{measurement.get('height_dp')} dp"
+                if measurement
+                else "missing"
+            )
+            preview = (
+                f'<a href="{escape(screenshot)}"><img loading="lazy" '
+                f'src="{escape(screenshot)}" alt="{escape(state_name)} rail"></a>'
+                if screenshot
+                else "—"
+            )
+            cells.append(f"<td>{size}<br>{preview}</td>")
+        delta = entry.get("state_delta_dp")
+        rail_rows.append(
+            "<tr>"
+            f"<td>{escape(entry.get('orientation', ''))}</td>"
+            f'<td><span class="badge {entry.get("status", "blocked").lower()}">'
+            f'{escape(entry.get("status", "BLOCKED"))}</span></td>'
+            f"{''.join(cells)}"
+            f"<td>{f'{delta} dp' if delta is not None else 'n/a'}</td>"
             "</tr>"
         )
     finding_cards = []
@@ -887,6 +1570,7 @@ a {{ color:var(--gold) }} code {{ word-break:break-word }}
 </section>
 <section class="metrics">
   <div class="metric"><span class="muted">Captures</span><strong>{summary['case_count']}</strong></div>
+  <div class="metric"><span class="muted">Infra retries</span><strong>{summary['retry_count']}</strong></div>
   <div class="metric"><span class="muted">Critical</span><strong>{summary['critical_count']}</strong></div>
   <div class="metric"><span class="muted">Warnings</span><strong>{summary['warning_count']}</strong></div>
   <div class="metric"><span class="muted">Infrastructure</span><strong>{summary['infrastructure_error_count']}</strong></div>
@@ -894,6 +1578,13 @@ a {{ color:var(--gold) }} code {{ word-break:break-word }}
 <h2>Page captures</h2>
 <table><thead><tr><th>Case</th><th>Status</th><th>Resolution</th><th>Nodes</th><th>Preview</th><th>Files</th></tr></thead>
 <tbody>{''.join(case_rows)}</tbody></table>
+{(
+    '<h2>Navigation rail logo</h2>'
+    '<table><thead><tr><th>Orientation</th><th>Status</th><th>Collapsed</th>'
+    '<th>Expanded</th><th>State delta</th></tr></thead><tbody>'
+    + ''.join(rail_rows)
+    + '</tbody></table>'
+) if rail_rows else ''}
 <h2>Findings</h2>
 {''.join(finding_cards) if finding_cards else '<p>No findings.</p>'}
 <p class="muted">Performance values are advisory on software-rendered emulators. Raw PNG, XML,
@@ -1015,6 +1706,13 @@ def analyze_run(root: Path) -> dict[str, Any]:
             )
         )
 
+    rail_visual, rail_visual_findings = analyze_rail_visual(
+        root,
+        device,
+        manifest.get("focus", []),
+    )
+    findings.extend(rail_visual_findings)
+
     critical_count = sum(1 for item in findings if item["severity"] == "critical")
     warning_count = sum(1 for item in findings if item["severity"] == "warning")
     infrastructure_count = sum(
@@ -1035,12 +1733,17 @@ def analyze_run(root: Path) -> dict[str, Any]:
         "overall_status": overall,
         "expected_case_count": expected_case_count,
         "case_count": len(cases),
+        "retry_count": sum(
+            int(case.get("retry_count", 0))
+            for case in manifest.get("cases", [])
+        ),
         "critical_count": critical_count,
         "warning_count": warning_count,
         "infrastructure_error_count": infrastructure_count,
         "cases": cases,
         "navigation": navigation,
         "focus": focus,
+        "rail_visual": rail_visual,
         "findings": findings,
     }
 
@@ -1057,6 +1760,7 @@ def analyze_run(root: Path) -> dict[str, Any]:
             f"## {device['name']} — {overall}",
             "",
             f"- Captures: {len(cases)} / {expected_case_count}",
+            f"- Infrastructure retries: {summary['retry_count']}",
             f"- Critical: {critical_count}",
             f"- Warnings: {warning_count}",
             f"- Infrastructure errors: {infrastructure_count}",
