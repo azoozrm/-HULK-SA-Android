@@ -38,6 +38,77 @@ EXPECTED_REPLACEMENTS = (
     "settings-content-marker",
 )
 
+HOME_CANONICAL = (
+    "            .fillMaxSize()\n"
+    "            .padding(bottom = if (isTv) 32.dp else 0.dp)"
+)
+HOME_PRODUCT = (
+    "            .fillMaxSize()\n"
+    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),"
+)
+POSTER_CANONICAL = (
+    "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
+    "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {"
+)
+POSTER_PRODUCT = (
+    "    Column(\n"
+    "        Modifier\n"
+    "            .fillMaxSize()\n"
+    "            .padding(\n"
+    "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
+    "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+    "            ),\n"
+    "    ) {"
+)
+LIVE_CANONICAL = (
+    "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
+    "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {"
+)
+LIVE_PRODUCT = (
+    "    Column(\n"
+    "        Modifier\n"
+    "            .fillMaxSize()\n"
+    "            .padding(\n"
+    "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+    "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+    "            ),\n"
+    "    ) {"
+)
+LIVE_ACTIONS_CANONICAL = (
+    "Row(Modifier.fillMaxWidth(), "
+    "horizontalArrangement = Arrangement.spacedBy(12.dp)) {"
+)
+LIVE_ACTIONS_PRODUCT = (
+    "                    Row(\n"
+    "                        Modifier.fillMaxWidth(),\n"
+    "                        horizontalArrangement = Arrangement.spacedBy(12.dp),\n"
+    "                    ) {"
+)
+PAGE_CANONICAL = (
+    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {"
+)
+PAGE_PRODUCT = (
+    "    Column(\n"
+    "        Modifier\n"
+    "            .fillMaxSize()\n"
+    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
+    "    ) {"
+)
+DOWNLOAD_CARD_CANONICAL = (
+    "            .height(if (isTv) 220.dp else 220.dp)\n"
+    "            .clip(shape)"
+)
+DOWNLOAD_CARD_PRODUCT = (
+    "            .height(if (isTv) 164.dp else 220.dp)\n"
+    "            .clip(shape)"
+)
+SETTINGS_CANONICAL = "modifier = Modifier.fillMaxSize(),"
+SETTINGS_PRODUCT = (
+    "        modifier = Modifier\n"
+    "            .fillMaxSize()\n"
+    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),"
+)
+
 
 def replace_once(source: str, old: str, new: str, label: str) -> str:
     count = source.count(old)
@@ -46,75 +117,95 @@ def replace_once(source: str, old: str, new: str, label: str) -> str:
     return source.replace(old, new, 1)
 
 
-def patch_segment(
+def segment_bounds(
     source: str,
     start_marker: str,
     end_marker: str,
-    old: str,
-    new: str,
+    label: str,
+) -> tuple[int, int]:
+    start = source.find(start_marker)
+    if start < 0:
+        raise AssertionError(f"{label}: start marker not found")
+    end = source.find(end_marker, start + len(start_marker))
+    if end < 0:
+        raise AssertionError(f"{label}: end marker not found")
+    return start, end
+
+
+def normalize_segment_shape(
+    source: str,
+    start_marker: str,
+    end_marker: str,
+    canonical: str,
+    product: str,
+    target: str,
     label: str,
 ) -> str:
-    start = source.index(start_marker)
-    end = source.index(end_marker, start + len(start_marker))
-    segment = replace_once(source[start:end], old, new, label)
-    return source[:start] + segment + source[end:]
+    start, end = segment_bounds(source, start_marker, end_marker, label)
+    segment = source[start:end]
+    canonical_count = segment.count(canonical)
+    product_count = segment.count(product)
+    total = canonical_count + product_count
+    if total != 1:
+        raise AssertionError(
+            f"{label}: expected exactly one qualified fixture shape, found {total} "
+            f"(canonical={canonical_count}, product={product_count})"
+        )
+    if target == "canonical":
+        if canonical_count == 1:
+            return source
+        normalized = segment.replace(product, canonical, 1)
+    elif target == "product":
+        if product_count == 1:
+            return source
+        normalized = segment.replace(canonical, product, 1)
+    else:
+        raise AssertionError(f"unsupported fixture target: {target}")
+    return source[:start] + normalized + source[end:]
 
 
-def product_layout_shape(source: str) -> str:
-    """Model PR #57's supported layout anchors without importing product code."""
+def layout_shape(source: str, target: str) -> str:
+    """Return a deterministic canonical or PR #57 layout fixture.
 
-    source = patch_segment(
+    The checked-out production source may already be either supported shape.
+    Tests normalize from whichever shape is current so both contracts are always
+    exercised without importing Quality Lab semantics into production source.
+    """
+
+    source = normalize_segment_shape(
         source,
         "private fun CinemaHomeScreen(",
         "private fun HomeSectionPadding(",
-        "            .fillMaxSize()\n"
-        "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
-        "            .fillMaxSize()\n"
-        "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+        HOME_CANONICAL,
+        HOME_PRODUCT,
+        target,
         "home",
     )
-    source = patch_segment(
+    source = normalize_segment_shape(
         source,
         "private fun PosterCatalogScreen(",
         "private fun LiveCatalogScreen(",
-        "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
-        "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {",
-        "    Column(\n"
-        "        Modifier\n"
-        "            .fillMaxSize()\n"
-        "            .padding(\n"
-        "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
-        "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
-        "            ),\n"
-        "    ) {",
+        POSTER_CANONICAL,
+        POSTER_PRODUCT,
+        target,
         "poster catalog",
     )
-    source = patch_segment(
+    source = normalize_segment_shape(
         source,
         "private fun LiveCatalogScreen(",
         "private fun LiveStage(",
-        "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
-        "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {",
-        "    Column(\n"
-        "        Modifier\n"
-        "            .fillMaxSize()\n"
-        "            .padding(\n"
-        "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
-        "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
-        "            ),\n"
-        "    ) {",
+        LIVE_CANONICAL,
+        LIVE_PRODUCT,
+        target,
         "live catalog",
     )
-    source = patch_segment(
+    source = normalize_segment_shape(
         source,
         "private fun LiveStage(",
         "private fun FavoritesScreen(",
-        "Row(Modifier.fillMaxWidth(), "
-        "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
-        "                    Row(\n"
-        "                        Modifier.fillMaxWidth(),\n"
-        "                        horizontalArrangement = Arrangement.spacedBy(12.dp),\n"
-        "                    ) {",
+        LIVE_ACTIONS_CANONICAL,
+        LIVE_ACTIONS_PRODUCT,
+        target,
         "live actions",
     )
     for function_name, next_name, destination in (
@@ -134,39 +225,51 @@ def product_layout_shape(source: str) -> str:
             "downloads",
         ),
     ):
-        source = patch_segment(
+        source = normalize_segment_shape(
             source,
             function_name,
             next_name,
-            "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
-            "    Column(\n"
-            "        Modifier\n"
-            "            .fillMaxSize()\n"
-            "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
-            "    ) {",
+            PAGE_CANONICAL,
+            PAGE_PRODUCT,
+            target,
             destination,
         )
-    source = patch_segment(
+    source = normalize_segment_shape(
         source,
         "private fun DownloadCard(",
         "private fun DownloadProgress(",
-        "            .height(if (isTv) 220.dp else 220.dp)\n"
-        "            .clip(shape)",
-        "            .height(if (isTv) 164.dp else 220.dp)\n"
-        "            .clip(shape)",
+        DOWNLOAD_CARD_CANONICAL,
+        DOWNLOAD_CARD_PRODUCT,
+        target,
         "download card",
     )
-    source = patch_segment(
+    source = normalize_segment_shape(
         source,
         "private fun SettingsScreen(",
         "private fun AccountMetric(",
-        "modifier = Modifier.fillMaxSize(),",
-        "        modifier = Modifier\n"
-        "            .fillMaxSize()\n"
-        "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+        SETTINGS_CANONICAL,
+        SETTINGS_PRODUCT,
+        target,
         "settings",
     )
     return source
+
+
+def ambiguous_home_shape(source: str) -> str:
+    canonical = layout_shape(source, "canonical")
+    start, end = segment_bounds(
+        canonical,
+        "private fun CinemaHomeScreen(",
+        "private fun HomeSectionPadding(",
+        "ambiguous home",
+    )
+    segment = replace_once(
+        canonical[start:end],
+        HOME_CANONICAL,
+        HOME_CANONICAL + "\n" + HOME_PRODUCT,
+        "ambiguous home",
+    )
+    return canonical[:start] + segment + canonical[end:]
 
 
 class QualityMarkerInjectionTest(unittest.TestCase):
@@ -191,7 +294,7 @@ class QualityMarkerInjectionTest(unittest.TestCase):
         self.assertIn("qaTvPageContent(isTv, destination)", patched)
         self.assertIn("BuildConfig.DEBUG", patched)
 
-    def test_injection_is_strict_disposable_and_complete(self) -> None:
+    def test_current_source_injection_is_strict_disposable_and_complete(self) -> None:
         original = SOURCE.read_bytes()
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "MainShellScreen.kt"
@@ -215,24 +318,33 @@ class QualityMarkerInjectionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "already contains a marker"):
                 INJECTION.inject_file(target)
 
+    def test_canonical_layout_shape_preserves_the_fail_closed_contract(self) -> None:
+        source = layout_shape(SOURCE.read_text(encoding="utf-8"), "canonical")
+        self.assertNotIn("qa-tv-", source)
+        self.assert_complete_injection(source)
+
     def test_product_layout_shape_preserves_the_same_fail_closed_contract(self) -> None:
-        source = product_layout_shape(SOURCE.read_text(encoding="utf-8"))
+        source = layout_shape(SOURCE.read_text(encoding="utf-8"), "product")
         self.assertNotIn("qa-tv-", source)
         self.assert_complete_injection(source)
 
     def test_ambiguous_supported_shape_fails_closed(self) -> None:
-        source = SOURCE.read_text(encoding="utf-8")
-        ambiguous = source.replace(
-            "            .fillMaxSize()\n"
-            "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
-            "            .fillMaxSize()\n"
-            "            .padding(bottom = if (isTv) 32.dp else 0.dp)\n"
-            "            .fillMaxSize()\n"
-            "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
-            1,
-        )
+        ambiguous = ambiguous_home_shape(SOURCE.read_text(encoding="utf-8"))
         with self.assertRaisesRegex(ValueError, "supported source shape"):
             INJECTION.inject_text(ambiguous)
+
+    def test_fixture_normalization_rejects_unknown_source_shape(self) -> None:
+        source = SOURCE.read_text(encoding="utf-8").replace(
+            HOME_CANONICAL,
+            "            .fillMaxSize()\n            .padding(99.dp)",
+            1,
+        ).replace(
+            HOME_PRODUCT,
+            "            .fillMaxSize()\n            .padding(99.dp)",
+            1,
+        )
+        with self.assertRaisesRegex(AssertionError, "qualified fixture shape"):
+            layout_shape(source, "canonical")
 
     def test_unexpected_source_shape_fails_closed(self) -> None:
         with self.assertRaises(ValueError):
