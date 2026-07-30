@@ -60,6 +60,36 @@ class QualityMarkerInjectionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "already contains a marker"):
                 INJECTION.inject_file(target)
 
+    def test_supported_shape_selection_is_strict(self) -> None:
+        variants = (
+            ("legacy", "legacy-shape", "legacy-patched"),
+            ("v09320", "modern-shape", "modern-patched"),
+        )
+        changes: list[str] = []
+        patched = INJECTION.replace_one_of(
+            "prefix modern-shape suffix",
+            variants,
+            "adaptive-anchor",
+            changes,
+        )
+        self.assertEqual("prefix modern-patched suffix", patched)
+        self.assertEqual(["adaptive-anchor:v09320"], changes)
+
+        with self.assertRaisesRegex(ValueError, "found 0"):
+            INJECTION.replace_one_of(
+                "unknown-shape",
+                variants,
+                "adaptive-anchor",
+                [],
+            )
+        with self.assertRaisesRegex(ValueError, "found 2"):
+            INJECTION.replace_one_of(
+                "legacy-shape modern-shape",
+                variants,
+                "adaptive-anchor",
+                [],
+            )
+
     def test_unexpected_source_shape_fails_closed(self) -> None:
         with self.assertRaises(ValueError):
             INJECTION.inject_text("package example\n")
