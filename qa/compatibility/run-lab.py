@@ -1123,7 +1123,12 @@ class DeviceLab:
 
             restart("pause-action")
             inspect("pause-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
-            inspect("row-1-pause-executes", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="pause")
+            inspect("row-1-pause", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="pause")
+
+            restart("row-2-pause-action")
+            inspect("row-2-pause-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-2-pause-row-2-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-2-pause", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="pause")
 
             restart("priority-action")
             inspect("priority-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))

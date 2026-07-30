@@ -229,6 +229,28 @@ class ConfigTests(unittest.TestCase):
 
 
 
+    def test_download_action_runner_matches_analyzer_required_ids(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        required_ids = (
+            "top-wifi-executes",
+            "top-schedule-executes",
+            "top-concurrent-executes",
+            "row-1-primary",
+            "row-1-pause",
+            "row-1-priority",
+            "row-1-priority-executes",
+            "row-1-cancel",
+            "row-2-cancel",
+            "row-2-priority",
+            "row-2-primary",
+            "row-2-pause",
+            "cancel-row-1-executes",
+        )
+        for check_id in required_ids:
+            self.assertIn(f'inspect("{check_id}"', source)
+        self.assertNotIn('inspect("row-1-pause-executes"', source)
+
+
 class AnalyzerTests(unittest.TestCase):
 
     def test_download_action_audit_classifies_unreachable_and_unexecuted_controls(self) -> None:
