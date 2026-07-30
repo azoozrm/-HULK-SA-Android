@@ -31,6 +31,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           workflow = Path('.github/workflows/pr57-download-focus-patch.yml').read_text(encoding='utf-8')
           marker = '      - name: Apply focused product correction and tests\n'
@@ -43,15 +44,19 @@ jobs:
           block = tail.split(run_marker, 1)[1]
           lines = [line[10:] if line.startswith('          ') else line for line in block.splitlines()]
           script = '\n'.join(lines) + '\n'
-          broken = "              main = replace_once(main, old, new, f'{label} primary route')"
-          corrected = (
-              "              if old not in main:\n"
-              "                  raise SystemExit(f'{label} primary route: missing expected action')\n"
-              "              main = main.replace(old, new, 1)"
+          pattern = re.compile(
+              r"(?m)^(?P<indent>[ ]*)main = replace_once\(main, old, new, f'\{label\} primary route'\)$"
           )
-          if script.count(broken) != 1:
-              raise SystemExit('expected primary-action loop correction point not found exactly once')
-          script = script.replace(broken, corrected, 1)
+          matches = list(pattern.finditer(script))
+          if len(matches) != 1:
+              raise SystemExit(f'expected one primary-action loop correction point, found {len(matches)}')
+          indent = matches[0].group('indent')
+          corrected = (
+              f"{indent}if old not in main:\n"
+              f"{indent}    raise SystemExit(f'{{label}} primary route: missing expected action')\n"
+              f"{indent}main = main.replace(old, new, 1)"
+          )
+          script = pattern.sub(corrected, script, count=1)
           target = Path('/tmp/apply-pr57-download-focus.sh')
           target.write_text(script, encoding='utf-8')
           target.chmod(0o700)
