@@ -24,13 +24,32 @@ Only the following product/release files were imported from the archived PR #57 
 - `app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt`
 - `qa/canonical/canonical-source.sha256`
 
+## Physical download-focus regression and repair
+
+Physical Xiaomi evidence on signed `0.9.3.20 (64)` proved that active download cards rendered their metadata while the pause/resume, priority and cancel controls were clipped and unreachable. D-pad navigation stayed in the top settings row and did not enter multiple active download cards.
+
+The clean repair adds:
+
+- a deterministic RTL-aware D-pad graph from Wi-Fi, schedule and concurrency controls into the matching action column of every download row;
+- explicit vertical movement through all active download rows and explicit horizontal movement through primary, priority and cancel actions;
+- a card layout that reserves a fixed visible action row instead of allowing metadata/progress content to consume it;
+- visible outlined secondary actions and focus callbacks on every action;
+- unit graph coverage plus a Compose test with two active downloads that verifies visibility, focus order and callback execution.
+
+The regression test file is:
+
+- `app/src/androidTest/java/sa/hulksa/player/ui/DownloadsFocusNavigationTest.kt`
+
+Clean product-repair head before the ordinary retrigger commit: `8862bba41e710e86f68feafa4902f58a8ecd4ef2`.
+
 ## Atomic cleanup evidence
 
 - Production source contains no `qa-tv-*`, `qaTvPageContent`, or `qaMarker` semantics.
 - Canonical hashes were rebuilt from the actual repository bytes, not copied manually.
 - `ArtworkUrlTest.kt` and `TvLayoutPolicyTest.kt` hashes match their current files.
-- The temporary cleanup workflow removed itself after committing the source and manifest changes.
-- The following ordinary documentation commit intentionally retriggers the complete PR workflow suite because GitHub does not recursively trigger workflows from a `GITHUB_TOKEN` bot push.
+- Temporary repair and sanitizer workflows are absent from the final PR diff.
+- A broad staging mistake was removed by rebuilding from clean head `c291fa7df2f3ee3a04d020cd831f02073a44d514` and preserving exactly four intended repair files.
+- The ordinary documentation commit retriggers the complete PR workflow suite because GitHub does not recursively trigger workflows from a `GITHUB_TOKEN` bot push.
 
 ## Integrity conditions
 
@@ -38,12 +57,13 @@ Only the following product/release files were imported from the archived PR #57 
 - The approved logo SHA-256 remains `2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e`.
 - Production package remains `sa.hulksa.player`.
 - Candidate version is `0.9.3.20` / `versionCode 64`.
-- Production endpoint remains `http://3162356.xyz:8080` with an empty `CONFIG_URL`.
+- Production endpoint remains unchanged and `CONFIG_URL` remains empty.
 - Product findings are enforced fail-closed by the merged Quality Lab.
 
 ## Acceptance path
 
 1. Run PR static, canonical, generated-source, intelligence, instrumentation and full Compatibility Lab gates on the exact integrated head.
 2. Inspect every expected artifact and separate product findings from infrastructure failures.
-3. Do not merge PR #57 unless all deterministic product gates pass.
-4. After CI passes, require physical Xiaomi, TCL and Galaxy evidence before signed release qualification and final merge.
+3. Extend the independent Quality Lab contract so active multi-download actions and full-page focus reachability cannot pass on no-op fixtures.
+4. Do not merge PR #57 unless all deterministic product gates pass.
+5. After CI passes, require physical Xiaomi, TCL and Galaxy evidence before signed release qualification and final merge.
