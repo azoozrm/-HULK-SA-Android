@@ -92,6 +92,10 @@ class DownloadsFocusNavigationTest {
         compose.onAllNodesWithText("ايقاف مؤقت")[0].assertIsDisplayed()
         compose.onAllNodesWithText("الغاء")[1].assertIsDisplayed()
 
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(250L)
+        compose.waitForIdle()
+
         val wifi = compose.onNodeWithText("كل الشبكات")
         compose.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
@@ -102,16 +106,22 @@ class DownloadsFocusNavigationTest {
         wifi.assertIsFocused()
 
         wifi.performKeyInput { pressKey(Key.DirectionDown) }
+        compose.waitForIdle()
         compose.onAllNodesWithText("ايقاف مؤقت")[0].assertIsFocused()
         compose.onAllNodesWithText("ايقاف مؤقت")[0].performKeyInput { pressKey(Key.DirectionLeft) }
+        compose.waitForIdle()
         compose.onAllNodesWithText("عادية")[0].assertIsFocused()
         compose.onAllNodesWithText("عادية")[0].performKeyInput { pressKey(Key.DirectionLeft) }
+        compose.waitForIdle()
         compose.onAllNodesWithText("الغاء")[0].assertIsFocused()
         compose.onAllNodesWithText("الغاء")[0].performKeyInput { pressKey(Key.DirectionDown) }
+        compose.waitForIdle()
         compose.onAllNodesWithText("الغاء")[1].assertIsFocused()
         compose.onAllNodesWithText("الغاء")[1].performKeyInput { pressKey(Key.DirectionRight) }
+        compose.waitForIdle()
         compose.onAllNodesWithText("عادية")[1].assertIsFocused()
         compose.onAllNodesWithText("عادية")[1].performKeyInput { pressKey(Key.DirectionRight) }
+        compose.waitForIdle()
         compose.onAllNodesWithText("ايقاف مؤقت")[1].assertIsFocused()
 
         compose.onAllNodesWithText("ايقاف مؤقت")[1]
@@ -120,6 +130,7 @@ class DownloadsFocusNavigationTest {
             .performSemanticsAction(SemanticsActions.OnClick)
         compose.onAllNodesWithText("الغاء")[1]
             .performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
         assertEquals(1, pauseResumeCalls)
         assertEquals(1, priorityCalls)
         assertEquals(1, cancelCalls)
