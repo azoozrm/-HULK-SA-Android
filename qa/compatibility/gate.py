@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,137 @@ def reconcile_final_page_markers(
     return corrections
 
 
+def _findings(data: dict[str, Any], severity: str) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in data.get("findings", [])
+        if isinstance(item, dict) and str(item.get("severity")) == severity
+    ]
+
+
+def _workflow_escape(value: object, *, property_value: bool = False) -> str:
+    escaped = str(value).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    if property_value:
+        escaped = escaped.replace(":", "%3A").replace(",", "%2C")
+    return escaped
+
+
+def _markdown_escape(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def emit_finding_diagnostics(
+    data: dict[str, Any],
+    summary_path: Path,
+    severity: str,
+) -> int:
+    """Print actionable findings and append them to the Actions step summary."""
+
+    findings = _findings(data, severity)
+    declared_count = int(
+        data.get(
+            "critical_count" if severity == "critical" else "infrastructure_error_count",
+            0,
+        )
+    )
+    print(f"::group::{severity.upper()} finding diagnostics ({len(findings)} detailed)")
+    if declared_count and not findings:
+        print(
+            "DIAGNOSTIC ERROR: summary declares "
+            f"{declared_count} {severity} finding(s), but no detailed finding records exist."
+        )
+
+    rows: list[str] = []
+    command = "error" if severity in {"critical", "infrastructure"} else "warning"
+    for index, item in enumerate(findings, start=1):
+        code = str(item.get("code") or "unknown")
+        case_id = str(item.get("case_id") or "unknown")
+        page = str(item.get("page") or "unknown")
+        message = str(item.get("message") or "No diagnostic message supplied.")
+        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+        evidence_items = [
+            f"{name}={path}"
+            for name, path in sorted(evidence.items())
+            if str(path).strip()
+        ]
+        evidence_text = "; ".join(evidence_items) or "none"
+
+        print(f"{severity.upper()} {index}/{len(findings)}")
+        print(f"  code: {code}")
+        print(f"  case: {case_id}")
+        print(f"  page: {page}")
+        print(f"  message: {message}")
+        print(f"  evidence: {evidence_text}")
+        title = f"{severity.upper()} {code} · {case_id}"
+        print(
+            f"::{command} title={_workflow_escape(title, property_value=True)}::"
+            f"{_workflow_escape(message)}"
+        )
+        rows.append(
+            "| "
+            + " | ".join(
+                (
+                    _markdown_escape(severity.upper()),
+                    f"`{_markdown_escape(code)}`",
+                    f"`{_markdown_escape(case_id)}`",
+                    _markdown_escape(page),
+                    _markdown_escape(message),
+                    f"`{_markdown_escape(evidence_text)}`",
+                )
+            )
+            + " |"
+        )
+    print("::endgroup::")
+
+    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        target = Path(step_summary)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n### {severity.title()} compatibility diagnostics\n\n")
+            handle.write(f"Source summary: `{summary_path}`\n\n")
+            if rows:
+                handle.write("| Severity | Code | Case | Page | Message | Evidence |\n")
+                handle.write("|---|---|---|---|---|---|\n")
+                handle.write("\n".join(rows) + "\n")
+            else:
+                handle.write(
+                    f"No detailed `{severity}` finding records were present; "
+                    f"declared count was `{declared_count}`.\n"
+                )
+    return len(findings)
+
+
+def evaluate_gate(data: dict[str, Any], summary_path: Path, enforce: bool) -> int:
+    infrastructure = int(data.get("infrastructure_error_count", 0))
+    critical = int(data.get("critical_count", 0))
+    warnings = int(data.get("warning_count", 0))
+
+    if infrastructure:
+        print(f"BLOCKED: {infrastructure} Compatibility Lab infrastructure error(s)")
+        emit_finding_diagnostics(data, summary_path, "infrastructure")
+        if critical:
+            emit_finding_diagnostics(data, summary_path, "critical")
+        return 2
+
+    if critical:
+        emit_finding_diagnostics(data, summary_path, "critical")
+        if enforce:
+            print(f"FAIL: {critical} critical application compatibility finding(s)")
+            return 1
+        print(
+            "DETECTED: "
+            f"{critical} critical product finding(s) preserved as evidence; "
+            "product enforcement is disabled only for this lab-only qualification."
+        )
+
+    print(
+        f"PASS: lab infrastructure completed; critical={critical}, warnings={warnings}, "
+        f"enforce_findings={str(enforce).lower()}"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("summary", type=Path)
@@ -136,22 +268,7 @@ def main() -> int:
             f"{len(corrections)} page marker timeout(s) were proven present "
             "by final XML evidence"
         )
-
-    infrastructure = int(data.get("infrastructure_error_count", 0))
-    critical = int(data.get("critical_count", 0))
-    enforce = parse_bool(args.enforce_findings)
-
-    if infrastructure:
-        print(f"BLOCKED: {infrastructure} Compatibility Lab infrastructure error(s)")
-        return 2
-    if enforce and critical:
-        print(f"FAIL: {critical} critical application compatibility finding(s)")
-        return 1
-    print(
-        f"PASS: lab completed; critical={critical}, warnings={data.get('warning_count', 0)}, "
-        f"enforce_findings={str(enforce).lower()}"
-    )
-    return 0
+    return evaluate_gate(data, args.summary, parse_bool(args.enforce_findings))
 
 
 if __name__ == "__main__":
