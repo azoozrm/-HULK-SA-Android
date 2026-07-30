@@ -1,0 +1,45 @@
+name: Temporary API28 and TV focus audit repair
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.ref == 'quality/api28-tv-focus-audit-repair'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply deterministic repair
+        run: python3 qa/compatibility/patch-api28-tv-focus-audit.py
+
+      - name: Run Quality Lab unit contracts
+        run: |
+          python3 -m py_compile qa/compatibility/run-lab.py qa/compatibility/tests/test_lab.py
+          python3 -m unittest qa.compatibility.tests.test_lab
+
+      - name: Commit only intended lab files and remove temporary tooling
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/temporary-api28-tv-focus-audit-repair.yml
+          git rm qa/compatibility/patch-api28-tv-focus-audit.py
+          git add qa/compatibility/QaActivity.kt
+          git add qa/compatibility/run-lab.py
+          git add qa/compatibility/tests/test_lab.py
+          git diff --cached --check
+          git commit -m "test: stabilize API28 harness and TV focus action audit"
+          git push origin "HEAD:${BRANCH}"
