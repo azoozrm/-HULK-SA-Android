@@ -52,9 +52,24 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("INSTRUMENTATION_CLASSES", self_validation)
         self.assertIn("Prove no production source or approved logo changed", self_validation)
         self.assertIn("Final lab self-validation enforcement", self_validation)
-        self.assertIn("enforce_findings: true", strict_ui)
-        self.assertIn("Final UI evidence enforcement", strict_ui)
+        self.assertIn("Classify lab-only versus product changes", strict_ui)
+        self.assertIn("qa.quality.scripts.pr_scope", strict_ui)
+        self.assertIn(
+            "enforce_findings: ${{ needs.scope.outputs.lab_only != 'true' }}",
+            strict_ui,
+        )
+        self.assertIn("if: needs.scope.outputs.lab_only != 'true'", strict_ui)
+        self.assertIn("product-affecting PR passed strict instrumentation", strict_ui)
         self.assertNotIn("report_only: true", self_validation)
+
+    def test_scope_classifier_is_fail_closed_and_gradle_test_only(self) -> None:
+        source = (ROOT / "qa/quality/scripts/pr_scope.py").read_text(encoding="utf-8")
+        self.assertIn("No diff evidence was available", source)
+        self.assertIn("enforce_product_findings", source)
+        self.assertIn("restricted_gradle_lines", source)
+        self.assertIn("app/src/androidTest/", source)
+        self.assertIn("app/build.gradle.kts", source)
+        self.assertIn("ANDROIDX_TEST_ORCHESTRATOR", source)
 
     def test_compatibility_matrix_uses_stable_native_runner_and_marker_provenance(self) -> None:
         source = self.source("compatibility-lab.yml")
@@ -133,8 +148,8 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("steps.instrumented.outcome", source)
         self.assertIn("'.overall_status == \"PASS\"'", source)
         self.assertIn("if-no-files-found: error", source)
-        self.assertIn("github.event.pull_request.head.sha || github.sha", source)
-        self.assertIn("test_variant: quality-ui", source)
+        self.assertIn("github.event.pull_request.head.sha || inputs.source_head_sha || github.sha", source)
+        self.assertIn("quality-ui-product", source)
         self.assertIn("bash -n qa/quality/scripts/run_instrumentation.sh", source)
         self.assertIn("bash -n qa/compatibility/run-native-emulator.sh", source)
         self.assertIn("Run isolated instrumentation after stable Android service boot", source)
