@@ -29,12 +29,9 @@ jobs:
       - name: Verify exact qualified inputs
         run: |
           set -euo pipefail
-          cat > /tmp/EXPECTED-FOCUS-INPUTS.sha256 <<'EOF'
-          5845ae64f1cc2f384e2610bd5fc296553277aa1a  qa/compatibility/QaActivity.kt
-          f966f61a6258ae849b2aeb6a845e4cf4584fddc9  qa/compatibility/run-lab.py
-          2979887ab767fcc830bab1e76fd3d02f40fbfe52  qa/compatibility/analyze.py
-          EOF
-          sha256sum -c /tmp/EXPECTED-FOCUS-INPUTS.sha256
+          test "$(git hash-object qa/compatibility/QaActivity.kt)" = '5845ae64f1cc2f384e2610bd5fc296553277aa1a'
+          test "$(git hash-object qa/compatibility/run-lab.py)" = 'f966f61a6258ae849b2aeb6a845e4cf4584fddc9'
+          test "$(git hash-object qa/compatibility/analyze.py)" = '2979887ab767fcc830bab1e76fd3d02f40fbfe52'
           git diff --name-only 882c40ea959a431f27d852cf63bc4314c55de022..HEAD | sort
 
       - name: Apply reviewable fixture driver and analyzer patches
