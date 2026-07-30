@@ -60,6 +60,144 @@ class QualityMarkerInjectionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "already contains a marker"):
                 INJECTION.inject_file(target)
 
+    def test_v09320_layout_shape_is_fully_instrumented(self) -> None:
+        modern_source = '''import androidx.compose.ui.semantics.Role
+private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
+
+private fun CinematicNavigationRail(
+    selected: MainDestination,
+) {
+    Column(
+        modifier = Modifier
+            .width(railWidth)
+            .fillMaxHeight()
+            .focusGroup()
+    )
+}
+
+private fun NavigationItem(
+)
+
+private fun CinemaHomeScreen(
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
+    )
+}
+
+private fun HomeSectionPadding(
+)
+
+private fun PosterCatalogScreen(
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(
+                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
+            ),
+    ) {
+    }
+}
+
+private fun LiveCatalogScreen(
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(
+                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
+            ),
+    ) {
+    }
+}
+
+private fun LiveStage(
+) {
+    Box(Modifier.fillMaxWidth().padding(bottom = TV_LIVE_ACTION_INSET)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                    }
+    }
+}
+
+private fun FavoritesScreen(
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+    ) {
+    }
+}
+
+private fun UnifiedSearchScreen(
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+    ) {
+    }
+}
+
+private fun TvSearchField(
+)
+
+private fun DownloadsScreen(
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+private fun DownloadCard(
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(if (isTv) 164.dp else 220.dp)
+            .clip(shape)
+    )
+}
+
+private fun DownloadProgress(
+)
+
+private fun SettingsScreen(
+) {
+    LazyColumn(
+        state = settingsListState,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
+    )
+}
+
+private fun AccountMetric(
+)
+'''
+        patched, report = INJECTION.inject_text(modern_source)
+        self.assertEqual(13, report["replacement_count"])
+        self.assertTrue(all(item.endswith(":v09320") for item in report["replacements"] if ":" in item))
+        for marker in INJECTION.MARKERS:
+            self.assertIn(marker, patched)
+        self.assertIn("qaTvPageContent(isTv, destination)", patched)
+        self.assertIn(".height(if (isTv) 164.dp else 220.dp)", patched)
+
     def test_supported_shape_selection_is_strict(self) -> None:
         variants = (
             ("legacy", "legacy-shape", "legacy-patched"),
