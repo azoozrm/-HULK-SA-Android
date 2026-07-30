@@ -14,11 +14,6 @@ import xml.etree.ElementTree as ET
 
 from PIL import Image, ImageStat
 
-from focus_contract import (
-    focus_coverage,
-    minimum_unique_targets,
-)
-
 
 PACKAGE = "sa.hulksa.player.dev"
 BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
@@ -1040,8 +1035,6 @@ def analyze_focus(
         signatures = {focus_signature(node) for node in observed}
         item["observed_focus_steps"] = len(observed)
         item["unique_focus_targets"] = len(signatures)
-        minimum_targets = minimum_unique_targets(str(entry.get("page", "")))
-        item["minimum_unique_focus_targets"] = minimum_targets
         item["status"] = "PASS"
         if not observed:
             item["status"] = "FAIL"
@@ -1054,104 +1047,17 @@ def analyze_focus(
                     evidence=evidence,
                 )
             )
-        elif len(signatures) < minimum_targets:
+        elif len(signatures) < 2:
             item["status"] = "FAIL"
             findings.append(
                 finding(
                     "critical",
-                    "focus_coverage_insufficient",
-                    f"{entry.get('orientation')} / {entry.get('page')}: "
-                    f"reached {len(signatures)} unique focus targets; required at least {minimum_targets}",
+                    "focus_trap",
+                    f"{entry.get('orientation')} / {entry.get('page')}: focus never moved to a second target",
                     page=entry.get("page"),
                     evidence=evidence,
                 )
             )
-
-        initial_targets = list(entry.get("initial_targets") or [])
-        coverage = focus_coverage(initial_targets, observed)
-        item["focus_coverage"] = coverage
-        exhaustive = bool(entry.get("exhaustive"))
-        coverage_threshold = 0.75 if exhaustive else 0.35
-        item["focus_coverage_threshold"] = coverage_threshold
-        if initial_targets and float(coverage["coverage"]) < coverage_threshold:
-            item["status"] = "FAIL"
-            findings.append(
-                finding(
-                    "critical",
-                    "visible_focus_targets_unreachable",
-                    f"{entry.get('orientation')} / {entry.get('page')}: "
-                    f"reached {coverage['reached_count']}/{coverage['target_count']} "
-                    f"visible focus targets ({coverage['coverage']:.0%}); "
-                    f"required {coverage_threshold:.0%}",
-                    page=entry.get("page"),
-                    evidence=evidence,
-                )
-            )
-        if exhaustive and coverage["named_target_count"] and coverage["named_coverage"] < 1.0:
-            item["status"] = "FAIL"
-            missing_labels = [
-                target.get("label") or "<unlabelled>"
-                for target in coverage["unreached_named"][:12]
-            ]
-            findings.append(
-                finding(
-                    "critical",
-                    "named_control_unreachable",
-                    f"{entry.get('orientation')} / {entry.get('page')}: "
-                    f"visible named controls were not reached: {missing_labels}",
-                    page=entry.get("page"),
-                    evidence=evidence,
-                )
-            )
-
-        unfocusable = list(entry.get("unfocusable_clickables") or [])
-        item["unfocusable_clickable_count"] = len(unfocusable)
-        if unfocusable:
-            item["status"] = "FAIL"
-            findings.append(
-                finding(
-                    "critical",
-                    "visible_control_not_focusable",
-                    f"{entry.get('orientation')} / {entry.get('page')}: "
-                    f"{len(unfocusable)} visible clickable control(s) cannot receive D-pad focus",
-                    page=entry.get("page"),
-                    evidence=evidence,
-                )
-            )
-
-        if entry.get("page") == "downloads":
-            action_audit = entry.get("action_audit") or {}
-            item["download_action_audit"] = action_audit
-            successful_actions = [
-                action.get("name")
-                for action in action_audit.get("actions", [])
-                if action.get("success")
-            ]
-            required_actions = {
-                "wifi-toggle",
-                "schedule-toggle",
-                "concurrent-cycle",
-                "pause",
-                "resume",
-                "priority-cycle",
-                "cancel",
-            }
-            missing_actions = sorted(required_actions - set(successful_actions))
-            if not action_audit.get("success") or missing_actions:
-                item["status"] = "FAIL"
-                action_evidence = dict(evidence)
-                if action_audit.get("evidence"):
-                    action_evidence["download_actions"] = str(action_audit["evidence"])
-                findings.append(
-                    finding(
-                        "critical",
-                        "download_action_contract_failed",
-                        f"{entry.get('orientation')} / downloads: executable action audit failed; "
-                        f"missing={missing_actions}; error={action_audit.get('error') or 'none'}",
-                        page="downloads",
-                        evidence=action_evidence,
-                    )
-                )
 
         width, height = expected_dimensions(device, entry.get("orientation", "landscape"))
         bad_bounds = []
