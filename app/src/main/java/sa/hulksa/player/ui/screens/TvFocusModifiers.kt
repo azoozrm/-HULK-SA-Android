@@ -24,7 +24,8 @@ internal fun Modifier.liveFocusNavigation(
             else -> null
         } ?: return@onPreviewKeyEvent false
         val target = nextLiveFocusSlot(slot, direction) ?: return@onPreviewKeyEvent false
-        runCatching { requesters[target]?.requestFocus() }.isSuccess
+        val targetRequester = requesters[target] ?: return@onPreviewKeyEvent false
+        runCatching { targetRequester.requestFocus() }.isSuccess
     }
 }
 
@@ -33,7 +34,7 @@ internal fun Modifier.downloadFocusNavigationStrict(
     node: DownloadFocusNode,
     rowCount: Int,
     requesters: Map<DownloadFocusNode, FocusRequester>,
-    onBeforeRequest: ((DownloadFocusNode) -> Unit)? = null,
+    requestTarget: (DownloadFocusNode, FocusRequester) -> Unit,
 ): Modifier {
     if (!isTv) return this
     val requester = requesters[node] ?: return this
@@ -48,7 +49,8 @@ internal fun Modifier.downloadFocusNavigationStrict(
         } ?: return@onPreviewKeyEvent false
         val target = nextDownloadFocusNodeStrict(node, rowCount, direction)
             ?: return@onPreviewKeyEvent false
-        onBeforeRequest?.invoke(target)
-        runCatching { requesters[target]?.requestFocus() }.isSuccess
+        val targetRequester = requesters[target] ?: return@onPreviewKeyEvent false
+        requestTarget(target, targetRequester)
+        true
     }
 }
