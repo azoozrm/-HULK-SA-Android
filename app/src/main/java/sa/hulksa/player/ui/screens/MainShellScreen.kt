@@ -158,6 +158,7 @@ private val TV_LIVE_ACTION_INSET = 8.dp
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
+
 internal enum class DownloadFocusSlot {
     WIFI,
     SCHEDULE,
@@ -187,30 +188,32 @@ internal fun nextDownloadFocusNode(
     if (rowCount < 0) return null
     if (current.rowIndex < 0) {
         return when (direction) {
-  DownloadFocusDirection.UP -> null
-  DownloadFocusDirection.DOWN -> when (current.slot) {
-      DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
-      DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
-      DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
-      else -> null
-  }.takeIf { rowCount > 0 }
-  DownloadFocusDirection.LEFT -> when (current.slot) {
-      DownloadFocusSlot.WIFI -> DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)
-      DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT)
-      else -> null
-  }
-  DownloadFocusDirection.RIGHT -> when (current.slot) {
-      DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)
-      DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
-      else -> null
-  }
+            DownloadFocusDirection.UP -> null
+            DownloadFocusDirection.DOWN -> when (current.slot) {
+                DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
+                DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
+                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
+                else -> null
+            }.takeIf { rowCount > 0 }
+            DownloadFocusDirection.LEFT -> when (current.slot) {
+                DownloadFocusSlot.WIFI -> DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)
+                DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT)
+                else -> null
+            }
+            DownloadFocusDirection.RIGHT -> when (current.slot) {
+                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)
+                DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
+                else -> null
+            }
         }
     }
 
-    if (current.rowIndex >= rowCount || current.slot !in setOf(
-  DownloadFocusSlot.PRIMARY,
-  DownloadFocusSlot.PRIORITY,
-  DownloadFocusSlot.CANCEL,
+    if (
+        current.rowIndex >= rowCount ||
+        current.slot !in setOf(
+            DownloadFocusSlot.PRIMARY,
+            DownloadFocusSlot.PRIORITY,
+            DownloadFocusSlot.CANCEL,
         )
     ) {
         return null
@@ -218,32 +221,32 @@ internal fun nextDownloadFocusNode(
 
     return when (direction) {
         DownloadFocusDirection.LEFT -> when (current.slot) {
-  DownloadFocusSlot.PRIMARY -> current.copy(slot = DownloadFocusSlot.PRIORITY)
-  DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.CANCEL)
-  else -> null
+            DownloadFocusSlot.PRIMARY -> current.copy(slot = DownloadFocusSlot.PRIORITY)
+            DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.CANCEL)
+            else -> null
         }
         DownloadFocusDirection.RIGHT -> when (current.slot) {
-  DownloadFocusSlot.CANCEL -> current.copy(slot = DownloadFocusSlot.PRIORITY)
-  DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.PRIMARY)
-  else -> null
+            DownloadFocusSlot.CANCEL -> current.copy(slot = DownloadFocusSlot.PRIORITY)
+            DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.PRIMARY)
+            else -> null
         }
         DownloadFocusDirection.UP -> if (current.rowIndex > 0) {
-  current.copy(rowIndex = current.rowIndex - 1)
+            current.copy(rowIndex = current.rowIndex - 1)
         } else {
-  DownloadFocusNode(
-      rowIndex = -1,
-      slot = when (current.slot) {
-          DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
-          DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
-          DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT
-          else -> return null
-      },
-  )
+            DownloadFocusNode(
+                rowIndex = -1,
+                slot = when (current.slot) {
+                    DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
+                    DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
+                    DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT
+                    else -> return null
+                },
+            )
         }
         DownloadFocusDirection.DOWN -> if (current.rowIndex + 1 < rowCount) {
-  current.copy(rowIndex = current.rowIndex + 1)
+            current.copy(rowIndex = current.rowIndex + 1)
         } else {
-  null
+            null
         }
     }
 }
@@ -258,23 +261,23 @@ private fun Modifier.downloadFocusNavigation(
     val requester = requesters[node] ?: return this
     return focusRequester(requester).onPreviewKeyEvent { event ->
         if (event.type != KeyEventType.KeyDown) {
-  false
+            false
         } else {
-  val direction = when (event.key) {
-      Key.DirectionUp -> DownloadFocusDirection.UP
-      Key.DirectionDown -> DownloadFocusDirection.DOWN
-      Key.DirectionLeft -> DownloadFocusDirection.LEFT
-      Key.DirectionRight -> DownloadFocusDirection.RIGHT
-      else -> null
-  }
-  val target = direction?.let { nextDownloadFocusNode(node, rowCount, it) }
-  if (target == null) {
-      false
-  } else {
-      requesters[target]?.let { targetRequester ->
-          runCatching { targetRequester.requestFocus() }.isSuccess
-      } ?: false
-  }
+            val direction = when (event.key) {
+                Key.DirectionUp -> DownloadFocusDirection.UP
+                Key.DirectionDown -> DownloadFocusDirection.DOWN
+                Key.DirectionLeft -> DownloadFocusDirection.LEFT
+                Key.DirectionRight -> DownloadFocusDirection.RIGHT
+                else -> null
+            }
+            val target = direction?.let { nextDownloadFocusNode(node, rowCount, it) }
+            if (target == null) {
+                false
+            } else {
+                requesters[target]?.let { targetRequester ->
+                    runCatching { targetRequester.requestFocus() }.isSuccess
+                } ?: false
+            }
         }
     }
 }
@@ -1605,12 +1608,12 @@ private fun DownloadsScreen(
     val completed = downloads.count { it.status == OfflineStatus.COMPLETED }
     val active = downloads.count {
         it.status == OfflineStatus.QUEUED ||
-  it.status == OfflineStatus.CHECKING ||
-  it.status == OfflineStatus.DOWNLOADING ||
-  it.status == OfflineStatus.PAUSED ||
-  it.status == OfflineStatus.WAITING_SCHEDULE ||
-  it.status == OfflineStatus.WAITING_NETWORK ||
-  it.status == OfflineStatus.WAITING_STORAGE
+            it.status == OfflineStatus.CHECKING ||
+            it.status == OfflineStatus.DOWNLOADING ||
+            it.status == OfflineStatus.PAUSED ||
+            it.status == OfflineStatus.WAITING_SCHEDULE ||
+            it.status == OfflineStatus.WAITING_NETWORK ||
+            it.status == OfflineStatus.WAITING_STORAGE
     }
     val storedBytes = downloads
         .filter { it.status == OfflineStatus.COMPLETED }
@@ -1627,14 +1630,14 @@ private fun DownloadsScreen(
     val downloadIds = downloads.map(OfflineDownload::downloadId)
     val downloadFocusRequesters = remember(downloadIds) {
         buildMap {
-  put(DownloadFocusNode(-1, DownloadFocusSlot.WIFI), FocusRequester())
-  put(DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE), FocusRequester())
-  put(DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT), FocusRequester())
-  downloads.indices.forEach { rowIndex ->
-      put(DownloadFocusNode(rowIndex, DownloadFocusSlot.PRIMARY), FocusRequester())
-      put(DownloadFocusNode(rowIndex, DownloadFocusSlot.PRIORITY), FocusRequester())
-      put(DownloadFocusNode(rowIndex, DownloadFocusSlot.CANCEL), FocusRequester())
-  }
+            put(DownloadFocusNode(-1, DownloadFocusSlot.WIFI), FocusRequester())
+            put(DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE), FocusRequester())
+            put(DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT), FocusRequester())
+            downloads.indices.forEach { rowIndex ->
+                put(DownloadFocusNode(rowIndex, DownloadFocusSlot.PRIMARY), FocusRequester())
+                put(DownloadFocusNode(rowIndex, DownloadFocusSlot.PRIORITY), FocusRequester())
+                put(DownloadFocusNode(rowIndex, DownloadFocusSlot.CANCEL), FocusRequester())
+            }
         }
     }
     fun focusModifier(node: DownloadFocusNode): Modifier = Modifier.downloadFocusNavigation(
@@ -1646,103 +1649,103 @@ private fun DownloadsScreen(
 
     LaunchedEffect(isTv, downloadIds, remembered.itemKey, rememberedIndex) {
         if (isTv) {
-  delay(180L)
-  val initialNode = if (remembered.itemKey.isBlank()) {
-      DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
-  } else {
-      DownloadFocusNode(rememberedIndex, DownloadFocusSlot.PRIMARY)
-  }
-  runCatching { downloadFocusRequesters[initialNode]?.requestFocus() }
+            delay(180L)
+            val initialNode = if (remembered.itemKey.isBlank()) {
+                DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
+            } else {
+                DownloadFocusNode(rememberedIndex, DownloadFocusSlot.PRIMARY)
+            }
+            runCatching { downloadFocusRequesters[initialNode]?.requestFocus() }
         }
     }
 
     Column(
         Modifier
-  .fillMaxSize()
-  .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-  InfoPill("مكتمل  $completed")
-  if (active > 0) InfoPill("نشط ومجدول  $active")
-  if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
-  InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}")
+            InfoPill("مكتمل  $completed")
+            if (active > 0) InfoPill("نشط ومجدول  $active")
+            if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
+            InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}")
         }
         Spacer(Modifier.height(11.dp))
         LazyRow(
-  horizontalArrangement = Arrangement.spacedBy(8.dp),
-  contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
         ) {
-  item {
-      FocusButton(
-          if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
-          onToggleWifiOnly,
-          primary = settings.wifiOnly,
-          compact = true,
-          outlined = !settings.wifiOnly,
-          modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.WIFI)),
-      )
-  }
-  item {
-      FocusButton(
-          if (settings.scheduleMode == DownloadScheduleMode.NIGHT) "الجدولة 02:00" else "الجدولة الان",
-          onToggleSchedule,
-          primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
-          compact = true,
-          outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
-          modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)),
-      )
-  }
-  item {
-      FocusButton(
-          "متزامنة  ${settings.concurrentDownloads}",
-          onCycleConcurrent,
-          primary = false,
-          compact = true,
-          outlined = true,
-          modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT)),
-      )
-  }
+            item {
+                FocusButton(
+                    if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
+                    onToggleWifiOnly,
+                    primary = settings.wifiOnly,
+                    compact = true,
+                    outlined = !settings.wifiOnly,
+                    modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.WIFI)),
+                )
+            }
+            item {
+                FocusButton(
+                    if (settings.scheduleMode == DownloadScheduleMode.NIGHT) "الجدولة 02:00" else "الجدولة الان",
+                    onToggleSchedule,
+                    primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
+                    compact = true,
+                    outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
+                    modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)),
+                )
+            }
+            item {
+                FocusButton(
+                    "متزامنة  ${settings.concurrentDownloads}",
+                    onCycleConcurrent,
+                    primary = false,
+                    compact = true,
+                    outlined = true,
+                    modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT)),
+                )
+            }
         }
         Spacer(Modifier.height(12.dp))
         if (downloads.isEmpty()) {
-  EmptyState("ستظهر هنا الافلام والحلقات التي تختار تحميلها")
+            EmptyState("ستظهر هنا الافلام والحلقات التي تختار تحميلها")
         } else {
-  LazyColumn(
-      state = downloadsState,
-      verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-      horizontalAlignment = Alignment.Start,
-      contentPadding = PaddingValues(bottom = 28.dp),
-      modifier = Modifier.fillMaxSize(),
-  ) {
-      itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
-          DownloadCard(
-              item = item,
-              isTv = isTv,
-              onFocused = {
-                  navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
-                  if (isTv) {
-                      downloadsFocusJob?.cancel()
-                      downloadsFocusJob = downloadsFocusScope.launch {
-                          delay(100L)
-                          runCatching { downloadsState.scrollToItem(index, scrollOffset = 0) }
-                      }
-                  }
-              },
-              onPlay = onPlay,
-              onDelete = onDelete,
-              onRetry = onRetry,
-              onCyclePriority = onCyclePriority,
-              primaryActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.PRIMARY)),
-              priorityActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.PRIORITY)),
-              cancelActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.CANCEL)),
-              modifier = Modifier
-                  .widthIn(max = if (isTv) 720.dp else 520.dp)
-                  .fillMaxWidth(),
-          )
-      }
-  }
+            LazyColumn(
+                state = downloadsState,
+                verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+                horizontalAlignment = Alignment.Start,
+                contentPadding = PaddingValues(bottom = 28.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
+                    DownloadCard(
+                        item = item,
+                        isTv = isTv,
+                        onFocused = {
+                            navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
+                            if (isTv) {
+                                downloadsFocusJob?.cancel()
+                                downloadsFocusJob = downloadsFocusScope.launch {
+                                    delay(100L)
+                                    runCatching { downloadsState.scrollToItem(index, scrollOffset = 0) }
+                                }
+                            }
+                        },
+                        onPlay = onPlay,
+                        onDelete = onDelete,
+                        onRetry = onRetry,
+                        onCyclePriority = onCyclePriority,
+                        primaryActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.PRIMARY)),
+                        priorityActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.PRIORITY)),
+                        cancelActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.CANCEL)),
+                        modifier = Modifier
+                            .widthIn(max = if (isTv) 720.dp else 520.dp)
+                            .fillMaxWidth(),
+                    )
+                }
+            }
         }
     }
 }
@@ -1766,155 +1769,159 @@ private fun DownloadCard(
     val shape = RoundedCornerShape(17.dp)
     Column(
         modifier = modifier
-  .fillMaxWidth()
-  .height(if (isTv) 164.dp else 220.dp)
-  .clip(shape)
-  .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
-  .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .45f), shape)
-  .onFocusChanged { focusState -> focused = focusState.hasFocus }
-  .padding(if (isTv) 9.dp else 11.dp),
+            .fillMaxWidth()
+            .height(if (isTv) 164.dp else 220.dp)
+            .clip(shape)
+            .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) colors.goldBright else colors.line.copy(alpha = .45f),
+                shape,
+            )
+            .onFocusChanged { focusState -> focused = focusState.hasFocus }
+            .padding(if (isTv) 9.dp else 11.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 6.dp else 8.dp),
     ) {
         Row(
-  modifier = Modifier.fillMaxWidth().weight(1f),
-  horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 12.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 12.dp),
         ) {
-  Box(
-      modifier = Modifier
-          .width(if (isTv) 72.dp else 72.dp)
-          .fillMaxHeight()
-          .clip(RoundedCornerShape(12.dp))
-          .background(Color(0xFF1B1C15)),
-      contentAlignment = Alignment.Center,
-  ) {
-      if (!item.posterUrl.isNullOrBlank()) {
-          AsyncImage(
-              model = item.posterUrl,
-              contentDescription = item.title,
-              modifier = Modifier.fillMaxSize(),
-              contentScale = ContentScale.Crop,
-          )
-      } else {
-          BrandLogo(Modifier.size(52.dp).graphicsLayer { alpha = .55f })
-      }
-      if (item.status == OfflineStatus.COMPLETED) {
-          Box(
-              Modifier
-                  .align(Alignment.TopStart)
-                  .padding(5.dp)
-                  .clip(CircleShape)
-                  .background(colors.gold)
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
-          ) {
-              Text("جاهز", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-          }
-      }
-  }
-  Column(
-      modifier = Modifier.weight(1f).fillMaxHeight(),
-      verticalArrangement = Arrangement.SpaceBetween,
-  ) {
-      Column {
-          Text(
-              item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
-              color = colors.goldBright,
-              fontSize = 9.sp,
-              fontWeight = FontWeight.Bold,
-              maxLines = 1,
-          )
-          val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
-              "الحلقة ${item.episodeNumber}"
-          } else {
-              item.title
-          }
-          Text(
-              cleanDownloadTitle,
-              color = colors.text,
-              fontSize = if (isTv) 14.sp else 12.sp,
-              fontWeight = FontWeight.Bold,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-              lineHeight = if (isTv) 17.sp else 15.sp,
-          )
-          Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-              item.season?.let { season ->
-                  Text("الموسم $season", color = colors.textMuted, fontSize = 8.sp, maxLines = 1)
-              }
-              Text(
-                  "الاولوية  ${priorityLabel(item.priority)}",
-                  color = if (item.priority == 1) colors.goldBright else colors.textMuted,
-                  fontSize = 8.sp,
-                  maxLines = 1,
-              )
-          }
-      }
-      DownloadProgress(item)
-  }
+            Box(
+                modifier = Modifier
+                    .width(72.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF1B1C15)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!item.posterUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = item.posterUrl,
+                        contentDescription = item.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    BrandLogo(Modifier.size(52.dp).graphicsLayer { alpha = .55f })
+                }
+                if (item.status == OfflineStatus.COMPLETED) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(5.dp)
+                            .clip(CircleShape)
+                            .background(colors.gold)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text("جاهز", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text(
+                        item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
+                        color = colors.goldBright,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
+                        "الحلقة ${item.episodeNumber}"
+                    } else {
+                        item.title
+                    }
+                    Text(
+                        cleanDownloadTitle,
+                        color = colors.text,
+                        fontSize = if (isTv) 14.sp else 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = if (isTv) 17.sp else 15.sp,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        item.season?.let { season ->
+                            Text("الموسم $season", color = colors.textMuted, fontSize = 8.sp, maxLines = 1)
+                        }
+                        Text(
+                            "الاولوية  ${priorityLabel(item.priority)}",
+                            color = if (item.priority == 1) colors.goldBright else colors.textMuted,
+                            fontSize = 8.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                DownloadProgress(item)
+            }
         }
         Row(
-  modifier = Modifier.fillMaxWidth().height(if (isTv) 36.dp else 40.dp),
-  horizontalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier.fillMaxWidth().height(if (isTv) 36.dp else 40.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-  when (item.status) {
-      OfflineStatus.COMPLETED -> FocusButton(
-          "تشغيل",
-          { onPlay(item) },
-          compact = true,
-          outlined = true,
-          onFocused = onFocused,
-          modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
-      )
-      OfflineStatus.FAILED -> FocusButton(
-          "اعادة المحاولة",
-          { onRetry(item) },
-          compact = true,
-          outlined = true,
-          onFocused = onFocused,
-          modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
-      )
-      OfflineStatus.PAUSED,
-      OfflineStatus.WAITING_SCHEDULE,
-      OfflineStatus.WAITING_NETWORK,
-      OfflineStatus.WAITING_STORAGE,
-      -> FocusButton(
-          "استئناف",
-          { onRetry(item) },
-          compact = true,
-          outlined = true,
-          onFocused = onFocused,
-          modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
-      )
-      OfflineStatus.QUEUED,
-      OfflineStatus.CHECKING,
-      OfflineStatus.DOWNLOADING,
-      -> FocusButton(
-          "ايقاف مؤقت",
-          { onRetry(item) },
-          primary = false,
-          compact = true,
-          outlined = true,
-          onFocused = onFocused,
-          modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
-      )
-  }
-  FocusButton(
-      priorityShortLabel(item.priority),
-      { onCyclePriority(item) },
-      primary = item.priority == 1,
-      compact = true,
-      outlined = true,
-      onFocused = onFocused,
-      modifier = Modifier.weight(1f).fillMaxHeight().then(priorityActionModifier),
-  )
-  FocusButton(
-      if (item.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
-      { onDelete(item) },
-      primary = false,
-      compact = true,
-      outlined = true,
-      onFocused = onFocused,
-      modifier = Modifier.weight(1f).fillMaxHeight().then(cancelActionModifier),
-  )
+            when (item.status) {
+                OfflineStatus.COMPLETED -> FocusButton(
+                    "تشغيل",
+                    { onPlay(item) },
+                    compact = true,
+                    outlined = true,
+                    onFocused = onFocused,
+                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                )
+                OfflineStatus.FAILED -> FocusButton(
+                    "اعادة المحاولة",
+                    { onRetry(item) },
+                    compact = true,
+                    outlined = true,
+                    onFocused = onFocused,
+                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                )
+                OfflineStatus.PAUSED,
+                OfflineStatus.WAITING_SCHEDULE,
+                OfflineStatus.WAITING_NETWORK,
+                OfflineStatus.WAITING_STORAGE,
+                -> FocusButton(
+                    "استئناف",
+                    { onRetry(item) },
+                    compact = true,
+                    outlined = true,
+                    onFocused = onFocused,
+                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                )
+                OfflineStatus.QUEUED,
+                OfflineStatus.CHECKING,
+                OfflineStatus.DOWNLOADING,
+                -> FocusButton(
+                    "ايقاف مؤقت",
+                    { onRetry(item) },
+                    primary = false,
+                    compact = true,
+                    outlined = true,
+                    onFocused = onFocused,
+                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                )
+            }
+            FocusButton(
+                priorityShortLabel(item.priority),
+                { onCyclePriority(item) },
+                primary = item.priority == 1,
+                compact = true,
+                outlined = true,
+                onFocused = onFocused,
+                modifier = Modifier.weight(1f).fillMaxHeight().then(priorityActionModifier),
+            )
+            FocusButton(
+                if (item.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
+                { onDelete(item) },
+                primary = false,
+                compact = true,
+                outlined = true,
+                onFocused = onFocused,
+                modifier = Modifier.weight(1f).fillMaxHeight().then(cancelActionModifier),
+            )
         }
     }
 }
