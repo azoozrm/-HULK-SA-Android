@@ -47,13 +47,15 @@ jobs:
           ):
               text = text.replace(constant, '')
 
-          helper_pattern = re.compile(
-              r'\nprivate fun Modifier\.qaTvPageContent\([\s\S]*?\n\)\n\n'
-              r'private fun Modifier\.qaMarker\([\s\S]*?\n\)\n',
-          )
-          text, helper_count = helper_pattern.subn('\n', text, count=1)
-          if helper_count != 1:
-              raise SystemExit(f'FAIL: expected one QA helper block, removed {helper_count}')
+          helper_start_token = '\nprivate fun Modifier.qaTvPageContent('
+          helper_end_token = '\ndata class NavigationPosition('
+          helper_start = text.find(helper_start_token)
+          helper_end = text.find(helper_end_token, helper_start + 1)
+          if helper_start < 0 or helper_end < 0 or helper_end <= helper_start:
+              raise SystemExit(
+                  f'FAIL: QA helper boundaries not found: start={helper_start}, end={helper_end}'
+              )
+          text = text[:helper_start] + '\n' + text[helper_end:]
 
           text, rail_count = re.subn(
               r'\n\s*\.semantics \{ contentDescription = "qa-tv-rail" \}',
