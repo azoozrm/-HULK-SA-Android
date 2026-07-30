@@ -47,8 +47,8 @@ class WorkflowContractTest(unittest.TestCase):
     def test_quality_lab_self_validation_is_not_a_product_bypass(self) -> None:
         self_validation = self.source("quality-lab-self-validation.yml")
         strict_ui = self.source("quality-ui.yml")
-        self.assertIn("enforce_findings: false", self_validation)
-        self.assertIn("test_variant: quality-lab-self-validation", self_validation)
+        self.assertNotIn("enforce_findings: false", self_validation)
+        self.assertNotIn("uses: ./.github/workflows/compatibility-lab.yml", self_validation)
         self.assertIn("INSTRUMENTATION_CLASSES", self_validation)
         self.assertIn("Prove no production source or approved logo changed", self_validation)
         self.assertIn("Final lab self-validation enforcement", self_validation)
