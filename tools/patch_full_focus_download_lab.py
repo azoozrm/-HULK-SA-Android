@@ -28,15 +28,27 @@ def patch_activity() -> None:
     source = path.read_text(encoding="utf-8")
     fixture_main = r'''@Composable
 private fun FixtureMain(
-    initial: HulkUiState,
-    initialPage: MainDestination,
-    downloadRepository: DownloadRepository?,
-    originProgress: () -> Boolean,
+    initialDestination: MainDestination,
+    isTv: Boolean,
+    downloadHarness: QaDownloadHarness?,
 ) {
-    val context = LocalContext.current
-    var state by remember { mutableStateOf(initial) }
+    val downloadRepository = downloadHarness?.repository
+    var favorites by remember {
+        mutableStateOf(setOf("MOVIE:101", "SERIES:301", "LIVE:501"))
+    }
+    var state by remember(initialDestination) {
+        mutableStateOf(fixtureState(initialDestination).copy(favorites = favorites))
+    }
     var actionRevision by remember { mutableStateOf(0) }
     var lastDownloadAction by remember { mutableStateOf<String?>(null) }
+    val navigationMemory = remember { NavigationMemoryStore() }
+    val pageMarker = "qa-page:${state.destination.name.lowercase(Locale.ROOT)}"
+    var originBytesServed by remember(downloadHarness) {
+        mutableStateOf(downloadHarness?.origin?.bytesServed() ?: 0L)
+    }
+    val hasRealDownloadProgress =
+        downloadRepository != null && state.downloads.any { it.bytesDownloaded > 0L }
+    val hasOriginByteProgress = originBytesServed > 0L
 
     fun publishDownloadAction(action: String) {
         actionRevision += 1
@@ -50,51 +62,68 @@ private fun FixtureMain(
         )
     }
 
-    LaunchedEffect(downloadRepository) {
-        while (downloadRepository != null) {
-            val downloads = downloadRepository.downloads()
-            val settings = downloadRepository.settings()
-            if (downloads != state.downloads || settings != state.downloadSettings) {
-                state = state.copy(downloads = downloads, downloadSettings = settings)
-            }
-            delay(250L)
+    LaunchedEffect(downloadHarness) {
+        while (downloadHarness != null) {
+            refreshDownloads(downloadHarness.repository)
+            originBytesServed = downloadHarness.origin.bytesServed()
+            delay(QA_DOWNLOAD_POLL_MS)
         }
     }
-    val page = state.destination.name.lowercase(Locale.US)
-    val transferredBytes = state.downloads.maxOfOrNull(OfflineDownload::bytesDownloaded) ?: 0L
-    val rootDescription = buildList {
-        add("qa-page:$page")
-        if (state.destination == MainDestination.DOWNLOADS && originProgress()) {
-            add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
-        }
-        if (state.destination == MainDestination.DOWNLOADS && transferredBytes > 0L) {
-            add(QA_DOWNLOAD_PROGRESS_MARKER)
-        }
-        lastDownloadAction?.let { marker ->
-            if (state.destination == MainDestination.DOWNLOADS) {
-                add("qa-download-action:$marker")
-            }
-        }
-    }.joinToString(",")
-    Box(Modifier.fillMaxSize().semantics { contentDescription = rootDescription }) {
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .semantics(mergeDescendants = false) {
+                contentDescription = buildList {
+                    add(pageMarker)
+                    if (hasOriginByteProgress) {
+                        add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
+                    }
+                    if (hasRealDownloadProgress) {
+                        add(QA_DOWNLOAD_PROGRESS_MARKER)
+                    }
+                    lastDownloadAction?.let { marker ->
+                        if (state.destination == MainDestination.DOWNLOADS) {
+                            add("qa-download-action:$marker")
+                        }
+                    }
+                }
+                    .joinToString(",")
+            },
+    ) {
         MainShellScreen(
-            state = state,
-            isTv = initialPage == MainDestination.HOME && isTelevision(context),
-            navigationMemory = remember { NavigationMemoryStore() },
-            isFavorite = { item -> "${item.type.name}:${item.id}" in state.favorites },
-            onSelectDestination = { destination -> state = state.copy(destination = destination) },
-            onSelectCategory = { category -> state = state.copy(selectedCategoryId = category?.id) },
-            onSearch = { query -> state = state.copy(searchQuery = query) },
+            state = state.copy(favorites = favorites),
+            isTv = isTv,
+            navigationMemory = navigationMemory,
+            isFavorite = { "${it.type.name}:${it.id}" in favorites },
+            onSelectDestination = { destination ->
+                val next = fixtureState(destination).copy(favorites = favorites)
+                state = if (destination == MainDestination.DOWNLOADS && downloadRepository != null) {
+                    next.copy(
+                        downloads = downloadRepository.downloads(),
+                        downloadSettings = downloadRepository.settings(),
+                    )
+                } else {
+                    next
+                }
+            },
+            onSelectCategory = { state = state.copy(selectedCategoryId = it) },
+            onSearch = { state = state.copy(searchQuery = it) },
             onOpen = {},
             onOpenHistory = {},
-            onToggleFavorite = {},
+            onToggleFavorite = { item ->
+                val key = "${item.type.name}:${item.id}"
+                favorites = if (key in favorites) favorites - key else favorites + key
+            },
             onRefresh = {},
-            onClearHistory = {},
+            onClearHistory = { state = state.copy(history = emptyList()) },
             onPlayDownload = {},
             onDeleteDownload = { item ->
                 val repository = downloadRepository
                 if (repository == null) {
-                    state = state.copy(downloads = state.downloads.filterNot { it.downloadId == item.downloadId })
+                    state = state.copy(
+                        downloads = state.downloads.filterNot { it.downloadId == item.downloadId },
+                    )
                 } else {
                     repository.remove(item.downloadId)
                     refreshDownloads(repository)
@@ -142,14 +171,17 @@ private fun FixtureMain(
                 publishDownloadAction("wifi")
             },
             onToggleDownloadSchedule = {
-                val next = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NOW) {
-                    DownloadScheduleMode.NIGHT
-                } else {
-                    DownloadScheduleMode.NOW
-                }
+                val next =
+                    if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NOW) {
+                        DownloadScheduleMode.NIGHT
+                    } else {
+                        DownloadScheduleMode.NOW
+                    }
                 val repository = downloadRepository
                 if (repository == null) {
-                    state = state.copy(downloadSettings = state.downloadSettings.copy(scheduleMode = next))
+                    state = state.copy(
+                        downloadSettings = state.downloadSettings.copy(scheduleMode = next),
+                    )
                 } else {
                     repository.setScheduleMode(next)
                     refreshDownloads(repository)
@@ -187,27 +219,26 @@ private fun FixtureMain(
     source = replace_between(
         source,
         "@Composable\nprivate fun FixtureMain(",
-        "private class QaRangeServer",
+        "private fun String.toDestination",
         fixture_main,
         "FixtureMain",
     )
     source = replace_once(
         source,
         "private const val QA_DOWNLOAD_WRITE_DELAY_MS = 10L",
-        "private const val QA_DOWNLOAD_WRITE_DELAY_MS = 100L",
+        "private const val QA_DOWNLOAD_WRITE_DELAY_MS = 40L",
         "fixture transfer delay",
     )
-    required = (
-        'repository.pause(item.downloadId)',
-        'repository.resume(item.downloadId)',
-        'repository.cyclePriority(item.downloadId)',
-        'repository.setConcurrentDownloads(next)',
-        'repository.remove(item.downloadId)',
-        'qa-download-action:$marker',
-    )
-    missing = [item for item in required if item not in source]
-    if missing:
-        raise SystemExit(f"QaActivity missing real action contracts: {missing}")
+    for contract in (
+        "repository.pause(item.downloadId)",
+        "repository.resume(item.downloadId)",
+        "repository.cyclePriority(item.downloadId)",
+        "repository.setConcurrentDownloads(next)",
+        "repository.remove(item.downloadId)",
+        'add("qa-download-action:$marker")',
+    ):
+        if contract not in source:
+            raise SystemExit(f"QaActivity missing contract: {contract}")
     path.write_text(source, encoding="utf-8")
 
 
@@ -216,47 +247,41 @@ def patch_runner() -> None:
     source = path.read_text(encoding="utf-8")
     source = replace_once(
         source,
-        'DOWNLOAD_ORIGIN_MARKER = "qa-download-origin:bytes-positive"\n',
-        'DOWNLOAD_ORIGIN_MARKER = "qa-download-origin:bytes-positive"\n'
+        'DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"\n',
+        'DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"\n'
         'DOWNLOAD_ACTION_RE = re.compile(r"qa-download-action:([a-z]+):(\\d+)")\n',
-        "download action marker regex",
+        "download action regex",
     )
-    helper_anchor = '''def visible_package_names(xml_bytes: bytes) -> list[str]:
-'''
-    helper_index = source.find(helper_anchor)
-    if helper_index < 0:
-        raise SystemExit("visible_package_names helper not found")
-    next_class = source.find("\n\n@dataclass", helper_index)
-    if next_class < 0:
-        raise SystemExit("dataclass anchor after helpers not found")
-    helpers = source[helper_index:next_class]
-    if "def download_action_markers" not in helpers:
-        source = source[:next_class] + r'''
-
-
-def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
-    text = xml_bytes.decode("utf-8", errors="ignore")
-    return {
-        (match.group(1), int(match.group(2)))
-        for match in DOWNLOAD_ACTION_RE.finditer(text)
-    }
-''' + source[next_class:]
-
+    source = replace_once(
+        source,
+        "\n\ndef focused_node(xml_bytes: bytes) -> dict[str, Any] | None:\n",
+        '''\n\ndef download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:\n    text = xml_bytes.decode("utf-8", errors="ignore")\n    return {\n        (match.group(1), int(match.group(2)))\n        for match in DOWNLOAD_ACTION_RE.finditer(text)\n    }\n\n\ndef focused_node(xml_bytes: bytes) -> dict[str, Any] | None:\n''',
+        "download action marker helper",
+    )
+    source = replace_once(
+        source,
+        '            "focus": [],\n            "harness_errors": [],\n',
+        '            "focus": [],\n            "download_actions": [],\n            "harness_errors": [],\n',
+        "manifest action field",
+    )
     method = r'''
-    def download_action_audit(self, orientation: str, root: Path) -> dict[str, Any]:
-        audit_root = root / "focus" / orientation / "downloads-actions"
+    def download_action_audit(self, orientation: str) -> None:
+        audit_root = self.out / "focus" / orientation / "downloads-actions"
         audit_root.mkdir(parents=True, exist_ok=True)
         checks: list[dict[str, Any]] = []
         known_markers: set[tuple[str, int]] = set()
         sequence_number = 0
+        error: str | None = None
 
         def restart(scope: str) -> None:
             nonlocal known_markers
             case_dir = audit_root / scope
             case_dir.mkdir(parents=True, exist_ok=True)
-            self.apply_case_settings(orientation, 1.0)
             self.start_page("downloads", case_dir)
-            known_markers = download_action_markers(self.adb.dump_ui())
+            known_markers = download_action_markers(
+                dump_xml(self.adb, case_dir / ".initial.xml", attempts=2)
+            )
+            (case_dir / ".initial.xml").unlink(missing_ok=True)
 
         def inspect(
             check_id: str,
@@ -271,7 +296,7 @@ def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
             step_root.mkdir(parents=True, exist_ok=True)
             previous = set(known_markers)
             if key_code is not None:
-                self.adb.key(key_code)
+                self.adb.shell(["input", "keyevent", str(key_code)])
             deadline = time.monotonic() + (5.0 if expected_action else 1.5)
             xml = b""
             markers: set[tuple[str, int]] = set()
@@ -279,7 +304,7 @@ def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
             action_seen = expected_action is None
             while time.monotonic() < deadline:
                 time.sleep(0.20)
-                xml = self.adb.dump_ui()
+                xml = dump_xml(self.adb, step_root / "ui.xml", attempts=2)
                 markers = download_action_markers(xml)
                 focused = focused_node(xml)
                 if expected_action is not None:
@@ -291,14 +316,23 @@ def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
                 if focused is not None and action_seen:
                     break
             known_markers = markers
-            label = ""
-            if focused:
-                label = str(focused.get("text") or focused.get("content_description") or "")
+            label = str(
+                (focused or {}).get("text")
+                or (focused or {}).get("content_description")
+                or ""
+            )
             focus_seen = not expected_labels or any(expected in label for expected in expected_labels)
             success = bool(focused) and focus_seen and action_seen
-            (step_root / "ui.xml").write_bytes(xml or self.adb.dump_ui())
-            (step_root / "screenshot.png").write_bytes(self.adb.screencap())
-            (step_root / "logcat.txt").write_bytes(self.adb.run(["logcat", "-d", "-v", "threadtime"]).stdout)
+            capture_png(self.adb, step_root / "screenshot.png")
+            safe_write(
+                step_root / "logcat.txt",
+                command_text(
+                    self.adb,
+                    ["logcat", "-d", "-v", "threadtime"],
+                    shell=False,
+                    timeout=90,
+                ),
+            )
             checks.append(
                 {
                     "id": check_id,
@@ -306,7 +340,9 @@ def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
                     "expected_labels": list(expected_labels),
                     "expected_action": expected_action,
                     "focused": focused,
-                    "action_markers": [f"{action}:{revision}" for action, revision in sorted(markers)],
+                    "action_markers": [
+                        f"{action}:{revision}" for action, revision in sorted(markers)
+                    ],
                     "reason": None if success else (
                         "expected action marker was not emitted"
                         if not action_seen
@@ -315,9 +351,9 @@ def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
                         else "no focused control was exposed"
                     ),
                     "evidence": {
-                        "screenshot": (step_root / "screenshot.png").relative_to(root).as_posix(),
-                        "xml": (step_root / "ui.xml").relative_to(root).as_posix(),
-                        "logcat": (step_root / "logcat.txt").relative_to(root).as_posix(),
+                        "screenshot": (step_root / "screenshot.png").relative_to(self.out).as_posix(),
+                        "xml": (step_root / "ui.xml").relative_to(self.out).as_posix(),
+                        "logcat": (step_root / "logcat.txt").relative_to(self.out).as_posix(),
                     },
                 }
             )
@@ -354,63 +390,47 @@ def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
             inspect("cancel-row-1-focus", key_code=21, expected_labels=("الغاء",))
             inspect("cancel-row-1-executes", key_code=23, expected_action="cancel")
         except Exception as exc:
-            return {
+            error = f"{type(exc).__name__}: {exc}"[-1200:]
+            self.record_harness_error(f"download-actions:{orientation}", exc)
+        finally:
+            result = {
                 "orientation": orientation,
                 "page": "downloads",
-                "success": False,
-                "error": f"{type(exc).__name__}: {exc}",
+                "success": error is None and all(check.get("success") for check in checks),
+                "error": error,
                 "checks": checks,
             }
-
-        return {
-            "orientation": orientation,
-            "page": "downloads",
-            "success": all(check.get("success") for check in checks),
-            "error": None,
-            "checks": checks,
-        }
+            self.manifest["download_actions"].append(result)
+            safe_write(
+                audit_root / "download-actions.json",
+                json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            )
+            self.flush_manifest()
 
 '''
-    run_anchor = "    def run(self) -> int:\n"
-    source = replace_once(source, run_anchor, method + run_anchor, "download action audit method")
+    source = replace_once(source, "    def run(self) -> None:\n", method + "    def run(self) -> None:\n", "action audit method")
     source = replace_once(
         source,
-        '            "focus": [],\n            "harness_errors": [],\n',
-        '            "focus": [],\n            "download_actions": [],\n            "harness_errors": [],\n',
-        "manifest download action collection",
+        '''            if self.args.is_tv:
+                for page in PAGES:
+                    self.focus_audit(page["id"], orientation)
+''',
+        '''            if self.args.is_tv:
+                for page in PAGES:
+                    self.focus_audit(page["id"], orientation)
+                self.download_action_audit(orientation)
+''',
+        "action audit invocation",
     )
-    focus_loop = '''                if self.device["is_tv"]:
-                    for page in self.pages:
-                        try:
-                            manifest["focus"].append(self.focus_audit(page, orientation, root))
-                        except Exception as exc:
-                            manifest["harness_errors"].append(
-                                {"scope": f"focus:{orientation}:{page}", "message": f"{type(exc).__name__}: {exc}"}
-                            )
-'''
-    focus_loop_with_actions = focus_loop + '''                    try:
-                        manifest["download_actions"].append(
-                            self.download_action_audit(orientation, root)
-                        )
-                    except Exception as exc:
-                        manifest["harness_errors"].append(
-                            {
-                                "scope": f"download-actions:{orientation}",
-                                "message": f"{type(exc).__name__}: {exc}",
-                            }
-                        )
-'''
-    source = replace_once(source, focus_loop, focus_loop_with_actions, "runner action audit call")
-    required = (
+    for contract in (
         "def download_action_audit",
         '"download_actions": []',
-        "expected_action=\"pause\"",
-        "expected_action=\"priority\"",
-        "expected_action=\"cancel\"",
-    )
-    missing = [item for item in required if item not in source]
-    if missing:
-        raise SystemExit(f"run-lab missing action contracts: {missing}")
+        'expected_action="pause"',
+        'expected_action="priority"',
+        'expected_action="cancel"',
+    ):
+        if contract not in source:
+            raise SystemExit(f"run-lab missing contract: {contract}")
     path.write_text(source, encoding="utf-8")
 
 
@@ -433,7 +453,9 @@ def patch_analyzer() -> None:
         '}\n',
         "focus coverage policy",
     )
-    old_focus = '''        elif len(signatures) < 2:
+    source = replace_once(
+        source,
+        '''        elif len(signatures) < 2:
             item["status"] = "FAIL"
             findings.append(
                 finding(
@@ -444,8 +466,8 @@ def patch_analyzer() -> None:
                     evidence=evidence,
                 )
             )
-'''
-    new_focus = '''        else:
+''',
+        '''        else:
             minimum_targets = TV_FOCUS_MIN_UNIQUE_TARGETS.get(entry.get("page"), 3)
             item["minimum_unique_focus_targets"] = minimum_targets
             if len(signatures) < minimum_targets:
@@ -460,9 +482,9 @@ def patch_analyzer() -> None:
                         evidence=evidence,
                     )
                 )
-'''
-    source = replace_once(source, old_focus, new_focus, "focus coverage analyzer")
-
+''',
+        "focus coverage analyzer",
+    )
     action_analyzer = r'''
 
 def analyze_download_actions(
@@ -526,11 +548,11 @@ def analyze_download_actions(
                 for key, value in check.get("evidence", {}).items()
                 if (root / value).is_file()
             }
-            item["status"] = "FAIL" if item["status"] != "BLOCKED" else item["status"]
-            expected_action = check.get("expected_action")
+            if item["status"] != "BLOCKED":
+                item["status"] = "FAIL"
             code = (
                 "tv_download_action_not_executed"
-                if expected_action
+                if check.get("expected_action")
                 else "tv_download_action_unreachable"
             )
             findings.append(
@@ -544,7 +566,8 @@ def analyze_download_actions(
                 )
             )
         row_two_ids = {"row-2-cancel", "row-2-priority", "row-2-primary", "row-2-pause"}
-        if not row_two_ids.issubset({check.get("id") for check in checks if check.get("success")}):
+        successful_ids = {check.get("id") for check in checks if check.get("success")}
+        if not row_two_ids.issubset(successful_ids):
             if item["status"] != "BLOCKED":
                 item["status"] = "FAIL"
             findings.append(
@@ -558,12 +581,7 @@ def analyze_download_actions(
         normalized.append(item)
     return normalized, findings
 '''
-    source = replace_once(
-        source,
-        "\ndef rail_logo_measurement(\n",
-        action_analyzer + "\n\ndef rail_logo_measurement(\n",
-        "download action analyzer",
-    )
+    source = replace_once(source, "\ndef rail_logo_measurement(\n", action_analyzer + "\n\ndef rail_logo_measurement(\n", "action analyzer")
     source = replace_once(
         source,
         '''    rail_visual, rail_visual_findings = analyze_rail_visual(
@@ -597,13 +615,13 @@ def analyze_download_actions(
     )
     findings.extend(rail_visual_findings)
 ''',
-        "analyze run action integration",
+        "analyze run actions",
     )
     source = replace_once(
         source,
         '        "focus": focus,\n        "rail_visual": rail_visual,\n',
         '        "focus": focus,\n        "download_actions": download_actions,\n        "rail_visual": rail_visual,\n',
-        "summary download actions",
+        "summary actions",
     )
     report_anchor = '''        for entry in summary["focus"]:
             lines.append(
@@ -642,17 +660,16 @@ def analyze_download_actions(
             "",
             "## Navigation rail logo",
 '''
-    source = replace_once(source, report_anchor, report_replacement, "markdown action report")
-    required = (
+    source = replace_once(source, report_anchor, report_replacement, "markdown actions")
+    for contract in (
         "def analyze_download_actions",
         '"focus_coverage_incomplete"',
         '"tv_download_action_not_executed"',
         '"tv_download_row_navigation_incomplete"',
         '"download_actions": download_actions',
-    )
-    missing = [item for item in required if item not in source]
-    if missing:
-        raise SystemExit(f"analyzer missing action contracts: {missing}")
+    ):
+        if contract not in source:
+            raise SystemExit(f"analyzer missing contract: {contract}")
     path.write_text(source, encoding="utf-8")
 
 
@@ -661,18 +678,18 @@ def patch_tests() -> None:
     source = path.read_text(encoding="utf-8")
     source = replace_once(
         source,
-        "    download_layout_measurement,\n    live_action_measurement,\n",
-        "    analyze_download_actions,\n    download_layout_measurement,\n    live_action_measurement,\n",
-        "test analyzer import",
+        "    analyze_run,\n    download_layout_measurement,\n",
+        "    analyze_run,\n    analyze_download_actions,\n    download_layout_measurement,\n",
+        "analyzer test import",
     )
     source = replace_once(
         source,
         "visible_package_names = RUN_LAB_MODULE.visible_package_names\n",
         "visible_package_names = RUN_LAB_MODULE.visible_package_names\n"
         "download_action_markers = RUN_LAB_MODULE.download_action_markers\n",
-        "runner marker test import",
+        "runner test import",
     )
-    tests = r'''
+    config_tests = r'''
     def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
         for contract in (
@@ -681,7 +698,7 @@ def patch_tests() -> None:
             "repository.cyclePriority(item.downloadId)",
             "repository.setConcurrentDownloads(next)",
             "repository.remove(item.downloadId)",
-            'private const val QA_DOWNLOAD_WRITE_DELAY_MS = 100L',
+            'private const val QA_DOWNLOAD_WRITE_DELAY_MS = 40L',
         ):
             self.assertIn(contract, source)
         self.assertNotIn("onRetryDownload = {},", source)
@@ -697,8 +714,7 @@ def patch_tests() -> None:
         self.assertEqual({("pause", 1), ("priority", 2)}, download_action_markers(xml))
 
 '''
-    insert_before = "\n\nclass AnalyzerTests(unittest.TestCase):"
-    source = replace_once(source, insert_before, "\n" + tests + insert_before, "runner action tests")
+    source = replace_once(source, "\n\nclass AnalyzerTests(unittest.TestCase):", "\n" + config_tests + "\n\nclass AnalyzerTests(unittest.TestCase):", "config action tests")
     analyzer_test = r'''
     def test_download_action_audit_classifies_unreachable_and_unexecuted_controls(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -744,22 +760,26 @@ def patch_tests() -> None:
         self.assertIn("tv_download_row_navigation_incomplete", codes)
 
 '''
-    analyzer_anchor = "    def tv_gutter_xml(self, content_bounds: str, page: str = \"live\") -> ET.Element:\n"
-    source = replace_once(source, analyzer_anchor, analyzer_test + analyzer_anchor, "action analyzer unit test")
+    source = replace_once(
+        source,
+        "    def tv_gutter_xml(self, content_bounds: str, page: str = \"live\") -> ET.Element:\n",
+        analyzer_test + "    def tv_gutter_xml(self, content_bounds: str, page: str = \"live\") -> ET.Element:\n",
+        "analyzer action test",
+    )
     path.write_text(source, encoding="utf-8")
 
 
 def patch_readme() -> None:
     path = ROOT / "qa/compatibility/README.md"
     source = path.read_text(encoding="utf-8")
-    addition = """
+    heading = "## Full TV focus and download-action contract"
+    if heading not in source:
+        source = source.rstrip() + """
 
 ## Full TV focus and download-action contract
 
 The TV audit no longer treats two unique focus targets as sufficient. Every page has a minimum focus-coverage policy, and Downloads additionally runs a deterministic physical D-pad action audit. The audit proves that Wi-Fi mode, scheduling, concurrency, pause/resume, priority, cancel and movement across two active rows are both reachable and executable. Debug fixture callbacks call the real `DownloadRepository`; they are never no-ops. Missing evidence is infrastructure `BLOCKED`, while unreachable controls or missing action markers are critical product findings.
-"""
-    if "## Full TV focus and download-action contract" not in source:
-        source = source.rstrip() + addition + "\n"
+""" + "\n"
     path.write_text(source, encoding="utf-8")
 
 
