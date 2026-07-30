@@ -52,7 +52,8 @@ The signed APK produced before this physical finding is invalidated as an accept
 - Temporary repair, formatter and sanitizer workflows are absent from the final PR diff.
 - A broad staging mistake was removed by rebuilding from clean head `c291fa7df2f3ee3a04d020cd831f02073a44d514` and preserving exactly four intended repair files.
 - The formatted source successfully passed marker-injection self-tests, canonical project preparation, Kotlin compile, unit tests and Android-test compilation before the bot commit.
-- This ordinary documentation commit retriggers the complete PR workflow suite because GitHub does not recursively trigger workflows from a `GITHUB_TOKEN` bot push.
+- The first runtime instrumentation attempt exposed only a synchronization flaw in the test: Semantics `RequestFocus` was asserted before the production `180ms` initial-focus contract completed. The test now waits for the real production focus state before sending any D-pad key; no product focus rule was weakened.
+- This ordinary documentation commit retriggers the complete PR workflow suite after the synchronized test and canonical hash update.
 
 ## Integrity conditions
 
