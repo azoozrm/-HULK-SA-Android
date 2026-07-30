@@ -55,7 +55,7 @@ jobs:
           git rm .github/workflows/temporary-api28-tv-focus-audit-repair.yml
           git rm .github/workflows/temporary-api28-tv-focus-audit-repair-v2.yml
           git rm .github/workflows/temporary-api28-tv-focus-audit-repair-v3.yml
-          git rm qa/compatibility/patch-api28-tv-focus-audit.py
+          git rm -f qa/compatibility/patch-api28-tv-focus-audit.py
           git add qa/compatibility/QaActivity.kt
           git add qa/compatibility/run-lab.py
           git add qa/compatibility/tests/test_lab.py
