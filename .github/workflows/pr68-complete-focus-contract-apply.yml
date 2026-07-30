@@ -37,10 +37,60 @@ jobs:
       - name: Apply reviewable fixture driver and analyzer patches
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          HUNK = re.compile(
+              r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$'
+          )
+
+          def normalize(source: Path, destination: Path) -> None:
+              lines = source.read_text(encoding='utf-8').splitlines()
+              output: list[str] = []
+              index = 0
+              while index < len(lines):
+                  line = lines[index]
+                  match = HUNK.match(line)
+                  if not match:
+                      output.append(line)
+                      index += 1
+                      continue
+                  old_start, new_start, suffix = match.groups()
+                  body_start = index + 1
+                  cursor = body_start
+                  old_count = 0
+                  new_count = 0
+                  while cursor < len(lines):
+                      candidate = lines[cursor]
+                      if candidate.startswith('@@ ') or candidate.startswith('--- '):
+                          break
+                      if candidate.startswith((' ', '-')):
+                          old_count += 1
+                      if candidate.startswith((' ', '+')):
+                          new_count += 1
+                      cursor += 1
+                  output.append(
+                      f'@@ -{old_start},{old_count} +{new_start},{new_count} @@{suffix}'
+                  )
+                  output.extend(lines[body_start:cursor])
+                  index = cursor
+              destination.write_text('\n'.join(output) + '\n', encoding='utf-8')
+
+          for source_name in (
+              'tools/pr68-qaactivity-focus.patch',
+              'tools/pr68-run-lab-focus.patch',
+              'tools/pr68-analyze-focus.patch',
+          ):
+              source = Path(source_name)
+              destination = Path('/tmp') / source.name
+              normalize(source, destination)
+              print(f'normalized {source} -> {destination}')
+          PY
           for patch in \
-            tools/pr68-qaactivity-focus.patch \
-            tools/pr68-run-lab-focus.patch \
-            tools/pr68-analyze-focus.patch; do
+            /tmp/pr68-qaactivity-focus.patch \
+            /tmp/pr68-run-lab-focus.patch \
+            /tmp/pr68-analyze-focus.patch; do
             git apply --check "$patch"
             git apply "$patch"
           done
