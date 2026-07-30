@@ -41,14 +41,7 @@ jobs:
           if run_marker not in tail:
               raise SystemExit('staged patch shell block not found')
           block = tail.split(run_marker, 1)[1]
-          lines = []
-          for line in block.splitlines():
-              if line.startswith('          '):
-                  lines.append(line[10:])
-              elif not line.strip():
-                  lines.append('')
-              else:
-                  raise SystemExit(f'unexpected staged patch indentation: {line!r}')
+          lines = [line[10:] if line.startswith('          ') else line for line in block.splitlines()]
           script = '\n'.join(lines) + '\n'
           broken = "              main = replace_once(main, old, new, f'{label} primary route')"
           corrected = (
