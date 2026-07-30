@@ -41,6 +41,7 @@ external_error_dialog_center = RUN_LAB_MODULE.external_error_dialog_center
 is_expanded_rail_focus = RUN_LAB_MODULE.is_expanded_rail_focus
 visible_package_names = RUN_LAB_MODULE.visible_package_names
 download_action_markers = RUN_LAB_MODULE.download_action_markers
+focused_node = RUN_LAB_MODULE.focused_node
 
 
 class ConfigTests(unittest.TestCase):
@@ -131,6 +132,39 @@ class ConfigTests(unittest.TestCase):
             )
         )
 
+    def test_focused_node_reads_text_from_semantics_descendants(self) -> None:
+        xml = (
+            '<hierarchy><node package="sa.hulksa.player.dev" focused="true" '
+            'focusable="true" clickable="true" bounds="[0,0][200,80]">'
+            '<node package="sa.hulksa.player.dev" text="ايقاف مؤقت" '
+            'bounds="[20,10][180,70]" /></node></hierarchy>'
+        ).encode()
+        self.assertEqual("ايقاف مؤقت", focused_node(xml)["text"])
+
+    def test_download_fixture_prepares_repository_off_main_thread(self) -> None:
+        source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn("downloadHarnessState by mutableStateOf<QaDownloadHarness?>(null)", source)
+        self.assertIn("lifecycleScope.launch", source)
+        self.assertIn("withContext(Dispatchers.IO)", source)
+        self.assertLess(source.index("setContent {"), source.index("withContext(Dispatchers.IO)"))
+
+    def test_tv_focus_sequences_are_page_specific_and_actions_are_isolated(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        self.assertIn('page == "live"', source)
+        self.assertIn('page == "downloads"', source)
+        for scope in (
+            'restart("navigation")',
+            'restart("wifi-action")',
+            'restart("schedule-action")',
+            'restart("concurrent-action")',
+            'restart("pause-action")',
+            'restart("priority-action")',
+            'restart("cancel-action")',
+        ):
+            self.assertIn(scope, source)
+        self.assertIn('"before_xml"', source)
+        self.assertIn("node_text_with_descendants", source)
+
     def test_download_fixture_contains_expected_client_disconnects(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
         self.assertIn("workers.execute { serveSafely(socket) }", source)
@@ -193,6 +227,28 @@ class ConfigTests(unittest.TestCase):
         ).encode()
         self.assertEqual({("pause", 1), ("priority", 2)}, download_action_markers(xml))
 
+
+
+    def test_download_action_runner_matches_analyzer_required_ids(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        required_ids = (
+            "top-wifi-executes",
+            "top-schedule-executes",
+            "top-concurrent-executes",
+            "row-1-primary",
+            "row-1-pause",
+            "row-1-priority",
+            "row-1-priority-executes",
+            "row-1-cancel",
+            "row-2-cancel",
+            "row-2-priority",
+            "row-2-primary",
+            "row-2-pause",
+            "cancel-row-1-executes",
+        )
+        for check_id in required_ids:
+            self.assertIn(f'inspect("{check_id}"', source)
+        self.assertNotIn('inspect("row-1-pause-executes"', source)
 
 
 class AnalyzerTests(unittest.TestCase):

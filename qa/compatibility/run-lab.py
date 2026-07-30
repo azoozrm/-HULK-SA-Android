@@ -225,6 +225,16 @@ def node_text(node: ET.Element) -> str:
     )
 
 
+def node_text_with_descendants(node: ET.Element) -> str:
+    """Return semantics text exposed on the focused node or its merged children."""
+    values: list[str] = []
+    for descendant in node.iter("node"):
+        value = node_text(descendant)
+        if value and value not in values:
+            values.append(value)
+    return " ".join(values)
+
+
 def node_bounds(node: ET.Element) -> tuple[int, int, int, int] | None:
     match = BOUNDS_RE.fullmatch(node.attrib.get("bounds", ""))
     if not match:
@@ -321,7 +331,7 @@ def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
             continue
         bounds = node_bounds(node)
         return {
-            "text": node_text(node),
+            "text": node_text_with_descendants(node),
             "class": node.attrib.get("class", ""),
             "bounds": list(bounds) if bounds else None,
             "clickable": node.attrib.get("clickable") == "true",
@@ -844,20 +854,43 @@ class DeviceLab:
     def focus_audit(self, page: str, orientation: str) -> None:
         audit_dir = self.out / "focus" / orientation / page
         audit_dir.mkdir(parents=True, exist_ok=True)
-        key_sequence = [
-            ("RIGHT", 22),
-            ("LEFT", 21),
-            ("UP", 19),
-            ("DOWN", 20),
-            ("DOWN", 20),
-            ("DOWN", 20),
-            ("RIGHT", 22),
-            ("RIGHT", 22),
-            ("LEFT", 21),
-            ("UP", 19),
-            ("DOWN", 20),
-            ("DOWN", 20),
-        ]
+        if self.args.is_tv and page == "live":
+            # RTL path: rail -> channel -> play -> favorite -> play -> channel -> next channel.
+            key_sequence = [
+                ("LEFT", 21),
+                ("LEFT", 21),
+                ("LEFT", 21),
+                ("RIGHT", 22),
+                ("RIGHT", 22),
+                ("DOWN", 20),
+            ]
+        elif self.args.is_tv and page == "downloads":
+            # Wi-Fi -> schedule -> concurrent -> row-1 cancel -> row-2 cancel -> priority -> primary.
+            key_sequence = [
+                ("LEFT", 21),
+                ("LEFT", 21),
+                ("DOWN", 20),
+                ("DOWN", 20),
+                ("RIGHT", 22),
+                ("RIGHT", 22),
+                ("UP", 19),
+                ("LEFT", 21),
+            ]
+        else:
+            key_sequence = [
+                ("RIGHT", 22),
+                ("LEFT", 21),
+                ("UP", 19),
+                ("DOWN", 20),
+                ("DOWN", 20),
+                ("DOWN", 20),
+                ("RIGHT", 22),
+                ("RIGHT", 22),
+                ("LEFT", 21),
+                ("UP", 19),
+                ("DOWN", 20),
+                ("DOWN", 20),
+            ]
         trace: list[dict[str, Any]] = []
         rail_visual: dict[str, dict[str, str]] = {}
         error: str | None = None
@@ -963,9 +996,8 @@ class DeviceLab:
             case_dir = audit_root / scope
             case_dir.mkdir(parents=True, exist_ok=True)
             self.start_page("downloads", case_dir)
-            known_markers = download_action_markers(
-                dump_xml(self.adb, case_dir / ".initial.xml", attempts=2)
-            )
+            initial_xml = dump_xml(self.adb, case_dir / ".initial.xml", attempts=2)
+            known_markers = download_action_markers(initial_xml)
             (case_dir / ".initial.xml").unlink(missing_ok=True)
 
         def inspect(
@@ -980,34 +1012,49 @@ class DeviceLab:
             step_root = audit_root / f"{sequence_number:02d}-{check_id}"
             step_root.mkdir(parents=True, exist_ok=True)
             previous = set(known_markers)
+            before_xml = dump_xml(self.adb, step_root / "before.xml", attempts=2)
+            focused_before = focused_node(before_xml)
+            before_label = str((focused_before or {}).get("text") or "")
+            before_focus_seen = not expected_labels or any(
+                expected in before_label for expected in expected_labels
+            )
             if key_code is not None:
                 self.adb.shell(["input", "keyevent", str(key_code)])
             deadline = time.monotonic() + (5.0 if expected_action else 1.5)
-            xml = b""
-            markers: set[tuple[str, int]] = set()
-            focused: dict[str, Any] | None = None
+            xml = before_xml
+            markers = set(previous)
+            focused_after = focused_before
             action_seen = expected_action is None
             while time.monotonic() < deadline:
                 time.sleep(0.20)
                 xml = dump_xml(self.adb, step_root / "ui.xml", attempts=2)
                 markers = download_action_markers(xml)
-                focused = focused_node(xml)
+                focused_after = focused_node(xml)
                 if expected_action is not None:
                     action_seen = any(
                         action == expected_action and marker not in previous
                         for marker in markers
                         for action in (marker[0],)
                     )
-                if focused is not None and action_seen:
-                    break
+                    if action_seen:
+                        break
+                else:
+                    label = str((focused_after or {}).get("text") or "")
+                    if focused_after is not None and (
+                        not expected_labels or any(expected in label for expected in expected_labels)
+                    ):
+                        break
             known_markers = markers
-            label = str(
-                (focused or {}).get("text")
-                or (focused or {}).get("content_description")
-                or ""
+            after_label = str((focused_after or {}).get("text") or "")
+            after_focus_seen = not expected_labels or any(
+                expected in after_label for expected in expected_labels
             )
-            focus_seen = not expected_labels or any(expected in label for expected in expected_labels)
-            success = bool(focused) and focus_seen and action_seen
+            if expected_action is not None:
+                success = bool(focused_before) and before_focus_seen and action_seen
+                focused_evidence = focused_before
+            else:
+                success = bool(focused_after) and after_focus_seen
+                focused_evidence = focused_after
             capture_png(self.adb, step_root / "screenshot.png")
             safe_write(
                 step_root / "logcat.txt",
@@ -1024,19 +1071,22 @@ class DeviceLab:
                     "success": success,
                     "expected_labels": list(expected_labels),
                     "expected_action": expected_action,
-                    "focused": focused,
+                    "focused": focused_evidence,
+                    "focused_before": focused_before,
+                    "focused_after": focused_after,
                     "action_markers": [
                         f"{action}:{revision}" for action, revision in sorted(markers)
                     ],
                     "reason": None if success else (
                         "expected action marker was not emitted"
-                        if not action_seen
+                        if expected_action is not None and not action_seen
                         else "expected focused control was not reached"
-                        if not focus_seen
+                        if not (before_focus_seen if expected_action is not None else after_focus_seen)
                         else "no focused control was exposed"
                     ),
                     "evidence": {
                         "screenshot": (step_root / "screenshot.png").relative_to(self.out).as_posix(),
+                        "before_xml": (step_root / "before.xml").relative_to(self.out).as_posix(),
                         "xml": (step_root / "ui.xml").relative_to(self.out).as_posix(),
                         "logcat": (step_root / "logcat.txt").relative_to(self.out).as_posix(),
                     },
@@ -1045,35 +1095,51 @@ class DeviceLab:
             return success
 
         try:
-            restart("top-wifi")
+            # First prove the complete D-pad graph without mutating download state.
+            restart("navigation")
             inspect("top-wifi-initial", expected_labels=("كل الشبكات", "WiFi فقط"))
-            inspect("top-wifi-executes", key_code=23, expected_action="wifi")
-
-            restart("top-schedule")
             inspect("top-schedule-focus", key_code=21, expected_labels=("الجدولة",))
-            inspect("top-schedule-executes", key_code=23, expected_action="schedule")
-
-            restart("top-concurrent")
-            inspect("top-concurrent-schedule", key_code=21, expected_labels=("الجدولة",))
             inspect("top-concurrent-focus", key_code=21, expected_labels=("متزامنة",))
-            inspect("top-concurrent-executes", key_code=23, expected_action="concurrent")
-
-            restart("rows")
-            inspect("row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
-            inspect("row-1-pause", key_code=23, expected_action="pause")
-            inspect("row-1-priority", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
-            inspect("row-1-priority-executes", key_code=23, expected_action="priority")
-            inspect("row-1-cancel", key_code=21, expected_labels=("الغاء",))
+            inspect("row-1-cancel", key_code=20, expected_labels=("الغاء",))
             inspect("row-2-cancel", key_code=20, expected_labels=("الغاء",))
             inspect("row-2-priority", key_code=22, expected_labels=("عالية", "عادية", "منخفضة"))
             inspect("row-2-primary", key_code=22, expected_labels=("ايقاف مؤقت", "استئناف"))
-            inspect("row-2-pause", key_code=23, expected_action="pause")
+            inspect("row-1-primary", key_code=19, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-1-priority", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
 
-            restart("cancel")
+            # Execute each state-changing callback from a fresh deterministic page.
+            restart("wifi-action")
+            inspect("top-wifi-action-focus", expected_labels=("كل الشبكات", "WiFi فقط"))
+            inspect("top-wifi-executes", key_code=23, expected_labels=("كل الشبكات", "WiFi فقط"), expected_action="wifi")
+
+            restart("schedule-action")
+            inspect("top-schedule-action-focus", key_code=21, expected_labels=("الجدولة",))
+            inspect("top-schedule-executes", key_code=23, expected_labels=("الجدولة",), expected_action="schedule")
+
+            restart("concurrent-action")
+            inspect("top-concurrent-action-schedule", key_code=21, expected_labels=("الجدولة",))
+            inspect("top-concurrent-action-focus", key_code=21, expected_labels=("متزامنة",))
+            inspect("top-concurrent-executes", key_code=23, expected_labels=("متزامنة",), expected_action="concurrent")
+
+            restart("pause-action")
+            inspect("pause-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-1-pause", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="pause")
+
+            restart("row-2-pause-action")
+            inspect("row-2-pause-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-2-pause-row-2-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-2-pause", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="pause")
+
+            restart("priority-action")
+            inspect("priority-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("priority-row-1-focus", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
+            inspect("row-1-priority-executes", key_code=23, expected_labels=("عالية", "عادية", "منخفضة"), expected_action="priority")
+
+            restart("cancel-action")
             inspect("cancel-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
             inspect("cancel-row-1-priority", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
             inspect("cancel-row-1-focus", key_code=21, expected_labels=("الغاء",))
-            inspect("cancel-row-1-executes", key_code=23, expected_action="cancel")
+            inspect("cancel-row-1-executes", key_code=23, expected_labels=("الغاء",), expected_action="cancel")
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"[-1200:]
             self.record_harness_error(f"download-actions:{orientation}", exc)
