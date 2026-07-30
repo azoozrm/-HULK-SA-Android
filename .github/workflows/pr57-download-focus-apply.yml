@@ -1,0 +1,78 @@
+name: Apply isolated PR57 download focus correction
+
+on:
+  pull_request:
+    branches:
+      - fix/v09318-production-host-qualification
+    paths:
+      - .github/workflows/pr57-download-focus-apply.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr57-download-focus-apply-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/pr57-download-focus-actions'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/pr57-download-focus-actions
+          fetch-depth: 0
+
+      - name: Extract and correct the staged atomic patch
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/pr57-download-focus-patch.yml').read_text(encoding='utf-8')
+          marker = '      - name: Apply focused product correction and tests\n'
+          if marker not in workflow:
+              raise SystemExit('staged patch step not found')
+          tail = workflow.split(marker, 1)[1]
+          run_marker = '        run: |\n'
+          if run_marker not in tail:
+              raise SystemExit('staged patch shell block not found')
+          block = tail.split(run_marker, 1)[1]
+          lines = []
+          for line in block.splitlines():
+              if line.startswith('          '):
+                  lines.append(line[10:])
+              elif not line.strip():
+                  lines.append('')
+              else:
+                  raise SystemExit(f'unexpected staged patch indentation: {line!r}')
+          script = '\n'.join(lines) + '\n'
+          broken = "              main = replace_once(main, old, new, f'{label} primary route')"
+          corrected = (
+              "              if old not in main:\n"
+              "                  raise SystemExit(f'{label} primary route: missing expected action')\n"
+              "              main = main.replace(old, new, 1)"
+          )
+          if script.count(broken) != 1:
+              raise SystemExit('expected primary-action loop correction point not found exactly once')
+          script = script.replace(broken, corrected, 1)
+          target = Path('/tmp/apply-pr57-download-focus.sh')
+          target.write_text(script, encoding='utf-8')
+          target.chmod(0o700)
+          print('PASS: staged product patch extracted and corrected')
+          PY
+
+      - name: Apply product correction on canonical PR57 source
+        run: /tmp/apply-pr57-download-focus.sh
+
+      - name: Remove the one-shot launcher
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/pr57-download-focus-apply.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'chore: remove one-shot download focus launcher'
+          git push origin HEAD:fix/pr57-download-focus-actions
