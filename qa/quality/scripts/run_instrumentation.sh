@@ -50,11 +50,20 @@ wait_for_android_services() {
 }
 
 run_instrumentation() {
-  ./gradlew --no-daemon --console=plain \
-    connectedDebugAndroidTest \
-    -PHULK_PORTAL_URL=http://3162356.xyz:8080 \
-    -PHULK_CONFIG_URL= \
+  local gradle_args=(
+    --no-daemon
+    --console=plain
+    connectedDebugAndroidTest
+    -PHULK_PORTAL_URL=http://3162356.xyz:8080
+    -PHULK_CONFIG_URL=
     --stacktrace
+  )
+  if [[ -n "${INSTRUMENTATION_CLASSES:-}" ]]; then
+    gradle_args+=(
+      "-Pandroid.testInstrumentationRunnerArguments.class=${INSTRUMENTATION_CLASSES}"
+    )
+  fi
+  ./gradlew "${gradle_args[@]}"
 }
 
 has_zero_test_infrastructure_failure() {
