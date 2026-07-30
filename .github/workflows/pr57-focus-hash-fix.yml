@@ -1,0 +1,40 @@
+name: PR57 Focus Hash Fix
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-clean:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/v09318-production-host-qualification
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Update exact canonical hash
+        run: python qa/canonical/pr57_focus_hash_fix.py
+      - name: Verify canonical manifest
+        run: |
+          set -euo pipefail
+          sha256sum -c qa/canonical/canonical-source.sha256
+      - name: Commit clean product test repair
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/workflows/pr57-focus-hash-fix.yml qa/canonical/pr57_focus_hash_fix.py
+          git add qa/canonical/canonical-source.sha256 app/src/androidTest/java/sa/hulksa/player/ui/DownloadsFocusNavigationTest.kt
+          git commit -m 'test: align downloads focus instrumentation startup'
+          git push origin HEAD:fix/v09318-production-host-qualification
