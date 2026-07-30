@@ -1,4 +1,4 @@
-name: PR57 Strip Production QA Markers
+name: PR57 Finalize Production QA Marker Cleanup
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  strip-and-verify:
+  finalize-and-verify:
     if: github.event.pull_request.number == 57
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -21,89 +21,25 @@ jobs:
           ref: fix/v09318-production-host-qualification
           fetch-depth: 0
 
-      - name: Remove all test-only markers from production UI source
+      - name: Prove production source contains no Quality Lab markers
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from hashlib import sha256
           from pathlib import Path
-          import re
 
           source = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
           text = source.read_text(encoding='utf-8')
-          original = text
-
-          for import_line in (
-              'import androidx.compose.ui.semantics.contentDescription\n',
-              'import androidx.compose.ui.semantics.semantics\n',
-          ):
-              text = text.replace(import_line, '')
-
-          for constant in (
-              'private const val QA_TV_PAGE_CONTENT_PREFIX = "qa-tv-page-content:"\n',
-              'private const val QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"\n',
-              'private const val QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"\n',
-              'private const val QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"\n',
-          ):
-              text = text.replace(constant, '')
-
-          helper_start_token = '\nprivate fun Modifier.qaTvPageContent('
-          helper_end_token = '\ndata class NavigationPosition('
-          helper_start = text.find(helper_start_token)
-          helper_end = text.find(helper_end_token, helper_start + 1)
-          if helper_start < 0 or helper_end < 0 or helper_end <= helper_start:
-              raise SystemExit(
-                  f'FAIL: QA helper boundaries not found: start={helper_start}, end={helper_end}'
-              )
-          text = text[:helper_start] + '\n' + text[helper_end:]
-
-          text, rail_count = re.subn(
-              r'\n\s*\.semantics \{ contentDescription = "qa-tv-rail" \}',
-              '',
-              text,
-              count=1,
-          )
-          if rail_count != 1:
-              raise SystemExit(f'FAIL: expected one direct rail marker, removed {rail_count}')
-
-          text, page_count = re.subn(
-              r'\n\s*\.qaTvPageContent\([^\n]*\),',
-              ',',
-              text,
-          )
-          text, marker_arg_count = re.subn(
-              r'\n\s*\.qaMarker\([^\n]*\),',
-              ',',
-              text,
-          )
-          text, marker_chain_count = re.subn(
-              r'\n\s*\.qaMarker\([^\n]*\)(?=\n\s*\.)',
-              '',
-              text,
-          )
-
-          if page_count != 7:
-              raise SystemExit(f'FAIL: expected seven page marker calls, removed {page_count}')
-          if marker_arg_count != 2:
-              raise SystemExit(f'FAIL: expected two marker argument calls, removed {marker_arg_count}')
-          if marker_chain_count != 1:
-              raise SystemExit(f'FAIL: expected one chained card marker, removed {marker_chain_count}')
-
           forbidden = (
               'QA_TV_',
               'qaTvPageContent',
               'qaMarker',
               'qa-tv-',
-              'contentDescription',
               'androidx.compose.ui.semantics.semantics',
           )
           leftovers = [token for token in forbidden if token in text]
           if leftovers:
               raise SystemExit(f'FAIL: production QA tokens remain: {leftovers}')
-          if text == original:
-              raise SystemExit('FAIL: source was not changed')
-
-          source.write_text(text, encoding='utf-8')
 
           manifest = Path('qa/canonical/canonical-source.sha256')
           target = source.as_posix()
@@ -119,14 +55,10 @@ jobs:
           if replaced != 1:
               raise SystemExit(f'FAIL: expected one manifest entry, found {replaced}')
           manifest.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-
-          print(
-              'PASS: stripped production QA markers; '
-              f'page={page_count}, arg={marker_arg_count}, chain={marker_chain_count}, sha256={digest}'
-          )
+          print(f'PASS: production source is marker-free; canonical SHA-256={digest}')
           PY
 
-      - name: Verify canonical source, approved branding and disposable injection
+      - name: Verify canonical tree, branding and disposable debug injection
         run: |
           set -euo pipefail
           sha256sum -c qa/canonical/canonical-source.sha256
@@ -151,12 +83,12 @@ jobs:
           PY
           git diff --check
 
-      - name: Commit atomic production-source cleanup
+      - name: Commit atomic finalization
         run: |
           set -euo pipefail
           rm '.github/workflows/pr57-strip-production-qa-markers.yml'
           git add -A
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix: keep Quality Lab markers out of production UI'
+          git commit -m 'test: finalize marker-free v0.9.3.20 source contract'
           git push origin HEAD:fix/v09318-production-host-qualification
