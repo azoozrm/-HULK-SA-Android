@@ -103,9 +103,15 @@ jobs:
           source "$RUNNER_TEMP/device.env"
           OUT="compatibility-results/$ID"
           bash qa/compatibility/run-native-emulator.sh --api "$API" --target "$TARGET" --arch "$ARCH" --profile "$PROFILE" --skin "$BOOT_SKIN" --result-dir "$OUT" -- python3 qa/compatibility/run-lab.py --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk --device-id "$ID" --device-name "$NAME" --family "$FAMILY" --api "$API" --target "$TARGET" --arch "$ARCH" --profile "$PROFILE" --width "$WIDTH" --height "$HEIGHT" --density "$DENSITY" --orientations "$ORIENTATIONS" --font-scales "$FONT_SCALES" --is-tv "$IS_TV" --out "$OUT" --serial emulator-5554
+          set +e
           python3 qa/compatibility/analyze.py "$OUT"
+          ANALYZE_EXIT=$?
+          set -e
+          python3 qa/compatibility/postprocess_targeted_downloads.py "$OUT"
           if [[ "${{ inputs.enforce_findings }}" == "true" ]]; then
             python3 qa/compatibility/gate.py "$OUT/summary.json"
+          elif [[ "$ANALYZE_EXIT" -ne 0 ]]; then
+            echo "Analyzer reported findings, but enforcement is disabled for this targeted run."
           fi
 
       - name: Upload selected-device evidence
