@@ -1,0 +1,116 @@
+name: Apply complete TV focus contract
+
+on:
+  pull_request:
+    branches:
+      - fix/pr57-download-focus-actions
+    paths:
+      - .github/workflows/pr68-complete-focus-contract-apply.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr68-complete-focus-contract-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'quality/pr68-complete-focus-contract'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: quality/pr68-complete-focus-contract
+          fetch-depth: 0
+
+      - name: Verify exact qualified inputs
+        run: |
+          set -euo pipefail
+          cat > /tmp/EXPECTED-FOCUS-INPUTS.sha256 <<'EOF'
+          5845ae64f1cc2f384e2610bd5fc296553277aa1a  qa/compatibility/QaActivity.kt
+          f966f61a6258ae849b2aeb6a845e4cf4584fddc9  qa/compatibility/run-lab.py
+          2979887ab767fcc830bab1e76fd3d02f40fbfe52  qa/compatibility/analyze.py
+          EOF
+          sha256sum -c /tmp/EXPECTED-FOCUS-INPUTS.sha256
+          git diff --name-only 882c40ea959a431f27d852cf63bc4314c55de022..HEAD | sort
+
+      - name: Apply reviewable fixture driver and analyzer patches
+        run: |
+          set -euo pipefail
+          for patch in \
+            tools/pr68-qaactivity-focus.patch \
+            tools/pr68-run-lab-focus.patch \
+            tools/pr68-analyze-focus.patch; do
+            git apply --check "$patch"
+            git apply "$patch"
+          done
+          python3 -m py_compile \
+            qa/compatibility/focus_contract.py \
+            qa/compatibility/run-lab.py \
+            qa/compatibility/analyze.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+            qa.compatibility.tests.test_focus_contract -v
+          git diff --check
+
+      - name: Enforce complete focus contract invariants
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          qa = Path('qa/compatibility/QaActivity.kt').read_text(encoding='utf-8')
+          runner = Path('qa/compatibility/run-lab.py').read_text(encoding='utf-8')
+          analyzer = Path('qa/compatibility/analyze.py').read_text(encoding='utf-8')
+          contract = Path('qa/compatibility/focus_contract.py').read_text(encoding='utf-8')
+
+          required_qa = (
+              'downloadRepository.pause(item.downloadId)',
+              'downloadRepository.resume(item.downloadId)',
+              'downloadRepository.remove(item.downloadId)',
+              'downloadRepository.cyclePriority(item.downloadId)',
+              'downloadRepository?.setConcurrentDownloads(next)',
+              'qa-download-action:pause:',
+              'QA_DOWNLOAD_TOTAL_BYTES = 256L * 1024L * 1024L',
+          )
+          required_runner = (
+              'download_action_audit',
+              'wifi-toggle',
+              'schedule-toggle',
+              'concurrent-cycle',
+              'priority-cycle',
+              'visible_interactive_targets',
+              'focus_key_sequence',
+          )
+          required_analyzer = (
+              'visible_focus_targets_unreachable',
+              'named_control_unreachable',
+              'visible_control_not_focusable',
+              'download_action_contract_failed',
+          )
+          missing = [token for token in required_qa if token not in qa]
+          missing += [token for token in required_runner if token not in runner]
+          missing += [token for token in required_analyzer if token not in analyzer]
+          missing += [token for token in ('DOWNLOAD_REQUIRED_LABELS', 'focus_coverage') if token not in contract]
+          if missing:
+              raise SystemExit(f'incomplete focus contract: {missing}')
+          if 'onRetryDownload = {}' in qa or 'onCycleDownloadPriority = {}' in qa:
+              raise SystemExit('fixture still contains a no-op download action')
+          print('PASS: fixture actions, full-page reachability and fail-closed findings are wired')
+          PY
+
+      - name: Commit only the final Quality Lab contract
+        run: |
+          set -euo pipefail
+          git rm \
+            .github/workflows/pr68-complete-focus-contract-apply.yml \
+            tools/pr68-qaactivity-focus.patch \
+            tools/pr68-run-lab-focus.patch \
+            tools/pr68-analyze-focus.patch
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add qa/compatibility
+          git commit -m 'test: execute every TV download action and strengthen focus coverage'
+          git push origin HEAD:quality/pr68-complete-focus-contract
