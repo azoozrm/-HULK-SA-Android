@@ -3,11 +3,9 @@ package sa.hulksa.player.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -97,7 +95,8 @@ class DownloadsFocusNavigationTest {
         val wifi = compose.onNodeWithText("كل الشبكات")
         compose.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
-                wifi.fetchSemanticsNode().config[SemanticsProperties.Focused]
+                wifi.assertIsFocused()
+                true
             }.getOrDefault(false)
         }
         wifi.assertIsFocused()
