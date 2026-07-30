@@ -24,13 +24,8 @@ runner = runner.replace(old_pause, new_pause)
 runner_path.write_text(runner, encoding='utf-8')
 
 tests = tests_path.read_text(encoding='utf-8')
-anchor = '''        self.assertEqual({("pause", 1), ("priority", 2)}, download_action_markers(xml))
-
-
-class AnalyzerTests(unittest.TestCase):
-'''
-insert = '''        self.assertEqual({("pause", 1), ("priority", 2)}, download_action_markers(xml))
-
+class_marker = '\nclass AnalyzerTests(unittest.TestCase):\n'
+contract_test = '''
     def test_download_action_runner_matches_analyzer_required_ids(self) -> None:
         source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
         required_ids = (
@@ -52,12 +47,12 @@ insert = '''        self.assertEqual({("pause", 1), ("priority", 2)}, download_a
             self.assertIn(f'inspect("{check_id}"', source)
         self.assertNotIn('inspect("row-1-pause-executes"', source)
 
-
-class AnalyzerTests(unittest.TestCase):
 '''
-if tests.count(anchor) != 1:
-    raise SystemExit('expected exactly one test insertion anchor')
-tests = tests.replace(anchor, insert)
+if tests.count(class_marker) != 1:
+    raise SystemExit('expected exactly one AnalyzerTests class marker')
+if 'test_download_action_runner_matches_analyzer_required_ids' in tests:
+    raise SystemExit('contract test already present')
+tests = tests.replace(class_marker, contract_test + class_marker)
 tests_path.write_text(tests, encoding='utf-8')
 
 print('PASS: PR72 runner/analyzer action IDs aligned')
