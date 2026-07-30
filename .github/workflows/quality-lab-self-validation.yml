@@ -62,6 +62,9 @@ jobs:
           bash -n qa/compatibility/run-native-emulator.sh
           grep -q 'productionRepositoryTransfersPositiveBytesAndFinalFileMatchesFixture' \
             app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt
+          grep -q 'enforce_findings: true' .github/workflows/quality-ui.yml
+          grep -q 'aggregate-evidence:' .github/workflows/compatibility-lab.yml
+          grep -q 'Final fail-closed enforcement' .github/workflows/compatibility-lab.yml
 
   infrastructure-instrumentation:
     name: Run non-product instrumentation controls
@@ -148,24 +151,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  compatibility-evidence:
-    name: Prove complete Compatibility Lab evidence without masking product findings
-    needs: static-contracts
-    uses: ./.github/workflows/compatibility-lab.yml
-    with:
-      enforce_findings: false
-      source_head_sha: ${{ github.event.pull_request.head.sha || github.sha }}
-      base_sha: ${{ github.event.pull_request.base.sha || '' }}
-      pr_number: ${{ github.event.pull_request.number || '' }}
-      test_variant: quality-lab-self-validation
-
   enforce:
     name: Final lab self-validation enforcement
     if: always()
     needs:
       - static-contracts
       - infrastructure-instrumentation
-      - compatibility-evidence
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -173,11 +164,10 @@ jobs:
         env:
           STATIC: ${{ needs.static-contracts.result }}
           INSTRUMENTATION: ${{ needs.infrastructure-instrumentation.result }}
-          COMPATIBILITY: ${{ needs.compatibility-evidence.result }}
         run: |
           set -euo pipefail
           [[ "$STATIC" = 'success' ]]
           [[ "$INSTRUMENTATION" = 'success' ]]
-          [[ "$COMPATIBILITY" = 'success' ]]
           echo 'PASS: Quality Lab infrastructure is independently qualified.'
-          echo 'Product findings remain enforced by HULK SA Quality UI Gate.'
+          echo 'The full device matrix runs once in HULK SA Quality UI Gate.'
+          echo 'Product findings remain strict and are not converted to infrastructure PASS.'
