@@ -5,6 +5,7 @@
 - Quality Lab base: `d26b4f36841e6a418796bb86829a94d62a162bdd` (merged PR #59)
 - Scope-aware Quality Lab base update: `c3ab24a830750384d651e19f042c3022e89d9c7d` (merged PR #60)
 - Full TV focus and real download-action contract: `ff3776eb17b451092b78c6427a893d231a00592f` (merged PR #71)
+- Synchronized merge head before this trigger commit: `613fad6cb78029cc8597285804e3a29e36b61990`
 - Archived PR #57 head: `93b42c0e043d0fb43792f03db9a97903898fbca2`
 - Archive branch: `archive/pr57-before-quality-lab-integration`
 
@@ -54,7 +55,7 @@ The signed APK produced before this physical finding is invalidated as an accept
 - A broad staging mistake was removed by rebuilding from clean head `c291fa7df2f3ee3a04d020cd831f02073a44d514` and preserving exactly four intended repair files.
 - The formatted source successfully passed marker-injection self-tests, canonical project preparation, Kotlin compile, unit tests and Android-test compilation before the bot commit.
 - The first runtime instrumentation attempt exposed only a synchronization flaw in the test: Semantics `RequestFocus` was asserted before the production `180ms` initial-focus contract completed. The test now waits for the real production focus state before sending any D-pad key; no product focus rule was weakened.
-- This ordinary documentation commit refreshes GitHub's PR merge ref after PR #71 was merged into the official base.
+- This ordinary documentation commit starts the complete strict workflow suite on the PR #71-synchronized product tree.
 
 ## Integrity conditions
 
