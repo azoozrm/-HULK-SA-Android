@@ -1,11 +1,13 @@
 name: PR72 V2 Contract Fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - quality/api28-tv-focus-audit-repair-v2
-    paths:
-      - qa/compatibility/pr72_contract_fix.py
+      - phase-3-v0.9.3.0-adaptive-foundation
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
