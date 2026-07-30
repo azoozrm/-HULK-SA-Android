@@ -1,4 +1,4 @@
-7fddf6e4485a37ce6eec3bed44bd5f793a6c4d597e3688ee6e1fa2300c6247a9  app/build.gradle.kts
+b31a9649932e43d9153bd0b0f6737cbadf89a4ea1f01d084d0dcf1bc654dc1fc  app/build.gradle.kts
 be84ea0d7f23b1aa8b5958470ea0f622a63aa05eefd40899e0e9c52e85924fba  app/proguard-rules.pro
 8b0145a8d17a7ecb1cb6046fad5032566a4aa36beeb3d47760c57a0a124098a1  app/src/androidTest/java/sa/hulksa/player/CompatibilitySmokeTest.kt
 b6d9f1c99130f3ef9f452f148b17a3a0277566cfdefbedfae9ef2d3ee3961225  app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt
@@ -9,7 +9,7 @@ c530816818aa0b879c1cde1a8439aa5722d8d2a0e11b54259a1b83790e984338  app/src/main/j
 5d4d585eb8b42ef2a18b5e8189d9ed520417ee1928e07465c75b059e3c38d3ea  app/src/main/java/sa/hulksa/player/MainActivity.kt
 303e31a2a395c138e3401bc71b9196b67e8afb755c1487b64164054b9c4c34d2  app/src/main/java/sa/hulksa/player/TvMainActivity.kt
 33893050141838931a91a7fe4984c548bc23408fdc681136db4dca6db6161ac3  app/src/main/java/sa/hulksa/player/data/DownloadExecutionEntryPoint.kt
-4f10af3840a6ddd9aa35f7796c546c007ec329934adce114d9b1dc0754efad53  app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
+48c23ab13770fac6e08d17f4eccf6059f3306b1c04aacf854c9dd5954909acfa  app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt
 7704d29dc56e371c7985213821b521964fb4740748ae046743e95bc6870c2f83  app/src/main/java/sa/hulksa/player/data/DownloadRepositoryProcessOwner.kt
 b349ee6742c4edc7667f6a100305079fe9b992488e8c85913299dfc82e001ec0  app/src/main/java/sa/hulksa/player/data/DownloadSchedulingPolicy.kt
 2227955fe8906d7fdba8ac35409facd2661b461d5782b57285960de6080d2bbe  app/src/main/java/sa/hulksa/player/data/DurableDownloadActionReceiver.kt
@@ -32,10 +32,10 @@ e6354de8cd1e666d49035de3391fa12d43eaf8c5f3d537a2e05ca442c38baa84  app/src/main/j
 42e9c4b63707127fb868a7255188e54b911e7c045f3c323edf21bbd8930aff88  app/src/main/java/sa/hulksa/player/ui/screens/DetailsNavigationDrawer.kt
 45ee15418b4a54f2c7769dde022fb1b3a6b95c90d40392bc7f79175ad974a974  app/src/main/java/sa/hulksa/player/ui/screens/HomeScreen.kt
 28d6509550f3264fc70f7f69233ec4b3c3b3187baec880f686fe5b946d7ed57e  app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt
-1ed1590beb9738ac4a3b0a56136c87d14d6527e8d2094bbac120f20c13b79bd9  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+7ee74b8fdf0767a7d4ba4f4eaa6f1d3f92b7862db75404b89efba27aec373f16  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 87e0a9dfb54427781adf14991a464b8dec0ef29cc11d53840fb98cdb16107d98  app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
 8a43849b9bc6a097e7594e5ca1ceb7992157077a7a87f7e32a1e52cbe5724d2a  app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
-169f06c1dc391d2533f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
+169f06c1dc391d2533bc2573f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
 cddb6a86741b7071a3806f2be3e01a87ef9a65b57293b2d8d9bba794c8f1b9e8  app/src/main/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicy.kt
 8b34550c3998a88a7c53587e303322b934417e199352a47250a0f1107b03efff  app/src/main/java/sa/hulksa/player/ui/theme/HulkTheme.kt
 2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e  app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
@@ -60,6 +60,7 @@ d1208b6c7c3576f4938ecaf601734f3cf785a51bac58e82175ecef432fa6aeb4  app/src/main/r
 87f7ca23172b1febd2fe77f67ade1ccdb7ab5a91ddfc64e2891b10b39418badf  app/src/test/java/sa/hulksa/player/data/ArtworkUrlTest.kt
 196d2120b12dca5f78e715612db01095ba18acad79f918389d58e1e33a2ab2df  app/src/test/java/sa/hulksa/player/data/DownloadExecutionEntryPointTest.kt
 54ed0a6e5f79c7c0fa8f2735cf8999e677b9989d9dbbabcde107c27745fe8e5c  app/src/test/java/sa/hulksa/player/data/DownloadSchedulingPolicyTest.kt
+fd7fb904cf2a109957fb5a2cbb1cab924075e333bd8eb4eacc1bd1f09d6b1dd3  app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt
 57440f84159ff0a092d679aa0b6ad6a3d9fdbbc1e4c3bd47d99d58e2845bd0b1  app/src/test/java/sa/hulksa/player/data/DurableDownloadActionReceiverTest.kt
 e529cb7e552d0741b5b741bae365b1bb9e61264151e40aeed2257cc9c6ceee4f  app/src/test/java/sa/hulksa/player/data/DurableDownloadForegroundTest.kt
 33f5cf769c57841466dc3777bd9c95137b63e47a194fc8f193103ea88a31d1fe  app/src/test/java/sa/hulksa/player/data/DurableDownloadLifecycleBridgeTest.kt
@@ -70,6 +71,7 @@ dae295dea65ce272e0af9e747b448eee683523742fff024f7eee874b48ba45da  app/src/test/j
 6d77cefcb453764fd131e021c540988eeab5f49356d2b6d5d47246eb5053f37c  app/src/test/java/sa/hulksa/player/ui/screens/HomeContentCacheTest.kt
 606580d9098ead7fa6c9a1d013e8fd04b10b741c0dd8d6a0ad60398980af50ac  app/src/test/java/sa/hulksa/player/ui/screens/HomeRecommendationCacheTest.kt
 9e68c592838169f1190729a721393685c4df1e32392d26a9fca159f473ebf1d7  app/src/test/java/sa/hulksa/player/ui/screens/TvSearchFocusPolicyTest.kt
+5b10134aaf29208711628cffa98c2a193d3048ec4cb737fcac719f7e56925c26  app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt
 52f9b95bdc89db4b3641d7c0684e8d92f62cbfdd5c83168a9eead5ff041b4c95  build.gradle.kts
 c10fac2d0111efe3e146a5e25baed23168a387c2b1edacd716177f3ba7e867c0  gradle.properties
 81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f  gradle/wrapper/gradle-wrapper.jar
