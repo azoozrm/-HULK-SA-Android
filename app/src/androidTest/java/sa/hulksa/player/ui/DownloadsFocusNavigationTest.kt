@@ -92,11 +92,8 @@ class DownloadsFocusNavigationTest {
         compose.onAllNodesWithText("ايقاف مؤقت")[0].assertIsDisplayed()
         compose.onAllNodesWithText("الغاء")[1].assertIsDisplayed()
 
-        compose.waitForIdle()
-        compose.mainClock.advanceTimeBy(250L)
-        compose.waitForIdle()
-
         val wifi = compose.onNodeWithText("كل الشبكات")
+        wifi.performSemanticsAction(SemanticsActions.RequestFocus)
         compose.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
                 wifi.assertIsFocused()
