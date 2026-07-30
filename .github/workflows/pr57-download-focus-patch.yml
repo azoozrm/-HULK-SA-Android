@@ -1,0 +1,675 @@
+name: Apply PR57 physical download focus fix
+
+on:
+  push:
+    branches:
+      - fix/pr57-download-focus-actions
+    paths:
+      - .github/workflows/pr57-download-focus-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/pr57-download-focus-actions
+          fetch-depth: 0
+
+      - name: Apply focused product correction and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+
+          root = Path('.')
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          components_path = root / 'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt'
+          components = components_path.read_text(encoding='utf-8')
+          components = replace_once(
+              components,
+              'import androidx.compose.ui.semantics.Role\n',
+              'import androidx.compose.ui.semantics.Role\n'
+              'import androidx.compose.ui.semantics.contentDescription\n'
+              'import androidx.compose.ui.semantics.semantics\n',
+              'component semantics imports',
+          )
+          components = replace_once(
+              components,
+              '''            .border(
+                  width = when {
+                      showFocused -> 2.dp
+                      outlined -> 1.dp
+                      else -> 0.dp
+                  },
+                  color = when {
+                      showFocused -> colors.goldBright
+                      outlined -> colors.gold.copy(alpha = .42f)
+                      else -> Color.Transparent
+                  },
+                  shape = shape,
+              )
+              .onFocusChanged {''',
+              '''            .border(
+                  width = when {
+                      showFocused -> 2.dp
+                      outlined -> 1.dp
+                      else -> 0.dp
+                  },
+                  color = when {
+                      showFocused -> colors.goldBright
+                      outlined -> colors.gold.copy(alpha = .42f)
+                      else -> Color.Transparent
+                  },
+                  shape = shape,
+              )
+              .semantics(mergeDescendants = true) { contentDescription = text }
+              .onFocusChanged {''',
+              'FocusButton accessibility label',
+          )
+          components = replace_once(
+              components,
+              '''            .border(
+                  if (showFocused) 2.dp else 0.dp,
+                  if (showFocused) colors.goldBright else Color.Transparent,
+                  shape,
+              )
+              .onFocusChanged { focused = it.isFocused }''',
+              '''            .border(
+                  if (showFocused) 2.dp else 0.dp,
+                  if (showFocused) colors.goldBright else Color.Transparent,
+                  shape,
+              )
+              .semantics(mergeDescendants = true) { contentDescription = text }
+              .onFocusChanged { focused = it.isFocused }''',
+              'NavRailButton accessibility label',
+          )
+          components_path.write_text(components, encoding='utf-8')
+
+          policy_path = root / 'app/src/main/java/sa/hulksa/player/ui/screens/DownloadFocusPolicy.kt'
+          policy_path.write_text('''package sa.hulksa.player.ui.screens
+
+internal enum class DownloadFocusZone {
+    TOOLBAR,
+    CARD,
+}
+
+internal enum class DownloadFocusSlot {
+    WIFI,
+    SCHEDULE,
+    CONCURRENT,
+    PRIMARY,
+    PRIORITY,
+    CANCEL,
+}
+
+internal enum class DownloadFocusMove {
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN,
+}
+
+internal data class DownloadFocusLocation(
+    val zone: DownloadFocusZone,
+    val row: Int,
+    val slot: DownloadFocusSlot,
+) {
+    companion object {
+        fun toolbar(slot: DownloadFocusSlot): DownloadFocusLocation =
+            DownloadFocusLocation(DownloadFocusZone.TOOLBAR, -1, slot)
+
+        fun card(row: Int, slot: DownloadFocusSlot): DownloadFocusLocation =
+            DownloadFocusLocation(DownloadFocusZone.CARD, row, slot)
+    }
+}
+
+internal fun nextDownloadFocus(
+    rowCount: Int,
+    current: DownloadFocusLocation,
+    move: DownloadFocusMove,
+): DownloadFocusLocation? {
+    if (rowCount < 0) return null
+    return when (current.zone) {
+        DownloadFocusZone.TOOLBAR -> when (move) {
+            DownloadFocusMove.LEFT -> when (current.slot) {
+                DownloadFocusSlot.WIFI -> DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE)
+                DownloadFocusSlot.SCHEDULE -> DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT)
+                else -> null
+            }
+            DownloadFocusMove.RIGHT -> when (current.slot) {
+                DownloadFocusSlot.CONCURRENT -> DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE)
+                DownloadFocusSlot.SCHEDULE -> DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI)
+                else -> null
+            }
+            DownloadFocusMove.DOWN -> if (rowCount == 0) {
+                null
+            } else {
+                DownloadFocusLocation.card(
+                    row = 0,
+                    slot = when (current.slot) {
+                        DownloadFocusSlot.WIFI -> DownloadFocusSlot.PRIMARY
+                        DownloadFocusSlot.SCHEDULE -> DownloadFocusSlot.PRIORITY
+                        DownloadFocusSlot.CONCURRENT -> DownloadFocusSlot.CANCEL
+                        else -> return null
+                    },
+                )
+            }
+            DownloadFocusMove.UP -> null
+        }
+
+        DownloadFocusZone.CARD -> when (move) {
+            DownloadFocusMove.LEFT -> when (current.slot) {
+                DownloadFocusSlot.PRIMARY -> current.copy(slot = DownloadFocusSlot.PRIORITY)
+                DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.CANCEL)
+                else -> null
+            }
+            DownloadFocusMove.RIGHT -> when (current.slot) {
+                DownloadFocusSlot.CANCEL -> current.copy(slot = DownloadFocusSlot.PRIORITY)
+                DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.PRIMARY)
+                else -> null
+            }
+            DownloadFocusMove.UP -> if (current.row > 0) {
+                current.copy(row = current.row - 1)
+            } else {
+                DownloadFocusLocation.toolbar(
+                    when (current.slot) {
+                        DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
+                        DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
+                        DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT
+                        else -> return null
+                    },
+                )
+            }
+            DownloadFocusMove.DOWN -> if (current.row + 1 < rowCount) {
+                current.copy(row = current.row + 1)
+            } else {
+                null
+            }
+        }
+    }
+}
+''', encoding='utf-8')
+
+          main_path = root / 'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt'
+          main = main_path.read_text(encoding='utf-8')
+          main = replace_once(
+              main,
+              '''private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
+    then(if (enabled) Modifier.focusRequester(requester) else Modifier)
+''',
+              '''private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
+    then(if (enabled) Modifier.focusRequester(requester) else Modifier)
+
+private data class DownloadToolbarFocusRequesters(
+    val wifi: FocusRequester = FocusRequester(),
+    val schedule: FocusRequester = FocusRequester(),
+    val concurrent: FocusRequester = FocusRequester(),
+)
+
+private data class DownloadCardFocusRequesters(
+    val primary: FocusRequester = FocusRequester(),
+    val priority: FocusRequester = FocusRequester(),
+    val cancel: FocusRequester = FocusRequester(),
+)
+
+private fun Modifier.applyDownloadFocusPolicy(
+    current: DownloadFocusLocation,
+    rowCount: Int,
+    resolve: (DownloadFocusLocation) -> FocusRequester?,
+): Modifier = focusProperties {
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.LEFT)?.let(resolve)?.let { left = it }
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.RIGHT)?.let(resolve)?.let { right = it }
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.UP)?.let(resolve)?.let { up = it }
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.DOWN)?.let(resolve)?.let { down = it }
+}
+''',
+              'download focus helpers',
+          )
+          main = replace_once(
+              main,
+              '''    val downloadsFocusScope = rememberCoroutineScope()
+    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
+    val context = LocalContext.current
+''',
+              '''    val downloadsFocusScope = rememberCoroutineScope()
+    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
+    val toolbarFocus = remember { DownloadToolbarFocusRequesters() }
+    val cardFocus = remember(downloads.map { it.downloadId }) {
+        downloads.associate { item -> item.downloadId to DownloadCardFocusRequesters() }
+    }
+    val resolveDownloadFocus: (DownloadFocusLocation) -> FocusRequester? = { location ->
+        when (location.zone) {
+            DownloadFocusZone.TOOLBAR -> when (location.slot) {
+                DownloadFocusSlot.WIFI -> toolbarFocus.wifi
+                DownloadFocusSlot.SCHEDULE -> toolbarFocus.schedule
+                DownloadFocusSlot.CONCURRENT -> toolbarFocus.concurrent
+                else -> null
+            }
+            DownloadFocusZone.CARD -> downloads.getOrNull(location.row)
+                ?.let { cardFocus[it.downloadId] }
+                ?.let { requesters ->
+                    when (location.slot) {
+                        DownloadFocusSlot.PRIMARY -> requesters.primary
+                        DownloadFocusSlot.PRIORITY -> requesters.priority
+                        DownloadFocusSlot.CANCEL -> requesters.cancel
+                        else -> null
+                    }
+                }
+        }
+    }
+    val context = LocalContext.current
+''',
+              'download focus state',
+          )
+          main = replace_once(
+              main,
+              '''        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+        ) {''',
+              '''        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+            modifier = Modifier.focusGroup(),
+        ) {''',
+              'download toolbar focus group',
+          )
+          main = replace_once(
+              main,
+              '''                    primary = settings.wifiOnly,
+                    compact = true,
+                )''',
+              '''                    primary = settings.wifiOnly,
+                    compact = true,
+                    outlined = !settings.wifiOnly,
+                    modifier = Modifier
+                        .focusRequester(toolbarFocus.wifi)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
+                            downloads.size,
+                            resolveDownloadFocus,
+                        ),
+                )''',
+              'wifi focus route',
+          )
+          main = replace_once(
+              main,
+              '''                    primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
+                    compact = true,
+                )''',
+              '''                    primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
+                    compact = true,
+                    outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
+                    modifier = Modifier
+                        .focusRequester(toolbarFocus.schedule)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
+                            downloads.size,
+                            resolveDownloadFocus,
+                        ),
+                )''',
+              'schedule focus route',
+          )
+          main = replace_once(
+              main,
+              '''                    primary = false,
+                    compact = true,
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))''',
+              '''                    primary = false,
+                    compact = true,
+                    outlined = true,
+                    modifier = Modifier
+                        .focusRequester(toolbarFocus.concurrent)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
+                            downloads.size,
+                            resolveDownloadFocus,
+                        ),
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))''',
+              'concurrent focus route',
+          )
+          main = replace_once(
+              main,
+              '''                itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
+                    DownloadCard(
+                        item = item,
+                        isTv = isTv,
+                        restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
+''',
+              '''                itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
+                    val requesters = checkNotNull(cardFocus[item.downloadId])
+                    DownloadCard(
+                        item = item,
+                        isTv = isTv,
+                        rowIndex = index,
+                        rowCount = downloads.size,
+                        focusRequesters = requesters,
+                        resolveFocus = resolveDownloadFocus,
+                        restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
+''',
+              'download card focus arguments',
+          )
+          main = replace_once(
+              main,
+              '''private fun DownloadCard(
+    item: OfflineDownload,
+    isTv: Boolean,
+    restoreFocus: Boolean,
+''',
+              '''private fun DownloadCard(
+    item: OfflineDownload,
+    isTv: Boolean,
+    rowIndex: Int,
+    rowCount: Int,
+    focusRequesters: DownloadCardFocusRequesters,
+    resolveFocus: (DownloadFocusLocation) -> FocusRequester?,
+    restoreFocus: Boolean,
+''',
+              'DownloadCard signature',
+          )
+          main = replace_once(
+              main,
+              '''    var focused by remember { mutableStateOf(false) }
+    val actionRequester = remember { FocusRequester() }
+    LaunchedEffect(restoreFocus, item.downloadId) {
+        if (restoreFocus) { delay(180); runCatching { actionRequester.requestFocus() } }
+    }
+''',
+              '''    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(restoreFocus, item.downloadId) {
+        if (restoreFocus) { delay(220); runCatching { focusRequesters.primary.requestFocus() } }
+    }
+''',
+              'restore first download action',
+          )
+          old_column = '''        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Text(
+                item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
+                color = colors.goldBright,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
+                "الحلقة ${item.episodeNumber}"
+            } else {
+                item.title
+            }
+            Text(
+                cleanDownloadTitle,
+                color = colors.text,
+                fontSize = if (isTv) 14.sp else 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = if (isTv) 17.sp else 15.sp,
+            )
+            val episodeMeta = item.season?.let { "الموسم $it" }.orEmpty()
+            if (episodeMeta.isNotBlank()) {
+                Text(episodeMeta, color = colors.textMuted, fontSize = 9.sp, maxLines = 1)
+            }
+            Text(
+                "الاولوية  ${priorityLabel(item.priority)}",
+                color = if (item.priority == 1) colors.goldBright else colors.textMuted,
+                fontSize = 8.sp,
+                maxLines = 1,
+            )
+            Spacer(Modifier.weight(1f))
+            DownloadProgress(item)
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(40.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+'''
+          new_column = '''        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Column(Modifier.weight(1f).fillMaxWidth()) {
+                Text(
+                    item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
+                    color = colors.goldBright,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
+                    "الحلقة ${item.episodeNumber}"
+                } else {
+                    item.title
+                }
+                Text(
+                    cleanDownloadTitle,
+                    color = colors.text,
+                    fontSize = if (isTv) 14.sp else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = if (isTv) 17.sp else 15.sp,
+                )
+                val downloadMeta = buildList {
+                    item.season?.let { add("الموسم $it") }
+                    add("الاولوية ${priorityLabel(item.priority)}")
+                }.joinToString("  •  ")
+                Text(
+                    downloadMeta,
+                    color = if (item.priority == 1) colors.goldBright else colors.textMuted,
+                    fontSize = 8.sp,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(2.dp))
+                DownloadProgress(item)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(44.dp).focusGroup(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+'''
+          main = replace_once(main, old_column, new_column, 'reserve visible download action row')
+
+          primary_old = '''                        primary = false,
+                        compact = true,
+                        modifier = Modifier.weight(1.35f).fillMaxHeight().restoreFocus(restoreFocus, actionRequester),
+                    )'''
+          primary_new = '''                        primary = true,
+                        compact = true,
+                        onFocused = onFocused,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequesters.primary)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                rowCount,
+                                resolveFocus,
+                            ),
+                    )'''
+          main = replace_once(main, primary_old, primary_new, 'active primary action style and route')
+
+          for label in ('تشغيل', 'اعادة المحاولة', 'استئناف'):
+              old = '''                        compact = true,
+                        modifier = Modifier.weight(1.35f).fillMaxHeight().restoreFocus(restoreFocus, actionRequester),
+                    )'''
+              new = '''                        compact = true,
+                        onFocused = onFocused,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequesters.primary)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                rowCount,
+                                resolveFocus,
+                            ),
+                    )'''
+              main = replace_once(main, old, new, f'{label} primary route')
+
+          main = replace_once(
+              main,
+              '''                    primary = item.priority == 1,
+                    compact = true,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )''',
+              '''                    primary = item.priority == 1,
+                    compact = true,
+                    outlined = item.priority != 1,
+                    onFocused = onFocused,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .focusRequester(focusRequesters.priority)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
+                            rowCount,
+                            resolveFocus,
+                        ),
+                )''',
+              'priority visibility and route',
+          )
+          main = replace_once(
+              main,
+              '''                    primary = false,
+                    compact = true,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )''',
+              '''                    primary = false,
+                    compact = true,
+                    outlined = true,
+                    onFocused = onFocused,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .focusRequester(focusRequesters.cancel)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
+                            rowCount,
+                            resolveFocus,
+                        ),
+                )''',
+              'cancel visibility and route',
+          )
+          if 'actionRequester' in main:
+              raise SystemExit('stale actionRequester remained after patch')
+          main_path.write_text(main, encoding='utf-8')
+
+          test_path = root / 'app/src/test/java/sa/hulksa/player/ui/screens/DownloadFocusPolicyTest.kt'
+          test_path.write_text('''package sa.hulksa.player.ui.screens
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class DownloadFocusPolicyTest {
+    @Test
+    fun `toolbar routes down into matching first-card action`() {
+        assertEquals(
+            DownloadFocusLocation.card(0, DownloadFocusSlot.PRIMARY),
+            nextDownloadFocus(3, DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI), DownloadFocusMove.DOWN),
+        )
+        assertEquals(
+            DownloadFocusLocation.card(0, DownloadFocusSlot.PRIORITY),
+            nextDownloadFocus(3, DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE), DownloadFocusMove.DOWN),
+        )
+        assertEquals(
+            DownloadFocusLocation.card(0, DownloadFocusSlot.CANCEL),
+            nextDownloadFocus(3, DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT), DownloadFocusMove.DOWN),
+        )
+    }
+
+    @Test
+    fun `all three actions traverse horizontally in physical RTL order`() {
+        val primary = DownloadFocusLocation.card(1, DownloadFocusSlot.PRIMARY)
+        val priority = DownloadFocusLocation.card(1, DownloadFocusSlot.PRIORITY)
+        val cancel = DownloadFocusLocation.card(1, DownloadFocusSlot.CANCEL)
+        assertEquals(priority, nextDownloadFocus(3, primary, DownloadFocusMove.LEFT))
+        assertEquals(cancel, nextDownloadFocus(3, priority, DownloadFocusMove.LEFT))
+        assertEquals(priority, nextDownloadFocus(3, cancel, DownloadFocusMove.RIGHT))
+        assertEquals(primary, nextDownloadFocus(3, priority, DownloadFocusMove.RIGHT))
+    }
+
+    @Test
+    fun `vertical traversal preserves action column between every download`() {
+        DownloadFocusSlot.entries
+            .filter { it in setOf(DownloadFocusSlot.PRIMARY, DownloadFocusSlot.PRIORITY, DownloadFocusSlot.CANCEL) }
+            .forEach { slot ->
+                assertEquals(
+                    DownloadFocusLocation.card(1, slot),
+                    nextDownloadFocus(3, DownloadFocusLocation.card(0, slot), DownloadFocusMove.DOWN),
+                )
+                assertEquals(
+                    DownloadFocusLocation.card(0, slot),
+                    nextDownloadFocus(3, DownloadFocusLocation.card(1, slot), DownloadFocusMove.UP),
+                )
+            }
+    }
+
+    @Test
+    fun `first row returns to corresponding toolbar control and boundaries stay stable`() {
+        assertEquals(
+            DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
+            nextDownloadFocus(2, DownloadFocusLocation.card(0, DownloadFocusSlot.PRIMARY), DownloadFocusMove.UP),
+        )
+        assertEquals(
+            DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
+            nextDownloadFocus(2, DownloadFocusLocation.card(0, DownloadFocusSlot.PRIORITY), DownloadFocusMove.UP),
+        )
+        assertEquals(
+            DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
+            nextDownloadFocus(2, DownloadFocusLocation.card(0, DownloadFocusSlot.CANCEL), DownloadFocusMove.UP),
+        )
+        assertNull(nextDownloadFocus(0, DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI), DownloadFocusMove.DOWN))
+        assertNull(nextDownloadFocus(2, DownloadFocusLocation.card(1, DownloadFocusSlot.PRIMARY), DownloadFocusMove.DOWN))
+    }
+}
+''', encoding='utf-8')
+
+          manifest_path = root / 'qa/canonical/canonical-source.sha256'
+          lines = manifest_path.read_text(encoding='utf-8').splitlines()
+          paths = [
+              'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt',
+              'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt',
+              'app/src/main/java/sa/hulksa/player/ui/screens/DownloadFocusPolicy.kt',
+              'app/src/test/java/sa/hulksa/player/ui/screens/DownloadFocusPolicyTest.kt',
+          ]
+          mapping = {}
+          for line in lines:
+              digest, path = line.split('  ', 1)
+              mapping[path] = digest
+          for path in paths:
+              mapping[path] = hashlib.sha256((root / path).read_bytes()).hexdigest()
+          manifest_path.write_text(
+              ''.join(f'{mapping[path]}  {path}\n' for path in sorted(mapping)),
+              encoding='utf-8',
+          )
+
+          assert 'height(44.dp).focusGroup()' in main
+          assert 'outlined = true' in main
+          assert 'DownloadFocusLocation.card' in main
+          assert 'contentDescription = text' in components
+          print('PASS: product focus/action patch applied with canonical hashes')
+          PY
+
+          git rm .github/workflows/pr57-download-focus-patch.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app qa/canonical/canonical-source.sha256
+          git commit -m "fix: make TV download actions visible and fully focusable"
+          git push origin HEAD:fix/pr57-download-focus-actions
