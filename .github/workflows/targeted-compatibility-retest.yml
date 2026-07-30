@@ -122,7 +122,10 @@ jobs:
           test -s "$OUT/run-manifest.json"
           python3 qa/compatibility/analyze.py "$OUT" || ANALYZE_EXIT=$?
           ANALYZE_EXIT="${ANALYZE_EXIT:-0}"
-          python3 qa/compatibility/postprocess_targeted_downloads.py "$OUT"
+
+          if [[ "$ID" == "nexus-9-api28" ]]; then
+            python3 qa/compatibility/postprocess_targeted_downloads.py "$OUT"
+          fi
 
           if [[ "${{ inputs.enforce_findings }}" == "true" ]]; then
             python3 qa/compatibility/gate.py "$OUT/summary.json" --enforce-findings true
