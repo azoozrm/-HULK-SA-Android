@@ -21,6 +21,7 @@ from analyze import (  # noqa: E402
     analyze_xml,
     analyze_rail_visual,
     analyze_run,
+    analyze_download_actions,
     download_layout_measurement,
     live_action_measurement,
     tv_content_gutter_measurement,
@@ -39,6 +40,7 @@ png_dimensions = RUN_LAB_MODULE.png_dimensions
 external_error_dialog_center = RUN_LAB_MODULE.external_error_dialog_center
 is_expanded_rail_focus = RUN_LAB_MODULE.is_expanded_rail_focus
 visible_package_names = RUN_LAB_MODULE.visible_package_names
+download_action_markers = RUN_LAB_MODULE.download_action_markers
 
 
 class ConfigTests(unittest.TestCase):
@@ -168,7 +170,76 @@ class ConfigTests(unittest.TestCase):
         self.assertLess(prepare.index(cleanup), prepare.index(enqueue))
 
 
+    def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:
+        source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        for contract in (
+            "repository.pause(item.downloadId)",
+            "repository.resume(item.downloadId)",
+            "repository.cyclePriority(item.downloadId)",
+            "repository.setConcurrentDownloads(next)",
+            "repository.remove(item.downloadId)",
+            'private const val QA_DOWNLOAD_WRITE_DELAY_MS = 40L',
+        ):
+            self.assertIn(contract, source)
+        self.assertNotIn("onRetryDownload = {},", source)
+        self.assertNotIn("onCycleConcurrentDownloads = {},", source)
+        self.assertNotIn("onCycleDownloadPriority = {},", source)
+
+    def test_download_action_markers_are_versioned_and_parseable(self) -> None:
+        xml = (
+            '<hierarchy><node package="sa.hulksa.player.dev" '
+            'content-desc="qa-page:downloads,qa-download-action:pause:1,'
+            'qa-download-action:priority:2" bounds="[0,0][10,10]" /></hierarchy>'
+        ).encode()
+        self.assertEqual({("pause", 1), ("priority", 2)}, download_action_markers(xml))
+
+
+
 class AnalyzerTests(unittest.TestCase):
+
+    def test_download_action_audit_classifies_unreachable_and_unexecuted_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "focus/landscape/downloads-actions/01-step"
+            evidence.mkdir(parents=True)
+            for name in ("screenshot.png", "ui.xml", "logcat.txt"):
+                (evidence / name).write_bytes(b"x")
+            normalized, findings = analyze_download_actions(
+                root,
+                {"is_tv": True},
+                [
+                    {
+                        "orientation": "landscape",
+                        "checks": [
+                            {
+                                "id": "row-1-primary",
+                                "success": False,
+                                "expected_action": None,
+                                "reason": "expected focused control was not reached",
+                                "evidence": {
+                                    "screenshot": "focus/landscape/downloads-actions/01-step/screenshot.png",
+                                    "xml": "focus/landscape/downloads-actions/01-step/ui.xml",
+                                    "logcat": "focus/landscape/downloads-actions/01-step/logcat.txt",
+                                },
+                            },
+                            {
+                                "id": "row-1-pause",
+                                "success": False,
+                                "expected_action": "pause",
+                                "reason": "expected action marker was not emitted",
+                                "evidence": {},
+                            },
+                        ],
+                    }
+                ],
+            )
+        self.assertEqual("BLOCKED", normalized[0]["status"])
+        codes = {item["code"] for item in findings}
+        self.assertIn("download_action_audit_incomplete", codes)
+        self.assertIn("tv_download_action_unreachable", codes)
+        self.assertIn("tv_download_action_not_executed", codes)
+        self.assertIn("tv_download_row_navigation_incomplete", codes)
+
     def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:
         return ET.fromstring(
             '<hierarchy>'

@@ -127,3 +127,8 @@ bash -n qa/compatibility/prepare-project.sh
 
 The emulator matrix itself is designed for GitHub Actions runners with KVM and
 the Android SDK.
+
+## Full TV focus and download-action contract
+
+The TV audit no longer treats two unique focus targets as sufficient. Every page has a minimum focus-coverage policy, and Downloads additionally runs a deterministic physical D-pad action audit. The audit proves that Wi-Fi mode, scheduling, concurrency, pause/resume, priority, cancel and movement across two active rows are both reachable and executable. Debug fixture callbacks call the real `DownloadRepository`; they are never no-ops. Missing evidence is infrastructure `BLOCKED`, while unreachable controls or missing action markers are critical product findings.
+

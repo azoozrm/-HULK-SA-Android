@@ -22,6 +22,7 @@ PACKAGE = "sa.hulksa.player.dev"
 ACTIVITY = "sa.hulksa.player.qa.QaActivity"
 PAGE_MARKER_PREFIX = "qa-page:"
 DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
+DOWNLOAD_ACTION_RE = re.compile(r"qa-download-action:([a-z]+):(\d+)")
 BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 TRANSIENT_ADB_RE = re.compile(
     r"device offline|device ['\"][^'\"]+['\"] not found|"
@@ -302,6 +303,14 @@ def visible_package_names(xml_bytes: bytes) -> list[str]:
     )
 
 
+def download_action_markers(xml_bytes: bytes) -> set[tuple[str, int]]:
+    text = xml_bytes.decode("utf-8", errors="ignore")
+    return {
+        (match.group(1), int(match.group(2)))
+        for match in DOWNLOAD_ACTION_RE.finditer(text)
+    }
+
+
 def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
     try:
         root = ET.fromstring(xml_bytes)
@@ -382,6 +391,7 @@ class DeviceLab:
             "cases": [],
             "navigation": [],
             "focus": [],
+            "download_actions": [],
             "harness_errors": [],
             "started_at_epoch": int(time.time()),
         }
@@ -939,6 +949,149 @@ class DeviceLab:
             )
             self.flush_manifest()
 
+
+    def download_action_audit(self, orientation: str) -> None:
+        audit_root = self.out / "focus" / orientation / "downloads-actions"
+        audit_root.mkdir(parents=True, exist_ok=True)
+        checks: list[dict[str, Any]] = []
+        known_markers: set[tuple[str, int]] = set()
+        sequence_number = 0
+        error: str | None = None
+
+        def restart(scope: str) -> None:
+            nonlocal known_markers
+            case_dir = audit_root / scope
+            case_dir.mkdir(parents=True, exist_ok=True)
+            self.start_page("downloads", case_dir)
+            known_markers = download_action_markers(
+                dump_xml(self.adb, case_dir / ".initial.xml", attempts=2)
+            )
+            (case_dir / ".initial.xml").unlink(missing_ok=True)
+
+        def inspect(
+            check_id: str,
+            *,
+            key_code: int | None = None,
+            expected_labels: tuple[str, ...] = (),
+            expected_action: str | None = None,
+        ) -> bool:
+            nonlocal sequence_number, known_markers
+            sequence_number += 1
+            step_root = audit_root / f"{sequence_number:02d}-{check_id}"
+            step_root.mkdir(parents=True, exist_ok=True)
+            previous = set(known_markers)
+            if key_code is not None:
+                self.adb.shell(["input", "keyevent", str(key_code)])
+            deadline = time.monotonic() + (5.0 if expected_action else 1.5)
+            xml = b""
+            markers: set[tuple[str, int]] = set()
+            focused: dict[str, Any] | None = None
+            action_seen = expected_action is None
+            while time.monotonic() < deadline:
+                time.sleep(0.20)
+                xml = dump_xml(self.adb, step_root / "ui.xml", attempts=2)
+                markers = download_action_markers(xml)
+                focused = focused_node(xml)
+                if expected_action is not None:
+                    action_seen = any(
+                        action == expected_action and marker not in previous
+                        for marker in markers
+                        for action in (marker[0],)
+                    )
+                if focused is not None and action_seen:
+                    break
+            known_markers = markers
+            label = str(
+                (focused or {}).get("text")
+                or (focused or {}).get("content_description")
+                or ""
+            )
+            focus_seen = not expected_labels or any(expected in label for expected in expected_labels)
+            success = bool(focused) and focus_seen and action_seen
+            capture_png(self.adb, step_root / "screenshot.png")
+            safe_write(
+                step_root / "logcat.txt",
+                command_text(
+                    self.adb,
+                    ["logcat", "-d", "-v", "threadtime"],
+                    shell=False,
+                    timeout=90,
+                ),
+            )
+            checks.append(
+                {
+                    "id": check_id,
+                    "success": success,
+                    "expected_labels": list(expected_labels),
+                    "expected_action": expected_action,
+                    "focused": focused,
+                    "action_markers": [
+                        f"{action}:{revision}" for action, revision in sorted(markers)
+                    ],
+                    "reason": None if success else (
+                        "expected action marker was not emitted"
+                        if not action_seen
+                        else "expected focused control was not reached"
+                        if not focus_seen
+                        else "no focused control was exposed"
+                    ),
+                    "evidence": {
+                        "screenshot": (step_root / "screenshot.png").relative_to(self.out).as_posix(),
+                        "xml": (step_root / "ui.xml").relative_to(self.out).as_posix(),
+                        "logcat": (step_root / "logcat.txt").relative_to(self.out).as_posix(),
+                    },
+                }
+            )
+            return success
+
+        try:
+            restart("top-wifi")
+            inspect("top-wifi-initial", expected_labels=("كل الشبكات", "WiFi فقط"))
+            inspect("top-wifi-executes", key_code=23, expected_action="wifi")
+
+            restart("top-schedule")
+            inspect("top-schedule-focus", key_code=21, expected_labels=("الجدولة",))
+            inspect("top-schedule-executes", key_code=23, expected_action="schedule")
+
+            restart("top-concurrent")
+            inspect("top-concurrent-schedule", key_code=21, expected_labels=("الجدولة",))
+            inspect("top-concurrent-focus", key_code=21, expected_labels=("متزامنة",))
+            inspect("top-concurrent-executes", key_code=23, expected_action="concurrent")
+
+            restart("rows")
+            inspect("row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-1-pause", key_code=23, expected_action="pause")
+            inspect("row-1-priority", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
+            inspect("row-1-priority-executes", key_code=23, expected_action="priority")
+            inspect("row-1-cancel", key_code=21, expected_labels=("الغاء",))
+            inspect("row-2-cancel", key_code=20, expected_labels=("الغاء",))
+            inspect("row-2-priority", key_code=22, expected_labels=("عالية", "عادية", "منخفضة"))
+            inspect("row-2-primary", key_code=22, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("row-2-pause", key_code=23, expected_action="pause")
+
+            restart("cancel")
+            inspect("cancel-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
+            inspect("cancel-row-1-priority", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
+            inspect("cancel-row-1-focus", key_code=21, expected_labels=("الغاء",))
+            inspect("cancel-row-1-executes", key_code=23, expected_action="cancel")
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"[-1200:]
+            self.record_harness_error(f"download-actions:{orientation}", exc)
+        finally:
+            result = {
+                "orientation": orientation,
+                "page": "downloads",
+                "success": error is None and all(check.get("success") for check in checks),
+                "error": error,
+                "checks": checks,
+            }
+            self.manifest["download_actions"].append(result)
+            safe_write(
+                audit_root / "download-actions.json",
+                json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            )
+            self.flush_manifest()
+
     def run(self) -> None:
         self.setup()
         orientations = [item.strip() for item in self.args.orientations.split(",") if item.strip()]
@@ -953,6 +1106,7 @@ class DeviceLab:
             if self.args.is_tv:
                 for page in PAGES:
                     self.focus_audit(page["id"], orientation)
+                self.download_action_audit(orientation)
         self.manifest["finished_at_epoch"] = int(time.time())
         self.flush_manifest()
 

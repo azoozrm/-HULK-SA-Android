@@ -44,6 +44,16 @@ QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
 QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
 QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes-positive"
+TV_FOCUS_MIN_UNIQUE_TARGETS = {
+    "home": 3,
+    "live": 4,
+    "movies": 3,
+    "series": 3,
+    "favorites": 3,
+    "search": 3,
+    "downloads": 6,
+    "settings": 3,
+}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -1047,17 +1057,21 @@ def analyze_focus(
                     evidence=evidence,
                 )
             )
-        elif len(signatures) < 2:
-            item["status"] = "FAIL"
-            findings.append(
-                finding(
-                    "critical",
-                    "focus_trap",
-                    f"{entry.get('orientation')} / {entry.get('page')}: focus never moved to a second target",
-                    page=entry.get("page"),
-                    evidence=evidence,
+        else:
+            minimum_targets = TV_FOCUS_MIN_UNIQUE_TARGETS.get(entry.get("page"), 3)
+            item["minimum_unique_focus_targets"] = minimum_targets
+            if len(signatures) < minimum_targets:
+                item["status"] = "FAIL"
+                findings.append(
+                    finding(
+                        "critical",
+                        "focus_coverage_incomplete",
+                        f"{entry.get('orientation')} / {entry.get('page')}: focus reached "
+                        f"{len(signatures)} unique target(s); expected at least {minimum_targets}",
+                        page=entry.get("page"),
+                        evidence=evidence,
+                    )
                 )
-            )
 
         width, height = expected_dimensions(device, entry.get("orientation", "landscape"))
         bad_bounds = []
@@ -1092,6 +1106,102 @@ def analyze_focus(
                     f"{entry.get('orientation')} / {entry.get('page')}: focus touches a display edge",
                     page=entry.get("page"),
                     evidence=evidence,
+                )
+            )
+        normalized.append(item)
+    return normalized, findings
+
+
+
+def analyze_download_actions(
+    root: Path,
+    device: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not device.get("is_tv"):
+        return [], []
+    normalized: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    required_checks = {
+        "top-wifi-executes",
+        "top-schedule-executes",
+        "top-concurrent-executes",
+        "row-1-primary",
+        "row-1-pause",
+        "row-1-priority",
+        "row-1-priority-executes",
+        "row-1-cancel",
+        "row-2-cancel",
+        "row-2-priority",
+        "row-2-primary",
+        "row-2-pause",
+        "cancel-row-1-executes",
+    }
+    for entry in entries:
+        item = dict(entry)
+        checks = [dict(check) for check in entry.get("checks", [])]
+        item["checks"] = checks
+        item["status"] = "PASS"
+        if entry.get("error"):
+            item["status"] = "BLOCKED"
+            findings.append(
+                finding(
+                    "infrastructure",
+                    "download_action_audit_error",
+                    f"{entry.get('orientation')} / downloads: {entry['error']}",
+                    page="downloads",
+                )
+            )
+            normalized.append(item)
+            continue
+        observed_ids = {check.get("id") for check in checks}
+        missing = sorted(required_checks - observed_ids)
+        if missing:
+            item["status"] = "BLOCKED"
+            findings.append(
+                finding(
+                    "infrastructure",
+                    "download_action_audit_incomplete",
+                    f"{entry.get('orientation')} / downloads: missing checks {', '.join(missing)}",
+                    page="downloads",
+                )
+            )
+        for check in checks:
+            if check.get("success"):
+                continue
+            evidence = {
+                key: value
+                for key, value in check.get("evidence", {}).items()
+                if (root / value).is_file()
+            }
+            if item["status"] != "BLOCKED":
+                item["status"] = "FAIL"
+            code = (
+                "tv_download_action_not_executed"
+                if check.get("expected_action")
+                else "tv_download_action_unreachable"
+            )
+            findings.append(
+                finding(
+                    "critical",
+                    code,
+                    f"{entry.get('orientation')} / downloads / {check.get('id')}: "
+                    f"{check.get('reason') or 'required control contract failed'}",
+                    page="downloads",
+                    evidence=evidence,
+                )
+            )
+        row_two_ids = {"row-2-cancel", "row-2-priority", "row-2-primary", "row-2-pause"}
+        successful_ids = {check.get("id") for check in checks if check.get("success")}
+        if not row_two_ids.issubset(successful_ids):
+            if item["status"] != "BLOCKED":
+                item["status"] = "FAIL"
+            findings.append(
+                finding(
+                    "critical",
+                    "tv_download_row_navigation_incomplete",
+                    f"{entry.get('orientation')} / downloads: D-pad did not prove all action columns on the second active row",
+                    page="downloads",
                 )
             )
         normalized.append(item)
@@ -1385,6 +1495,21 @@ def report_markdown(summary: dict[str, Any]) -> str:
                 f"| {entry.get('page')} | **{entry.get('status')}** | "
                 f"{entry.get('observed_focus_steps', 0)} | "
                 f"{entry.get('unique_focus_targets', 0)} |"
+            )
+
+        lines += [
+            "",
+            "## Download D-pad actions",
+            "",
+            "| Orientation | Status | Passed checks | Total checks |",
+            "|---|---|---:|---:|",
+        ]
+        for entry in summary.get("download_actions", []):
+            checks = entry.get("checks", [])
+            passed = sum(1 for check in checks if check.get("success"))
+            lines.append(
+                f"| {entry.get('orientation')} | **{entry.get('status')}** | "
+                f"{passed} | {len(checks)} |"
             )
 
         lines += [
@@ -1706,6 +1831,23 @@ def analyze_run(root: Path) -> dict[str, Any]:
             )
         )
 
+    download_actions, download_action_findings = analyze_download_actions(
+        root,
+        device,
+        manifest.get("download_actions", []),
+    )
+    findings.extend(download_action_findings)
+    expected_download_actions = len(orientations) if device["is_tv"] else 0
+    if len(download_actions) != expected_download_actions:
+        findings.append(
+            finding(
+                "infrastructure",
+                "incomplete_download_action_audit",
+                f"captured {len(download_actions)} download action audit(s); expected {expected_download_actions}",
+                page="downloads",
+            )
+        )
+
     rail_visual, rail_visual_findings = analyze_rail_visual(
         root,
         device,
@@ -1743,6 +1885,7 @@ def analyze_run(root: Path) -> dict[str, Any]:
         "cases": cases,
         "navigation": navigation,
         "focus": focus,
+        "download_actions": download_actions,
         "rail_visual": rail_visual,
         "findings": findings,
     }

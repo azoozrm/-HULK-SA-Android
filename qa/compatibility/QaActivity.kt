@@ -206,6 +206,8 @@ private fun FixtureMain(
     var state by remember(initialDestination) {
         mutableStateOf(fixtureState(initialDestination).copy(favorites = favorites))
     }
+    var actionRevision by remember { mutableStateOf(0) }
+    var lastDownloadAction by remember { mutableStateOf<String?>(null) }
     val navigationMemory = remember { NavigationMemoryStore() }
     val pageMarker = "qa-page:${state.destination.name.lowercase(Locale.ROOT)}"
     var originBytesServed by remember(downloadHarness) {
@@ -215,12 +217,21 @@ private fun FixtureMain(
         downloadRepository != null && state.downloads.any { it.bytesDownloaded > 0L }
     val hasOriginByteProgress = originBytesServed > 0L
 
+    fun publishDownloadAction(action: String) {
+        actionRevision += 1
+        lastDownloadAction = "$action:$actionRevision"
+    }
+
+    fun refreshDownloads(repository: DownloadRepository) {
+        state = state.copy(
+            downloads = repository.downloads(),
+            downloadSettings = repository.settings(),
+        )
+    }
+
     LaunchedEffect(downloadHarness) {
         while (downloadHarness != null) {
-            state = state.copy(
-                downloads = downloadHarness.repository.downloads(),
-                downloadSettings = downloadHarness.repository.settings(),
-            )
+            refreshDownloads(downloadHarness.repository)
             originBytesServed = downloadHarness.origin.bytesServed()
             delay(QA_DOWNLOAD_POLL_MS)
         }
@@ -238,6 +249,11 @@ private fun FixtureMain(
                     if (hasRealDownloadProgress) {
                         add(QA_DOWNLOAD_PROGRESS_MARKER)
                     }
+                    lastDownloadAction?.let { marker ->
+                        if (state.destination == MainDestination.DOWNLOADS) {
+                            add("qa-download-action:$marker")
+                        }
+                    }
                 }
                     .joinToString(",")
             },
@@ -248,7 +264,15 @@ private fun FixtureMain(
             navigationMemory = navigationMemory,
             isFavorite = { "${it.type.name}:${it.id}" in favorites },
             onSelectDestination = { destination ->
-                state = fixtureState(destination).copy(favorites = favorites)
+                val next = fixtureState(destination).copy(favorites = favorites)
+                state = if (destination == MainDestination.DOWNLOADS && downloadRepository != null) {
+                    next.copy(
+                        downloads = downloadRepository.downloads(),
+                        downloadSettings = downloadRepository.settings(),
+                    )
+                } else {
+                    next
+                }
             },
             onSelectCategory = { state = state.copy(selectedCategoryId = it) },
             onSearch = { state = state.copy(searchQuery = it) },
@@ -262,19 +286,56 @@ private fun FixtureMain(
             onClearHistory = { state = state.copy(history = emptyList()) },
             onPlayDownload = {},
             onDeleteDownload = { item ->
-                state = state.copy(
-                    downloads = state.downloads.filterNot {
-                        it.downloadId == item.downloadId
-                    },
-                )
+                val repository = downloadRepository
+                if (repository == null) {
+                    state = state.copy(
+                        downloads = state.downloads.filterNot { it.downloadId == item.downloadId },
+                    )
+                } else {
+                    repository.remove(item.downloadId)
+                    refreshDownloads(repository)
+                }
+                publishDownloadAction("cancel")
             },
-            onRetryDownload = {},
+            onRetryDownload = { item ->
+                val repository = downloadRepository
+                if (repository != null) {
+                    val action = when (item.status) {
+                        OfflineStatus.QUEUED,
+                        OfflineStatus.CHECKING,
+                        OfflineStatus.DOWNLOADING,
+                        -> {
+                            repository.pause(item.downloadId)
+                            "pause"
+                        }
+                        OfflineStatus.PAUSED,
+                        OfflineStatus.WAITING_SCHEDULE,
+                        OfflineStatus.WAITING_NETWORK,
+                        OfflineStatus.WAITING_STORAGE,
+                        OfflineStatus.FAILED,
+                        -> {
+                            repository.resume(item.downloadId)
+                            "resume"
+                        }
+                        OfflineStatus.COMPLETED -> "play"
+                    }
+                    refreshDownloads(repository)
+                    publishDownloadAction(action)
+                }
+            },
             onToggleWifiOnly = {
-                state = state.copy(
-                    downloadSettings = state.downloadSettings.copy(
-                        wifiOnly = !state.downloadSettings.wifiOnly,
-                    ),
-                )
+                val repository = downloadRepository
+                if (repository == null) {
+                    state = state.copy(
+                        downloadSettings = state.downloadSettings.copy(
+                            wifiOnly = !state.downloadSettings.wifiOnly,
+                        ),
+                    )
+                } else {
+                    repository.setWifiOnly(!state.downloadSettings.wifiOnly)
+                    refreshDownloads(repository)
+                }
+                publishDownloadAction("wifi")
             },
             onToggleDownloadSchedule = {
                 val next =
@@ -283,12 +344,38 @@ private fun FixtureMain(
                     } else {
                         DownloadScheduleMode.NOW
                     }
-                state = state.copy(
-                    downloadSettings = state.downloadSettings.copy(scheduleMode = next),
-                )
+                val repository = downloadRepository
+                if (repository == null) {
+                    state = state.copy(
+                        downloadSettings = state.downloadSettings.copy(scheduleMode = next),
+                    )
+                } else {
+                    repository.setScheduleMode(next)
+                    refreshDownloads(repository)
+                }
+                publishDownloadAction("schedule")
             },
-            onCycleConcurrentDownloads = {},
-            onCycleDownloadPriority = {},
+            onCycleConcurrentDownloads = {
+                val next = (state.downloadSettings.concurrentDownloads % 3) + 1
+                val repository = downloadRepository
+                if (repository == null) {
+                    state = state.copy(
+                        downloadSettings = state.downloadSettings.copy(concurrentDownloads = next),
+                    )
+                } else {
+                    repository.setConcurrentDownloads(next)
+                    refreshDownloads(repository)
+                }
+                publishDownloadAction("concurrent")
+            },
+            onCycleDownloadPriority = { item ->
+                val repository = downloadRepository
+                if (repository != null) {
+                    repository.cyclePriority(item.downloadId)
+                    refreshDownloads(repository)
+                }
+                publishDownloadAction("priority")
+            },
             onRunDiagnostics = {},
             onLogout = {},
         )
@@ -540,7 +627,7 @@ private const val QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes
 private const val QA_DOWNLOAD_POLL_MS = 100L
 private const val QA_DOWNLOAD_TOTAL_BYTES = 64L * 1024L * 1024L
 private const val QA_DOWNLOAD_WRITE_BLOCK = 64 * 1024
-private const val QA_DOWNLOAD_WRITE_DELAY_MS = 10L
+private const val QA_DOWNLOAD_WRITE_DELAY_MS = 40L
 
 /**
  * Debug-only loopback origin. Bounded byte ranges progress normally, while an
