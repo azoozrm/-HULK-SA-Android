@@ -22,8 +22,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Classify self-validation scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      lab_only: ${{ steps.classify.outputs.lab_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Classify exact pull-request scope
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p quality-evidence/self-validation/scope
+          if [[ "$EVENT_NAME" = 'workflow_dispatch' ]]; then
+            echo 'lab_only=true' >> "$GITHUB_OUTPUT"
+            printf '%s\n' \
+              '{"schema_version":1,"classification":"manual-self-validation","lab_only":true}' \
+              > quality-evidence/self-validation/scope/SCOPE.json
+          else
+            python3 -m qa.quality.scripts.pr_scope \
+              --base "$BASE_SHA" \
+              --head "$HEAD_SHA" \
+              --output quality-evidence/self-validation/scope/SCOPE.json \
+              --github-output "$GITHUB_OUTPUT"
+          fi
+          jq . quality-evidence/self-validation/scope/SCOPE.json
+
+      - name: Upload self-validation scope evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-QUALITY-LAB-SELF-VALIDATION-SCOPE
+          path: quality-evidence/self-validation/scope/
+          if-no-files-found: error
+          retention-days: 14
+
   static-contracts:
     name: Validate lab-only source and contracts
+    needs: scope
+    if: needs.scope.outputs.lab_only == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -83,6 +128,11 @@ jobs:
                   "GITHUB_STEP_SUMMARY",
                   "DETECTED:",
               ],
+              ".github/workflows/quality-lab-self-validation.yml": [
+                  "Classify self-validation scope",
+                  "needs.scope.outputs.lab_only == 'true'",
+                  "product-affecting PR correctly delegated",
+              ],
           }
 
           failures = []
@@ -107,7 +157,10 @@ jobs:
 
   infrastructure-instrumentation:
     name: Run non-product instrumentation controls
-    needs: static-contracts
+    needs:
+      - scope
+      - static-contracts
+    if: needs.scope.outputs.lab_only == 'true' && needs.static-contracts.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 85
     steps:
@@ -194,17 +247,27 @@ jobs:
     name: Final lab self-validation enforcement
     if: always()
     needs:
+      - scope
       - static-contracts
       - infrastructure-instrumentation
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require complete lab infrastructure
+      - name: Require correct scope-aware result
         env:
+          LAB_ONLY: ${{ needs.scope.outputs.lab_only }}
+          SCOPE: ${{ needs.scope.result }}
           STATIC: ${{ needs.static-contracts.result }}
           INSTRUMENTATION: ${{ needs.infrastructure-instrumentation.result }}
         run: |
           set -euo pipefail
+          [[ "$SCOPE" = 'success' ]]
+          if [[ "$LAB_ONLY" != 'true' ]]; then
+            [[ "$STATIC" = 'skipped' ]]
+            [[ "$INSTRUMENTATION" = 'skipped' ]]
+            echo 'PASS: product-affecting PR correctly delegated to PRODUCT_STRICT gates.'
+            exit 0
+          fi
           [[ "$STATIC" = 'success' ]]
           [[ "$INSTRUMENTATION" = 'success' ]]
           echo 'PASS: Quality Lab infrastructure is independently qualified.'
