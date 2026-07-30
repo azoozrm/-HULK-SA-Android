@@ -1,0 +1,142 @@
+name: PR57 Rebase After PR61
+
+on:
+  push:
+    branches:
+      - integration/pr57-after-pr61-product-strict
+    paths:
+      - '.github/workflows/pr57-rebase-after-pr61.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr57-rebase-after-pr61
+  cancel-in-progress: false
+
+jobs:
+  rebase-product-only:
+    name: Preserve adaptive Quality Lab and import PR57 product files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: integration/pr57-after-pr61-product-strict
+          fetch-depth: 0
+
+      - name: Fetch archived PR57 product head
+        run: |
+          set -euo pipefail
+          git fetch origin archive/pr57-before-pr61-rebase:refs/remotes/origin/archive/pr57-before-pr61-rebase
+          test "$(git rev-parse origin/archive/pr57-before-pr61-rebase)" = 'db0fee28e93e4ab669e04b8b4413e8d5fc9e40bf'
+
+      - name: Capture authoritative Quality Lab and logo hashes
+        run: |
+          set -euo pipefail
+          sha256sum \
+            qa/compatibility/inject_quality_markers.py \
+            qa/compatibility/tests/test_marker_injection.py \
+            qa/quality/release/approved-logo-assets.sha256 \
+            app/src/main/res/drawable-nodpi/hulk_sa_logo.webp \
+            app/src/main/res/drawable-nodpi/ic_banner.webp \
+            > "$RUNNER_TEMP/authoritative-before.sha256"
+
+      - name: Import only qualified product and integration files
+        run: |
+          set -euo pipefail
+          git checkout origin/archive/pr57-before-pr61-rebase -- \
+            app/build.gradle.kts \
+            app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt \
+            app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+            app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt \
+            app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt \
+            docs/project-audit/PR57-QUALITY-LAB-INTEGRATION.md
+
+      - name: Rebuild canonical manifest from actual integrated bytes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          manifest = Path('qa/canonical/canonical-source.sha256')
+          rebuilt = []
+          for raw in manifest.read_text(encoding='utf-8').splitlines():
+              if not raw.strip():
+                  continue
+              _digest, relative = raw.split(maxsplit=1)
+              path = Path(relative)
+              if not path.is_file():
+                  raise SystemExit(f'canonical path missing: {relative}')
+              rebuilt.append(f'{sha256(path.read_bytes()).hexdigest()}  {relative}')
+          manifest.write_text('\n'.join(rebuilt) + '\n', encoding='utf-8')
+          print(f'PASS: rebuilt {len(rebuilt)} canonical hashes from integrated repository bytes')
+          PY
+          sha256sum -c qa/canonical/canonical-source.sha256
+
+      - name: Prove Quality Lab and approved logo remain authoritative
+        run: |
+          set -euo pipefail
+          sha256sum -c "$RUNNER_TEMP/authoritative-before.sha256"
+          python3 qa/quality/release/logo_integrity.py
+          expected='2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e'
+          test "$(sha256sum app/src/main/res/drawable-nodpi/hulk_sa_logo.webp | awk '{print $1}')" = "$expected"
+          test "$(sha256sum app/src/main/res/drawable-nodpi/ic_banner.webp | awk '{print $1}')" = "$expected"
+
+      - name: Prove production source is marker-free and adaptive injection succeeds
+        run: |
+          set -euo pipefail
+          ! grep -Eq 'qa-tv-|qaTvPageContent|qaMarker\(|QA_TV_' \
+            app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          bash qa/compatibility/prepare-project.sh "$RUNNER_TEMP/pr57-integrated-project"
+          report="$RUNNER_TEMP/pr57-integrated-project/app/src/debug/quality-marker-injection.json"
+          test -s "$report"
+          python3 - "$report" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          report = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert report['replacement_count'] == 13, report
+          assert len(report['replacements']) == 13, report
+          assert report['original_sha256'] != report['instrumented_sha256'], report
+          assert report['markers'] == [
+              'qa-tv-rail',
+              'qa-tv-page-content:',
+              'qa-tv-live-actions',
+              'qa-tv-download-list',
+              'qa-tv-download-card:',
+          ], report
+          print('PASS: adaptive Quality Lab injected all 13 markers into PR57 product shape')
+          PY
+
+      - name: Record latest Quality Lab integration base
+        run: |
+          set -euo pipefail
+          cat >> docs/project-audit/PR57-QUALITY-LAB-INTEGRATION.md <<'EOF'
+
+## Adaptive marker-injection rebase
+
+- Latest Quality Lab base: `86d233c120dd21ff937a487bc1c4e9275786b7be` (merged PR #61).
+- Product source was re-established from archive `db0fee28e93e4ab669e04b8b4413e8d5fc9e40bf` over that base.
+- Only the six product/integration files listed above plus the regenerated canonical manifest differ from the latest base.
+- The adaptive debug injector accepted the marker-free PR #57 source and produced exactly 13 disposable marker layers.
+EOF
+
+      - name: Commit atomic product-only integration and remove temporary workflow
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/pr57-rebase-after-pr61.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            app/build.gradle.kts \
+            app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt \
+            app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+            app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt \
+            app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt \
+            docs/project-audit/PR57-QUALITY-LAB-INTEGRATION.md \
+            qa/canonical/canonical-source.sha256
+          git diff --cached --check
+          git commit -m 'test: rebase PR57 product fixes onto adaptive Quality Lab'
+          git push origin HEAD:integration/pr57-after-pr61-product-strict
