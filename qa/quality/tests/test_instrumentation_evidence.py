@@ -22,10 +22,11 @@ class InstrumentationEvidenceTest(unittest.TestCase):
             self.assertEqual("BLOCKED", summary["overall_status"])
             self.assertEqual("infrastructure", summary["classification"])
             self.assertEqual(0, summary["executed"])
+            self.assertEqual([], summary["failed_tests"])
             for filename in ("SUMMARY.json", "REPORT.md", "run-manifest.json", "SHA256SUMS"):
                 self.assertTrue((root / "evidence" / filename).is_file())
 
-    def test_junit_failures_are_product_failures(self) -> None:
+    def test_junit_failures_are_product_failures_with_actionable_details(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             results = root / "results"
@@ -33,7 +34,14 @@ class InstrumentationEvidenceTest(unittest.TestCase):
             results.mkdir()
             reports.mkdir()
             (results / "TEST-fixture.xml").write_text(
-                '<testsuite tests="3" failures="1" errors="0" skipped="1" />',
+                """<testsuite tests="3" failures="1" errors="0" skipped="1">
+<testcase classname="sa.hulksa.player.data.DownloadRepositoryFixtureTest"
+          name="productionRepositoryTransfersPositiveBytesAndFinalFileMatchesFixture">
+  <failure>java.lang.AssertionError: repository exposed zero bytes</failure>
+</testcase>
+<testcase classname="Example" name="pass" />
+<testcase classname="Example" name="skip"><skipped /></testcase>
+</testsuite>""",
                 encoding="utf-8",
             )
             (reports / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -53,6 +61,16 @@ class InstrumentationEvidenceTest(unittest.TestCase):
             self.assertEqual(1, summary["passed"])
             self.assertEqual(1, summary["failed"])
             self.assertEqual(1, summary["skipped"])
+            self.assertEqual(1, len(summary["failed_tests"]))
+            failure = summary["failed_tests"][0]
+            self.assertEqual(
+                "productionRepositoryTransfersPositiveBytesAndFinalFileMatchesFixture",
+                failure["test_name"],
+            )
+            self.assertIn("zero bytes", failure["message"])
+            report = (root / "evidence" / "REPORT.md").read_text(encoding="utf-8")
+            self.assertIn("## Failed tests", report)
+            self.assertIn("DownloadRepositoryFixtureTest", report)
 
     def test_clean_junit_and_report_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -81,6 +99,7 @@ class InstrumentationEvidenceTest(unittest.TestCase):
             self.assertEqual("none", summary["classification"])
             self.assertEqual(4, summary["executed"])
             self.assertEqual(4, summary["passed"])
+            self.assertEqual([], summary["failed_tests"])
 
 
 if __name__ == "__main__":
