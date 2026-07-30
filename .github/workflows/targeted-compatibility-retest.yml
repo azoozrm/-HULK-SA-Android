@@ -133,6 +133,9 @@ jobs:
               --out "$OUT" \
               --serial emulator-5554
           python3 qa/compatibility/analyze.py "$OUT"
+          if [[ "$ID" == "nexus-9-api28" ]]; then
+            python3 qa/compatibility/postprocess_targeted_downloads.py "$OUT"
+          fi
           if [[ "${{ inputs.enforce_findings }}" == "true" ]]; then
             python3 qa/compatibility/gate.py "$OUT/summary.json"
           fi
