@@ -6,6 +6,11 @@ on:
       - integration/pr57-after-pr61-product-strict
     paths:
       - '.github/workflows/pr57-rebase-after-pr61.yml'
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/workflows/pr57-rebase-after-pr61.yml'
 
 permissions:
   contents: write
