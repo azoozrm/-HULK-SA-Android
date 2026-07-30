@@ -90,13 +90,16 @@ jobs:
               normalize(source, destination)
               print(f'normalized {source} -> {destination}')
           PY
-          for patch in \
+          for patch_file in \
             /tmp/pr68-qaactivity-focus.patch \
             /tmp/pr68-run-lab-focus.patch \
             /tmp/pr68-analyze-focus.patch; do
-            git apply --check "$patch"
-            git apply "$patch"
+            patch --batch --forward --fuzz=3 -p1 < "$patch_file"
           done
+          if find qa -name '*.rej' -print -quit | grep -q .; then
+            find qa -name '*.rej' -print -exec cat {} \;
+            exit 1
+          fi
           python3 - <<'PY'
           from pathlib import Path
 
