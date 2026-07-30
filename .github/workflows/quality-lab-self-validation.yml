@@ -60,11 +60,50 @@ jobs:
           python3 qa/compatibility/lab_config.py --validate
           bash -n qa/quality/scripts/run_instrumentation.sh
           bash -n qa/compatibility/run-native-emulator.sh
-          grep -q 'productionRepositoryTransfersPositiveBytesAndFinalFileMatchesFixture' \
-            app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt
-          grep -q 'enforce_findings: true' .github/workflows/quality-ui.yml
-          grep -q 'aggregate-evidence:' .github/workflows/compatibility-lab.yml
-          grep -q 'Final fail-closed enforcement' .github/workflows/compatibility-lab.yml
+          python3 - <<'PY'
+          from pathlib import Path
+
+          contracts = {
+              "app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt": [
+                  "productionRepositoryTransfersPositiveBytesAndFinalFileMatchesFixture",
+              ],
+              ".github/workflows/quality-ui.yml": [
+                  "Classify lab-only versus product changes",
+                  "qa.quality.scripts.pr_scope",
+                  "enforce_findings:",
+                  "needs.scope.outputs.lab_only != 'true'",
+                  "product-affecting PR passed strict instrumentation",
+              ],
+              ".github/workflows/compatibility-lab.yml": [
+                  "aggregate-evidence:",
+                  "Final fail-closed enforcement",
+              ],
+              "qa/compatibility/gate.py": [
+                  "emit_finding_diagnostics",
+                  "GITHUB_STEP_SUMMARY",
+                  "DETECTED:",
+              ],
+          }
+
+          failures = []
+          for filename, needles in contracts.items():
+              path = Path(filename)
+              if not path.is_file():
+                  failures.append(f"missing file: {filename}")
+                  continue
+              source = path.read_text(encoding="utf-8")
+              for needle in needles:
+                  if needle not in source:
+                      failures.append(f"{filename} missing contract: {needle}")
+                  else:
+                      print(f"PASS: {filename} contains contract {needle!r}")
+
+          if failures:
+              for failure in failures:
+                  print(f"::error title=Quality Lab contract failure::{failure}")
+              raise SystemExit("FAIL: " + "; ".join(failures))
+          print("PASS: all explicit Quality Lab source contracts are present")
+          PY
 
   infrastructure-instrumentation:
     name: Run non-product instrumentation controls
