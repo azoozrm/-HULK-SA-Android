@@ -25,170 +25,6 @@ def tree_digest(root: Path, *, exclude: set[Path] | None = None) -> str:
     return digest.hexdigest()
 
 
-def replace_exact(source: str, old: str, new: str, label: str) -> str:
-    count = source.count(old)
-    if count != 1:
-        raise ValueError(f"{label} must match exactly once; found {count}")
-    return source.replace(old, new, 1)
-
-
-def prepare_qa_activity(source: str) -> str:
-    """Add a native debug-only accessibility evidence node.
-
-    Android 9 UI Automator can retain a previous Compose semantics snapshot while
-    the rendered page and durable download state have already advanced. A tiny
-    native TextView is overlaid after the product shell so the platform tree sees
-    the same authenticated page/transfer evidence. The transform is exact,
-    debug-only, and fails closed for repeated, missing, or already-instrumented
-    source.
-    """
-
-    guard = "val qualityEvidence = buildList {"
-    if guard in source or "AndroidView(" in source:
-        raise ValueError(
-            "QA Activity already contains the native accessibility evidence node"
-        )
-
-    for anchor, addition, label in (
-        (
-            "import android.os.Environment\n",
-            "import android.view.View\n"
-            "import android.view.accessibility.AccessibilityEvent\n"
-            "import android.widget.TextView\n",
-            "Android accessibility imports",
-        ),
-        (
-            "import androidx.compose.foundation.layout.fillMaxSize\n",
-            "import androidx.compose.foundation.layout.size\n",
-            "Compose size import",
-        ),
-        (
-            "import androidx.compose.runtime.getValue\n",
-            "import androidx.compose.runtime.key\n",
-            "Compose key import",
-        ),
-        (
-            "import androidx.compose.ui.Modifier\n",
-            "import androidx.compose.ui.Alignment\n",
-            "Compose alignment import",
-        ),
-        (
-            "import androidx.compose.ui.semantics.semantics\n",
-            "import androidx.compose.ui.unit.dp\n"
-            "import androidx.compose.ui.viewinterop.AndroidView\n"
-            "import androidx.compose.ui.zIndex\n",
-            "AndroidView imports",
-        ),
-    ):
-        source = replace_exact(source, anchor, anchor + addition, label)
-
-    start_marker = "private fun FixtureMain("
-    end_marker = "\nprivate fun String.toDestination()"
-    start = source.find(start_marker)
-    if start < 0:
-        raise ValueError("QA Activity FixtureMain start marker not found")
-    end = source.find(end_marker, start)
-    if end < 0:
-        raise ValueError("QA Activity FixtureMain end marker not found")
-    segment = source[start:end]
-
-    marker_block = """    Box(
-        Modifier
-            .fillMaxSize()
-            .semantics(mergeDescendants = false) {
-                contentDescription = buildList {
-                    add(pageMarker)
-                    if (hasOriginByteProgress) {
-                        add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
-                    }
-                    if (hasRealDownloadProgress) {
-                        add(QA_DOWNLOAD_PROGRESS_MARKER)
-                    }
-                    lastDownloadAction?.let { marker ->
-                        if (state.destination == MainDestination.DOWNLOADS) {
-                            add("qa-download-action:$marker")
-                        }
-                    }
-                }
-                    .joinToString(",")
-            },
-    ) {
-        MainShellScreen(
-"""
-    replacement = """    val qualityEvidence = buildList {
-        add(pageMarker)
-        if (hasOriginByteProgress) {
-            add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
-        }
-        if (hasRealDownloadProgress) {
-            add(QA_DOWNLOAD_PROGRESS_MARKER)
-        }
-        lastDownloadAction?.let { marker ->
-            if (state.destination == MainDestination.DOWNLOADS) {
-                add("qa-download-action:$marker")
-            }
-        }
-    }
-        .joinToString(",")
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .semantics(mergeDescendants = false) {
-                contentDescription = qualityEvidence
-            },
-    ) {
-        MainShellScreen(
-"""
-    segment = replace_exact(
-        segment,
-        marker_block,
-        replacement,
-        "QA Activity evidence block",
-    )
-
-    tail = """            onRunDiagnostics = {},
-            onLogout = {},
-        )
-    }
-}
-"""
-    tail_replacement = """            onRunDiagnostics = {},
-            onLogout = {},
-        )
-        key(qualityEvidence) {
-            AndroidView(
-                factory = { context ->
-                    TextView(context).apply {
-                        importantForAccessibility =
-                            View.IMPORTANT_FOR_ACCESSIBILITY_YES
-                    }
-                },
-                update = { view ->
-                    view.text = qualityEvidence
-                    view.contentDescription = qualityEvidence
-                    view.sendAccessibilityEvent(
-                        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-                    )
-                },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(4.dp)
-                    .zIndex(1000f),
-            )
-        }
-    }
-}
-"""
-    segment = replace_exact(
-        segment,
-        tail,
-        tail_replacement,
-        "QA Activity post-shell evidence anchor",
-    )
-    return source[:start] + segment + source[end:]
-
-
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: prepare-harness.py <prepared-project>")
@@ -199,7 +35,10 @@ def main() -> None:
     if not (project / "settings.gradle.kts").is_file() or not main_source.is_dir():
         raise SystemExit(f"not a prepared Android project: {project}")
 
-    marker_target = main_source / "java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+    marker_target = (
+        main_source
+        / "java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+    )
     if not marker_target.is_file():
         raise SystemExit(f"missing Quality Lab marker target: {marker_target}")
 
@@ -227,8 +66,10 @@ def main() -> None:
         encoding="utf-8",
     )
     source = Path(__file__).with_name("QaActivity.kt")
-    prepared_source = prepare_qa_activity(source.read_text(encoding="utf-8"))
-    (source_dir / "QaActivity.kt").write_text(prepared_source, encoding="utf-8")
+    (source_dir / "QaActivity.kt").write_text(
+        source.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
     marker_report = debug_root / "quality-marker-injection.json"
     report = inject_file(marker_target, marker_report)
@@ -246,9 +87,6 @@ def main() -> None:
     print(
         "PASS: temporary MainShell marker instrumentation is limited to the "
         "prepared debug checkout"
-    )
-    print(
-        "PASS: post-shell native accessibility evidence tracks page and transfer state"
     )
     print(f"Canonical src/main digest before injection: {production_before}")
     print(f"Instrumented src/main digest: {production_after}")
