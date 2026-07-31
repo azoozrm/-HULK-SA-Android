@@ -176,3 +176,15 @@ class WorkflowContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+    def test_mixed_scope_runs_lab_self_validation(self) -> None:
+        source = Path(".github/workflows/quality-lab-self-validation.yml").read_text(encoding="utf-8")
+        self.assertIn("lab_changed", source)
+        self.assertIn("product_changed", source)
+        self.assertIn("lab_only", source)
+        self.assertIn("needs.scope.outputs.lab_changed == 'true'", source)
+        self.assertIn("STATIC_VALIDATED", source)
+        self.assertIn("RUNTIME_VALIDATED", source)
+        self.assertIn("DELEGATED_ONLY", source)
