@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from qa.quality.reporters.aggregate.__main__ import policy_exit_code
@@ -54,15 +55,13 @@ class AggregateCliPolicyTest(unittest.TestCase):
             policy_exit_code(1, "quality-ui-lab-only", summary),
         )
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-
     def test_raw_and_root_cause_counts_are_distinct(self) -> None:
         source = Path("qa/quality/reporters/aggregate.py").read_text(encoding="utf-8")
         self.assertIn('"primary_root_cause_count"', source)
         self.assertIn('"raw_failed_checks_count"', source)
         self.assertIn('"downstream_count"', source)
         self.assertNotIn('"false_positives": 0', source)
+
+
+if __name__ == "__main__":
+    unittest.main()

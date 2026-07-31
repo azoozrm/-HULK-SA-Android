@@ -229,12 +229,6 @@ class StaleDownloadHierarchyReconciliationTest(unittest.TestCase):
             self.assertEqual([], GATE.reconcile_stale_download_hierarchies(summary, summary_path))
             self.assertEqual(2, summary["critical_count"])
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-
     def test_downstream_findings_do_not_inflate_product_count(self) -> None:
         data = {
             "infrastructure_error_count": 0,
@@ -243,7 +237,11 @@ if __name__ == "__main__":
                 {"severity": "critical", "classification": "future_stage", "finding_role": "downstream", "root_cause_id": "root", "gate_outcome": "RECORDED", "product_strict": False},
             ],
         }
-        metrics = gate._finding_metrics(data)
+        metrics = GATE._finding_metrics(data)
         self.assertEqual(1, metrics["primary_root_cause_count"])
         self.assertEqual(1, metrics["downstream_count"])
         self.assertEqual(0, metrics["product_critical_count"])
+
+
+if __name__ == "__main__":
+    unittest.main()
