@@ -20,6 +20,34 @@ class TvLayoutPolicyTest {
     }
 
     @Test
+    fun `download card heights preserve the qualified TV layouts`() {
+        assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 360), 0.001f)
+        assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 540), 0.001f)
+        assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 541), 0.001f)
+        assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 1080), 0.001f)
+    }
+
+    @Test
+    fun `toolbar focus descends to the aligned action column`() {
+        assertEquals(
+            DownloadFocusNode(0, DownloadFocusSlot.PRIORITY),
+            nextDownloadFocusNode(
+                DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE),
+                rowCount = 2,
+                direction = DownloadFocusDirection.DOWN,
+            ),
+        )
+        assertEquals(
+            DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
+            nextDownloadFocusNode(
+                DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),
+                rowCount = 2,
+                direction = DownloadFocusDirection.DOWN,
+            ),
+        )
+    }
+
+    @Test
     fun `download focus graph reaches every filter and every action in every row`() {
         val rowCount = 4
         val start = DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
@@ -27,12 +55,12 @@ class TvLayoutPolicyTest {
         val queue = ArrayDeque<DownloadFocusNode>()
         queue.add(start)
         while (queue.isNotEmpty()) {
-  val current = queue.removeFirst()
-  DownloadFocusDirection.entries.forEach { direction ->
-      nextDownloadFocusNode(current, rowCount, direction)?.let { target ->
-          if (visited.add(target)) queue.add(target)
-      }
-  }
+            val current = queue.removeFirst()
+            DownloadFocusDirection.entries.forEach { direction ->
+                nextDownloadFocusNode(current, rowCount, direction)?.let { target ->
+                    if (visited.add(target)) queue.add(target)
+                }
+            }
         }
         assertEquals(3 + rowCount * 3, visited.size)
     }
@@ -40,43 +68,43 @@ class TvLayoutPolicyTest {
     @Test
     fun `download focus graph has deterministic vertical and horizontal ordering`() {
         assertEquals(
-  DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
-  nextDownloadFocusNode(
-      DownloadFocusNode(-1, DownloadFocusSlot.WIFI),
-      rowCount = 2,
-      direction = DownloadFocusDirection.DOWN,
-  ),
+            DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
+            nextDownloadFocusNode(
+                DownloadFocusNode(-1, DownloadFocusSlot.WIFI),
+                rowCount = 2,
+                direction = DownloadFocusDirection.DOWN,
+            ),
         )
         assertEquals(
-  DownloadFocusNode(0, DownloadFocusSlot.PRIORITY),
-  nextDownloadFocusNode(
-      DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
-      rowCount = 2,
-      direction = DownloadFocusDirection.LEFT,
-  ),
+            DownloadFocusNode(0, DownloadFocusSlot.PRIORITY),
+            nextDownloadFocusNode(
+                DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
+                rowCount = 2,
+                direction = DownloadFocusDirection.LEFT,
+            ),
         )
         assertEquals(
-  DownloadFocusNode(1, DownloadFocusSlot.CANCEL),
-  nextDownloadFocusNode(
-      DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
-      rowCount = 2,
-      direction = DownloadFocusDirection.DOWN,
-  ),
+            DownloadFocusNode(1, DownloadFocusSlot.CANCEL),
+            nextDownloadFocusNode(
+                DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
+                rowCount = 2,
+                direction = DownloadFocusDirection.DOWN,
+            ),
         )
         assertEquals(
-  DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),
-  nextDownloadFocusNode(
-      DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
-      rowCount = 2,
-      direction = DownloadFocusDirection.UP,
-  ),
+            DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),
+            nextDownloadFocusNode(
+                DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
+                rowCount = 2,
+                direction = DownloadFocusDirection.UP,
+            ),
         )
         assertNull(
-  nextDownloadFocusNode(
-      DownloadFocusNode(1, DownloadFocusSlot.CANCEL),
-      rowCount = 2,
-      direction = DownloadFocusDirection.DOWN,
-  ),
+            nextDownloadFocusNode(
+                DownloadFocusNode(1, DownloadFocusSlot.CANCEL),
+                rowCount = 2,
+                direction = DownloadFocusDirection.DOWN,
+            ),
         )
     }
 }
