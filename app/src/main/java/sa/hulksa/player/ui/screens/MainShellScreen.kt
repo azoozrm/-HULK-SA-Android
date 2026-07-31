@@ -158,130 +158,6 @@ private val TV_LIVE_ACTION_INSET = 8.dp
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
-
-internal enum class DownloadFocusSlot {
-    WIFI,
-    SCHEDULE,
-    CONCURRENT,
-    PRIMARY,
-    PRIORITY,
-    CANCEL,
-}
-
-internal enum class DownloadFocusDirection {
-    UP,
-    DOWN,
-    LEFT,
-    RIGHT,
-}
-
-internal data class DownloadFocusNode(
-    val rowIndex: Int,
-    val slot: DownloadFocusSlot,
-)
-
-internal fun nextDownloadFocusNode(
-    current: DownloadFocusNode,
-    rowCount: Int,
-    direction: DownloadFocusDirection,
-): DownloadFocusNode? {
-    if (rowCount < 0) return null
-    if (current.rowIndex < 0) {
-        return when (direction) {
-            DownloadFocusDirection.UP -> null
-            DownloadFocusDirection.DOWN -> when (current.slot) {
-                DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
-                DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
-                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
-                else -> null
-            }.takeIf { rowCount > 0 }
-            DownloadFocusDirection.LEFT -> when (current.slot) {
-                DownloadFocusSlot.WIFI -> DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)
-                DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT)
-                else -> null
-            }
-            DownloadFocusDirection.RIGHT -> when (current.slot) {
-                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)
-                DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
-                else -> null
-            }
-        }
-    }
-
-    if (
-        current.rowIndex >= rowCount ||
-        current.slot !in setOf(
-            DownloadFocusSlot.PRIMARY,
-            DownloadFocusSlot.PRIORITY,
-            DownloadFocusSlot.CANCEL,
-        )
-    ) {
-        return null
-    }
-
-    return when (direction) {
-        DownloadFocusDirection.LEFT -> when (current.slot) {
-            DownloadFocusSlot.PRIMARY -> current.copy(slot = DownloadFocusSlot.PRIORITY)
-            DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.CANCEL)
-            else -> null
-        }
-        DownloadFocusDirection.RIGHT -> when (current.slot) {
-            DownloadFocusSlot.CANCEL -> current.copy(slot = DownloadFocusSlot.PRIORITY)
-            DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.PRIMARY)
-            else -> null
-        }
-        DownloadFocusDirection.UP -> if (current.rowIndex > 0) {
-            current.copy(rowIndex = current.rowIndex - 1)
-        } else {
-            DownloadFocusNode(
-                rowIndex = -1,
-                slot = when (current.slot) {
-                    DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
-                    DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
-                    DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT
-                    else -> return null
-                },
-            )
-        }
-        DownloadFocusDirection.DOWN -> if (current.rowIndex + 1 < rowCount) {
-            current.copy(rowIndex = current.rowIndex + 1)
-        } else {
-            null
-        }
-    }
-}
-
-private fun Modifier.downloadFocusNavigation(
-    isTv: Boolean,
-    node: DownloadFocusNode,
-    rowCount: Int,
-    requesters: Map<DownloadFocusNode, FocusRequester>,
-): Modifier {
-    if (!isTv) return this
-    val requester = requesters[node] ?: return this
-    return focusRequester(requester).onPreviewKeyEvent { event ->
-        if (event.type != KeyEventType.KeyDown) {
-            false
-        } else {
-            val direction = when (event.key) {
-                Key.DirectionUp -> DownloadFocusDirection.UP
-                Key.DirectionDown -> DownloadFocusDirection.DOWN
-                Key.DirectionLeft -> DownloadFocusDirection.LEFT
-                Key.DirectionRight -> DownloadFocusDirection.RIGHT
-                else -> null
-            }
-            val target = direction?.let { nextDownloadFocusNode(node, rowCount, it) }
-            if (target == null) {
-                false
-            } else {
-                requesters[target]?.let { targetRequester ->
-                    runCatching { targetRequester.requestFocus() }.isSuccess
-                } ?: false
-            }
-        }
-    }
-}
-
 data class NavigationPosition(
     val rowKey: String = "",
     val rowIndex: Int = 0,
@@ -456,6 +332,29 @@ class NavigationMemoryStore {
 
 private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
     then(if (enabled) Modifier.focusRequester(requester) else Modifier)
+
+private data class DownloadToolbarFocusRequesters(
+    val wifi: FocusRequester = FocusRequester(),
+    val schedule: FocusRequester = FocusRequester(),
+    val concurrent: FocusRequester = FocusRequester(),
+)
+
+private data class DownloadCardFocusRequesters(
+    val primary: FocusRequester = FocusRequester(),
+    val priority: FocusRequester = FocusRequester(),
+    val cancel: FocusRequester = FocusRequester(),
+)
+
+private fun Modifier.applyDownloadFocusPolicy(
+    current: DownloadFocusLocation,
+    rowCount: Int,
+    resolve: (DownloadFocusLocation) -> FocusRequester?,
+): Modifier = focusProperties {
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.LEFT)?.let(resolve)?.let { left = it }
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.RIGHT)?.let(resolve)?.let { right = it }
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.UP)?.let(resolve)?.let { up = it }
+    nextDownloadFocus(rowCount, current, DownloadFocusMove.DOWN)?.let(resolve)?.let { down = it }
+}
 
 
 @Composable
@@ -1623,40 +1522,33 @@ private fun DownloadsScreen(
     val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val downloadsFocusScope = rememberCoroutineScope()
     var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
+    val toolbarFocus = remember { DownloadToolbarFocusRequesters() }
+    val cardFocus = remember(downloads.map { it.downloadId }) {
+        downloads.associate { item -> item.downloadId to DownloadCardFocusRequesters() }
+    }
+    val resolveDownloadFocus: (DownloadFocusLocation) -> FocusRequester? = { location ->
+        when (location.zone) {
+            DownloadFocusZone.TOOLBAR -> when (location.slot) {
+                DownloadFocusSlot.WIFI -> toolbarFocus.wifi
+                DownloadFocusSlot.SCHEDULE -> toolbarFocus.schedule
+                DownloadFocusSlot.CONCURRENT -> toolbarFocus.concurrent
+                else -> null
+            }
+            DownloadFocusZone.CARD -> downloads.getOrNull(location.row)
+                ?.let { cardFocus[it.downloadId] }
+                ?.let { requesters ->
+                    when (location.slot) {
+                        DownloadFocusSlot.PRIMARY -> requesters.primary
+                        DownloadFocusSlot.PRIORITY -> requesters.priority
+                        DownloadFocusSlot.CANCEL -> requesters.cancel
+                        else -> null
+                    }
+                }
+        }
+    }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
-    }
-    val downloadIds = downloads.map(OfflineDownload::downloadId)
-    val downloadFocusRequesters = remember(downloadIds) {
-        buildMap {
-            put(DownloadFocusNode(-1, DownloadFocusSlot.WIFI), FocusRequester())
-            put(DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE), FocusRequester())
-            put(DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT), FocusRequester())
-            downloads.indices.forEach { rowIndex ->
-                put(DownloadFocusNode(rowIndex, DownloadFocusSlot.PRIMARY), FocusRequester())
-                put(DownloadFocusNode(rowIndex, DownloadFocusSlot.PRIORITY), FocusRequester())
-                put(DownloadFocusNode(rowIndex, DownloadFocusSlot.CANCEL), FocusRequester())
-            }
-        }
-    }
-    fun focusModifier(node: DownloadFocusNode): Modifier = Modifier.downloadFocusNavigation(
-        isTv = isTv,
-        node = node,
-        rowCount = downloads.size,
-        requesters = downloadFocusRequesters,
-    )
-
-    LaunchedEffect(isTv, downloadIds, remembered.itemKey, rememberedIndex) {
-        if (isTv) {
-            delay(180L)
-            val initialNode = if (remembered.itemKey.isBlank()) {
-                DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
-            } else {
-                DownloadFocusNode(rememberedIndex, DownloadFocusSlot.PRIMARY)
-            }
-            runCatching { downloadFocusRequesters[initialNode]?.requestFocus() }
-        }
     }
 
     Column(
@@ -1676,6 +1568,7 @@ private fun DownloadsScreen(
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+            modifier = Modifier.focusGroup(),
         ) {
             item {
                 FocusButton(
@@ -1684,7 +1577,13 @@ private fun DownloadsScreen(
                     primary = settings.wifiOnly,
                     compact = true,
                     outlined = !settings.wifiOnly,
-                    modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.WIFI)),
+                    modifier = Modifier
+                        .focusRequester(toolbarFocus.wifi)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
+                            downloads.size,
+                            resolveDownloadFocus,
+                        ),
                 )
             }
             item {
@@ -1694,7 +1593,13 @@ private fun DownloadsScreen(
                     primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
                     compact = true,
                     outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
-                    modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.SCHEDULE)),
+                    modifier = Modifier
+                        .focusRequester(toolbarFocus.schedule)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
+                            downloads.size,
+                            resolveDownloadFocus,
+                        ),
                 )
             }
             item {
@@ -1704,7 +1609,13 @@ private fun DownloadsScreen(
                     primary = false,
                     compact = true,
                     outlined = true,
-                    modifier = focusModifier(DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT)),
+                    modifier = Modifier
+                        .focusRequester(toolbarFocus.concurrent)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
+                            downloads.size,
+                            resolveDownloadFocus,
+                        ),
                 )
             }
         }
@@ -1720,16 +1631,27 @@ private fun DownloadsScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
+                    val requesters = checkNotNull(cardFocus[item.downloadId])
                     DownloadCard(
                         item = item,
                         isTv = isTv,
+                        rowIndex = index,
+                        rowCount = downloads.size,
+                        focusRequesters = requesters,
+                        resolveFocus = resolveDownloadFocus,
+                        restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
                         onFocused = {
                             navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
                             if (isTv) {
                                 downloadsFocusJob?.cancel()
                                 downloadsFocusJob = downloadsFocusScope.launch {
-                                    delay(100L)
-                                    runCatching { downloadsState.scrollToItem(index, scrollOffset = 0) }
+                                    // Compose's TV focus relocation can pivot a focused action
+                                    // above the LazyColumn viewport. Re-anchor the owning card
+                                    // after that relocation so its top edge is never clipped.
+                                    delay(120)
+                                    runCatching {
+                                        downloadsState.scrollToItem(index, scrollOffset = 0)
+                                    }
                                 }
                             }
                         },
@@ -1737,9 +1659,6 @@ private fun DownloadsScreen(
                         onDelete = onDelete,
                         onRetry = onRetry,
                         onCyclePriority = onCyclePriority,
-                        primaryActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.PRIMARY)),
-                        priorityActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.PRIORITY)),
-                        cancelActionModifier = focusModifier(DownloadFocusNode(index, DownloadFocusSlot.CANCEL)),
                         modifier = Modifier
                             .widthIn(max = if (isTv) 720.dp else 520.dp)
                             .fillMaxWidth(),
@@ -1754,174 +1673,215 @@ private fun DownloadsScreen(
 private fun DownloadCard(
     item: OfflineDownload,
     isTv: Boolean,
+    rowIndex: Int,
+    rowCount: Int,
+    focusRequesters: DownloadCardFocusRequesters,
+    resolveFocus: (DownloadFocusLocation) -> FocusRequester?,
+    restoreFocus: Boolean,
     onFocused: () -> Unit,
     onPlay: (OfflineDownload) -> Unit,
     onDelete: (OfflineDownload) -> Unit,
     onRetry: (OfflineDownload) -> Unit,
     onCyclePriority: (OfflineDownload) -> Unit,
-    primaryActionModifier: Modifier,
-    priorityActionModifier: Modifier,
-    cancelActionModifier: Modifier,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(restoreFocus, item.downloadId) {
+        if (restoreFocus) { delay(220); runCatching { focusRequesters.primary.requestFocus() } }
+    }
     val shape = RoundedCornerShape(17.dp)
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .height(if (isTv) 164.dp else 220.dp)
             .clip(shape)
             .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
-            .border(
-                if (focused) 2.dp else 1.dp,
-                if (focused) colors.goldBright else colors.line.copy(alpha = .45f),
-                shape,
-            )
-            .onFocusChanged { focusState -> focused = focusState.hasFocus }
-            .padding(if (isTv) 9.dp else 11.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 6.dp else 8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(72.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF1B1C15)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (!item.posterUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = item.posterUrl,
-                        contentDescription = item.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    BrandLogo(Modifier.size(52.dp).graphicsLayer { alpha = .55f })
-                }
-                if (item.status == OfflineStatus.COMPLETED) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .padding(5.dp)
-                            .clip(CircleShape)
-                            .background(colors.gold)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text("جاهز", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+            .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .45f), shape)
+            .onFocusChanged {
+                focused = it.hasFocus
+                if (it.hasFocus) onFocused()
             }
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column {
-                    Text(
-                        item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
-                        color = colors.goldBright,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                    val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
-                        "الحلقة ${item.episodeNumber}"
-                    } else {
-                        item.title
-                    }
-                    Text(
-                        cleanDownloadTitle,
-                        color = colors.text,
-                        fontSize = if (isTv) 14.sp else 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        lineHeight = if (isTv) 17.sp else 15.sp,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                        item.season?.let { season ->
-                            Text("الموسم $season", color = colors.textMuted, fontSize = 8.sp, maxLines = 1)
-                        }
-                        Text(
-                            "الاولوية  ${priorityLabel(item.priority)}",
-                            color = if (item.priority == 1) colors.goldBright else colors.textMuted,
-                            fontSize = 8.sp,
-                            maxLines = 1,
-                        )
-                    }
+            .padding(11.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(if (isTv) 82.dp else 72.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF1B1C15)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.posterUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = item.posterUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                BrandLogo(Modifier.size(58.dp).graphicsLayer { alpha = .55f })
+            }
+            if (item.status == OfflineStatus.COMPLETED) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .clip(CircleShape)
+                        .background(colors.gold)
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                ) {
+                    Text("جاهز", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                 }
-                DownloadProgress(item)
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().height(if (isTv) 36.dp else 40.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            when (item.status) {
-                OfflineStatus.COMPLETED -> FocusButton(
-                    "تشغيل",
-                    { onPlay(item) },
-                    compact = true,
-                    outlined = true,
-                    onFocused = onFocused,
-                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Column(Modifier.weight(1f).fillMaxWidth()) {
+                Text(
+                    item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
+                    color = colors.goldBright,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                 )
-                OfflineStatus.FAILED -> FocusButton(
-                    "اعادة المحاولة",
-                    { onRetry(item) },
-                    compact = true,
-                    outlined = true,
-                    onFocused = onFocused,
-                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
+                    "الحلقة ${item.episodeNumber}"
+                } else {
+                    item.title
+                }
+                Text(
+                    cleanDownloadTitle,
+                    color = colors.text,
+                    fontSize = if (isTv) 14.sp else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = if (isTv) 17.sp else 15.sp,
                 )
-                OfflineStatus.PAUSED,
-                OfflineStatus.WAITING_SCHEDULE,
-                OfflineStatus.WAITING_NETWORK,
-                OfflineStatus.WAITING_STORAGE,
-                -> FocusButton(
-                    "استئناف",
-                    { onRetry(item) },
-                    compact = true,
-                    outlined = true,
-                    onFocused = onFocused,
-                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                val downloadMeta = buildList {
+                    item.season?.let { add("الموسم $it") }
+                    add("الاولوية ${priorityLabel(item.priority)}")
+                }.joinToString("  •  ")
+                Text(
+                    downloadMeta,
+                    color = if (item.priority == 1) colors.goldBright else colors.textMuted,
+                    fontSize = 8.sp,
+                    maxLines = 1,
                 )
-                OfflineStatus.QUEUED,
-                OfflineStatus.CHECKING,
-                OfflineStatus.DOWNLOADING,
-                -> FocusButton(
-                    "ايقاف مؤقت",
-                    { onRetry(item) },
+                Spacer(Modifier.height(2.dp))
+                DownloadProgress(item)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(44.dp).focusGroup(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                when (item.status) {
+                    OfflineStatus.COMPLETED -> FocusButton(
+                        "تشغيل",
+                        { onPlay(item) },
+                        compact = true,
+                        onFocused = onFocused,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequesters.primary)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                rowCount,
+                                resolveFocus,
+                            ),
+                    )
+                    OfflineStatus.FAILED -> FocusButton(
+                        "اعادة المحاولة",
+                        { onRetry(item) },
+                        compact = true,
+                        onFocused = onFocused,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequesters.primary)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                rowCount,
+                                resolveFocus,
+                            ),
+                    )
+                    OfflineStatus.PAUSED,
+                    OfflineStatus.WAITING_SCHEDULE,
+                    OfflineStatus.WAITING_NETWORK,
+                    OfflineStatus.WAITING_STORAGE,
+                    -> FocusButton(
+                        "استئناف",
+                        { onRetry(item) },
+                        compact = true,
+                        onFocused = onFocused,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequesters.primary)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                rowCount,
+                                resolveFocus,
+                            ),
+                    )
+                    OfflineStatus.QUEUED,
+                    OfflineStatus.CHECKING,
+                    OfflineStatus.DOWNLOADING,
+                    -> FocusButton(
+                        "ايقاف مؤقت",
+                        { onRetry(item) },
+                        primary = true,
+                        compact = true,
+                        onFocused = onFocused,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequesters.primary)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                rowCount,
+                                resolveFocus,
+                            ),
+                    )
+                }
+                FocusButton(
+                    priorityShortLabel(item.priority),
+                    { onCyclePriority(item) },
+                    primary = item.priority == 1,
+                    compact = true,
+                    outlined = item.priority != 1,
+                    onFocused = onFocused,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .focusRequester(focusRequesters.priority)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
+                            rowCount,
+                            resolveFocus,
+                        ),
+                )
+                FocusButton(
+                    if (item.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
+                    { onDelete(item) },
                     primary = false,
                     compact = true,
                     outlined = true,
                     onFocused = onFocused,
-                    modifier = Modifier.weight(1.35f).fillMaxHeight().then(primaryActionModifier),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .focusRequester(focusRequesters.cancel)
+                        .applyDownloadFocusPolicy(
+                            DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
+                            rowCount,
+                            resolveFocus,
+                        ),
                 )
             }
-            FocusButton(
-                priorityShortLabel(item.priority),
-                { onCyclePriority(item) },
-                primary = item.priority == 1,
-                compact = true,
-                outlined = true,
-                onFocused = onFocused,
-                modifier = Modifier.weight(1f).fillMaxHeight().then(priorityActionModifier),
-            )
-            FocusButton(
-                if (item.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
-                { onDelete(item) },
-                primary = false,
-                compact = true,
-                outlined = true,
-                onFocused = onFocused,
-                modifier = Modifier.weight(1f).fillMaxHeight().then(cancelActionModifier),
-            )
         }
     }
 }
