@@ -35,7 +35,10 @@ def main() -> None:
     if not (project / "settings.gradle.kts").is_file() or not main_source.is_dir():
         raise SystemExit(f"not a prepared Android project: {project}")
 
-    marker_target = main_source / "java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+    marker_target = (
+        main_source
+        / "java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+    )
     if not marker_target.is_file():
         raise SystemExit(f"missing Quality Lab marker target: {marker_target}")
 
@@ -63,20 +66,28 @@ def main() -> None:
         encoding="utf-8",
     )
     source = Path(__file__).with_name("QaActivity.kt")
-    (source_dir / "QaActivity.kt").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    (source_dir / "QaActivity.kt").write_text(
+        source.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
     marker_report = debug_root / "quality-marker-injection.json"
     report = inject_file(marker_target, marker_report)
 
     protected_after = tree_digest(main_source, exclude={marker_target})
     if protected_before != protected_after:
-        raise SystemExit("Quality Lab marker injection changed an unexpected production file")
+        raise SystemExit(
+            "Quality Lab marker injection changed an unexpected production file"
+        )
     production_after = tree_digest(main_source)
     if production_before == production_after:
         raise SystemExit("Quality Lab marker injection did not change its target")
 
     print("PASS: disposable Compatibility Lab harness prepared")
-    print("PASS: temporary MainShell marker instrumentation is limited to the prepared debug checkout")
+    print(
+        "PASS: temporary MainShell marker instrumentation is limited to the "
+        "prepared debug checkout"
+    )
     print(f"Canonical src/main digest before injection: {production_before}")
     print(f"Instrumented src/main digest: {production_after}")
     print(f"Marker source SHA-256: {report['original_sha256']}")
