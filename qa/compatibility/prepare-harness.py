@@ -10,6 +10,76 @@ import sys
 from inject_quality_markers import inject_file
 
 
+QA_ACTIVITY_REPLACEMENTS = (
+    (
+        "download-refresh-state",
+        """    fun refreshDownloads(repository: DownloadRepository) {
+        state = state.copy(
+            downloads = repository.downloads(),
+            downloadSettings = repository.settings(),
+        )
+    }
+""",
+        """    fun refreshDownloads(repository: DownloadRepository) {
+        val downloads = repository.downloads()
+        val settings = repository.settings()
+        if (state.downloads != downloads || state.downloadSettings != settings) {
+            state = state.copy(
+                downloads = downloads,
+                downloadSettings = settings,
+            )
+        }
+    }
+""",
+    ),
+    (
+        "download-refresh-loop",
+        """    LaunchedEffect(downloadHarness) {
+        while (downloadHarness != null) {
+            refreshDownloads(downloadHarness.repository)
+            originBytesServed = downloadHarness.origin.bytesServed()
+            delay(QA_DOWNLOAD_POLL_MS)
+        }
+    }
+""",
+        """    LaunchedEffect(downloadHarness) {
+        while (downloadHarness != null) {
+            refreshDownloads(downloadHarness.repository)
+            val nextOriginBytesServed = downloadHarness.origin.bytesServed()
+            if (originBytesServed != nextOriginBytesServed) {
+                originBytesServed = nextOriginBytesServed
+            }
+            delay(QA_DOWNLOAD_POLL_MS)
+        }
+    }
+""",
+    ),
+    (
+        "download-poll-interval",
+        "private const val QA_DOWNLOAD_POLL_MS = 100L",
+        "private const val QA_DOWNLOAD_POLL_MS = 1_000L",
+    ),
+)
+
+
+def stabilize_qa_activity(source: str) -> tuple[str, list[str]]:
+    """Create UIAutomator idle windows without weakening download evidence.
+
+    API 28 cannot reliably produce a fresh accessibility hierarchy while the
+    debug-only fixture recomposes every 100 ms. The production repository and
+    transfer cadence stay untouched; only the disposable fixture publication
+    cadence is stabilized. Every replacement remains strict and fail-closed.
+    """
+    changes: list[str] = []
+    for label, old, new in QA_ACTIVITY_REPLACEMENTS:
+        count = source.count(old)
+        if count != 1:
+            raise ValueError(f"{label}: expected exactly one fixture anchor, found {count}")
+        source = source.replace(old, new, 1)
+        changes.append(label)
+    return source, changes
+
+
 def tree_digest(root: Path, *, exclude: set[Path] | None = None) -> str:
     excluded = {item.resolve() for item in (exclude or set())}
     digest = hashlib.sha256()
@@ -66,8 +136,11 @@ def main() -> None:
         encoding="utf-8",
     )
     source = Path(__file__).with_name("QaActivity.kt")
+    prepared_activity, activity_changes = stabilize_qa_activity(
+        source.read_text(encoding="utf-8")
+    )
     (source_dir / "QaActivity.kt").write_text(
-        source.read_text(encoding="utf-8"),
+        prepared_activity,
         encoding="utf-8",
     )
 
@@ -87,6 +160,10 @@ def main() -> None:
     print(
         "PASS: temporary MainShell marker instrumentation is limited to the "
         "prepared debug checkout"
+    )
+    print(
+        "PASS: API 28 download hierarchy capture stabilized in the debug-only "
+        f"fixture ({', '.join(activity_changes)})"
     )
     print(f"Canonical src/main digest before injection: {production_before}")
     print(f"Instrumented src/main digest: {production_after}")
