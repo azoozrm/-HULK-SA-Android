@@ -39,13 +39,13 @@ EXPECTED_REPLACEMENTS = (
 )
 
 HOME_CANONICAL = (
-    "            .fillMaxSize()\n"
-    "            .padding(bottom = if (isTv) 32.dp else 0.dp)"
-)
-HOME_PRODUCT = (
+    "    LazyColumn(\n"
+    "        state = listState,\n"
+    "        modifier = Modifier\n"
     "            .fillMaxSize()\n"
     "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),"
 )
+HOME_PRODUCT = HOME_CANONICAL
 POSTER_CANONICAL = (
     "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
     "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {"
@@ -148,7 +148,7 @@ def normalize_segment_shape(
 ) -> str:
     start, end = segment_bounds(source, start_marker, end_marker, label)
     segment = source[start:end]
-    supported = (canonical, product, *additional_supported)
+    supported = tuple(dict.fromkeys((canonical, product, *additional_supported)))
     counts = [segment.count(shape) for shape in supported]
     total = sum(counts)
     if total != 1:
@@ -251,7 +251,7 @@ def ambiguous_home_shape(source: str) -> str:
     segment = replace_once(
         canonical[start:end],
         HOME_CANONICAL,
-        HOME_CANONICAL + "\n" + HOME_PRODUCT,
+        HOME_CANONICAL + "\n" + HOME_CANONICAL,
         "ambiguous home",
     )
     return canonical[:start] + segment + canonical[end:]
@@ -267,6 +267,7 @@ class QualityMarkerInjectionTest(unittest.TestCase):
         for destination in (
             "HOME",
             "LIVE",
+            "MOVIES",
             "FAVORITES",
             "SEARCH",
             "DOWNLOADS",
@@ -276,7 +277,6 @@ class QualityMarkerInjectionTest(unittest.TestCase):
                 f"qaTvPageContent(isTv, MainDestination.{destination})",
                 patched,
             )
-        self.assertIn("qaTvPageContent(isTv, destination)", patched)
         self.assertIn("BuildConfig.DEBUG", patched)
 
     def test_current_source_injection_is_strict_disposable_and_complete(self) -> None:
@@ -321,11 +321,7 @@ class QualityMarkerInjectionTest(unittest.TestCase):
     def test_fixture_normalization_rejects_unknown_source_shape(self) -> None:
         source = SOURCE.read_text(encoding="utf-8").replace(
             HOME_CANONICAL,
-            "            .fillMaxSize()\n            .padding(99.dp)",
-            1,
-        ).replace(
-            HOME_PRODUCT,
-            "            .fillMaxSize()\n            .padding(99.dp)",
+            "    LazyColumn(\n        state = listState,\n        modifier = Modifier.padding(99.dp),",
             1,
         )
         with self.assertRaisesRegex(AssertionError, "qualified fixture shape"):
