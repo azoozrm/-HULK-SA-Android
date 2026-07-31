@@ -37,7 +37,7 @@ def prepare_qa_activity(source: str) -> str:
 
     Android 9 UI Automator can retain a previous Compose semantics snapshot while
     the rendered page and durable download state have already advanced. A tiny
-    native Android View provides the same authenticated page/transfer evidence
+    native TextView provides the same authenticated page/transfer evidence
     through the platform accessibility tree. The transform is exact, debug-only,
     and fails closed for repeated, missing, or already-instrumented source.
     """
@@ -52,7 +52,8 @@ def prepare_qa_activity(source: str) -> str:
         (
             "import android.os.Environment\n",
             "import android.view.View\n"
-            "import android.view.accessibility.AccessibilityEvent\n",
+            "import android.view.accessibility.AccessibilityEvent\n"
+            "import android.widget.TextView\n",
             "Android accessibility imports",
         ),
         (
@@ -68,7 +69,8 @@ def prepare_qa_activity(source: str) -> str:
         (
             "import androidx.compose.ui.semantics.semantics\n",
             "import androidx.compose.ui.unit.dp\n"
-            "import androidx.compose.ui.viewinterop.AndroidView\n",
+            "import androidx.compose.ui.viewinterop.AndroidView\n"
+            "import androidx.compose.ui.zIndex\n",
             "AndroidView imports",
         ),
     ):
@@ -138,18 +140,21 @@ def prepare_qa_activity(source: str) -> str:
         key(qualityEvidence) {
             AndroidView(
                 factory = { context ->
-                    View(context).apply {
+                    TextView(context).apply {
                         importantForAccessibility =
                             View.IMPORTANT_FOR_ACCESSIBILITY_YES
                     }
                 },
                 update = { view ->
+                    view.text = qualityEvidence
                     view.contentDescription = qualityEvidence
                     view.sendAccessibilityEvent(
                         AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
                     )
                 },
-                modifier = Modifier.size(1.dp),
+                modifier = Modifier
+                    .size(2.dp)
+                    .zIndex(1f),
             )
         }
         MainShellScreen(
