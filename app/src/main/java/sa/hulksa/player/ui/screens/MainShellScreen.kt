@@ -158,7 +158,7 @@ internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
 internal fun tvDownloadCardHeightDp(screenHeightDp: Int): Float =
-    if (screenHeightDp <= 540) 164f else 188f
+    if (screenHeightDp <= 600) 196f else 188f
 
 
 internal enum class DownloadFocusSlot {
@@ -192,9 +192,9 @@ internal fun nextDownloadFocusNode(
         return when (direction) {
             DownloadFocusDirection.UP -> null
             DownloadFocusDirection.DOWN -> when (current.slot) {
-                DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
+                DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
                 DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
-                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
+                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
                 else -> null
             }.takeIf { rowCount > 0 }
             DownloadFocusDirection.LEFT -> when (current.slot) {
@@ -238,9 +238,9 @@ internal fun nextDownloadFocusNode(
             DownloadFocusNode(
                 rowIndex = -1,
                 slot = when (current.slot) {
-                    DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.CONCURRENT
+                    DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
                     DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
-                    DownloadFocusSlot.CANCEL -> DownloadFocusSlot.WIFI
+                    DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT
                     else -> return null
                 },
             )
@@ -258,6 +258,7 @@ private fun Modifier.downloadFocusNavigation(
     node: DownloadFocusNode,
     rowCount: Int,
     requesters: Map<DownloadFocusNode, FocusRequester>,
+    onRequestNode: (DownloadFocusNode) -> Unit,
 ): Modifier {
     if (!isTv) return this
     val requester = requesters[node] ?: return this
@@ -269,12 +270,27 @@ private fun Modifier.downloadFocusNavigation(
         ?.let(requesters::get)
     val rightRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.RIGHT)
         ?.let(requesters::get)
-    return focusRequester(requester).focusProperties {
-        upRequester?.let { up = it }
-        downRequester?.let { down = it }
-        leftRequester?.let { left = it }
-        rightRequester?.let { right = it }
-    }
+    return focusRequester(requester)
+        .onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            val direction = when (event.key) {
+                Key.DirectionUp -> DownloadFocusDirection.UP
+                Key.DirectionDown -> DownloadFocusDirection.DOWN
+                Key.DirectionLeft -> DownloadFocusDirection.LEFT
+                Key.DirectionRight -> DownloadFocusDirection.RIGHT
+                else -> return@onPreviewKeyEvent false
+            }
+            val target = nextDownloadFocusNode(node, rowCount, direction)
+                ?: return@onPreviewKeyEvent false
+            onRequestNode(target)
+            true
+        }
+        .focusProperties {
+            upRequester?.let { up = it }
+            downRequester?.let { down = it }
+            leftRequester?.let { left = it }
+            rightRequester?.let { right = it }
+        }
 }
 
 data class NavigationPosition(
@@ -1634,11 +1650,22 @@ private fun DownloadsScreen(
             }
         }
     }
+    val focusScope = rememberCoroutineScope()
+    fun requestDownloadFocus(target: DownloadFocusNode) {
+        focusScope.launch {
+            if (target.rowIndex >= 0) {
+                downloadsState.scrollToItem(target.rowIndex)
+                delay(32)
+            }
+            runCatching { downloadFocusRequesters[target]?.requestFocus() }
+        }
+    }
     fun focusModifier(node: DownloadFocusNode): Modifier = Modifier.downloadFocusNavigation(
         isTv = isTv,
         node = node,
         rowCount = downloads.size,
         requesters = downloadFocusRequesters,
+        onRequestNode = ::requestDownloadFocus,
     )
 
     LaunchedEffect(isTv, downloadIds, remembered.itemKey, rememberedIndex) {
