@@ -188,3 +188,13 @@ if __name__ == "__main__":
         self.assertIn("STATIC_VALIDATED", source)
         self.assertIn("RUNTIME_VALIDATED", source)
         self.assertIn("DELEGATED_ONLY", source)
+
+
+
+    def test_quality_pr_reporter_is_not_swallowed(self) -> None:
+        source = Path(".github/workflows/quality-pr.yml").read_text(encoding="utf-8")
+        self.assertNotIn("qa.quality.reporters.aggregate \\\n", source.split("Generate mandatory quick-gate report", 1)[1].split("Upload build", 1)[0].replace("\n            --impact quick-impact/impact.json\n", "\n            --impact quick-impact/impact.json || true\n"))
+        self.assertNotIn("--impact quick-impact/impact.json || true", source)
+        for required in ("SUMMARY.json", "REPORT.md", "REPORT.html", "junit.xml", "run-manifest.json", "findings.json", "coverage.json", "impact.json", "SHA256SUMS"):
+            self.assertIn(required, source)
+        self.assertIn("sha256sum -c SHA256SUMS", source)
