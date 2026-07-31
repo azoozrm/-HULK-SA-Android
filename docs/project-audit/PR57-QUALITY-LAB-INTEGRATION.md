@@ -1,75 +1,87 @@
-# PR #57 product-only integration over Quality Lab
+# PR #57 qualification scope and Quality Lab integration
 
-## Integration source
+## Purpose
 
-- Quality Lab base: `d26b4f36841e6a418796bb86829a94d62a162bdd` (merged PR #59)
-- Scope-aware Quality Lab base update: `c3ab24a830750384d651e19f042c3022e89d9c7d` (merged PR #60)
-- Full TV focus and real download-action contract: `ff3776eb17b451092b78c6427a893d231a00592f` (merged PR #71)
-- Synchronized merge head before this trigger commit: `613fad6cb78029cc8597285804e3a29e36b61990`
-- Archived PR #57 head: `93b42c0e043d0fb43792f03db9a97903898fbca2`
-- Archive branch: `archive/pr57-before-quality-lab-integration`
+PR #57 qualifies the v0.9.3.20 product changes for physical Android TV layout and durable downloads without turning this pull request into the project-wide D-pad navigation phase.
 
-## Preserved Quality Lab policy
+The pull request remains a draft. It must not be merged or promoted to a release solely because static checks are green.
 
-The merged Quality Engineering Lab is authoritative. No legacy Compatibility Lab workflow, analyzer, fixture, marker, matrix, retry policy, baseline, or quality report file from the archived PR #57 head was imported.
+## Product scope
 
-Quality-only semantics that existed in the archived production `MainShellScreen.kt` were removed. The approved debug-only injection layer remains the sole owner of `qa-tv-*` semantics.
-
-## Imported product scope
-
-Only the following product/release files were imported from the archived PR #57 head:
+The product changes in scope are limited to:
 
 - `app/build.gradle.kts`
+  - preserve `sa.hulksa.player`;
+  - preserve `versionName 0.9.3.20` and `versionCode 64`;
+  - compile the canonical production endpoint and reject release overrides.
 - `app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt`
+  - bounded HTTP range requests;
+  - resume validation through `Content-Range`;
+  - finite stalled-read timeout;
+  - persistence, cancellation, partial-file integrity and retry recovery.
 - `app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt`
-- `app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt`
-- `app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt`
-- `qa/canonical/canonical-source.sha256`
+  - TV safe gutters for the affected pages;
+  - prevent clipping of the live playback actions;
+  - qualify TV rail logo size without changing any logo asset;
+  - reserve visible space for download progress and actions;
+  - preserve phone and tablet branches.
+- Focused unit tests for the transport and layout policies directly introduced by these changes.
 
-## Physical download-focus regression and repair
+## Direct download-card focus regression
 
-Physical Xiaomi evidence on signed `0.9.3.20 (64)` proved that active download cards rendered their metadata while the pause/resume, priority and cancel controls were clipped and unreachable. D-pad navigation stayed in the top settings row and did not enter multiple active download cards.
+The download-card hierarchy changed in this pull request so its action row remains visible. The local focus routing retained here is limited to the controls inside the Downloads page and protects that direct layout regression.
 
-The clean repair adds:
+It does not establish or enforce a complete application-wide navigation contract.
 
-- a deterministic RTL-aware D-pad graph from Wi-Fi, schedule and concurrency controls into the matching action column of every download row;
-- explicit vertical movement through all active download rows and explicit horizontal movement through primary, priority and cancel actions;
-- a card layout that reserves a fixed visible action row instead of allowing metadata/progress content to consume it;
-- visible outlined secondary actions and focus callbacks on every action;
-- unit graph coverage plus a Compose test with two active downloads that verifies visibility, focus order and callback execution.
+## Deferred navigation phase
 
-The regression test file is:
+The following work is explicitly outside PR #57:
 
-- `app/src/androidTest/java/sa/hulksa/player/ui/DownloadsFocusNavigationTest.kt`
+- complete D-pad traversal across every page;
+- generic minimum target counts for Live, Home, Search, Settings or catalogs;
+- project-wide focus restoration and routing redesign;
+- acceptance enforcement by the removed `DownloadsFocusNavigationTest.kt` instrumentation file.
 
-Clean formatted product-repair head before the ordinary retrigger commit: `625ad311607fda7fe77a61b9ff590774d6940f5d`.
+Those requirements belong to the official navigation and focus phase. The removed instrumentation file must not remain referenced by canonical manifests, workflows, test plans or harnesses.
 
-The signed APK produced before this physical finding is invalidated as an acceptance candidate. A new signed APK/AAB must be generated only after the current strict CI, strengthened Quality Lab contract and repeated physical qualification pass.
+## Quality Lab support
 
-## Atomic cleanup evidence
+Quality Lab changes are permitted only where they support the current product source exactly:
 
-- Production source contains no `qa-tv-*`, `qaTvPageContent`, or `qaMarker` semantics.
-- Canonical hashes were rebuilt from the actual repository bytes, not copied manually.
-- `ArtworkUrlTest.kt` and `TvLayoutPolicyTest.kt` hashes match their current files.
-- Temporary repair, formatter and sanitizer workflows are absent from the final PR diff.
-- A broad staging mistake was removed by rebuilding from clean head `c291fa7df2f3ee3a04d020cd831f02073a44d514` and preserving exactly four intended repair files.
-- The formatted source successfully passed marker-injection self-tests, canonical project preparation, Kotlin compile, unit tests and Android-test compilation before the bot commit.
-- The first runtime instrumentation attempt exposed only a synchronization flaw in the test: Semantics `RequestFocus` was asserted before the production `180ms` initial-focus contract completed. The test now waits for the real production focus state before sending any D-pad key; no product focus rule was weakened.
-- This ordinary documentation commit starts the complete strict workflow suite on the PR #71-synchronized product tree.
+- `qa/compatibility/inject_quality_markers.py` recognizes the exact canonical and PR #57 source anchors required for disposable debug instrumentation.
+- `qa/compatibility/tests/test_marker_injection.py` exercises both supported layout fixtures and rejects zero matches, multiple matches, unknown shapes and production sources that already contain QA markers.
+- Marker injection modifies only the prepared debug checkout. Production source must contain no `qa-tv-*`, `qaMarker` or `qaTvPageContent` semantics.
+- `qa/compatibility/prepare-harness.py` remains byte-identical to the current base branch; formatting-only changes are outside scope.
 
-## Integrity conditions
+## Canonical integrity
 
-- Approved logo assets and colors are unchanged.
-- The approved logo SHA-256 remains `2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e`.
-- Production package remains `sa.hulksa.player`.
-- Candidate version is `0.9.3.20` / `versionCode 64`.
-- Production endpoint remains unchanged and `CONFIG_URL` remains empty.
-- Product findings are enforced fail-closed by the merged Quality Lab.
+`qa/canonical/canonical-source.sha256` must satisfy all of these conditions on every qualifying head:
 
-## Acceptance path
+- every listed path exists;
+- every listed digest matches the repository bytes;
+- deleted tests are absent from the manifest;
+- changed canonical product and test files are represented by current hashes;
+- approved logo assets retain their approved bytes.
 
-1. Run PR static, canonical, generated-source, intelligence, instrumentation and full Compatibility Lab gates on the exact integrated head.
-2. Inspect every expected artifact and separate product findings from infrastructure failures.
-3. The merged PR #71 lab must execute its full TV focus and real download-action contract under `PRODUCT_STRICT` on this PR.
-4. Do not merge PR #57 unless all deterministic product gates pass.
-5. After CI passes, require physical Xiaomi, TCL and Galaxy evidence before signed release qualification and final merge.
+## Required verification
+
+A qualifying head must provide evidence for:
+
+1. canonical SHA-256 and logo integrity;
+2. generated-source snapshot integrity;
+3. Python syntax and Quality Lab unit tests;
+4. Kotlin compilation and focused unit tests;
+5. Debug APK build and Android instrumentation compilation/execution;
+6. Release/R8 build where signing is not required;
+7. Compatibility Lab device reports for phone, tablet and TV profiles;
+8. artifact inspection for package, version, endpoint, ABIs and checksums.
+
+Physical Xiaomi, TCL and phone verification remains a separate acceptance requirement. Emulator evidence must not be described as a physical-device pass.
+
+## Immutable product identity
+
+- Package: `sa.hulksa.player`
+- Version: `0.9.3.20` (`versionCode 64`)
+- Production endpoint: `http://3162356.xyz:8080`
+- Approved logo assets and colors: unchanged
+- Pull request state: open draft until all required evidence is reviewed
