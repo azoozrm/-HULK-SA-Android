@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import java.io.BufferedInputStream
@@ -30,6 +31,8 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -207,6 +210,7 @@ private fun FixtureMain(
     downloadHarness: QaDownloadHarness?,
 ) {
     val downloadRepository = downloadHarness?.repository
+    val context = LocalContext.current
     var favorites by remember {
         mutableStateOf(setOf("MOVIE:101", "SERIES:301", "LIVE:501"))
     }
@@ -240,6 +244,9 @@ private fun FixtureMain(
         while (downloadHarness != null) {
             refreshDownloads(downloadHarness.repository)
             originBytesServed = downloadHarness.origin.bytesServed()
+            withContext(Dispatchers.IO) {
+                writeQaDownloadEvidence(context, downloadHarness)
+            }
             delay(QA_DOWNLOAD_POLL_MS)
         }
     }
@@ -627,7 +634,74 @@ private fun live(
     addedAtEpochSeconds = 1_800_000_000L - id,
 )
 
+private fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().buffered().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+}
+
+private fun jsonString(value: String): String = buildString {
+    append('"')
+    value.forEach { char ->
+        when (char) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            else -> append(char)
+        }
+    }
+    append('"')
+}
+
+private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness) {
+    val records = harness.repository.downloads()
+    val roots = context.getExternalFilesDirs(Environment.DIRECTORY_MOVIES).filterNotNull()
+    val files = roots.flatMap { root ->
+        root.listFiles()?.filter { file -> file.name.startsWith(QA_DOWNLOAD_FILE_PREFIX) } ?: emptyList()
+    }
+    val persisted = File(context.applicationInfo.dataDir, "shared_prefs/hulk_downloads.xml")
+    val fileRecords = files.joinToString(",") { file ->
+        val kind = if (file.name.endsWith(".part")) "partial" else "completed"
+        "{" +
+            "\"kind\":" + jsonString(kind) + "," +
+            "\"absolute_path\":" + jsonString(file.absolutePath) + "," +
+            "\"exists\":${file.exists()}," +
+            "\"length\":${file.length()}," +
+            "\"sha256\":" + jsonString(if (file.isFile) sha256(file) else "") +
+            "}"
+    }
+    val repositoryBytes = records.sumOf { item -> item.bytesDownloaded.coerceAtLeast(0L) }
+    val ledger = harness.origin.requestLedger().joinToString(",") { jsonString(it) }
+    val payload = "{" +
+        "\"schema_version\":1," +
+        "\"origin_bytes\":${harness.origin.bytesServed()}," +
+        "\"repository_bytes\":$repositoryBytes," +
+        "\"files\":[${fileRecords}]," +
+        "\"partial_file_bytes\":${files.filter { it.name.endsWith(\".part\") }.sumOf(File::length)}," +
+        "\"completed_file_bytes\":${files.filterNot { it.name.endsWith(\".part\") }.sumOf(File::length)}," +
+        "\"persisted_state\":{" +
+            "\"path\":" + jsonString(persisted.absolutePath) + "," +
+            "\"exists\":${persisted.exists()}," +
+            "\"length\":${if (persisted.exists()) persisted.length() else 0}," +
+            "\"sha256\":" + jsonString(if (persisted.isFile) sha256(persisted) else "") +
+        "}," +
+        "\"origin_request_ledger\":[${ledger}]" +
+    "}"
+    File(context.filesDir, QA_DOWNLOAD_EVIDENCE_FILE).writeText(payload)
+}
+
+
+
 private const val QA_DOWNLOAD_FILE_PREFIX = "QA_DOWNLOAD"
+private const val QA_DOWNLOAD_EVIDENCE_FILE = "qa-download-file-evidence.json"
 private const val QA_DOWNLOAD_HISTORY_PREFIX = "QA_DOWNLOAD"
 private const val QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 private const val QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes-positive"
@@ -645,6 +719,7 @@ private const val QA_DOWNLOAD_WRITE_DELAY_MS = 40L
 private class QaRangeServer : Closeable {
     private val running = AtomicBoolean(false)
     private val transferredBytes = AtomicLong(0L)
+    private val requests = CopyOnWriteArrayList<String>()
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val workers = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "hulk-qa-range-client").apply { isDaemon = true }
@@ -654,6 +729,7 @@ private class QaRangeServer : Closeable {
     val baseUrl: String = "http://127.0.0.1:${server.localPort}"
 
     fun bytesServed(): Long = transferredBytes.get()
+    fun requestLedger(): List<String> = requests.toList()
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -704,6 +780,7 @@ private class QaRangeServer : Closeable {
                     rangeHeader = line.substringAfter(':').trim()
                 }
             }
+            requests += "${requestLine.replace("\"", "\\\"")}|Range=${rangeHeader.orEmpty().replace("\"", "\\\"")}"
             val range = parseBoundedRange(rangeHeader)
             if (rangeHeader?.matches(Regex("""bytes=\d+-""")) == true) {
                 val start = rangeHeader.substringAfter("bytes=").substringBefore('-').toLong()

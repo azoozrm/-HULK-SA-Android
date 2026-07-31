@@ -815,6 +815,7 @@ class DeviceLab:
                     {
                         "download_state": case_dir / "download-state.xml",
                         "download_files": case_dir / "download-files.txt",
+                        "download_file_evidence": case_dir / "download-file-evidence.json",
                     }
                 )
             capture_png(self.adb, file_map["screenshot"])
@@ -873,19 +874,17 @@ class DeviceLab:
                         timeout=30,
                     ),
                 )
+                direct_evidence = self.adb.shell(
+                    ["run-as", PACKAGE, "cat", "files/qa-download-file-evidence.json"],
+                    timeout=30,
+                )
+                safe_write(
+                    file_map["download_file_evidence"],
+                    direct_evidence.stdout if direct_evidence.returncode == 0 else direct_evidence.error_text,
+                )
                 safe_write(
                     file_map["download_files"],
-                    command_text(
-                        self.adb,
-                        [
-                            "run-as",
-                            PACKAGE,
-                            "ls",
-                            "-lnR",
-                            f"/sdcard/Android/data/{PACKAGE}/files/Movies",
-                        ],
-                        timeout=30,
-                    ),
+                    direct_evidence.stdout if direct_evidence.returncode == 0 else direct_evidence.error_text,
                 )
             for key, path in file_map.items():
                 record["files"][key] = path.relative_to(self.out).as_posix()

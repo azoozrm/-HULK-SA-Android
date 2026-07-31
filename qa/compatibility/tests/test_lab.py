@@ -771,3 +771,13 @@ class DeterministicDownloadFocusTests(unittest.TestCase):
         self.assertEqual("row-1-priority", graph["row-1-primary"]["LEFT"])
         self.assertEqual("row-1-cancel", graph["row-1-priority"]["LEFT"])
 
+
+
+    def test_direct_file_evidence_contract_is_internal_and_independent(self) -> None:
+        runner = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn('run-as", PACKAGE, "cat", "files/qa-download-file-evidence.json"', runner)
+        self.assertNotIn('run-as",\n                            PACKAGE,\n                            "ls"', runner)
+        for field in ("origin_bytes", "repository_bytes", "partial_file_bytes", "completed_file_bytes", "persisted_state", "origin_request_ledger"):
+            self.assertIn(field, fixture)
+        self.assertIn("MessageDigest.getInstance(\"SHA-256\")", fixture)

@@ -811,6 +811,26 @@ def add_case_findings(
                         )
                     )
             if page == "downloads":
+                boundary_path = root / files.get("download_file_evidence", "") if files.get("download_file_evidence") else None
+                boundary = None
+                if boundary_path and boundary_path.is_file():
+                    try:
+                        boundary = json.loads(boundary_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        boundary = None
+                if boundary is None:
+                    findings.append(finding("critical", "download_file_bytes_evidence_missing", f"{case_id}: direct file-byte boundary evidence is missing or malformed", case_id=case_id, page=page, evidence=evidence, classification="fixture", product_strict=False, gate_outcome="BLOCKED"))
+                else:
+                    origin_bytes = int(boundary.get("origin_bytes") or 0)
+                    repository_bytes = int(boundary.get("repository_bytes") or 0)
+                    partial_bytes = int(boundary.get("partial_file_bytes") or 0)
+                    completed_bytes = int(boundary.get("completed_file_bytes") or 0)
+                    if repository_bytes > 0 and origin_bytes <= 0:
+                        findings.append(finding("critical", "download_repository_origin_boundary_mismatch", f"{case_id}: repository recorded {repository_bytes} bytes without origin bytes", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
+                    if origin_bytes > 0 and repository_bytes <= 0:
+                        findings.append(finding("critical", "download_origin_repository_boundary_mismatch", f"{case_id}: origin served {origin_bytes} bytes without repository progress", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
+                    if repository_bytes > 0 and partial_bytes <= 0 and completed_bytes <= 0:
+                        findings.append(finding("critical", "download_direct_file_bytes_missing", f"{case_id}: repository progress has no independently measured partial or completed file bytes", case_id=case_id, page=page, evidence=evidence, classification="fixture", product_strict=False, gate_outcome="BLOCKED"))
                 repository_progress = bool(ui.get("download_transfer_progress"))
                 origin_progress = bool(ui.get("download_origin_progress"))
                 if not repository_progress:
