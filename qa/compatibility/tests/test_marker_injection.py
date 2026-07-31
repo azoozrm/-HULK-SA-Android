@@ -268,7 +268,6 @@ class QualityMarkerInjectionTest(unittest.TestCase):
         for destination in (
             "HOME",
             "LIVE",
-            "MOVIES",
             "FAVORITES",
             "SEARCH",
             "DOWNLOADS",
@@ -278,6 +277,15 @@ class QualityMarkerInjectionTest(unittest.TestCase):
                 f"qaTvPageContent(isTv, MainDestination.{destination})",
                 patched,
             )
+        poster_start, poster_end = segment_bounds(
+            patched,
+            "private fun PosterCatalogScreen(",
+            "private fun LiveCatalogScreen(",
+            "instrumented poster catalog",
+        )
+        poster_segment = patched[poster_start:poster_end]
+        self.assertIn("qaTvPageContent(isTv, destination)", poster_segment)
+        self.assertNotIn("qaTvPageContent(isTv, MainDestination.MOVIES)", poster_segment)
         self.assertIn("BuildConfig.DEBUG", patched)
 
     def test_current_source_injection_is_strict_disposable_and_complete(self) -> None:
