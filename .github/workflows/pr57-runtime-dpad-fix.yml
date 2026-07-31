@@ -1,0 +1,230 @@
+name: Apply PR57 runtime D-pad fix
+
+on:
+  push:
+    branches:
+      - fix/v09318-production-host-qualification
+    paths:
+      - .github/workflows/pr57-runtime-dpad-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr57-runtime-dpad-fix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/v09318-production-host-qualification
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Apply runtime D-pad routing and 541dp layout fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          text = source.read_text()
+
+          old_height = '''internal fun tvDownloadCardHeightDp(screenHeightDp: Int): Float =
+              if (screenHeightDp <= 540) 164f else 188f'''
+          new_height = '''internal fun tvDownloadCardHeightDp(screenHeightDp: Int): Float =
+              if (screenHeightDp <= 600) 196f else 188f'''
+          assert text.count(old_height) == 1, 'unexpected current TV card-height source state'
+          text = text.replace(old_height, new_height, 1)
+
+          old_down = '''DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
+                          DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
+                          DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)'''
+          new_down = '''DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
+                          DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
+                          DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)'''
+          assert text.count(old_down) == 1, 'unexpected current toolbar focus map'
+          text = text.replace(old_down, new_down, 1)
+
+          old_up = '''DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.CONCURRENT
+                              DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
+                              DownloadFocusSlot.CANCEL -> DownloadFocusSlot.WIFI'''
+          new_up = '''DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
+                              DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
+                              DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT'''
+          assert text.count(old_up) == 1, 'unexpected current reverse focus map'
+          text = text.replace(old_up, new_up, 1)
+
+          old_modifier = '''private fun Modifier.downloadFocusNavigation(
+              isTv: Boolean,
+              node: DownloadFocusNode,
+              rowCount: Int,
+              requesters: Map<DownloadFocusNode, FocusRequester>,
+          ): Modifier {
+              if (!isTv) return this
+              val requester = requesters[node] ?: return this
+              val upRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.UP)
+                  ?.let(requesters::get)
+              val downRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.DOWN)
+                  ?.let(requesters::get)
+              val leftRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.LEFT)
+                  ?.let(requesters::get)
+              val rightRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.RIGHT)
+                  ?.let(requesters::get)
+              return focusRequester(requester).focusProperties {
+                  upRequester?.let { up = it }
+                  downRequester?.let { down = it }
+                  leftRequester?.let { left = it }
+                  rightRequester?.let { right = it }
+              }
+          }'''
+          new_modifier = '''private fun Modifier.downloadFocusNavigation(
+              isTv: Boolean,
+              node: DownloadFocusNode,
+              rowCount: Int,
+              requesters: Map<DownloadFocusNode, FocusRequester>,
+              onRequestNode: (DownloadFocusNode) -> Unit,
+          ): Modifier {
+              if (!isTv) return this
+              val requester = requesters[node] ?: return this
+              val upRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.UP)
+                  ?.let(requesters::get)
+              val downRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.DOWN)
+                  ?.let(requesters::get)
+              val leftRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.LEFT)
+                  ?.let(requesters::get)
+              val rightRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.RIGHT)
+                  ?.let(requesters::get)
+              return focusRequester(requester)
+                  .onPreviewKeyEvent { event ->
+                      if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                      val direction = when (event.key) {
+                          Key.DirectionUp -> DownloadFocusDirection.UP
+                          Key.DirectionDown -> DownloadFocusDirection.DOWN
+                          Key.DirectionLeft -> DownloadFocusDirection.LEFT
+                          Key.DirectionRight -> DownloadFocusDirection.RIGHT
+                          else -> return@onPreviewKeyEvent false
+                      }
+                      val target = nextDownloadFocusNode(node, rowCount, direction)
+                          ?: return@onPreviewKeyEvent false
+                      onRequestNode(target)
+                      true
+                  }
+                  .focusProperties {
+                      upRequester?.let { up = it }
+                      downRequester?.let { down = it }
+                      leftRequester?.let { left = it }
+                      rightRequester?.let { right = it }
+                  }
+          }'''
+          assert text.count(old_modifier) == 1, 'downloadFocusNavigation anchor moved'
+          text = text.replace(old_modifier, new_modifier, 1)
+
+          old_focus = '''    fun focusModifier(node: DownloadFocusNode): Modifier = Modifier.downloadFocusNavigation(
+                  isTv = isTv,
+                  node = node,
+                  rowCount = downloads.size,
+                  requesters = downloadFocusRequesters,
+              )'''
+          new_focus = '''    val focusScope = rememberCoroutineScope()
+              fun requestDownloadFocus(target: DownloadFocusNode) {
+                  focusScope.launch {
+                      if (target.rowIndex >= 0) {
+                          downloadsState.scrollToItem(target.rowIndex)
+                          delay(32)
+                      }
+                      runCatching { downloadFocusRequesters[target]?.requestFocus() }
+                  }
+              }
+              fun focusModifier(node: DownloadFocusNode): Modifier = Modifier.downloadFocusNavigation(
+                  isTv = isTv,
+                  node = node,
+                  rowCount = downloads.size,
+                  requesters = downloadFocusRequesters,
+                  onRequestNode = ::requestDownloadFocus,
+              )'''
+          assert text.count(old_focus) == 1, 'DownloadsScreen focusModifier anchor moved'
+          text = text.replace(old_focus, new_focus, 1)
+          source.write_text(text)
+
+          test = Path('app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt')
+          t = test.read_text()
+          t = t.replace('assertEquals(164f, tvDownloadCardHeightDp(screenHeightDp = 360), 0.001f)',
+                        'assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 360), 0.001f)')
+          t = t.replace('assertEquals(164f, tvDownloadCardHeightDp(screenHeightDp = 540), 0.001f)',
+                        'assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 540), 0.001f)')
+          t = t.replace('assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 541), 0.001f)',
+                        'assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 541), 0.001f)')
+          t = t.replace('assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 1080), 0.001f)',
+                        'assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 601), 0.001f)\n        assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 1080), 0.001f)')
+          t = t.replace('fun `toolbar focus descends to the physically aligned RTL action column`()',
+                        'fun `toolbar focus descends to the deterministic action column`()')
+          t = t.replace('''DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
+                      nextDownloadFocusNode(
+                          DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),''',
+                        '''DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
+                      nextDownloadFocusNode(
+                          DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),''', 1)
+          t = t.replace('''DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
+                      nextDownloadFocusNode(
+                          DownloadFocusNode(-1, DownloadFocusSlot.WIFI),''',
+                        '''DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
+                      nextDownloadFocusNode(
+                          DownloadFocusNode(-1, DownloadFocusSlot.WIFI),''', 1)
+          t = t.replace('''DownloadFocusNode(-1, DownloadFocusSlot.WIFI),
+                      nextDownloadFocusNode(
+                          DownloadFocusNode(0, DownloadFocusSlot.CANCEL),''',
+                        '''DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),
+                      nextDownloadFocusNode(
+                          DownloadFocusNode(0, DownloadFocusSlot.CANCEL),''', 1)
+          test.write_text(t)
+          PY
+
+      - name: Update canonical source hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          canonical = Path('qa/canonical/canonical-source.sha256')
+          target = 'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt'
+          lines = canonical.read_text().splitlines()
+          matches = [i for i, line in enumerate(lines) if line.endswith('  ' + target)]
+          assert len(matches) == 1, f'canonical MainShell entry count={len(matches)}'
+          digest = hashlib.sha256(Path(target).read_bytes()).hexdigest()
+          lines[matches[0]] = f'{digest}  {target}'
+          canonical.write_text('\n'.join(lines) + '\n')
+          PY
+          sha256sum -c qa/canonical/canonical-source.sha256
+          git diff --check
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:testDebugUnitTest --tests 'sa.hulksa.player.ui.screens.TvLayoutPolicyTest'
+
+      - name: Commit product fix and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr57-runtime-dpad-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+                  app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt \
+                  qa/canonical/canonical-source.sha256 \
+                  .github/workflows/pr57-runtime-dpad-fix.yml
+          git commit -m 'fix(tv): route download D-pad focus at runtime'
+          git push origin HEAD:fix/v09318-production-host-qualification
