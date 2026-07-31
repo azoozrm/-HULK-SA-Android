@@ -32,17 +32,22 @@ class QualityHarnessPreparationTest(unittest.TestCase):
         for expected in (
             "import android.view.View\n",
             "import android.view.accessibility.AccessibilityEvent\n",
+            "import android.widget.TextView\n",
             "import androidx.compose.foundation.layout.size\n",
             "import androidx.compose.runtime.key\n",
             "import androidx.compose.ui.unit.dp\n",
             "import androidx.compose.ui.viewinterop.AndroidView\n",
+            "import androidx.compose.ui.zIndex\n",
             "val qualityEvidence = buildList {",
             "key(qualityEvidence) {",
+            "TextView(context).apply {",
             "importantForAccessibility =\n"
             "                            View.IMPORTANT_FOR_ACCESSIBILITY_YES",
+            "view.text = qualityEvidence",
             "view.contentDescription = qualityEvidence",
             "AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED",
-            "modifier = Modifier.size(1.dp)",
+            ".size(2.dp)",
+            ".zIndex(1f)",
         ):
             self.assertEqual(1, prepared.count(expected), expected)
         self.assertEqual(
