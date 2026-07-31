@@ -25,6 +25,75 @@ def tree_digest(root: Path, *, exclude: set[Path] | None = None) -> str:
     return digest.hexdigest()
 
 
+def prepare_qa_activity(source: str) -> str:
+    """Force a fresh debug semantics node when page or transfer state changes.
+
+    Android 9's accessibility bridge can retain the previous content description
+    when one Compose semantics node mutates in place. The Compatibility Lab uses
+    these descriptions only as debug evidence, so recreate that node whenever
+    its evidence tuple changes. Every anchor is exact and the transform fails
+    closed for unknown or already-instrumented harness source.
+    """
+
+    key_import = "import androidx.compose.runtime.key\n"
+    if key_import in source:
+        raise ValueError(
+            "QA Activity already contains the API 28 semantics refresh key"
+        )
+    import_anchor = "import androidx.compose.runtime.getValue\n"
+    import_count = source.count(import_anchor)
+    if import_count != 1:
+        raise ValueError(
+            "QA Activity key import anchor must match exactly once; "
+            f"found {import_count}"
+        )
+    source = source.replace(import_anchor, import_anchor + key_import, 1)
+
+    start_marker = "private fun FixtureMain("
+    end_marker = "\nprivate fun String.toDestination()"
+    start = source.find(start_marker)
+    if start < 0:
+        raise ValueError("QA Activity FixtureMain start marker not found")
+    end = source.find(end_marker, start)
+    if end < 0:
+        raise ValueError("QA Activity FixtureMain end marker not found")
+    segment = source[start:end]
+
+    box_anchor = (
+        "    Box(\n"
+        "        Modifier\n"
+        "            .fillMaxSize()\n"
+        "            .semantics(mergeDescendants = false) {"
+    )
+    box_count = segment.count(box_anchor)
+    if box_count != 1:
+        raise ValueError(
+            "QA Activity marker Box anchor must match exactly once; "
+            f"found {box_count}"
+        )
+    segment = segment.replace(
+        box_anchor,
+        "    key(\n"
+        "        pageMarker,\n"
+        "        hasOriginByteProgress,\n"
+        "        hasRealDownloadProgress,\n"
+        "        lastDownloadAction,\n"
+        "    ) {\n"
+        "        Box(\n"
+        "            Modifier\n"
+        "                .fillMaxSize()\n"
+        "                .semantics(mergeDescendants = false) {",
+        1,
+    )
+    function_tail = "\n    }\n}"
+    if not segment.endswith(function_tail):
+        raise ValueError(
+            "QA Activity FixtureMain tail did not match the supported shape"
+        )
+    segment = segment[: -len(function_tail)] + "\n        }\n    }\n}"
+    return source[:start] + segment + source[end:]
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: prepare-harness.py <prepared-project>")
@@ -66,8 +135,9 @@ def main() -> None:
         encoding="utf-8",
     )
     source = Path(__file__).with_name("QaActivity.kt")
+    prepared_source = prepare_qa_activity(source.read_text(encoding="utf-8"))
     (source_dir / "QaActivity.kt").write_text(
-        source.read_text(encoding="utf-8"),
+        prepared_source,
         encoding="utf-8",
     )
 
@@ -87,6 +157,9 @@ def main() -> None:
     print(
         "PASS: temporary MainShell marker instrumentation is limited to the "
         "prepared debug checkout"
+    )
+    print(
+        "PASS: debug page and transfer semantics recreate on evidence changes"
     )
     print(f"Canonical src/main digest before injection: {production_before}")
     print(f"Instrumented src/main digest: {production_after}")
