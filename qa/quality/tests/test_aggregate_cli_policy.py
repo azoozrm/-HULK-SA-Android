@@ -57,3 +57,12 @@ class AggregateCliPolicyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+    def test_raw_and_root_cause_counts_are_distinct(self) -> None:
+        source = Path("qa/quality/reporters/aggregate.py").read_text(encoding="utf-8")
+        self.assertIn('"primary_root_cause_count"', source)
+        self.assertIn('"raw_failed_checks_count"', source)
+        self.assertIn('"downstream_count"', source)
+        self.assertNotIn('"false_positives": 0', source)

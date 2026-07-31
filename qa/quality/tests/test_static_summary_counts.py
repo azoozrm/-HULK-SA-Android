@@ -53,3 +53,11 @@ class StaticSummaryCountContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+    def test_reports_keep_quality_lab_and_fixture_counts(self) -> None:
+        source = Path("qa/quality/reporters/aggregate.py").read_text(encoding="utf-8")
+        self.assertIn('"quality_lab_critical"', source)
+        self.assertIn('"fixture_critical"', source)
+        self.assertIn('reclassified_from', source)

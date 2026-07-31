@@ -7,6 +7,7 @@ import argparse
 from collections import Counter, defaultdict
 from html import escape
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -48,6 +49,12 @@ def markdown(summary: dict[str, Any]) -> str:
         f"- Overall: **{summary['overall_status']}**",
         f"- Devices completed: {summary['device_count']} / {summary['expected_device_count']}",
         f"- Page captures: {summary['case_count']}",
+        f"- Raw failed checks: {summary.get('raw_failed_checks_count', summary['critical_count'])}",
+        f"- Primary root causes: {summary.get('primary_root_cause_count', 0)}",
+        f"- Downstream / blocked assertions: {summary.get('downstream_count', 0)}",
+        f"- Product-critical: {summary.get('product_critical_count', 0)}",
+        f"- Quality-lab-critical: {summary.get('quality_lab_critical_count', 0)}",
+        f"- Fixture-critical: {summary.get('fixture_critical_count', 0)}",
         f"- Critical findings: {summary['critical_count']}",
         f"- Warnings: {summary['warning_count']}",
         f"- Infrastructure errors: {summary['infrastructure_error_count']}",
@@ -305,6 +312,13 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
         "page_coverage": page_coverage,
         "devices": devices,
         "findings": all_findings,
+        "primary_root_cause_count": len({str(item.get("root_cause_id") or item.get("code")) for item in all_findings if item.get("finding_role", "primary") == "primary" and item.get("severity") in {"critical", "infrastructure"}}),
+        "raw_failed_checks_count": sum(item.get("severity") in {"critical", "infrastructure"} for item in all_findings),
+        "downstream_count": sum(item.get("finding_role") in {"downstream", "blocked_assertion"} for item in all_findings),
+        "product_critical_count": sum(item.get("severity") == "critical" and item.get("classification", "product") == "product" and item.get("product_strict", True) for item in all_findings),
+        "quality_lab_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "quality_lab" for item in all_findings),
+        "fixture_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "fixture" for item in all_findings),
+        "false_positives": sum(bool(item.get("reclassified_from")) or item.get("classification") == "false_positive" for item in all_findings),
     }
     (output_root / "COMPATIBILITY-LAB-SUMMARY.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
