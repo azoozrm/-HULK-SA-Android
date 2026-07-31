@@ -99,7 +99,7 @@ DOWNLOAD_CARD_CANONICAL = (
     "            .clip(shape)"
 )
 DOWNLOAD_CARD_PRODUCT = (
-    "            .height(if (isTv) 164.dp else 220.dp)\n"
+    "            .heightIn(min = cardHeight)\n"
     "            .clip(shape)"
 )
 SETTINGS_CANONICAL = "modifier = Modifier.fillMaxSize(),"
