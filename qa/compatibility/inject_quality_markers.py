@@ -138,6 +138,81 @@ def patch_segment_one_of(
     return source[:start] + patched + source[end:]
 
 
+def page_content_options(destination: str) -> tuple[tuple[str, str], ...]:
+    marker = f".qaTvPageContent(isTv, MainDestination.{destination})"
+    return (
+        (
+            "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
+            "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
+            f"{marker}) {{",
+        ),
+        (
+            "    Column(\n"
+            "        Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
+            "    ) {",
+            "    Column(\n"
+            "        Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
+            f"            {marker},\n"
+            "    ) {",
+        ),
+        (
+            "    Column(\n"
+            "        Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(\n"
+            "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
+            "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+            "            ),\n"
+            "    ) {",
+            "    Column(\n"
+            "        Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(\n"
+            "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
+            "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+            "            )\n"
+            f"            {marker},\n"
+            "    ) {",
+        ),
+        (
+            "    Column(\n"
+            "        Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(\n"
+            "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+            "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+            "            ),\n"
+            "    ) {",
+            "    Column(\n"
+            "        Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(\n"
+            "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+            "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+            "            )\n"
+            f"            {marker},\n"
+            "    ) {",
+        ),
+        (
+            "    LazyColumn(\n"
+            "        state = listState,\n"
+            "        modifier = Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+            "    LazyColumn(\n"
+            "        state = listState,\n"
+            "        modifier = Modifier\n"
+            "            .fillMaxSize()\n"
+            "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)\n"
+            f"            {marker},",
+        ),
+    )
+
+
 def inject_text(source: str) -> tuple[str, dict[str, Any]]:
     original = source
     changes: list[str] = []
@@ -168,74 +243,18 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         changes,
     )
     for function_name, next_name, destination in (
-        (
-            "private fun CinemaHomeScreen(",
-            "private fun ActiveDownloadsSection(",
-            "HOME",
-        ),
-        (
-            "private fun LiveCatalogScreen(",
-            "private fun LiveStage(",
-            "LIVE",
-        ),
-        (
-            "private fun PosterCatalogScreen(",
-            "private fun LiveCatalogScreen(",
-            "MOVIES",
-        ),
-        (
-            "private fun FavoritesScreen(",
-            "private fun UnifiedSearchScreen(",
-            "FAVORITES",
-        ),
-        (
-            "private fun UnifiedSearchScreen(",
-            "private fun TvSearchField(",
-            "SEARCH",
-        ),
-        (
-            "private fun DownloadsScreen(",
-            "private fun DownloadCard(",
-            "DOWNLOADS",
-        ),
+        ("private fun CinemaHomeScreen(", "private fun ActiveDownloadsSection(", "HOME"),
+        ("private fun LiveCatalogScreen(", "private fun LiveStage(", "LIVE"),
+        ("private fun PosterCatalogScreen(", "private fun LiveCatalogScreen(", "MOVIES"),
+        ("private fun FavoritesScreen(", "private fun UnifiedSearchScreen(", "FAVORITES"),
+        ("private fun UnifiedSearchScreen(", "private fun TvSearchField(", "SEARCH"),
+        ("private fun DownloadsScreen(", "private fun DownloadCard(", "DOWNLOADS"),
     ):
         source = patch_segment_one_of(
             source,
             function_name,
             next_name,
-            (
-                (
-                    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
-                    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
-                    f".qaTvPageContent(isTv, MainDestination.{destination})) {{",
-                ),
-                (
-                    "    Column(\n"
-                    "        Modifier\n"
-                    "            .fillMaxSize()\n"
-                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
-                    "    ) {",
-                    "    Column(\n"
-                    "        Modifier\n"
-                    "            .fillMaxSize()\n"
-                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
-                    f"            .qaTvPageContent(isTv, MainDestination.{destination}),\n"
-                    "    ) {",
-                ),
-                (
-                    "    LazyColumn(\n"
-                    "        state = listState,\n"
-                    "        modifier = Modifier\n"
-                    "            .fillMaxSize()\n"
-                    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
-                    "    LazyColumn(\n"
-                    "        state = listState,\n"
-                    "        modifier = Modifier\n"
-                    "            .fillMaxSize()\n"
-                    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)\n"
-                    f"            .qaTvPageContent(isTv, MainDestination.{destination}),",
-                ),
-            ),
+            page_content_options(destination),
             f"{destination.lower()}-content-marker",
             changes,
         )
@@ -257,24 +276,21 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "            .height(if (isTv) 220.dp else 220.dp)\n"
                 "            .clip(shape)",
                 "            .height(if (isTv) 220.dp else 220.dp)\n"
-                "            .qaMarker(isTv, "
-                "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
+                "            .qaMarker(isTv, \"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
                 "            .clip(shape)",
             ),
             (
                 "            .height(if (isTv) 164.dp else 220.dp)\n"
                 "            .clip(shape)",
                 "            .height(if (isTv) 164.dp else 220.dp)\n"
-                "            .qaMarker(isTv, "
-                "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
+                "            .qaMarker(isTv, \"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
                 "            .clip(shape)",
             ),
             (
                 "            .heightIn(min = cardHeight)\n"
                 "            .clip(shape)",
                 "            .heightIn(min = cardHeight)\n"
-                "            .qaMarker(isTv, "
-                "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
+                "            .qaMarker(isTv, \"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
                 "            .clip(shape)",
             ),
         ),
