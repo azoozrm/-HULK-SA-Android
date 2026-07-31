@@ -29,13 +29,13 @@ EXPECTED_REPLACEMENTS = (
     "home-content-marker",
     "poster-catalog-content-marker",
     "live-content-marker",
-    "live-actions-marker",
     "favorites-content-marker",
     "search-content-marker",
     "downloads-content-marker",
     "downloads-list-marker",
     "download-card-marker",
     "settings-content-marker",
+    "live-actions-marker",
 )
 
 HOME_CANONICAL = (
@@ -102,6 +102,10 @@ DOWNLOAD_CARD_PRODUCT = (
     "            .height(if (isTv) 164.dp else 220.dp)\n"
     "            .clip(shape)"
 )
+DOWNLOAD_CARD_ADAPTIVE = (
+    "            .heightIn(min = cardHeight)\n"
+    "            .clip(shape)"
+)
 SETTINGS_CANONICAL = "modifier = Modifier.fillMaxSize(),"
 SETTINGS_PRODUCT = (
     "        modifier = Modifier\n"
@@ -140,38 +144,30 @@ def normalize_segment_shape(
     product: str,
     target: str,
     label: str,
+    additional_supported: tuple[str, ...] = (),
 ) -> str:
     start, end = segment_bounds(source, start_marker, end_marker, label)
     segment = source[start:end]
-    canonical_count = segment.count(canonical)
-    product_count = segment.count(product)
-    total = canonical_count + product_count
+    supported = (canonical, product, *additional_supported)
+    counts = [segment.count(shape) for shape in supported]
+    total = sum(counts)
     if total != 1:
+        detail = ", ".join(str(count) for count in counts)
         raise AssertionError(
             f"{label}: expected exactly one qualified fixture shape, found {total} "
-            f"(canonical={canonical_count}, product={product_count})"
+            f"(counts={detail})"
         )
-    if target == "canonical":
-        if canonical_count == 1:
-            return source
-        normalized = segment.replace(product, canonical, 1)
-    elif target == "product":
-        if product_count == 1:
-            return source
-        normalized = segment.replace(canonical, product, 1)
-    else:
+    target_shape = canonical if target == "canonical" else product if target == "product" else None
+    if target_shape is None:
         raise AssertionError(f"unsupported fixture target: {target}")
+    if segment.count(target_shape) == 1:
+        return source
+    current_shape = next(shape for shape, count in zip(supported, counts) if count == 1)
+    normalized = segment.replace(current_shape, target_shape, 1)
     return source[:start] + normalized + source[end:]
 
 
 def layout_shape(source: str, target: str) -> str:
-    """Return a deterministic canonical or PR #57 layout fixture.
-
-    The checked-out production source may already be either supported shape.
-    Tests normalize from whichever shape is current so both contracts are always
-    exercised without importing Quality Lab semantics into production source.
-    """
-
     source = normalize_segment_shape(
         source,
         "private fun CinemaHomeScreen(",
@@ -209,21 +205,9 @@ def layout_shape(source: str, target: str) -> str:
         "live actions",
     )
     for function_name, next_name, destination in (
-        (
-            "private fun FavoritesScreen(",
-            "private fun UnifiedSearchScreen(",
-            "favorites",
-        ),
-        (
-            "private fun UnifiedSearchScreen(",
-            "private fun TvSearchField(",
-            "search",
-        ),
-        (
-            "private fun DownloadsScreen(",
-            "private fun DownloadCard(",
-            "downloads",
-        ),
+        ("private fun FavoritesScreen(", "private fun UnifiedSearchScreen(", "favorites"),
+        ("private fun UnifiedSearchScreen(", "private fun TvSearchField(", "search"),
+        ("private fun DownloadsScreen(", "private fun DownloadCard(", "downloads"),
     ):
         source = normalize_segment_shape(
             source,
@@ -242,6 +226,7 @@ def layout_shape(source: str, target: str) -> str:
         DOWNLOAD_CARD_PRODUCT,
         target,
         "download card",
+        additional_supported=(DOWNLOAD_CARD_ADAPTIVE,),
     )
     source = normalize_segment_shape(
         source,
