@@ -552,6 +552,16 @@ class DeviceLab:
             "focus": [],
             "download_actions": [],
             "harness_errors": [],
+            "provenance": {
+                "source_head_sha": args.source_head_sha,
+                "base_sha": args.base_sha,
+                "tested_ref": args.tested_ref,
+                "tested_commit_sha": args.tested_commit_sha,
+                "merge_sha": args.merge_sha,
+                "lab_apk_sha256": args.lab_apk_sha256,
+                "workflow_run_id": args.workflow_run_id,
+                "workflow_run_attempt": args.workflow_run_attempt,
+            },
             "started_at_epoch": int(time.time()),
         }
         self.out.mkdir(parents=True, exist_ok=True)
@@ -1560,6 +1570,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--is-tv", type=parse_bool, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--serial")
+    parser.add_argument("--source-head-sha", required=True)
+    parser.add_argument("--base-sha", required=True)
+    parser.add_argument("--tested-ref", required=True)
+    parser.add_argument("--tested-commit-sha", required=True)
+    parser.add_argument("--merge-sha", required=True)
+    parser.add_argument("--lab-apk-sha256", required=True)
+    parser.add_argument("--workflow-run-id", required=True)
+    parser.add_argument("--workflow-run-attempt", required=True)
     return parser
 
 

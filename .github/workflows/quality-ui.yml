@@ -197,6 +197,18 @@ jobs:
             grep -q .
           find app/build/reports/androidTests -type f -print -quit | grep -q .
 
+      - name: Record instrumentation provenance
+        if: always()
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.source_head_sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.base_sha || '' }}
+          TESTED_REF: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          TESTED_COMMIT_SHA: ${{ github.sha }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          mkdir -p quality-evidence/instrumentation
+          jq -n --arg source_head_sha "$SOURCE_HEAD_SHA" --arg base_sha "$BASE_SHA" --arg tested_ref "$TESTED_REF" --arg tested_commit_sha "$TESTED_COMMIT_SHA" --arg merge_sha "$MERGE_SHA" --arg workflow_run_id "$GITHUB_RUN_ID" --arg workflow_run_attempt "$GITHUB_RUN_ATTEMPT" '{source_head_sha:$source_head_sha,base_sha:$base_sha,tested_ref:$tested_ref,tested_commit_sha:$tested_commit_sha,merge_sha:$merge_sha,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt}' > quality-evidence/instrumentation/PROVENANCE.json
+
       - name: Upload instrumentation evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -221,6 +233,9 @@ jobs:
       base_sha: ${{ github.event.pull_request.base.sha || inputs.base_sha || '' }}
       pr_number: ${{ github.event.pull_request.number || '' }}
       test_variant: ${{ needs.scope.outputs.lab_only == 'true' && 'quality-ui-lab-only' || 'quality-ui-product' }}
+      tested_ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+      tested_commit_sha: ${{ github.sha }}
+      merge_sha: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
 
   enforce:
     name: Final UI evidence enforcement

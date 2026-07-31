@@ -191,6 +191,42 @@ class DownloadEvidenceTest(unittest.TestCase):
 
 
 class AggregateReporterTest(unittest.TestCase):
+    @staticmethod
+    def provenance(
+        *,
+        source_head_sha: str = "1" * 40,
+        base_sha: str = "2" * 40,
+        tested_ref: str = "refs/pull/57/merge",
+        tested_commit_sha: str = "3" * 40,
+        merge_sha: str = "3" * 40,
+        lab_apk_sha256: str = "4" * 64,
+        workflow_run_id: str = "unit-run",
+        workflow_run_attempt: str = "1",
+    ) -> dict[str, str]:
+        return {
+            "source_head_sha": source_head_sha,
+            "base_sha": base_sha,
+            "tested_ref": tested_ref,
+            "tested_commit_sha": tested_commit_sha,
+            "merge_sha": merge_sha,
+            "lab_apk_sha256": lab_apk_sha256,
+            "workflow_run_id": workflow_run_id,
+            "workflow_run_attempt": workflow_run_attempt,
+        }
+
+    @staticmethod
+    def aggregate_provenance_args(provenance: dict[str, str]) -> dict[str, str]:
+        return {
+            "source_head_sha": provenance["source_head_sha"],
+            "base_sha": provenance["base_sha"],
+            "tested_ref": provenance["tested_ref"],
+            "tested_commit_sha": provenance["tested_commit_sha"],
+            "merge_sha": provenance["merge_sha"],
+            "lab_apk_sha256": provenance["lab_apk_sha256"],
+            "run_id": provenance["workflow_run_id"],
+            "run_attempt": provenance["workflow_run_attempt"],
+        }
+
     def test_reporter_direct_cli_is_loadable(self) -> None:
         script = Path(__file__).resolve().parents[1] / "reporters" / "aggregate.py"
         result = subprocess.run(
@@ -208,8 +244,10 @@ class AggregateReporterTest(unittest.TestCase):
             device = root / "input" / "phone"
             attempt = device / "attempts" / "attempt-1"
             attempt.mkdir(parents=True)
+            provenance = self.provenance(workflow_run_id="retry")
             final = {
                 "device": {"id": "phone", "api": 35},
+                "provenance": provenance,
                 "case_count": 1,
                 "cases": [{"status": "PASS", "page": "home"}],
                 "findings": [],
@@ -234,9 +272,9 @@ class AggregateReporterTest(unittest.TestCase):
                 build_sha="c" * 40,
                 source_branch="test",
                 workflow="unit",
-                run_id="retry",
                 expected_devices=["phone"],
                 impact={"schema_version": 1},
+                **self.aggregate_provenance_args(provenance),
             )
             self.assertEqual(result["release_recommendation"], "PASS")
             self.assertEqual(result["parse_errors"], [])
@@ -263,10 +301,17 @@ class AggregateReporterTest(unittest.TestCase):
             root = Path(temp)
             device = root / "input" / "phone"
             device.mkdir(parents=True)
+            provenance = self.provenance(
+                source_head_sha="c" * 40,
+                base_sha="d" * 40,
+                workflow_run_id="2",
+                workflow_run_attempt="3",
+            )
             (device / "summary.json").write_text(
                 json.dumps(
                     {
                         "device": {"id": "phone", "api": 35},
+                        "provenance": provenance,
                         "case_count": 1,
                         "cases": [{"status": "PASS", "page": "home"}],
                         "findings": [
@@ -289,14 +334,11 @@ class AggregateReporterTest(unittest.TestCase):
                 build_sha="b" * 40,
                 source_branch="test",
                 workflow="unit",
-                run_id="2",
                 expected_devices=["phone"],
                 impact={"schema_version": 1},
                 pr_number="59",
-                source_head_sha="c" * 40,
-                base_sha="d" * 40,
                 test_variant="unit-fixture",
-                run_attempt="3",
+                **self.aggregate_provenance_args(provenance),
             )
             self.assertEqual(result["release_recommendation"], "PASS WITH WARNINGS")
             self.assertEqual(result["pr_number"], "59")
@@ -319,10 +361,12 @@ class AggregateReporterTest(unittest.TestCase):
             warning = root / "input" / "phone"
             blocked.mkdir(parents=True)
             warning.mkdir(parents=True)
+            provenance = self.provenance(workflow_run_id="matrix-counts")
             (blocked / "summary.json").write_text(
                 json.dumps(
                     {
                         "device": {"id": "tv", "api": 35},
+                        "provenance": provenance,
                         "overall_status": "BLOCKED",
                         "expected_case_count": 8,
                         "case_count": 0,
@@ -344,6 +388,7 @@ class AggregateReporterTest(unittest.TestCase):
                 json.dumps(
                     {
                         "device": {"id": "phone", "api": 35},
+                        "provenance": provenance,
                         "overall_status": "WARN",
                         "expected_case_count": 1,
                         "case_count": 1,
@@ -366,9 +411,9 @@ class AggregateReporterTest(unittest.TestCase):
                 build_sha="e" * 40,
                 source_branch="test",
                 workflow="unit",
-                run_id="matrix-counts",
                 expected_devices=["tv", "phone"],
                 impact={"schema_version": 1},
+                **self.aggregate_provenance_args(provenance),
             )
             self.assertEqual(result["release_recommendation"], "BLOCKED")
             self.assertEqual(result["planned"], 9)
@@ -380,6 +425,118 @@ class AggregateReporterTest(unittest.TestCase):
             suite = ET.parse(root / "output" / "junit.xml").getroot()
             self.assertEqual(suite.attrib["tests"], "9")
             self.assertEqual(suite.attrib["skipped"], "8")
+
+
+    def write_summary(
+        self,
+        root: Path,
+        device_id: str,
+        provenance: dict[str, str],
+    ) -> None:
+        device = root / "input" / device_id
+        device.mkdir(parents=True)
+        (device / "summary.json").write_text(
+            json.dumps(
+                {
+                    "device": {"id": device_id, "api": 35},
+                    "provenance": provenance,
+                    "case_count": 1,
+                    "cases": [{"status": "PASS", "page": "home"}],
+                    "findings": [],
+                    "infrastructure_error_count": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_missing_source_head_provenance_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            expected = self.provenance(workflow_run_id="missing-head")
+            actual = dict(expected)
+            actual.pop("source_head_sha")
+            self.write_summary(root, "phone", actual)
+            result = aggregate(
+                root / "input",
+                root / "output",
+                build_sha=expected["tested_commit_sha"],
+                source_branch="test",
+                workflow="unit",
+                expected_devices=["phone"],
+                impact={"schema_version": 1},
+                **self.aggregate_provenance_args(expected),
+            )
+            self.assertEqual(result["release_recommendation"], "BLOCKED")
+            findings = json.loads((root / "output" / "findings.json").read_text())["findings"]
+            self.assertTrue(
+                any(
+                    item["code"] == "artifact_provenance_mismatch"
+                    and "source_head_sha=missing" in item["message"]
+                    for item in findings
+                )
+            )
+
+    def test_wrong_merge_sha_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            expected = self.provenance(workflow_run_id="wrong-merge")
+            actual = dict(expected, merge_sha="9" * 40)
+            self.write_summary(root, "tv", actual)
+            result = aggregate(
+                root / "input",
+                root / "output",
+                build_sha=expected["tested_commit_sha"],
+                source_branch="test",
+                workflow="unit",
+                expected_devices=["tv"],
+                impact={"schema_version": 1},
+                **self.aggregate_provenance_args(expected),
+            )
+            self.assertEqual(result["release_recommendation"], "BLOCKED")
+            self.assertGreater(result["infrastructure"], 0)
+
+    def test_old_head_device_artifact_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            expected = self.provenance(workflow_run_id="old-head")
+            actual = dict(expected, source_head_sha="0" * 40)
+            self.write_summary(root, "phone", actual)
+            result = aggregate(
+                root / "input",
+                root / "output",
+                build_sha=expected["tested_commit_sha"],
+                source_branch="test",
+                workflow="unit",
+                expected_devices=["phone"],
+                impact={"schema_version": 1},
+                **self.aggregate_provenance_args(expected),
+            )
+            self.assertEqual(result["release_recommendation"], "BLOCKED")
+            self.assertGreater(result["infrastructure"], 0)
+
+    def test_mixed_apk_sha_across_devices_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = self.provenance(workflow_run_id="mixed-apk", lab_apk_sha256="a" * 64)
+            second = dict(first, lab_apk_sha256="b" * 64)
+            self.write_summary(root, "phone", first)
+            self.write_summary(root, "tv", second)
+            expected = dict(first, lab_apk_sha256="")
+            result = aggregate(
+                root / "input",
+                root / "output",
+                build_sha=first["tested_commit_sha"],
+                source_branch="test",
+                workflow="unit",
+                expected_devices=["phone", "tv"],
+                impact={"schema_version": 1},
+                **self.aggregate_provenance_args(expected),
+            )
+            self.assertEqual(result["release_recommendation"], "BLOCKED")
+            findings = json.loads((root / "output" / "findings.json").read_text())["findings"]
+            self.assertTrue(
+                any("mixed APK SHA-256 values across devices" in item["message"] for item in findings)
+            )
 
 
 class StaticSummaryTest(unittest.TestCase):

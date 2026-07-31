@@ -194,6 +194,10 @@ def aggregate(
     base_sha: str = "",
     test_variant: str = "unspecified",
     run_attempt: str = "1",
+    tested_ref: str = "",
+    tested_commit_sha: str = "",
+    merge_sha: str = "",
+    lab_apk_sha256: str = "",
 ) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     summaries: dict[str, dict[str, Any]] = {}
@@ -218,8 +222,18 @@ def aggregate(
     findings: list[dict[str, Any]] = []
     planned = executed = passed = failed = skipped = retried = 0
     infrastructure = len(parse_errors) + len(missing)
+    provenance_errors: list[str] = []
+    observed_apks: set[str] = set()
+    expected_provenance = {"source_head_sha": source_head_sha, "base_sha": base_sha, "tested_ref": tested_ref, "tested_commit_sha": tested_commit_sha, "merge_sha": merge_sha, "lab_apk_sha256": lab_apk_sha256, "workflow_run_id": run_id, "workflow_run_attempt": run_attempt}
     devices: list[dict[str, Any]] = []
     for device, data in sorted(summaries.items()):
+        provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
+        for field, expected in expected_provenance.items():
+            actual = str(provenance.get(field) or "")
+            if not actual or (str(expected) and actual != str(expected)):
+                provenance_errors.append(f"{device}: {field}={actual or 'missing'} expected {expected}")
+        if provenance.get("lab_apk_sha256"):
+            observed_apks.add(str(provenance["lab_apk_sha256"]))
         cases = data.get("cases", [])
         device_planned = int(
             data.get(
@@ -250,6 +264,13 @@ def aggregate(
             }
         )
         findings.extend(_finding(item, device, build_sha) for item in data.get("findings", []))
+    if len(observed_apks) > 1:
+        provenance_errors.append(
+            f"mixed APK SHA-256 values across devices: {sorted(observed_apks)}"
+        )
+    infrastructure += len(provenance_errors)
+    for error in provenance_errors:
+        findings.append(_finding({"code": "artifact_provenance_mismatch", "severity": "P1", "finding_type": "Infrastructure", "classification": "infrastructure", "message": error, "expected": "artifact provenance matches tested merge commit and APK", "actual": error}, "aggregation", tested_commit_sha or build_sha))
     for device in missing:
         findings.append(
             _finding(
@@ -298,6 +319,10 @@ def aggregate(
         "run_id": run_id,
         "run_attempt": run_attempt,
         "test_variant": test_variant,
+        "tested_ref": tested_ref,
+        "tested_commit_sha": tested_commit_sha,
+        "merge_sha": merge_sha,
+        "lab_apk_sha256": lab_apk_sha256,
         "planned": planned,
         "executed": executed,
         "passed": passed,
@@ -338,6 +363,10 @@ def aggregate(
         "run_id": run_id,
         "run_attempt": run_attempt,
         "test_variant": test_variant,
+        "tested_ref": tested_ref,
+        "tested_commit_sha": tested_commit_sha,
+        "merge_sha": merge_sha,
+        "lab_apk_sha256": lab_apk_sha256,
         "expected_devices": expected_devices,
         "artifact_contract": list(REQUIRED_OUTPUTS) + ["SHA256SUMS"],
     }
@@ -376,6 +405,10 @@ def main() -> int:
     parser.add_argument("--base-sha", default="")
     parser.add_argument("--test-variant", default="unspecified")
     parser.add_argument("--expected-devices", default="")
+    parser.add_argument("--tested-ref", default="")
+    parser.add_argument("--tested-commit-sha", default="")
+    parser.add_argument("--merge-sha", default="")
+    parser.add_argument("--lab-apk-sha256", default="")
     parser.add_argument("--impact", type=Path)
     args = parser.parse_args()
     impact = (
@@ -397,6 +430,10 @@ def main() -> int:
         base_sha=args.base_sha,
         test_variant=args.test_variant,
         run_attempt=args.run_attempt,
+        tested_ref=args.tested_ref,
+        tested_commit_sha=args.tested_commit_sha,
+        merge_sha=args.merge_sha,
+        lab_apk_sha256=args.lab_apk_sha256,
     )
     print(
         f"{summary['release_recommendation']}: "
