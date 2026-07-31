@@ -104,7 +104,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.BuildConfig
@@ -1621,8 +1620,6 @@ private fun DownloadsScreen(
     val remembered = navigationMemory.position(MainDestination.DOWNLOADS)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, downloads.lastIndex.coerceAtLeast(0))
     val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
-    val downloadsFocusScope = rememberCoroutineScope()
-    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
@@ -1725,13 +1722,6 @@ private fun DownloadsScreen(
                         isTv = isTv,
                         onFocused = {
                             navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
-                            if (isTv) {
-                                downloadsFocusJob?.cancel()
-                                downloadsFocusJob = downloadsFocusScope.launch {
-                                    delay(100L)
-                                    runCatching { downloadsState.scrollToItem(index, scrollOffset = 0) }
-                                }
-                            }
                         },
                         onPlay = onPlay,
                         onDelete = onDelete,
@@ -1767,10 +1757,16 @@ private fun DownloadCard(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(17.dp)
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val cardHeight = when {
+        !isTv -> 220.dp
+        screenHeightDp <= 540 -> 196.dp
+        else -> 188.dp
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (isTv) 164.dp else 220.dp)
+            .heightIn(min = cardHeight)
             .clip(shape)
             .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
             .border(
@@ -1859,7 +1855,7 @@ private fun DownloadCard(
             }
         }
         Row(
-            modifier = Modifier.fillMaxWidth().height(if (isTv) 36.dp else 40.dp),
+            modifier = Modifier.fillMaxWidth().height(if (isTv) 42.dp else 40.dp),
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             when (item.status) {
