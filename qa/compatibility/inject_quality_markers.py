@@ -352,6 +352,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
     original_sha256 = sha256_text(original)
     instrumented_sha256 = sha256_text(source)
     report = {
+        "schema_version": 1,
         "original_sha256": original_sha256,
         "instrumented_sha256": instrumented_sha256,
         "input_sha256": original_sha256,
