@@ -96,7 +96,7 @@ jobs:
           test.write_text(t)
           PY
 
-      - name: Update canonical source hashes
+      - name: Update canonical source hash
         shell: bash
         run: |
           set -euo pipefail
@@ -105,20 +105,16 @@ jobs:
           from pathlib import Path
 
           canonical = Path('qa/canonical/canonical-source.sha256')
-          lines = canonical.read_text().splitlines()
-          targets = {
-              'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt',
-              'app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt',
-          }
+          target = 'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt'
           updated = []
-          seen = set()
-          for line in lines:
+          seen = False
+          for line in canonical.read_text().splitlines():
               digest, path = line.split('  ', 1)
-              if path in targets:
+              if path == target:
                   digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-                  seen.add(path)
+                  seen = True
               updated.append(f'{digest}  {path}')
-          assert seen == targets, f'missing canonical targets: {targets - seen}'
+          assert seen, f'missing canonical target: {target}'
           canonical.write_text('\n'.join(updated) + '\n')
           PY
           sha256sum -c qa/canonical/canonical-source.sha256
