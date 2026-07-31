@@ -139,7 +139,8 @@ def patch_segment_one_of(
 
 
 def page_content_options(destination: str) -> tuple[tuple[str, str], ...]:
-    marker = f".qaTvPageContent(isTv, MainDestination.{destination})"
+    marker_destination = "destination" if destination == "MOVIES" else f"MainDestination.{destination}"
+    marker = f".qaTvPageContent(isTv, {marker_destination})"
     canonical_options: tuple[tuple[str, str], ...] = ()
     if destination == "MOVIES":
         canonical_options = (
