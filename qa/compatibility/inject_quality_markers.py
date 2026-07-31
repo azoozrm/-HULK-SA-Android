@@ -367,14 +367,6 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
                 "            .clip(shape)",
             ),
-            (
-                "            .heightIn(min = cardHeight)\n"
-                "            .clip(shape)",
-                "            .heightIn(min = cardHeight)\n"
-                "            .qaMarker(isTv, "
-                "\"$QA_TV_DOWNLOAD_CARD_PREFIX${item.downloadId}\")\n"
-                "            .clip(shape)",
-            ),
         ),
         "download-card-marker",
         changes,
