@@ -260,6 +260,7 @@ def ambiguous_home_shape(source: str) -> str:
 class QualityMarkerInjectionTest(unittest.TestCase):
     def assert_complete_injection(self, source: str) -> None:
         patched, report = INJECTION.inject_text(source)
+        self.assertEqual(1, report["schema_version"])
         self.assertEqual(13, report["replacement_count"])
         self.assertEqual(list(EXPECTED_REPLACEMENTS), report["replacements"])
         for marker in INJECTION.MARKERS:
@@ -289,6 +290,7 @@ class QualityMarkerInjectionTest(unittest.TestCase):
             report = INJECTION.inject_file(target, report_path)
             patched = target.read_text(encoding="utf-8")
 
+            self.assertEqual(1, report["schema_version"])
             self.assertEqual(13, report["replacement_count"])
             self.assertEqual(list(EXPECTED_REPLACEMENTS), report["replacements"])
             self.assertNotEqual(
