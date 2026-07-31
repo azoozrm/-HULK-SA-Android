@@ -6,6 +6,7 @@ on:
       - fix/v09318-production-host-qualification
     paths:
       - .github/workflows/pr57-rtl-focus-hotfix.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -99,9 +100,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE='app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt'
-          TEST='app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt'
-          CANONICAL='qa/canonical/canonical-source.sha256'
           python3 - <<'PY'
           import hashlib
           from pathlib import Path
@@ -123,7 +121,7 @@ jobs:
           assert seen == targets, f'missing canonical targets: {targets - seen}'
           canonical.write_text('\n'.join(updated) + '\n')
           PY
-          sha256sum -c "$CANONICAL"
+          sha256sum -c qa/canonical/canonical-source.sha256
 
       - name: Run focused unit tests
         shell: bash
