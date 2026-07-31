@@ -85,12 +85,12 @@ def prepare_qa_activity(source: str) -> str:
         "                .semantics(mergeDescendants = false) {",
         1,
     )
-    function_tail = "\n    }\n}"
+    function_tail = "\n    }\n}\n"
     if not segment.endswith(function_tail):
         raise ValueError(
             "QA Activity FixtureMain tail did not match the supported shape"
         )
-    segment = segment[: -len(function_tail)] + "\n        }\n    }\n}"
+    segment = segment[: -len(function_tail)] + "\n        }\n    }\n}\n"
     return source[:start] + segment + source[end:]
 
 
