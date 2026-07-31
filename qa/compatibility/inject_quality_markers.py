@@ -217,6 +217,9 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
     original = source
     changes: list[str] = []
 
+    if any(marker in source for marker in MARKERS):
+        raise ValueError("source already contains a marker")
+
     source = replace_once(
         source,
         "import androidx.compose.ui.semantics.Role",
@@ -230,7 +233,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         source,
         'private const val WEBSITE_URL = "https://hulksa.com/"',
         HELPERS + '\nprivate const val WEBSITE_URL = "https://hulksa.com/"',
-        "qa-helpers",
+        "marker-helpers",
         changes,
     )
     source = patch_segment(
@@ -239,23 +242,23 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun NavigationItem(",
         ".focusGroup()",
         ".focusGroup()\n            .qaMarker(true, \"qa-tv-rail\")",
-        "rail-marker",
+        "tv-rail-marker",
         changes,
     )
-    for function_name, next_name, destination in (
-        ("private fun CinemaHomeScreen(", "private fun ActiveDownloadsSection(", "HOME"),
-        ("private fun LiveCatalogScreen(", "private fun LiveStage(", "LIVE"),
-        ("private fun PosterCatalogScreen(", "private fun LiveCatalogScreen(", "MOVIES"),
-        ("private fun FavoritesScreen(", "private fun UnifiedSearchScreen(", "FAVORITES"),
-        ("private fun UnifiedSearchScreen(", "private fun TvSearchField(", "SEARCH"),
-        ("private fun DownloadsScreen(", "private fun DownloadCard(", "DOWNLOADS"),
+    for function_name, next_name, destination, label in (
+        ("private fun CinemaHomeScreen(", "private fun ActiveDownloadsSection(", "HOME", "home-content-marker"),
+        ("private fun PosterCatalogScreen(", "private fun LiveCatalogScreen(", "MOVIES", "poster-catalog-content-marker"),
+        ("private fun LiveCatalogScreen(", "private fun LiveStage(", "LIVE", "live-content-marker"),
+        ("private fun FavoritesScreen(", "private fun UnifiedSearchScreen(", "FAVORITES", "favorites-content-marker"),
+        ("private fun UnifiedSearchScreen(", "private fun TvSearchField(", "SEARCH", "search-content-marker"),
+        ("private fun DownloadsScreen(", "private fun DownloadCard(", "DOWNLOADS", "downloads-content-marker"),
     ):
         source = patch_segment_one_of(
             source,
             function_name,
             next_name,
             page_content_options(destination),
-            f"{destination.lower()}-content-marker",
+            label,
             changes,
         )
     source = patch_segment(
@@ -331,6 +334,8 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "instrumented_sha256": instrumented_sha256,
         "input_sha256": original_sha256,
         "output_sha256": instrumented_sha256,
+        "replacement_count": len(changes),
+        "replacements": changes,
         "changes": changes,
         "markers": list(MARKERS),
     }
