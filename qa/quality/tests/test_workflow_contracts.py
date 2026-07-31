@@ -185,6 +185,11 @@ class WorkflowContractTest(unittest.TestCase):
 
 
 
+    def test_quality_ui_binds_merge_provenance_to_the_tested_merge_commit(self) -> None:
+        source = Path(".github/workflows/quality-ui.yml").read_text(encoding="utf-8")
+        self.assertEqual(2, source.count("MERGE_SHA: ${{ github.sha }}") + source.count("merge_sha: ${{ github.sha }}"))
+        self.assertNotIn("github.event.pull_request.merge_commit_sha", source)
+
     def test_quality_pr_static_summary_binds_merge_and_apk_provenance(self) -> None:
         source = Path(".github/workflows/quality-pr.yml").read_text(encoding="utf-8")
         for expected in (
