@@ -773,6 +773,12 @@ class DeterministicDownloadFocusTests(unittest.TestCase):
 
 
 
+    def test_direct_file_evidence_kotlin_expressions_are_compile_safe(self) -> None:
+        fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertNotIn('endsWith(\\".part\\")', fixture)
+        self.assertIn('files.filter { it.name.endsWith(".part") }', fixture)
+        self.assertIn('files.filterNot { it.name.endsWith(".part") }', fixture)
+
     def test_direct_file_evidence_contract_is_internal_and_independent(self) -> None:
         runner = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
         fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")

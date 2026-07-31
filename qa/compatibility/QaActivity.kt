@@ -685,8 +685,8 @@ private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness
         "\"origin_bytes\":${harness.origin.bytesServed()}," +
         "\"repository_bytes\":$repositoryBytes," +
         "\"files\":[${fileRecords}]," +
-        "\"partial_file_bytes\":${files.filter { it.name.endsWith(\".part\") }.sumOf(File::length)}," +
-        "\"completed_file_bytes\":${files.filterNot { it.name.endsWith(\".part\") }.sumOf(File::length)}," +
+        "\"partial_file_bytes\":${files.filter { it.name.endsWith(".part") }.sumOf(File::length)}," +
+        "\"completed_file_bytes\":${files.filterNot { it.name.endsWith(".part") }.sumOf(File::length)}," +
         "\"persisted_state\":{" +
             "\"path\":" + jsonString(persisted.absolutePath) + "," +
             "\"exists\":${persisted.exists()}," +
