@@ -15,6 +15,7 @@ def build_summary(
     package_outcome: str,
     lint_path: Path,
     vulnerability_path: Path,
+    provenance: dict[str, object] | None = None,
 ) -> dict[str, object]:
     findings: list[dict[str, object]] = []
     infrastructure_errors = int(
@@ -102,7 +103,7 @@ def build_summary(
         },
         {"page": "vulnerability", "status": "SKIPPED"},
     ]
-    return {
+    summary: dict[str, object] = {
         "device": {"id": "static-build", "api": 36},
         "planned_case_count": len(cases),
         # The reporter's executed count represents emitted case evidence rows.
@@ -113,6 +114,9 @@ def build_summary(
         "findings": findings,
         "infrastructure_error_count": infrastructure_errors,
     }
+    if provenance is not None:
+        summary["provenance"] = dict(provenance)
+    return summary
 
 
 def main() -> int:
@@ -122,12 +126,30 @@ def main() -> int:
     parser.add_argument("--lint", type=Path, required=True)
     parser.add_argument("--vulnerability", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-head-sha", required=True)
+    parser.add_argument("--base-sha", required=True)
+    parser.add_argument("--tested-ref", required=True)
+    parser.add_argument("--tested-commit-sha", required=True)
+    parser.add_argument("--merge-sha", required=True)
+    parser.add_argument("--lab-apk-sha256", required=True)
+    parser.add_argument("--workflow-run-id", required=True)
+    parser.add_argument("--workflow-run-attempt", required=True)
     args = parser.parse_args()
     summary = build_summary(
         gradle_outcome=args.gradle_outcome,
         package_outcome=args.package_outcome,
         lint_path=args.lint,
         vulnerability_path=args.vulnerability,
+        provenance={
+            "source_head_sha": args.source_head_sha,
+            "base_sha": args.base_sha,
+            "tested_ref": args.tested_ref,
+            "tested_commit_sha": args.tested_commit_sha,
+            "merge_sha": args.merge_sha,
+            "lab_apk_sha256": args.lab_apk_sha256,
+            "workflow_run_id": args.workflow_run_id,
+            "workflow_run_attempt": args.workflow_run_attempt,
+        },
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

@@ -173,12 +173,6 @@ class WorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(expected, source)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-
     def test_mixed_scope_runs_lab_self_validation(self) -> None:
         source = Path(".github/workflows/quality-lab-self-validation.yml").read_text(encoding="utf-8")
         self.assertIn("lab_changed", source)
@@ -191,10 +185,43 @@ if __name__ == "__main__":
 
 
 
+    def test_quality_pr_static_summary_binds_merge_and_apk_provenance(self) -> None:
+        source = Path(".github/workflows/quality-pr.yml").read_text(encoding="utf-8")
+        for expected in (
+            'QUALITY_TESTED_REF="refs/pull/${QUALITY_PR_NUMBER}/merge"',
+            'QUALITY_TESTED_COMMIT_SHA="$GITHUB_SHA"',
+            'QUALITY_MERGE_SHA="$GITHUB_SHA"',
+            'QUALITY_LAB_APK_SHA256="$(sha256sum',
+            '--tested-ref "$QUALITY_TESTED_REF"',
+            '--tested-commit-sha "$QUALITY_TESTED_COMMIT_SHA"',
+            '--merge-sha "$QUALITY_MERGE_SHA"',
+            '--lab-apk-sha256 "$QUALITY_LAB_APK_SHA256"',
+            '--workflow-run-id "$GITHUB_RUN_ID"',
+            '--workflow-run-attempt "$GITHUB_RUN_ATTEMPT"',
+        ):
+            self.assertIn(expected, source)
+
     def test_quality_pr_reporter_is_not_swallowed(self) -> None:
         source = Path(".github/workflows/quality-pr.yml").read_text(encoding="utf-8")
-        self.assertNotIn("qa.quality.reporters.aggregate \\\n", source.split("Generate mandatory quick-gate report", 1)[1].split("Upload build", 1)[0].replace("\n            --impact quick-impact/impact.json\n", "\n            --impact quick-impact/impact.json || true\n"))
+        segment = source.split("Generate mandatory quick-gate report", 1)[1].split("Upload build", 1)[0]
+        self.assertIn("python3 -m qa.quality.reporters.aggregate", segment)
+        self.assertNotIn("|| true", segment)
         self.assertNotIn("--impact quick-impact/impact.json || true", source)
-        for required in ("SUMMARY.json", "REPORT.md", "REPORT.html", "junit.xml", "run-manifest.json", "findings.json", "coverage.json", "impact.json", "SHA256SUMS"):
+        for required in (
+            "SUMMARY.json",
+            "REPORT.md",
+            "REPORT.html",
+            "junit.xml",
+            "run-manifest.json",
+            "findings.json",
+            "coverage.json",
+            "impact.json",
+            "SHA256SUMS",
+        ):
             self.assertIn(required, source)
         self.assertIn("sha256sum -c SHA256SUMS", source)
+
+
+
+if __name__ == "__main__":
+    unittest.main()

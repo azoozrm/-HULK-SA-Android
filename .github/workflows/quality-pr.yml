@@ -196,11 +196,32 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p quick-evidence/static
+          mapfile -t debug_apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | sort)
+          [[ "${#debug_apks[@]}" -eq 1 ]] || {
+            echo "BLOCKED: expected exactly one debug APK, found ${#debug_apks[@]}" >&2
+            exit 2
+          }
+          QUALITY_TESTED_REF="refs/pull/${QUALITY_PR_NUMBER}/merge"
+          QUALITY_TESTED_COMMIT_SHA="$GITHUB_SHA"
+          QUALITY_MERGE_SHA="$GITHUB_SHA"
+          QUALITY_LAB_APK_SHA256="$(sha256sum "${debug_apks[0]}" | awk '{print $1}')"
+          [[ "$QUALITY_LAB_APK_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "BLOCKED: invalid debug APK SHA-256" >&2
+            exit 2
+          }
           python3 -m qa.quality.reporters.static_summary \
             --gradle-outcome "$GRADLE_OUTCOME" \
             --package-outcome "$PACKAGE_OUTCOME" \
             --lint app/build/reports/lint-results-debug.xml \
             --vulnerability quality-build/VULNERABILITY-REPORT.json \
+            --source-head-sha "$QUALITY_SOURCE_HEAD_SHA" \
+            --base-sha "$QUALITY_BASE_SHA" \
+            --tested-ref "$QUALITY_TESTED_REF" \
+            --tested-commit-sha "$QUALITY_TESTED_COMMIT_SHA" \
+            --merge-sha "$QUALITY_MERGE_SHA" \
+            --lab-apk-sha256 "$QUALITY_LAB_APK_SHA256" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output quick-evidence/static/summary.json
           python3 -m qa.quality.reporters.aggregate \
             --input quick-evidence \
@@ -214,6 +235,10 @@ jobs:
             --base-sha "$QUALITY_BASE_SHA" \
             --source-branch "$QUALITY_SOURCE_BRANCH" \
             --test-variant pr-static-release-like \
+            --tested-ref "$QUALITY_TESTED_REF" \
+            --tested-commit-sha "$QUALITY_TESTED_COMMIT_SHA" \
+            --merge-sha "$QUALITY_MERGE_SHA" \
+            --lab-apk-sha256 "$QUALITY_LAB_APK_SHA256" \
             --expected-devices static-build \
             --impact quick-impact/impact.json
           for required in SUMMARY.json REPORT.md REPORT.html junit.xml run-manifest.json findings.json coverage.json impact.json SHA256SUMS; do
