@@ -25,29 +25,59 @@ def tree_digest(root: Path, *, exclude: set[Path] | None = None) -> str:
     return digest.hexdigest()
 
 
-def prepare_qa_activity(source: str) -> str:
-    """Force a fresh debug semantics node when page or transfer state changes.
+def replace_exact(source: str, old: str, new: str, label: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise ValueError(f"{label} must match exactly once; found {count}")
+    return source.replace(old, new, 1)
 
-    Android 9's accessibility bridge can retain the previous content description
-    when one Compose semantics node mutates in place. The Compatibility Lab uses
-    these descriptions only as debug evidence, so recreate that node whenever
-    its evidence tuple changes. Every anchor is exact and the transform fails
-    closed for unknown or already-instrumented harness source.
+
+def prepare_qa_activity(source: str) -> str:
+    """Add a native debug-only accessibility evidence node.
+
+    Android 9 UI Automator can retain a previous Compose semantics snapshot while
+    the rendered page and durable download state have already advanced. A tiny
+    native Android View provides the same authenticated page/transfer evidence
+    through the platform accessibility tree. The transform is exact, debug-only,
+    and fails closed for repeated, missing, or already-instrumented source.
     """
 
-    key_import = "import androidx.compose.runtime.key\n"
-    if key_import in source:
+    guard = "val qualityEvidence = buildList {"
+    if guard in source or "AndroidView(" in source:
         raise ValueError(
-            "QA Activity already contains the API 28 semantics refresh key"
+            "QA Activity already contains the native accessibility evidence node"
         )
-    import_anchor = "import androidx.compose.runtime.getValue\n"
-    import_count = source.count(import_anchor)
-    if import_count != 1:
-        raise ValueError(
-            "QA Activity key import anchor must match exactly once; "
-            f"found {import_count}"
+
+    for anchor, addition, label in (
+        (
+            "import android.os.Environment\n",
+            "import android.view.View\n"
+            "import android.view.accessibility.AccessibilityEvent\n",
+            "Android accessibility imports",
+        ),
+        (
+            "import androidx.compose.foundation.layout.fillMaxSize\n",
+            "import androidx.compose.foundation.layout.size\n",
+            "Compose size import",
+        ),
+        (
+            "import androidx.compose.runtime.getValue\n",
+            "import androidx.compose.runtime.key\n",
+            "Compose key import",
+        ),
+        (
+            "import androidx.compose.ui.semantics.semantics\n",
+            "import androidx.compose.ui.unit.dp\n"
+            "import androidx.compose.ui.viewinterop.AndroidView\n",
+            "AndroidView imports",
+        ),
+    ):
+        source = replace_exact(
+            source,
+            anchor,
+            anchor + addition,
+            label,
         )
-    source = source.replace(import_anchor, import_anchor + key_import, 1)
 
     start_marker = "private fun FixtureMain("
     end_marker = "\nprivate fun String.toDestination()"
@@ -59,38 +89,77 @@ def prepare_qa_activity(source: str) -> str:
         raise ValueError("QA Activity FixtureMain end marker not found")
     segment = source[start:end]
 
-    box_anchor = (
-        "    Box(\n"
-        "        Modifier\n"
-        "            .fillMaxSize()\n"
-        "            .semantics(mergeDescendants = false) {"
+    marker_block = """    Box(
+        Modifier
+            .fillMaxSize()
+            .semantics(mergeDescendants = false) {
+                contentDescription = buildList {
+                    add(pageMarker)
+                    if (hasOriginByteProgress) {
+                        add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
+                    }
+                    if (hasRealDownloadProgress) {
+                        add(QA_DOWNLOAD_PROGRESS_MARKER)
+                    }
+                    lastDownloadAction?.let { marker ->
+                        if (state.destination == MainDestination.DOWNLOADS) {
+                            add("qa-download-action:$marker")
+                        }
+                    }
+                }
+                    .joinToString(",")
+            },
+    ) {
+        MainShellScreen(
+"""
+    replacement = """    val qualityEvidence = buildList {
+        add(pageMarker)
+        if (hasOriginByteProgress) {
+            add(QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER)
+        }
+        if (hasRealDownloadProgress) {
+            add(QA_DOWNLOAD_PROGRESS_MARKER)
+        }
+        lastDownloadAction?.let { marker ->
+            if (state.destination == MainDestination.DOWNLOADS) {
+                add("qa-download-action:$marker")
+            }
+        }
+    }
+        .joinToString(",")
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .semantics(mergeDescendants = false) {
+                contentDescription = qualityEvidence
+            },
+    ) {
+        key(qualityEvidence) {
+            AndroidView(
+                factory = { context ->
+                    View(context).apply {
+                        importantForAccessibility =
+                            View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                    }
+                },
+                update = { view ->
+                    view.contentDescription = qualityEvidence
+                    view.sendAccessibilityEvent(
+                        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                    )
+                },
+                modifier = Modifier.size(1.dp),
+            )
+        }
+        MainShellScreen(
+"""
+    segment = replace_exact(
+        segment,
+        marker_block,
+        replacement,
+        "QA Activity evidence block",
     )
-    box_count = segment.count(box_anchor)
-    if box_count != 1:
-        raise ValueError(
-            "QA Activity marker Box anchor must match exactly once; "
-            f"found {box_count}"
-        )
-    segment = segment.replace(
-        box_anchor,
-        "    key(\n"
-        "        pageMarker,\n"
-        "        hasOriginByteProgress,\n"
-        "        hasRealDownloadProgress,\n"
-        "        lastDownloadAction,\n"
-        "    ) {\n"
-        "        Box(\n"
-        "            Modifier\n"
-        "                .fillMaxSize()\n"
-        "                .semantics(mergeDescendants = false) {",
-        1,
-    )
-    function_tail = "\n    }\n}\n"
-    if not segment.endswith(function_tail):
-        raise ValueError(
-            "QA Activity FixtureMain tail did not match the supported shape"
-        )
-    segment = segment[: -len(function_tail)] + "\n        }\n    }\n}\n"
     return source[:start] + segment + source[end:]
 
 
@@ -159,7 +228,7 @@ def main() -> None:
         "prepared debug checkout"
     )
     print(
-        "PASS: debug page and transfer semantics recreate on evidence changes"
+        "PASS: native debug accessibility evidence tracks page and transfer state"
     )
     print(f"Canonical src/main digest before injection: {production_before}")
     print(f"Instrumented src/main digest: {production_after}")
