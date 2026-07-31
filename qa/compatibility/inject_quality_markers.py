@@ -140,7 +140,29 @@ def patch_segment_one_of(
 
 def page_content_options(destination: str) -> tuple[tuple[str, str], ...]:
     marker = f".qaTvPageContent(isTv, MainDestination.{destination})"
+    canonical_options: tuple[tuple[str, str], ...] = ()
+    if destination == "MOVIES":
+        canonical_options = (
+            (
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
+                "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {",
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
+                "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)"
+                f"{marker}) {{",
+            ),
+        )
+    elif destination == "LIVE":
+        canonical_options = (
+            (
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
+                "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {",
+                "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
+                "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)"
+                f"{marker}) {{",
+            ),
+        )
     return (
+        *canonical_options,
         (
             "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
             "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
