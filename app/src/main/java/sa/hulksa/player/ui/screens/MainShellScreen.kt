@@ -157,6 +157,9 @@ private val TV_LIVE_ACTION_INSET = 8.dp
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
+internal fun tvDownloadCardHeightDp(screenHeightDp: Int): Float =
+    if (screenHeightDp <= 540) 196f else 188f
+
 
 internal enum class DownloadFocusSlot {
     WIFI,
@@ -258,26 +261,19 @@ private fun Modifier.downloadFocusNavigation(
 ): Modifier {
     if (!isTv) return this
     val requester = requesters[node] ?: return this
-    return focusRequester(requester).onPreviewKeyEvent { event ->
-        if (event.type != KeyEventType.KeyDown) {
-            false
-        } else {
-            val direction = when (event.key) {
-                Key.DirectionUp -> DownloadFocusDirection.UP
-                Key.DirectionDown -> DownloadFocusDirection.DOWN
-                Key.DirectionLeft -> DownloadFocusDirection.LEFT
-                Key.DirectionRight -> DownloadFocusDirection.RIGHT
-                else -> null
-            }
-            val target = direction?.let { nextDownloadFocusNode(node, rowCount, it) }
-            if (target == null) {
-                false
-            } else {
-                requesters[target]?.let { targetRequester ->
-                    runCatching { targetRequester.requestFocus() }.isSuccess
-                } ?: false
-            }
-        }
+    val upRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.UP)
+        ?.let(requesters::get)
+    val downRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.DOWN)
+        ?.let(requesters::get)
+    val leftRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.LEFT)
+        ?.let(requesters::get)
+    val rightRequester = nextDownloadFocusNode(node, rowCount, DownloadFocusDirection.RIGHT)
+        ?.let(requesters::get)
+    return focusRequester(requester).focusProperties {
+        upRequester?.let { up = it }
+        downRequester?.let { down = it }
+        leftRequester?.let { left = it }
+        rightRequester?.let { right = it }
     }
 }
 
@@ -1272,13 +1268,14 @@ private fun LiveCatalogScreen(
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
         }
     }
-    LaunchedEffect(visible) {
+    LaunchedEffect(isTv, visible, state.searchQuery, remembered.itemKey, rememberedIndex) {
         if (preview == null || preview !in visible) {
             preview = visible.firstOrNull { "${it.type}:${it.id}" == remembered.itemKey } ?: visible.getOrNull(rememberedIndex) ?: visible.firstOrNull()
         }
-        if (state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty()) {
-            listState.scrollToItem(rememberedIndex)
-            delay(180)
+        if (isTv && state.searchQuery.isBlank() && visible.isNotEmpty()) {
+            if (remembered.itemKey.isNotBlank()) {
+                listState.scrollToItem(rememberedIndex)
+            }
             runCatching { channelRequester.requestFocus() }
         }
     }
@@ -1646,7 +1643,6 @@ private fun DownloadsScreen(
 
     LaunchedEffect(isTv, downloadIds, remembered.itemKey, rememberedIndex) {
         if (isTv) {
-            delay(180L)
             val initialNode = if (remembered.itemKey.isBlank()) {
                 DownloadFocusNode(-1, DownloadFocusSlot.WIFI)
             } else {
@@ -1661,15 +1657,36 @@ private fun DownloadsScreen(
             .fillMaxSize()
             .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
     ) {
-        PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoPill("مكتمل  $completed")
-            if (active > 0) InfoPill("نشط ومجدول  $active")
-            if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
-            InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}")
+        if (isTv) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
+                LazyRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                ) {
+                    item { InfoPill("مكتمل  $completed") }
+                    if (active > 0) item { InfoPill("نشط ومجدول  $active") }
+                    if (storedBytes > 0L) item { InfoPill("المحفوظ  ${formatBytes(storedBytes)}") }
+                    item { InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}") }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        } else {
+            PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoPill("مكتمل  $completed")
+                if (active > 0) InfoPill("نشط ومجدول  $active")
+                if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
+                InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}")
+            }
+            Spacer(Modifier.height(11.dp))
         }
-        Spacer(Modifier.height(11.dp))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
@@ -1705,7 +1722,7 @@ private fun DownloadsScreen(
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(if (isTv) 4.dp else 12.dp))
         if (downloads.isEmpty()) {
             EmptyState("ستظهر هنا الافلام والحلقات التي تختار تحميلها")
         } else {
@@ -1758,10 +1775,10 @@ private fun DownloadCard(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(17.dp)
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
-    val cardHeight = when {
-        !isTv -> 220.dp
-        screenHeightDp <= 540 -> 196.dp
-        else -> 188.dp
+    val cardHeight = if (isTv) {
+        tvDownloadCardHeightDp(screenHeightDp).dp
+    } else {
+        220.dp
     }
     Column(
         modifier = modifier
