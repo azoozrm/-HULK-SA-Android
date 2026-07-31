@@ -42,6 +42,9 @@ is_expanded_rail_focus = RUN_LAB_MODULE.is_expanded_rail_focus
 visible_package_names = RUN_LAB_MODULE.visible_package_names
 download_action_markers = RUN_LAB_MODULE.download_action_markers
 focused_node = RUN_LAB_MODULE.focused_node
+download_focus_target = RUN_LAB_MODULE.download_focus_target
+download_focus_graph = RUN_LAB_MODULE.download_focus_graph
+plan_download_focus_path = RUN_LAB_MODULE.plan_download_focus_path
 
 
 class ConfigTests(unittest.TestCase):
@@ -717,3 +720,54 @@ class AnalyzerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DeterministicDownloadFocusTests(unittest.TestCase):
+    @staticmethod
+    def xml(label: str, bounds: str = "[100,100][400,180]") -> bytes:
+        return (
+            '<hierarchy><node package="sa.hulksa.player.dev" focused="true" '
+            'focusable="true" clickable="true" '
+            f'content-desc="{label}" bounds="{bounds}" /></hierarchy>'
+        ).encode()
+
+    def test_focus_can_start_on_wifi(self) -> None:
+        self.assertEqual("toolbar-wifi", download_focus_target(self.xml("WiFi فقط"), 1920)[0])
+        self.assertEqual([], plan_download_focus_path("toolbar-wifi", "toolbar-wifi"))
+
+    def test_focus_can_start_on_concurrent(self) -> None:
+        self.assertEqual("toolbar-concurrent", download_focus_target(self.xml("متزامنة 2"), 1920)[0])
+        self.assertEqual(
+            [("RIGHT", "toolbar-schedule"), ("RIGHT", "toolbar-wifi")],
+            plan_download_focus_path("toolbar-concurrent", "toolbar-wifi"),
+        )
+
+    def test_focus_can_start_on_pause(self) -> None:
+        xml = (
+            '<hierarchy>'
+            '<node package="sa.hulksa.player.dev" focused="true" focusable="true" clickable="true" '
+            'content-desc="ايقاف مؤقت" bounds="[100,300][400,380]" />'
+            '<node package="sa.hulksa.player.dev" focusable="true" clickable="true" '
+            'content-desc="ايقاف مؤقت" bounds="[100,500][400,580]" />'
+            '</hierarchy>'
+        ).encode()
+        self.assertEqual("row-1-primary", download_focus_target(xml, 1920)[0])
+        path = plan_download_focus_path("row-1-primary", "toolbar-wifi")
+        self.assertEqual([("UP", "toolbar-wifi")], path)
+
+    def test_focus_can_start_on_rtl_rail(self) -> None:
+        target, _ = download_focus_target(self.xml("التنزيلات", "[1500,100][1900,200]"), 1920)
+        self.assertEqual("rail-item", target)
+        self.assertEqual([("LEFT", "toolbar-wifi")], plan_download_focus_path(target, "toolbar-wifi"))
+
+    def test_unknown_focus_is_blocked(self) -> None:
+        target, _ = download_focus_target(self.xml("عنصر مجهول"), 1920)
+        self.assertIsNone(target)
+        self.assertIsNone(plan_download_focus_path(target, "toolbar-wifi"))
+
+    def test_rtl_horizontal_graph_matches_contract(self) -> None:
+        graph = download_focus_graph(3)
+        self.assertEqual("toolbar-schedule", graph["toolbar-wifi"]["LEFT"])
+        self.assertEqual("toolbar-concurrent", graph["toolbar-schedule"]["LEFT"])
+        self.assertEqual("row-1-priority", graph["row-1-primary"]["LEFT"])
+        self.assertEqual("row-1-cancel", graph["row-1-priority"]["LEFT"])
+

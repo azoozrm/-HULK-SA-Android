@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -354,6 +355,154 @@ def is_expanded_rail_focus(
         and x2 >= display_width * 0.90
         and node_width >= display_width * 0.14
     )
+
+
+DOWNLOAD_FOCUS_LABELS: dict[str, tuple[str, ...]] = {
+    "toolbar-wifi": ("WiFi فقط", "كل الشبكات"),
+    "toolbar-schedule": ("الجدولة",),
+    "toolbar-concurrent": ("متزامنة",),
+    "primary": ("ايقاف مؤقت", "استئناف"),
+    "priority": ("عالية", "عادية", "منخفضة"),
+    "cancel": ("الغاء",),
+}
+DOWNLOAD_KEY_CODES = {"UP": 19, "DOWN": 20, "LEFT": 21, "RIGHT": 22, "CENTER": 23}
+
+
+def _label_matches(label: str, candidates: tuple[str, ...]) -> bool:
+    normalized = " ".join(label.split())
+    return any(candidate in normalized for candidate in candidates)
+
+
+def download_focus_target(
+    xml_bytes: bytes,
+    display_width: int,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Map the actual focused UI node to the documented RTL Downloads graph."""
+    node = focused_node(xml_bytes)
+    if node is None:
+        return None, None
+    label = str(node.get("text") or "")
+    for target in ("toolbar-wifi", "toolbar-schedule", "toolbar-concurrent"):
+        if _label_matches(label, DOWNLOAD_FOCUS_LABELS[target]):
+            return target, node
+    slot = next(
+        (
+            candidate
+            for candidate in ("primary", "priority", "cancel")
+            if _label_matches(label, DOWNLOAD_FOCUS_LABELS[candidate])
+        ),
+        None,
+    )
+    if slot:
+        try:
+            root = ET.fromstring(xml_bytes)
+        except ET.ParseError:
+            return None, node
+        centers: list[int] = []
+        for candidate in root.iter("node"):
+            if candidate.attrib.get("focusable") != "true" and candidate.attrib.get("clickable") != "true":
+                continue
+            candidate_label = node_text_with_descendants(candidate)
+            if not _label_matches(candidate_label, DOWNLOAD_FOCUS_LABELS[slot]):
+                continue
+            bounds = node_bounds(candidate)
+            if bounds and bounds[3] > bounds[1]:
+                centers.append((bounds[1] + bounds[3]) // 2)
+        bounds = node.get("bounds")
+        if bounds:
+            center = (bounds[1] + bounds[3]) // 2
+            ordered = sorted({value for value in centers if value > 0})
+            if ordered:
+                row = min(range(len(ordered)), key=lambda index: abs(ordered[index] - center)) + 1
+                return f"row-{row}-{slot}", node
+    bounds = node.get("bounds")
+    if bounds and display_width > 0:
+        x1, _, x2, _ = bounds
+        if x1 >= display_width * 0.62 and x2 >= display_width * 0.88:
+            return "rail-item", node
+    return None, node
+
+
+def download_focus_graph(row_count: int = 3) -> dict[str, dict[str, str]]:
+    """Return the current production RTL physical-order graph."""
+    graph: dict[str, dict[str, str]] = {
+        "rail-item": {"LEFT": "toolbar-wifi"},
+        "toolbar-wifi": {"LEFT": "toolbar-schedule"},
+        "toolbar-schedule": {"RIGHT": "toolbar-wifi", "LEFT": "toolbar-concurrent"},
+        "toolbar-concurrent": {"RIGHT": "toolbar-schedule"},
+    }
+    toolbar_to_slot = {
+        "toolbar-wifi": "primary",
+        "toolbar-schedule": "priority",
+        "toolbar-concurrent": "cancel",
+    }
+    for toolbar, slot in toolbar_to_slot.items():
+        if row_count:
+            graph[toolbar]["DOWN"] = f"row-1-{slot}"
+    for row in range(1, row_count + 1):
+        primary = f"row-{row}-primary"
+        priority = f"row-{row}-priority"
+        cancel = f"row-{row}-cancel"
+        graph.setdefault(primary, {})["LEFT"] = priority
+        graph.setdefault(priority, {}).update({"RIGHT": primary, "LEFT": cancel})
+        graph.setdefault(cancel, {})["RIGHT"] = priority
+        if row > 1:
+            for slot in ("primary", "priority", "cancel"):
+                graph[f"row-{row}-{slot}"]["UP"] = f"row-{row - 1}-{slot}"
+        else:
+            graph[primary]["UP"] = "toolbar-wifi"
+            graph[priority]["UP"] = "toolbar-schedule"
+            graph[cancel]["UP"] = "toolbar-concurrent"
+        if row < row_count:
+            for slot in ("primary", "priority", "cancel"):
+                graph[f"row-{row}-{slot}"]["DOWN"] = f"row-{row + 1}-{slot}"
+    return graph
+
+
+def plan_download_focus_path(
+    current: str | None,
+    target: str,
+    row_count: int = 3,
+) -> list[tuple[str, str]] | None:
+    if current is None:
+        return None
+    if current == target:
+        return []
+    graph = download_focus_graph(row_count)
+    queue: deque[tuple[str, list[tuple[str, str]]]] = deque([(current, [])])
+    visited = {current}
+    while queue:
+        node, path = queue.popleft()
+        for key, neighbor in graph.get(node, {}).items():
+            if neighbor in visited:
+                continue
+            next_path = [*path, (key, neighbor)]
+            if neighbor == target:
+                return next_path
+            visited.add(neighbor)
+            queue.append((neighbor, next_path))
+    return None
+
+
+def poll_download_focus(
+    adb: Adb,
+    expected_target: str,
+    scratch: Path,
+    display_width: int,
+    timeout: float = 3.5,
+) -> tuple[bool, str | None, dict[str, Any] | None, bytes]:
+    deadline = time.monotonic() + timeout
+    last_target: str | None = None
+    last_node: dict[str, Any] | None = None
+    last_xml = b""
+    while time.monotonic() < deadline:
+        last_xml = dump_xml(adb, scratch, attempts=1)
+        last_target, last_node = download_focus_target(last_xml, display_width)
+        if last_target == expected_target:
+            return True, last_target, last_node, last_xml
+        time.sleep(0.15)
+    return False, last_target, last_node, last_xml
+
 
 
 def parse_start_metrics(text: str) -> dict[str, int]:
@@ -1175,6 +1324,222 @@ class DeviceLab:
                 self.download_action_audit(orientation)
         self.manifest["finished_at_epoch"] = int(time.time())
         self.flush_manifest()
+
+
+def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> None:
+    audit_root = self.out / "focus" / orientation / "downloads-actions"
+    audit_root.mkdir(parents=True, exist_ok=True)
+    checks: list[dict[str, Any]] = []
+    display_width, _ = oriented_dimensions(self.args.width, self.args.height, orientation)
+    sequence_number = 0
+    audit_error: str | None = None
+
+    def run_check(check_id: str, target: str, action: str | None = None) -> bool:
+        nonlocal sequence_number
+        sequence_number += 1
+        step_root = audit_root / f"{sequence_number:02d}-{check_id}"
+        step_root.mkdir(parents=True, exist_ok=True)
+        key_events: list[dict[str, Any]] = []
+        reason: str | None = None
+        source = "PRODUCT" if action else "QUALITY_LAB"
+        precondition_established = False
+        initial_node = None
+        initial_target = None
+        actual_target = None
+        focused_before = None
+        focused_after = None
+        markers_before: set[tuple[str, int]] = set()
+        markers_after: set[tuple[str, int]] = set()
+        expected_action = action
+        key_press_confirmed = False
+        try:
+            self.start_page("downloads", step_root / "restart")
+            initial_xml = dump_xml(self.adb, step_root / "initial.xml", attempts=2)
+            initial_target, initial_node = download_focus_target(initial_xml, display_width)
+            markers_before = download_action_markers(initial_xml)
+            path = plan_download_focus_path(initial_target, target, row_count=3)
+            if path is None:
+                reason = (
+                    "DOWNLOAD_ACTION_START_STATE_NOT_ESTABLISHED: "
+                    f"initial focus {initial_target or 'unknown'} cannot reach {target}"
+                )
+                source = "FIXTURE"
+            else:
+                current_target = initial_target
+                for key_name, expected_next in path:
+                    focused_before = focused_node(
+                        dump_xml(self.adb, step_root / f"before-{len(key_events) + 1}.xml", attempts=2)
+                    )
+                    self.adb.shell(["input", "keyevent", str(DOWNLOAD_KEY_CODES[key_name])], check=True)
+                    reached, observed, observed_node, _ = poll_download_focus(
+                        self.adb,
+                        expected_next,
+                        step_root / f"after-{len(key_events) + 1}.xml",
+                        display_width,
+                    )
+                    key_events.append(
+                        {
+                            "key": key_name,
+                            "key_code": DOWNLOAD_KEY_CODES[key_name],
+                            "focused_before": current_target,
+                            "expected_target": expected_next,
+                            "actual_target": observed,
+                            "success": reached,
+                        }
+                    )
+                    focused_after = observed_node
+                    actual_target = observed
+                    current_target = observed
+                    if not reached:
+                        reason = (
+                            "DOWNLOAD_FOCUS_TARGET_MISMATCH: "
+                            f"{key_name} expected {expected_next}, observed {observed or 'unknown'}"
+                        )
+                        source = "QUALITY_LAB"
+                        break
+                if reason is None:
+                    final_xml = dump_xml(self.adb, step_root / "target.xml", attempts=2)
+                    actual_target, focused_before = download_focus_target(final_xml, display_width)
+                    markers_before = download_action_markers(final_xml)
+                    precondition_established = actual_target == target
+                    if not precondition_established:
+                        reason = f"DOWNLOAD_TARGET_PRECONDITION_FAILED: expected {target}, observed {actual_target}"
+                        source = "FIXTURE"
+            if reason is None and action is not None:
+                label = str((focused_before or {}).get("text") or "")
+                if action == "primary":
+                    expected_action = "resume" if "استئناف" in label else "pause"
+                self.adb.shell(["input", "keyevent", str(DOWNLOAD_KEY_CODES["CENTER"])], check=True)
+                key_press_confirmed = True
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    after_xml = dump_xml(self.adb, step_root / "ui.xml", attempts=1)
+                    markers_after = download_action_markers(after_xml)
+                    _, focused_after = download_focus_target(after_xml, display_width)
+                    new_markers = markers_after - markers_before
+                    if any(marker_action == expected_action for marker_action, _ in new_markers):
+                        break
+                    if new_markers:
+                        break
+                    time.sleep(0.15)
+                new_markers = markers_after - markers_before
+                expected_seen = any(marker_action == expected_action for marker_action, _ in new_markers)
+                wrong = sorted(
+                    f"{marker_action}:{revision}"
+                    for marker_action, revision in new_markers
+                    if marker_action != expected_action
+                )
+                if wrong:
+                    reason = (
+                        "WRONG_ACTION_MARKER: target was proven but callback marker(s) "
+                        f"{', '.join(wrong)} do not match {expected_action}"
+                    )
+                    source = "QUALITY_LAB"
+                elif not expected_seen:
+                    reason = f"PRODUCT_CALLBACK_MARKER_MISSING: {expected_action} revision did not advance"
+                    source = "PRODUCT"
+            elif reason is None:
+                markers_after = markers_before
+                focused_after = focused_before
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"[-1200:]
+            source = "INFRASTRUCTURE"
+
+        success = reason is None
+        if not (step_root / "ui.xml").exists():
+            try:
+                dump_xml(self.adb, step_root / "ui.xml", attempts=2)
+            except Exception:
+                pass
+        try:
+            capture_png(self.adb, step_root / "screenshot.png")
+        except Exception:
+            pass
+        safe_write(
+            step_root / "logcat.txt",
+            command_text(self.adb, ["logcat", "-d", "-v", "threadtime"], shell=False, timeout=90),
+        )
+        checks.append(
+            {
+                "id": check_id,
+                "success": success,
+                "expected_target": target,
+                "actual_target": actual_target,
+                "expected_action": expected_action,
+                "initial_focused_node": initial_node,
+                "initial_target": initial_target,
+                "focused_before": focused_before,
+                "focused_after": focused_after,
+                "key_events": key_events,
+                "key_press_confirmed": key_press_confirmed,
+                "precondition_established": precondition_established or (action is None and success),
+                "precondition_failure": None if success else reason,
+                "marker_revision_before": [f"{name}:{revision}" for name, revision in sorted(markers_before)],
+                "marker_revision_after": [f"{name}:{revision}" for name, revision in sorted(markers_after)],
+                "unexpected_markers": sorted(
+                    f"{name}:{revision}"
+                    for name, revision in (markers_after - markers_before)
+                    if expected_action and name != expected_action
+                ),
+                "source": source,
+                "reason": reason,
+                "evidence": {
+                    key: path.relative_to(self.out).as_posix()
+                    for key, path in {
+                        "screenshot": step_root / "screenshot.png",
+                        "initial_xml": step_root / "initial.xml",
+                        "before_xml": step_root / "target.xml",
+                        "xml": step_root / "ui.xml",
+                        "logcat": step_root / "logcat.txt",
+                    }.items()
+                    if path.is_file()
+                },
+            }
+        )
+        return success
+
+    try:
+        navigation = [
+            ("top-wifi-initial", "toolbar-wifi"),
+            ("top-schedule-focus", "toolbar-schedule"),
+            ("top-concurrent-focus", "toolbar-concurrent"),
+            ("row-1-cancel", "row-1-cancel"),
+            ("row-2-cancel", "row-2-cancel"),
+            ("row-2-priority", "row-2-priority"),
+            ("row-2-primary", "row-2-primary"),
+            ("row-1-primary", "row-1-primary"),
+            ("row-1-priority", "row-1-priority"),
+        ]
+        for check_id, target in navigation:
+            run_check(check_id, target)
+        for check_id, target, action in [
+            ("top-wifi-executes", "toolbar-wifi", "wifi"),
+            ("top-schedule-executes", "toolbar-schedule", "schedule"),
+            ("top-concurrent-executes", "toolbar-concurrent", "concurrent"),
+            ("row-1-pause", "row-1-primary", "primary"),
+            ("row-2-pause", "row-2-primary", "primary"),
+            ("row-1-priority-executes", "row-1-priority", "priority"),
+            ("cancel-row-1-executes", "row-1-cancel", "cancel"),
+        ]:
+            run_check(check_id, target, action)
+    except Exception as exc:
+        audit_error = f"{type(exc).__name__}: {exc}"[-1200:]
+        self.record_harness_error(f"download-actions:{orientation}", exc)
+    result = {
+        "orientation": orientation,
+        "page": "downloads",
+        "success": audit_error is None and all(check.get("success") for check in checks),
+        "status": "BLOCKED" if any(check.get("source") in {"FIXTURE", "QUALITY_LAB", "INFRASTRUCTURE"} and not check.get("success") for check in checks) else "FAIL" if any(not check.get("success") for check in checks) else "PASS",
+        "error": audit_error,
+        "checks": checks,
+    }
+    self.manifest["download_actions"].append(result)
+    safe_write(audit_root / "download-actions.json", json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    self.flush_manifest()
+
+
+DeviceLab.download_action_audit = _deterministic_download_action_audit
+
 
 
 def build_parser() -> argparse.ArgumentParser:
