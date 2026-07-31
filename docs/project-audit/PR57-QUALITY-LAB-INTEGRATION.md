@@ -96,3 +96,12 @@ Physical Xiaomi, TCL, phone, tablet, install-over, production signing and real-a
 - Version code: `64`
 - Production endpoint: `http://3162356.xyz:8080`
 - PR state requirement: open draft; no merge or release from this qualification task
+
+## Generated source provenance
+
+Workflow ID `322185201` now publishes two explicitly separated trees:
+
+- `canonical-production-source/` is the unmodified Product source from the recorded tested commit.
+- `debug-instrumented-source/` is the disposable output produced by `prepare-project.sh` for Quality Lab measurement only.
+
+`MANIFEST.json` records the tested commit, both SHA-256 values, the Product-source role, the debug-instrumented role, and the marker-injection report. Instrumented output must never be described as canonical Product source.
