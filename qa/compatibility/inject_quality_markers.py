@@ -222,6 +222,19 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                     f"            .qaTvPageContent(isTv, MainDestination.{destination}),\n"
                     "    ) {",
                 ),
+                (
+                    "    LazyColumn(\n"
+                    "        state = listState,\n"
+                    "        modifier = Modifier\n"
+                    "            .fillMaxSize()\n"
+                    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+                    "    LazyColumn(\n"
+                    "        state = listState,\n"
+                    "        modifier = Modifier\n"
+                    "            .fillMaxSize()\n"
+                    "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)\n"
+                    f"            .qaTvPageContent(isTv, MainDestination.{destination}),",
+                ),
             ),
             f"{destination.lower()}-content-marker",
             changes,
