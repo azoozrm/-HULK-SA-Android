@@ -71,3 +71,33 @@ class GateDiagnosticsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+    def test_fixture_precondition_is_blocked_not_product(self) -> None:
+        data = {
+            "infrastructure_error_count": 0,
+            "findings": [{
+                "severity": "critical", "code": "download_action_start_state_not_established",
+                "classification": "fixture", "finding_role": "primary", "root_cause_id": "r1",
+                "gate_outcome": "BLOCKED", "product_strict": False,
+            }],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "summary.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(2, evaluate_gate(data, path, True))
+
+    def test_valid_product_callback_failure_stays_fail(self) -> None:
+        data = {
+            "infrastructure_error_count": 0,
+            "findings": [{
+                "severity": "critical", "code": "tv_download_action_not_executed",
+                "classification": "product", "finding_role": "primary", "root_cause_id": "p1",
+                "gate_outcome": "FAIL", "product_strict": True,
+            }],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "summary.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(1, evaluate_gate(data, path, True))

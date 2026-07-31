@@ -324,6 +324,7 @@ def _recount_and_write(
     findings = [item for item in data.get("findings", []) if isinstance(item, dict)]
     data["critical_count"] = sum(item.get("severity") == "critical" for item in findings)
     data["warning_count"] = sum(item.get("severity") == "warning" for item in findings)
+    data.update(_finding_metrics(data))
     infrastructure = int(data.get("infrastructure_error_count", 0))
     if infrastructure:
         data["overall_status"] = "BLOCKED"
@@ -443,35 +444,79 @@ def emit_finding_diagnostics(
     return len(findings)
 
 
+
+def _finding_metrics(data: dict[str, Any]) -> dict[str, int]:
+    findings = [item for item in data.get("findings", []) if isinstance(item, dict)]
+    primary_roots = {
+        str(item.get("root_cause_id") or item.get("code"))
+        for item in findings
+        if item.get("finding_role", "primary") == "primary"
+        and item.get("severity") in {"critical", "infrastructure"}
+    }
+    return {
+        "primary_root_cause_count": len(primary_roots),
+        "raw_failed_checks_count": sum(item.get("severity") in {"critical", "infrastructure"} for item in findings),
+        "downstream_count": sum(item.get("finding_role") in {"downstream", "blocked_assertion"} for item in findings),
+        "product_critical_count": sum(item.get("severity") == "critical" and item.get("classification", "product") == "product" and item.get("product_strict", True) for item in findings),
+        "quality_lab_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "quality_lab" for item in findings),
+        "fixture_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "fixture" for item in findings),
+        "future_stage_count": sum(item.get("classification") == "future_stage" for item in findings),
+        "false_positives": sum(bool(item.get("reclassified_from")) or item.get("classification") == "false_positive" for item in findings),
+    }
+
+
 def evaluate_gate(data: dict[str, Any], summary_path: Path, enforce: bool) -> int:
+    metrics = _finding_metrics(data)
+    data.update(metrics)
+    findings = [item for item in data.get("findings", []) if isinstance(item, dict)]
     infrastructure = int(data.get("infrastructure_error_count", 0))
-    critical = int(data.get("critical_count", 0))
-    warnings = int(data.get("warning_count", 0))
-
-    if infrastructure:
-        print(f"BLOCKED: {infrastructure} Compatibility Lab infrastructure error(s)")
+    blocked = [
+        item for item in findings
+        if item.get("gate_outcome") == "BLOCKED"
+        or item.get("classification") in {"fixture", "quality_lab", "infrastructure"}
+        and item.get("severity") in {"critical", "infrastructure"}
+    ]
+    product = [
+        item for item in findings
+        if item.get("severity") == "critical"
+        and item.get("classification", "product") == "product"
+        and item.get("product_strict", True)
+        and item.get("finding_role", "primary") == "primary"
+    ]
+    ordered = sorted(
+        findings,
+        key=lambda item: (
+            0 if item.get("finding_role", "primary") == "primary" else 1,
+            str(item.get("root_cause_id") or ""),
+            str(item.get("code") or ""),
+        ),
+    )
+    data["findings"] = ordered
+    summary_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if infrastructure or blocked:
+        print(
+            f"BLOCKED: infrastructure={infrastructure}, invalid-preconditions={len(blocked)}, "
+            f"primary-roots={metrics['primary_root_cause_count']}, downstream={metrics['downstream_count']}"
+        )
         emit_finding_diagnostics(data, summary_path, "infrastructure")
-        if critical:
-            emit_finding_diagnostics(data, summary_path, "critical")
+        emit_finding_diagnostics(data, summary_path, "critical")
         return 2
-
-    if critical:
+    if product:
         emit_finding_diagnostics(data, summary_path, "critical")
         if enforce:
-            print(f"FAIL: {critical} critical application compatibility finding(s)")
+            print(f"FAIL: {len(product)} product-critical primary finding(s)")
             return 1
         print(
-            "DETECTED: "
-            f"{critical} critical product finding(s) preserved as evidence; "
-            "product enforcement is disabled only for this lab-only qualification."
+            f"DETECTED: {len(product)} product-critical finding(s) retained; "
+            "product enforcement is disabled only for this lab-only qualification "
+            "by explicit scope policy"
         )
-
     print(
-        f"PASS: lab infrastructure completed; critical={critical}, warnings={warnings}, "
-        f"enforce_findings={str(enforce).lower()}"
+        "PASS: valid evidence completed; "
+        f"product_critical={len(product)}, future_stage={metrics['future_stage_count']}, "
+        f"raw_failed={metrics['raw_failed_checks_count']}, downstream={metrics['downstream_count']}"
     )
     return 0
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()

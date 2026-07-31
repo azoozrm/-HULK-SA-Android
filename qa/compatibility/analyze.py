@@ -83,7 +83,22 @@ def finding(
     case_id: str | None = None,
     page: str | None = None,
     evidence: dict[str, str] | None = None,
+    classification: str | None = None,
+    root_cause_id: str | None = None,
+    finding_role: str = "primary",
+    product_strict: bool | None = None,
+    gate_outcome: str | None = None,
 ) -> dict[str, Any]:
+    classification = classification or ("infrastructure" if severity == "infrastructure" else "product")
+    if product_strict is None:
+        product_strict = classification == "product"
+    if gate_outcome is None:
+        if classification in {"infrastructure", "fixture", "quality_lab"} and severity in {"critical", "infrastructure"}:
+            gate_outcome = "BLOCKED"
+        elif classification == "product" and severity == "critical" and product_strict:
+            gate_outcome = "FAIL"
+        else:
+            gate_outcome = "RECORDED"
     return {
         "severity": severity,
         "code": code,
@@ -91,8 +106,12 @@ def finding(
         "case_id": case_id,
         "page": page,
         "evidence": evidence or {},
+        "classification": classification,
+        "root_cause_id": root_cause_id or f"{code}:{case_id or page or 'global'}",
+        "finding_role": finding_role,
+        "product_strict": bool(product_strict),
+        "gate_outcome": gate_outcome,
     }
-
 
 def app_nodes(root: ET.Element) -> Iterable[ET.Element]:
     for node in root.iter("node"):
@@ -1208,6 +1227,169 @@ def analyze_download_actions(
     return normalized, findings
 
 
+def _classified_download_actions(
+    root: Path,
+    device: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not device.get("is_tv"):
+        return [], []
+    required_checks = {
+        "top-wifi-executes", "top-schedule-executes", "top-concurrent-executes",
+        "row-1-primary", "row-1-pause", "row-1-priority", "row-1-priority-executes",
+        "row-1-cancel", "row-2-cancel", "row-2-priority", "row-2-primary",
+        "row-2-pause", "cancel-row-1-executes",
+    }
+    normalized: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    for entry in entries:
+        item = dict(entry)
+        checks = [dict(check) for check in entry.get("checks", [])]
+        item["checks"] = checks
+        item["status"] = "PASS"
+        orientation = str(entry.get("orientation") or "landscape")
+        root_id = f"download-actions:{orientation}"
+        if entry.get("error"):
+            item["status"] = "BLOCKED"
+            findings.append(finding(
+                "infrastructure", "download_action_audit_error",
+                f"{orientation} / downloads: {entry['error']}", page="downloads",
+                classification="infrastructure", root_cause_id=root_id, gate_outcome="BLOCKED",
+            ))
+            normalized.append(item)
+            continue
+        observed_ids = {check.get("id") for check in checks}
+        missing = sorted(required_checks - observed_ids)
+        if missing:
+            item["status"] = "BLOCKED"
+            findings.append(finding(
+                "infrastructure", "download_action_audit_incomplete",
+                f"{orientation} / downloads: missing checks {', '.join(missing)}", page="downloads",
+                classification="infrastructure", root_cause_id=root_id, gate_outcome="BLOCKED",
+            ))
+        primary_root: str | None = None
+        for check in checks:
+            if check.get("success"):
+                continue
+            evidence = {
+                key: value for key, value in check.get("evidence", {}).items()
+                if (root / value).is_file()
+            }
+            check_id = str(check.get("id") or "unknown")
+            check_root = f"{root_id}:{check_id}"
+            precondition = bool(check.get("precondition_established"))
+            key_confirmed = bool(check.get("key_press_confirmed"))
+            unexpected = list(check.get("unexpected_markers") or [])
+            reason = str(check.get("reason") or check.get("precondition_failure") or "contract failed")
+            if not precondition:
+                classification = "fixture" if check.get("source") == "FIXTURE" else "quality_lab"
+                code = "download_action_start_state_not_established" if classification == "fixture" else "tv_download_navigation_focus_mismatch"
+                primary_root = primary_root or check_root
+                findings.append(finding(
+                    "critical", code,
+                    f"{orientation} / downloads / {check_id}: {reason}",
+                    page="downloads", evidence=evidence, classification=classification,
+                    root_cause_id=primary_root, finding_role="primary" if primary_root == check_root else "downstream",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                raw_code = (
+                    "tv_download_action_not_executed"
+                    if check.get("expected_action")
+                    else "tv_download_action_unreachable"
+                )
+                findings.append(finding(
+                    "critical", raw_code,
+                    f"{orientation} / downloads / {check_id}: raw assertion retained but blocked because target focus was not established",
+                    page="downloads", evidence=evidence, classification=classification,
+                    root_cause_id=primary_root,
+                    finding_role="blocked_assertion" if check.get("expected_action") else "downstream",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                item["status"] = "BLOCKED"
+                continue
+            if unexpected:
+                primary_root = primary_root or check_root
+                findings.append(finding(
+                    "critical", "tv_download_navigation_focus_mismatch",
+                    f"{orientation} / downloads / {check_id}: a different callback marker was emitted: {', '.join(unexpected)}",
+                    page="downloads", evidence=evidence, classification="quality_lab",
+                    root_cause_id=primary_root, finding_role="primary" if primary_root == check_root else "downstream",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                item["status"] = "BLOCKED"
+                continue
+            if check.get("expected_action") and key_confirmed and check.get("marker_revision_before") is not None:
+                findings.append(finding(
+                    "critical", "tv_download_action_not_executed",
+                    f"{orientation} / downloads / {check_id}: target was proven and key press recorded, but {check.get('expected_action')} marker did not advance",
+                    page="downloads", evidence=evidence, classification="product",
+                    root_cause_id=check_root, finding_role="primary", product_strict=True, gate_outcome="FAIL",
+                ))
+                item["status"] = "FAIL"
+            else:
+                primary_root = primary_root or check_root
+                findings.append(finding(
+                    "critical", "tv_download_action_precondition_incomplete",
+                    f"{orientation} / downloads / {check_id}: callback assertion blocked because required evidence is incomplete",
+                    page="downloads", evidence=evidence, classification="fixture",
+                    root_cause_id=primary_root, finding_role="primary" if primary_root == check_root else "blocked_assertion",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                item["status"] = "BLOCKED"
+        row_two_ids = {"row-2-cancel", "row-2-priority", "row-2-primary", "row-2-pause"}
+        successful_ids = {check.get("id") for check in checks if check.get("success")}
+        if not row_two_ids.issubset(successful_ids):
+            downstream_root = primary_root or f"{root_id}:row-navigation"
+            findings.append(finding(
+                "critical", "tv_download_row_navigation_incomplete",
+                f"{orientation} / downloads: full second-row traversal remains recorded but is blocked by the first failed precondition",
+                page="downloads", classification="future_stage", root_cause_id=downstream_root,
+                finding_role="downstream", product_strict=False, gate_outcome="RECORDED",
+            ))
+            if item["status"] == "PASS":
+                item["status"] = "WARN"
+        normalized.append(item)
+    return normalized, findings
+
+
+analyze_download_actions = _classified_download_actions
+
+_legacy_analyze_focus = analyze_focus
+
+def analyze_focus(root: Path, device: dict[str, Any], entries: list[dict[str, Any]]):
+    normalized, findings = _legacy_analyze_focus(root, device, entries)
+    for item in findings:
+        if item.get("code") == "focus_coverage_incomplete":
+            item.update({
+                "classification": "future_stage",
+                "root_cause_id": f"future-focus:{item.get('page') or 'unknown'}",
+                "finding_role": "primary",
+                "product_strict": False,
+                "gate_outcome": "RECORDED",
+            })
+    return normalized, findings
+
+
+def summarize_finding_roles(findings: list[dict[str, Any]]) -> dict[str, int]:
+    primary_roots = {
+        str(item.get("root_cause_id"))
+        for item in findings
+        if item.get("finding_role", "primary") == "primary"
+        and item.get("severity") in {"critical", "infrastructure"}
+    }
+    return {
+        "primary_root_cause_count": len(primary_roots),
+        "raw_failed_checks_count": sum(item.get("severity") in {"critical", "infrastructure"} for item in findings),
+        "downstream_count": sum(item.get("finding_role") in {"downstream", "blocked_assertion"} for item in findings),
+        "product_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "product" and item.get("product_strict", True) for item in findings),
+        "quality_lab_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "quality_lab" for item in findings),
+        "fixture_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "fixture" for item in findings),
+        "future_stage_count": sum(item.get("classification") == "future_stage" for item in findings),
+        "false_positives": sum(bool(item.get("reclassified_from")) or item.get("classification") == "false_positive" for item in findings),
+    }
+
+
+
 def rail_logo_measurement(
     xml_path: Path,
     width: int,
@@ -1888,6 +2070,8 @@ def analyze_run(root: Path) -> dict[str, Any]:
         "download_actions": download_actions,
         "rail_visual": rail_visual,
         "findings": findings,
+        "provenance": manifest.get("provenance", {}),
+        **summarize_finding_roles(findings),
     }
 
     (root / "summary.json").write_text(
