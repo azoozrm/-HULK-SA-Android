@@ -1,89 +1,77 @@
-# PR #57 qualification scope and Quality Lab integration
+# PR #57 scope and qualification contract
 
 ## Purpose
 
-PR #57 qualifies the v0.9.3.20 product changes for physical Android TV layout and durable downloads without turning this pull request into the project-wide D-pad navigation phase.
+PR #57 qualifies the limited HULK SA Android product changes for `0.9.3.20` (`versionCode 64`): physical Android TV layout corrections and durable download transport behavior.
 
-The pull request remains a draft. It must not be merged or promoted to a release solely because static checks are green.
+This pull request remains an open draft. A green workflow alone is not physical-device acceptance and does not authorize merge or release.
 
-## Product scope
+## Product changes in scope
 
-The product changes in scope are limited to:
+The final product diff is limited to:
 
 - `app/build.gradle.kts`
-  - preserve `sa.hulksa.player`;
-  - preserve `versionName 0.9.3.20` and `versionCode 64`;
-  - compile the canonical production endpoint and reject release overrides.
+  - package remains `sa.hulksa.player`;
+  - version remains `0.9.3.20` (`64`);
+  - production runtime endpoint remains `http://3162356.xyz:8080`;
+  - release builds reject endpoint overrides.
 - `app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt`
-  - bounded HTTP range requests;
-  - resume validation through `Content-Range`;
-  - finite stalled-read timeout;
-  - persistence, cancellation, partial-file integrity and retry recovery.
+  - bounded sequential range requests;
+  - `Content-Range` validation;
+  - safe fallback when a server ignores a range and returns HTTP 200;
+  - persisted byte progress, cancellation and partial-file integrity;
+  - finite stalled-read timeout and retry recovery.
 - `app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt`
-  - TV safe gutters for the affected pages;
-  - prevent clipping of the live playback actions;
-  - qualify TV rail logo size without changing any logo asset;
-  - reserve visible space for download progress and actions;
-  - preserve phone and tablet branches.
-- Focused unit tests for the transport and layout policies directly introduced by these changes.
+  - TV safe gutters on the affected destinations;
+  - bottom clearance for Live actions;
+  - viewport-derived rail-logo layout without changing logo bytes;
+  - download-card height and focus restoration required by the card-layout regression;
+  - phone and tablet branches preserved.
+- Focused unit tests for the transport and TV-layout policies introduced by this PR.
 
-## Direct download-card focus regression
+## Focus classification
 
-The download-card hierarchy changed in this pull request so its action row remains visible. The local focus routing retained here is limited to the controls inside the Downloads page and protects that direct layout regression.
+The direct ability to expose and use the controls inside a Downloads card is an in-scope regression contract because PR #57 changes that card's visible layout.
 
-It does not establish or enforce a complete application-wide navigation contract.
+A complete cross-application D-pad graph, generic focus target counts, and centralized focus restoration across every page belong to the later navigation and focus phase. They must not be enforced as PR #57 acceptance unless Git history proves a direct regression caused by this product diff.
 
-## Deferred navigation phase
+## Quality Lab ownership
 
-The following work is explicitly outside PR #57:
+The Compatibility and Quality Lab implementation is owned by the base branch. The final PR #57 diff does not modify its workflows, analyzers, marker injector, harness, device matrix, retry policy, schemas or fixtures.
 
-- complete D-pad traversal across every page;
-- generic minimum target counts for Live, Home, Search, Settings or catalogs;
-- project-wide focus restoration and routing redesign;
-- acceptance enforcement by the removed `DownloadsFocusNavigationTest.kt` instrumentation file.
+Disposable marker instrumentation remains debug-only and fail-closed. It must not modify the original production checkout or enter release artifacts.
 
-Those requirements belong to the official navigation and focus phase. The removed instrumentation file must not remain referenced by canonical manifests, workflows, test plans or harnesses.
-
-## Quality Lab support
-
-Quality Lab changes are permitted only where they support the current product source exactly:
-
-- `qa/compatibility/inject_quality_markers.py` recognizes the exact canonical and PR #57 source anchors required for disposable debug instrumentation.
-- `qa/compatibility/tests/test_marker_injection.py` exercises both supported layout fixtures and rejects zero matches, multiple matches, unknown shapes and production sources that already contain QA markers.
-- Marker injection modifies only the prepared debug checkout. Production source must contain no `qa-tv-*`, `qaMarker` or `qaTvPageContent` semantics.
-- Nexus 9 API 28 artifacts proved the visible Downloads page and positive persisted byte progress while UI Automator retained the previous Search semantics tree; this isolated the failure to the debug evidence channel rather than the product transfer.
-- `qa/compatibility/prepare-harness.py` now adds one strict debug-only native Android accessibility node carrying the same page, origin-byte, repository-byte and action markers. It is recreated for every evidence value and leaves production source unchanged.
-- `qa/compatibility/tests/test_harness_preparation.py` proves that the native bridge matches the real fixture exactly once, preserves the checked-in fixture and fails closed for repeated or unknown shapes.
+Branch-local experimental accessibility overlays, source-shape adaptations and future-stage focus enforcement accumulated during earlier PR iterations were removed from the final tree rather than retained as product requirements.
 
 ## Canonical integrity
 
-`qa/canonical/canonical-source.sha256` must satisfy all of these conditions on every qualifying head:
+`qa/canonical/canonical-source.sha256` is a deterministic inventory of the canonical app, test and build inputs. Qualification requires:
 
 - every listed path exists;
-- every listed digest matches the repository bytes;
-- deleted tests are absent from the manifest;
-- changed canonical product and test files are represented by current hashes;
-- approved logo assets retain their approved bytes.
+- no duplicate, absolute or repository-external path exists;
+- every digest matches the checked-in bytes;
+- the two PR-specific unit tests are included;
+- deleted or abandoned test files are absent;
+- approved identity assets remain byte-identical.
 
-## Required verification
+Approved identity SHA-256:
 
-A qualifying head must provide evidence for:
+- `app/src/main/res/drawable-nodpi/hulk_sa_logo.webp`: `2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e`
+- `app/src/main/res/drawable-nodpi/ic_banner.webp`: `2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e`
 
-1. canonical SHA-256 and logo integrity;
-2. generated-source snapshot integrity;
-3. Python syntax and Quality Lab unit tests;
-4. Kotlin compilation and focused unit tests;
-5. Debug APK build and Android instrumentation compilation/execution;
-6. Release/R8 build where signing is not required;
-7. Compatibility Lab device reports for phone, tablet and TV profiles;
-8. artifact inspection for package, version, endpoint, ABIs and checksums.
+## Evidence policy
 
-Physical Xiaomi, TCL and phone verification remains a separate acceptance requirement. Emulator evidence must not be described as a physical-device pass.
+Only workflow runs whose `head_sha` equals the current PR head may qualify the final tree. Older runs are historical evidence and must be marked `OLD HEAD — DO NOT USE FOR FINAL QUALIFICATION`.
 
-## Immutable product identity
+Required evidence includes canonical verification, generated-source comparison, unit and instrumentation results, APK/AAB/R8/lint outputs where available, Compatibility Lab reports, screenshots, UI XML, download byte evidence and artifact inspection.
 
+Physical Xiaomi, TCL, phone, tablet, install-over, production signing and real-account download checks remain `NOT VERIFIED` unless their own artifacts are supplied.
+
+## Immutable identity
+
+- App name and branding: HULK SA, unchanged
 - Package: `sa.hulksa.player`
-- Version: `0.9.3.20` (`versionCode 64`)
+- Version name: `0.9.3.20`
+- Version code: `64`
 - Production endpoint: `http://3162356.xyz:8080`
-- Approved logo assets and colors: unchanged
-- Pull request state: open draft until all required evidence is reviewed
+- PR state requirement: open draft; no merge or release from this qualification task
