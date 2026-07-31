@@ -51,7 +51,8 @@ Quality Lab changes are permitted only where they support the current product so
 - `qa/compatibility/inject_quality_markers.py` recognizes the exact canonical and PR #57 source anchors required for disposable debug instrumentation.
 - `qa/compatibility/tests/test_marker_injection.py` exercises both supported layout fixtures and rejects zero matches, multiple matches, unknown shapes and production sources that already contain QA markers.
 - Marker injection modifies only the prepared debug checkout. Production source must contain no `qa-tv-*`, `qaMarker` or `qaTvPageContent` semantics.
-- `qa/compatibility/prepare-harness.py` remains byte-identical to the current base branch; formatting-only changes are outside scope.
+- `qa/compatibility/prepare-harness.py` applies one strict debug-only API 28 semantics refresh transform after Nexus 9 artifacts proved the visible Downloads page and positive persisted byte progress while UI Automator retained the previous Search marker.
+- `qa/compatibility/tests/test_harness_preparation.py` proves that the refresh transform matches the real fixture exactly once, leaves the checked-in fixture unchanged and fails closed for repeated or unknown shapes.
 
 ## Canonical integrity
 
