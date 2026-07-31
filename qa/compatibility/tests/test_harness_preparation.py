@@ -46,7 +46,7 @@ class QualityHarnessPreparationTest(unittest.TestCase):
         ):
             self.assertEqual(1, prepared.count(expected), expected)
         self.assertEqual(
-            1,
+            2,
             prepared.count("contentDescription = qualityEvidence"),
         )
         self.assertEqual(original, QA_ACTIVITY.read_text(encoding="utf-8"))
