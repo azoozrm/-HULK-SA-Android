@@ -37,9 +37,10 @@ def prepare_qa_activity(source: str) -> str:
 
     Android 9 UI Automator can retain a previous Compose semantics snapshot while
     the rendered page and durable download state have already advanced. A tiny
-    native TextView provides the same authenticated page/transfer evidence
-    through the platform accessibility tree. The transform is exact, debug-only,
-    and fails closed for repeated, missing, or already-instrumented source.
+    native TextView is overlaid after the product shell so the platform tree sees
+    the same authenticated page/transfer evidence. The transform is exact,
+    debug-only, and fails closed for repeated, missing, or already-instrumented
+    source.
     """
 
     guard = "val qualityEvidence = buildList {"
@@ -67,6 +68,11 @@ def prepare_qa_activity(source: str) -> str:
             "Compose key import",
         ),
         (
+            "import androidx.compose.ui.Modifier\n",
+            "import androidx.compose.ui.Alignment\n",
+            "Compose alignment import",
+        ),
+        (
             "import androidx.compose.ui.semantics.semantics\n",
             "import androidx.compose.ui.unit.dp\n"
             "import androidx.compose.ui.viewinterop.AndroidView\n"
@@ -74,12 +80,7 @@ def prepare_qa_activity(source: str) -> str:
             "AndroidView imports",
         ),
     ):
-        source = replace_exact(
-            source,
-            anchor,
-            anchor + addition,
-            label,
-        )
+        source = replace_exact(source, anchor, anchor + addition, label)
 
     start_marker = "private fun FixtureMain("
     end_marker = "\nprivate fun String.toDestination()"
@@ -137,6 +138,24 @@ def prepare_qa_activity(source: str) -> str:
                 contentDescription = qualityEvidence
             },
     ) {
+        MainShellScreen(
+"""
+    segment = replace_exact(
+        segment,
+        marker_block,
+        replacement,
+        "QA Activity evidence block",
+    )
+
+    tail = """            onRunDiagnostics = {},
+            onLogout = {},
+        )
+    }
+}
+"""
+    tail_replacement = """            onRunDiagnostics = {},
+            onLogout = {},
+        )
         key(qualityEvidence) {
             AndroidView(
                 factory = { context ->
@@ -153,17 +172,19 @@ def prepare_qa_activity(source: str) -> str:
                     )
                 },
                 modifier = Modifier
-                    .size(2.dp)
-                    .zIndex(1f),
+                    .align(Alignment.TopEnd)
+                    .size(4.dp)
+                    .zIndex(1000f),
             )
         }
-        MainShellScreen(
+    }
+}
 """
     segment = replace_exact(
         segment,
-        marker_block,
-        replacement,
-        "QA Activity evidence block",
+        tail,
+        tail_replacement,
+        "QA Activity post-shell evidence anchor",
     )
     return source[:start] + segment + source[end:]
 
@@ -178,10 +199,7 @@ def main() -> None:
     if not (project / "settings.gradle.kts").is_file() or not main_source.is_dir():
         raise SystemExit(f"not a prepared Android project: {project}")
 
-    marker_target = (
-        main_source
-        / "java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
-    )
+    marker_target = main_source / "java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
     if not marker_target.is_file():
         raise SystemExit(f"missing Quality Lab marker target: {marker_target}")
 
@@ -210,10 +228,7 @@ def main() -> None:
     )
     source = Path(__file__).with_name("QaActivity.kt")
     prepared_source = prepare_qa_activity(source.read_text(encoding="utf-8"))
-    (source_dir / "QaActivity.kt").write_text(
-        prepared_source,
-        encoding="utf-8",
-    )
+    (source_dir / "QaActivity.kt").write_text(prepared_source, encoding="utf-8")
 
     marker_report = debug_root / "quality-marker-injection.json"
     report = inject_file(marker_target, marker_report)
@@ -233,7 +248,7 @@ def main() -> None:
         "prepared debug checkout"
     )
     print(
-        "PASS: native debug accessibility evidence tracks page and transfer state"
+        "PASS: post-shell native accessibility evidence tracks page and transfer state"
     )
     print(f"Canonical src/main digest before injection: {production_before}")
     print(f"Instrumented src/main digest: {production_after}")
