@@ -24,7 +24,7 @@ finally:
 
 
 class QualityHarnessPreparationTest(unittest.TestCase):
-    def test_real_qa_activity_gets_one_native_accessibility_evidence_node(self) -> None:
+    def test_real_qa_activity_gets_one_post_shell_native_evidence_node(self) -> None:
         original = QA_ACTIVITY.read_text(encoding="utf-8")
         prepared = PREPARATION.prepare_qa_activity(original)
 
@@ -35,6 +35,7 @@ class QualityHarnessPreparationTest(unittest.TestCase):
             "import android.widget.TextView\n",
             "import androidx.compose.foundation.layout.size\n",
             "import androidx.compose.runtime.key\n",
+            "import androidx.compose.ui.Alignment\n",
             "import androidx.compose.ui.unit.dp\n",
             "import androidx.compose.ui.viewinterop.AndroidView\n",
             "import androidx.compose.ui.zIndex\n",
@@ -46,13 +47,18 @@ class QualityHarnessPreparationTest(unittest.TestCase):
             "view.text = qualityEvidence",
             "view.contentDescription = qualityEvidence",
             "AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED",
-            ".size(2.dp)",
-            ".zIndex(1f)",
+            ".align(Alignment.TopEnd)",
+            ".size(4.dp)",
+            ".zIndex(1000f)",
         ):
             self.assertEqual(1, prepared.count(expected), expected)
         self.assertEqual(
             2,
             prepared.count("contentDescription = qualityEvidence"),
+        )
+        self.assertLess(
+            prepared.find("onLogout = {}"),
+            prepared.find("key(qualityEvidence) {"),
         )
         self.assertEqual(original, QA_ACTIVITY.read_text(encoding="utf-8"))
 
