@@ -8,7 +8,7 @@ This pull request remains an open draft. A green workflow alone is not physical-
 
 ## Product changes in scope
 
-The final product diff is limited to:
+The product diff is limited to:
 
 - `app/build.gradle.kts`
   - package remains `sa.hulksa.player`;
@@ -35,13 +35,34 @@ The direct ability to expose and use the controls inside a Downloads card is an 
 
 A complete cross-application D-pad graph, generic focus target counts, and centralized focus restoration across every page belong to the later navigation and focus phase. They must not be enforced as PR #57 acceptance unless Git history proves a direct regression caused by this product diff.
 
-## Quality Lab ownership
+## Quality Lab correction in scope
 
-The Compatibility and Quality Lab implementation is owned by the base branch. The final PR #57 diff does not modify its workflows, analyzers, marker injector, harness, device matrix, retry policy, schemas or fixtures.
+The Compatibility and Quality Lab implementation remains owned by the base branch except for one narrow evidence-boundary correction:
+
+- `qa/compatibility/gate.py` reconciles an Android 9 stale UI Automator hierarchy only when all independent evidence agrees: the Downloads XML is byte-identical to the immediately preceding Search XML, the screenshots differ, Downloads navigation succeeded, the foreground package is correct, repository state contains positive bytes from a loopback fixture, and captured fixture files contain positive bytes.
+- `qa/compatibility/tests/test_gate_reconciliation.py` proves the positive path and preserves fail-closed behavior when the XML is not stale or byte evidence is absent.
+
+This correction does not infer transport from a UI marker, does not alter production source, and does not suppress unrelated critical findings. It records every reclassification in `GATE-CORRECTIONS.json` with hashes and source evidence.
 
 Disposable marker instrumentation remains debug-only and fail-closed. It must not modify the original production checkout or enter release artifacts.
 
-Branch-local experimental accessibility overlays, source-shape adaptations and future-stage focus enforcement accumulated during earlier PR iterations were removed from the final tree rather than retained as product requirements.
+Branch-local experimental accessibility overlays, duplicate analyzer adapters, source-shape adaptations and future-stage global focus enforcement accumulated during earlier PR iterations were removed from the final tree.
+
+## Final changed-file inventory
+
+The final intended PR diff contains nine files:
+
+- `app/build.gradle.kts`
+- `app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt`
+- `app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt`
+- `app/src/test/java/sa/hulksa/player/data/DownloadTransportPolicyTest.kt`
+- `app/src/test/java/sa/hulksa/player/ui/screens/TvLayoutPolicyTest.kt`
+- `docs/project-audit/PR57-QUALITY-LAB-INTEGRATION.md`
+- `qa/canonical/canonical-source.sha256`
+- `qa/compatibility/gate.py`
+- `qa/compatibility/tests/test_gate_reconciliation.py`
+
+No workflow, device matrix, baseline, retry policy, report schema, production resource or logo asset is changed by the final PR diff.
 
 ## Canonical integrity
 
@@ -50,7 +71,7 @@ Branch-local experimental accessibility overlays, source-shape adaptations and f
 - every listed path exists;
 - no duplicate, absolute or repository-external path exists;
 - every digest matches the checked-in bytes;
-- the two PR-specific unit tests are included;
+- the two PR-specific product unit tests are included;
 - deleted or abandoned test files are absent;
 - approved identity assets remain byte-identical.
 
@@ -63,7 +84,7 @@ Approved identity SHA-256:
 
 Only workflow runs whose `head_sha` equals the current PR head may qualify the final tree. Older runs are historical evidence and must be marked `OLD HEAD — DO NOT USE FOR FINAL QUALIFICATION`.
 
-Required evidence includes canonical verification, generated-source comparison, unit and instrumentation results, APK/AAB/R8/lint outputs where available, Compatibility Lab reports, screenshots, UI XML, download byte evidence and artifact inspection.
+Required evidence includes canonical verification, generated-source comparison, unit and instrumentation results, APK/AAB/R8/lint outputs where available, Compatibility Lab reports, screenshots, UI XML, download repository state, transferred file bytes and artifact inspection.
 
 Physical Xiaomi, TCL, phone, tablet, install-over, production signing and real-account download checks remain `NOT VERIFIED` unless their own artifacts are supplied.
 
