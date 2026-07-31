@@ -24,25 +24,30 @@ finally:
 
 
 class QualityHarnessPreparationTest(unittest.TestCase):
-    def test_real_qa_activity_gets_one_fail_closed_semantics_refresh_key(self) -> None:
+    def test_real_qa_activity_gets_one_native_accessibility_evidence_node(self) -> None:
         original = QA_ACTIVITY.read_text(encoding="utf-8")
         prepared = PREPARATION.prepare_qa_activity(original)
 
         self.assertNotEqual(original, prepared)
+        for expected in (
+            "import android.view.View\n",
+            "import android.view.accessibility.AccessibilityEvent\n",
+            "import androidx.compose.foundation.layout.size\n",
+            "import androidx.compose.runtime.key\n",
+            "import androidx.compose.ui.unit.dp\n",
+            "import androidx.compose.ui.viewinterop.AndroidView\n",
+            "val qualityEvidence = buildList {",
+            "key(qualityEvidence) {",
+            "importantForAccessibility =\n"
+            "                            View.IMPORTANT_FOR_ACCESSIBILITY_YES",
+            "view.contentDescription = qualityEvidence",
+            "AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED",
+            "modifier = Modifier.size(1.dp)",
+        ):
+            self.assertEqual(1, prepared.count(expected), expected)
         self.assertEqual(
             1,
-            prepared.count("import androidx.compose.runtime.key\n"),
-        )
-        self.assertEqual(
-            1,
-            prepared.count(
-                "    key(\n"
-                "        pageMarker,\n"
-                "        hasOriginByteProgress,\n"
-                "        hasRealDownloadProgress,\n"
-                "        lastDownloadAction,\n"
-                "    ) {"
-            ),
+            prepared.count("contentDescription = qualityEvidence"),
         )
         self.assertEqual(original, QA_ACTIVITY.read_text(encoding="utf-8"))
 
@@ -59,7 +64,7 @@ class QualityHarnessPreparationTest(unittest.TestCase):
             ".semantics {",
             1,
         )
-        with self.assertRaisesRegex(ValueError, "Box anchor"):
+        with self.assertRaisesRegex(ValueError, "evidence block"):
             PREPARATION.prepare_qa_activity(unknown)
 
 
