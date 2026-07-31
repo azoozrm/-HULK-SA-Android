@@ -158,7 +158,7 @@ internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
 internal fun tvDownloadCardHeightDp(screenHeightDp: Int): Float =
-    if (screenHeightDp <= 540) 196f else 188f
+    if (screenHeightDp <= 540) 164f else 188f
 
 
 internal enum class DownloadFocusSlot {
@@ -192,9 +192,9 @@ internal fun nextDownloadFocusNode(
         return when (direction) {
             DownloadFocusDirection.UP -> null
             DownloadFocusDirection.DOWN -> when (current.slot) {
-                DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
+                DownloadFocusSlot.WIFI -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
                 DownloadFocusSlot.SCHEDULE -> DownloadFocusNode(0, DownloadFocusSlot.PRIORITY)
-                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.CANCEL)
+                DownloadFocusSlot.CONCURRENT -> DownloadFocusNode(0, DownloadFocusSlot.PRIMARY)
                 else -> null
             }.takeIf { rowCount > 0 }
             DownloadFocusDirection.LEFT -> when (current.slot) {
@@ -238,9 +238,9 @@ internal fun nextDownloadFocusNode(
             DownloadFocusNode(
                 rowIndex = -1,
                 slot = when (current.slot) {
-                    DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.WIFI
+                    DownloadFocusSlot.PRIMARY -> DownloadFocusSlot.CONCURRENT
                     DownloadFocusSlot.PRIORITY -> DownloadFocusSlot.SCHEDULE
-                    DownloadFocusSlot.CANCEL -> DownloadFocusSlot.CONCURRENT
+                    DownloadFocusSlot.CANCEL -> DownloadFocusSlot.WIFI
                     else -> return null
                 },
             )

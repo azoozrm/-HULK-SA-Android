@@ -21,14 +21,14 @@ class TvLayoutPolicyTest {
 
     @Test
     fun `download card heights preserve the qualified TV layouts`() {
-        assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 360), 0.001f)
-        assertEquals(196f, tvDownloadCardHeightDp(screenHeightDp = 540), 0.001f)
+        assertEquals(164f, tvDownloadCardHeightDp(screenHeightDp = 360), 0.001f)
+        assertEquals(164f, tvDownloadCardHeightDp(screenHeightDp = 540), 0.001f)
         assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 541), 0.001f)
         assertEquals(188f, tvDownloadCardHeightDp(screenHeightDp = 1080), 0.001f)
     }
 
     @Test
-    fun `toolbar focus descends to the aligned action column`() {
+    fun `toolbar focus descends to the physically aligned RTL action column`() {
         assertEquals(
             DownloadFocusNode(0, DownloadFocusSlot.PRIORITY),
             nextDownloadFocusNode(
@@ -38,7 +38,7 @@ class TvLayoutPolicyTest {
             ),
         )
         assertEquals(
-            DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
+            DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
             nextDownloadFocusNode(
                 DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),
                 rowCount = 2,
@@ -68,7 +68,7 @@ class TvLayoutPolicyTest {
     @Test
     fun `download focus graph has deterministic vertical and horizontal ordering`() {
         assertEquals(
-            DownloadFocusNode(0, DownloadFocusSlot.PRIMARY),
+            DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
             nextDownloadFocusNode(
                 DownloadFocusNode(-1, DownloadFocusSlot.WIFI),
                 rowCount = 2,
@@ -92,7 +92,7 @@ class TvLayoutPolicyTest {
             ),
         )
         assertEquals(
-            DownloadFocusNode(-1, DownloadFocusSlot.CONCURRENT),
+            DownloadFocusNode(-1, DownloadFocusSlot.WIFI),
             nextDownloadFocusNode(
                 DownloadFocusNode(0, DownloadFocusSlot.CANCEL),
                 rowCount = 2,
