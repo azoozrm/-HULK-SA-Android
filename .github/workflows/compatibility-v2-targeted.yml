@@ -29,6 +29,7 @@ jobs:
       density: ${{ steps.profile.outputs.density }}
       font_scale: ${{ steps.profile.outputs.font_scale }}
       rotation: ${{ steps.profile.outputs.rotation }}
+      locale: ${{ steps.profile.outputs.locale }}
     steps:
       - uses: actions/checkout@v7
       - id: profile
@@ -52,7 +53,7 @@ jobs:
                   'api': profile['api'], 'target': target, 'profile': avd_profile,
                   'width': profile['width_px'], 'height': profile['height_px'],
                   'density': profile['density_dpi'], 'font_scale': profile['font_scale'],
-                  'rotation': rotation,
+                  'rotation': rotation, 'locale': profile['locale'],
               }.items():
                   out.write(f'{key}={value}\n')
           PY
@@ -60,7 +61,7 @@ jobs:
   targeted:
     needs: resolve-profile
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 75
     env:
       HULK_PORTAL_URL: http://3162356.xyz:8080
       HULK_CONFIG_URL: ''
@@ -95,17 +96,17 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             set -euo pipefail
-            adb shell wm size ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
-            adb shell wm density ${{ needs.resolve-profile.outputs.density }}
-            adb shell settings put system font_scale ${{ needs.resolve-profile.outputs.font_scale }}
-            adb shell settings put system accelerometer_rotation 0
-            adb shell settings put system user_rotation ${{ needs.resolve-profile.outputs.rotation }}
+            out='build/compatibility-v2/targeted/${{ inputs.profile_id }}'
+            bash quality/compatibility-v2/configure_emulator_profile.sh \
+              '${{ inputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' \
+              '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' \
+              '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' \
+              '${{ needs.resolve-profile.outputs.locale }}' "$out/PROFILE-CONFIG.txt"
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb logcat -c
             bash quality/compatibility-v2/collect_runtime_evidence.sh \
-              '${{ inputs.profile_id }}' 'build/compatibility-v2/targeted/${{ inputs.profile_id }}' \
-              '${{ inputs.test_class }}'
+              '${{ inputs.profile_id }}' "$out" '${{ inputs.test_class }}'
       - name: Enforce targeted evidence
         if: always()
         run: |

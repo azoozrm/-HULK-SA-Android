@@ -9,6 +9,7 @@
       "UNIT-TESTS.xml"
     ],
     "runtime": [
+      "PROFILE-CONFIG.txt",
       "DEVICE-PROFILE.txt",
       "WINDOW-METRICS.txt",
       "INSTRUMENTATION.txt",
