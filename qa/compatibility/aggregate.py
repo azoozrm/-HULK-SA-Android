@@ -7,6 +7,7 @@ import argparse
 from collections import Counter, defaultdict
 from html import escape
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -48,6 +49,12 @@ def markdown(summary: dict[str, Any]) -> str:
         f"- Overall: **{summary['overall_status']}**",
         f"- Devices completed: {summary['device_count']} / {summary['expected_device_count']}",
         f"- Page captures: {summary['case_count']}",
+        f"- Raw failed checks: {summary.get('raw_failed_checks_count', summary['critical_count'])}",
+        f"- Primary root causes: {summary.get('primary_root_cause_count', 0)}",
+        f"- Downstream / blocked assertions: {summary.get('downstream_count', 0)}",
+        f"- Product-critical: {summary.get('product_critical_count', 0)}",
+        f"- Quality-lab-critical: {summary.get('quality_lab_critical_count', 0)}",
+        f"- Fixture-critical: {summary.get('fixture_critical_count', 0)}",
         f"- Critical findings: {summary['critical_count']}",
         f"- Warnings: {summary['warning_count']}",
         f"- Infrastructure errors: {summary['infrastructure_error_count']}",
@@ -229,6 +236,38 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
             continue
         loaded[device_id] = (path.parent, data)
 
+    required_provenance = (
+        "source_head_sha", "base_sha", "tested_ref", "tested_commit_sha",
+        "merge_sha", "lab_apk_sha256", "workflow_run_id", "workflow_run_attempt",
+    )
+    expected_provenance = {
+        "source_head_sha": os.environ.get("QUALITY_SOURCE_HEAD_SHA", ""),
+        "base_sha": os.environ.get("QUALITY_BASE_SHA", ""),
+        "tested_ref": os.environ.get("QUALITY_TESTED_REF", ""),
+        "tested_commit_sha": os.environ.get("QUALITY_TESTED_COMMIT_SHA", ""),
+        "merge_sha": os.environ.get("QUALITY_MERGE_SHA", ""),
+        "lab_apk_sha256": os.environ.get("QUALITY_LAB_APK_SHA256", ""),
+        "workflow_run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+    }
+    provenance_errors: list[str] = []
+    observed_apks: set[str] = set()
+    for device_id, (_, data) in loaded.items():
+        provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
+        for field in required_provenance:
+            actual = str(provenance.get(field) or "")
+            expected = str(expected_provenance.get(field) or "")
+            if not actual:
+                provenance_errors.append(f"{device_id}: missing provenance {field}")
+            elif expected and actual != expected:
+                provenance_errors.append(f"{device_id}: {field}={actual} expected {expected}")
+        if provenance.get("lab_apk_sha256"):
+            observed_apks.add(str(provenance["lab_apk_sha256"]))
+    if len(observed_apks) > 1:
+        provenance_errors.append(f"mixed APK SHA-256 values across devices: {sorted(observed_apks)}")
+
+
+
     missing = sorted(set(expected_ids) - loaded.keys())
     unexpected = sorted(set(loaded) - set(expected_ids))
     devices = [
@@ -257,7 +296,9 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
             )
             all_findings.append(enriched)
 
-    infrastructure_extra = len(missing) + len(unexpected) + len(duplicate_ids) + len(parse_errors)
+    infrastructure_extra = len(missing) + len(unexpected) + len(duplicate_ids) + len(parse_errors) + len(provenance_errors)
+    for message in provenance_errors:
+        all_findings.append({"severity": "infrastructure", "code": "artifact_provenance_mismatch", "message": message, "classification": "infrastructure", "finding_role": "primary", "root_cause_id": f"provenance:{message}", "gate_outcome": "BLOCKED", "product_strict": False, "device_id": "aggregation", "device_name": "aggregation", "evidence": {}})
     critical = sum(device.get("critical_count", 0) for device in devices)
     warnings = sum(device.get("warning_count", 0) for device in devices)
     infrastructure = (
@@ -302,9 +343,18 @@ def aggregate(input_root: Path, output_root: Path) -> dict[str, Any]:
         "unexpected_devices": unexpected,
         "duplicate_devices": duplicate_ids,
         "parse_errors": parse_errors,
+        "provenance_errors": provenance_errors,
+        "provenance": expected_provenance,
         "page_coverage": page_coverage,
         "devices": devices,
         "findings": all_findings,
+        "primary_root_cause_count": len({str(item.get("root_cause_id") or item.get("code")) for item in all_findings if item.get("finding_role", "primary") == "primary" and item.get("severity") in {"critical", "infrastructure"}}),
+        "raw_failed_checks_count": sum(item.get("severity") in {"critical", "infrastructure"} for item in all_findings),
+        "downstream_count": sum(item.get("finding_role") in {"downstream", "blocked_assertion"} for item in all_findings),
+        "product_critical_count": sum(item.get("severity") == "critical" and item.get("classification", "product") == "product" and item.get("product_strict", True) for item in all_findings),
+        "quality_lab_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "quality_lab" for item in all_findings),
+        "fixture_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "fixture" for item in all_findings),
+        "false_positives": sum(bool(item.get("reclassified_from")) or item.get("classification") == "false_positive" for item in all_findings),
     }
     (output_root / "COMPATIBILITY-LAB-SUMMARY.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",

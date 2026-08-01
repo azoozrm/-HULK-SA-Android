@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Add measurement-only semantics to the temporary Compatibility Lab checkout.
+"""Add measurement-only semantics to a disposable Compatibility Lab checkout.
 
 The repository production source remains unchanged. This transformer runs only
-inside the disposable prepared project used to build the debug lab APK. Every
-replacement is strict and additive: an unexpected or ambiguous source shape
-fails closed.
+inside the temporary prepared project used to build the debug lab APK. Every
+replacement is strict and additive. A supported source shape must match exactly
+once; an unknown or ambiguous source shape fails closed.
 """
 
 from __future__ import annotations
@@ -52,6 +52,8 @@ private fun Modifier.qaMarker(isTv: Boolean, description: String): Modifier = th
 )
 '''
 
+Variant = tuple[str, str, str]
+
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -73,40 +75,29 @@ def replace_once(
 
 def replace_one_of(
     source: str,
-    options: Iterable[tuple[str, str]],
+    variants: Iterable[Variant],
     label: str,
     changes: list[str],
 ) -> str:
-    matches: list[tuple[str, str, int]] = []
-    for old, new in options:
+    matches: list[Variant] = []
+    counts: list[str] = []
+    for name, old, new in variants:
         count = source.count(old)
-        if count:
-            matches.append((old, new, count))
-    total = sum(count for _, _, count in matches)
-    if total != 1:
-        detail = ", ".join(str(count) for _, _, count in matches) or "none"
+        counts.append(f"{name}={count}")
+        if count > 1:
+            raise ValueError(
+                f"{label}: supported source shape {name!r} is ambiguous; found {count} matches"
+            )
+        if count == 1:
+            matches.append((name, old, new))
+    if len(matches) != 1:
         raise ValueError(
-            f"{label}: expected exactly one supported source shape, found {total} "
-            f"(matched counts: {detail})"
+            f"{label}: expected exactly one supported source shape, found {len(matches)} "
+            f"({', '.join(counts)})"
         )
-    old, new, _count = matches[0]
-    changes.append(label)
+    name, old, new = matches[0]
+    changes.append(f"{label}:{name}")
     return source.replace(old, new, 1)
-
-
-def segment_bounds(
-    source: str,
-    start_marker: str,
-    end_marker: str,
-    label: str,
-) -> tuple[int, int]:
-    start = source.find(start_marker)
-    if start < 0:
-        raise ValueError(f"{label}: start marker not found: {start_marker}")
-    end = source.find(end_marker, start + len(start_marker))
-    if end < 0:
-        raise ValueError(f"{label}: end marker not found: {end_marker}")
-    return start, end
 
 
 def patch_segment(
@@ -118,7 +109,12 @@ def patch_segment(
     label: str,
     changes: list[str],
 ) -> str:
-    start, end = segment_bounds(source, start_marker, end_marker, label)
+    start = source.find(start_marker)
+    if start < 0:
+        raise ValueError(f"{label}: start marker not found: {start_marker}")
+    end = source.find(end_marker, start + len(start_marker))
+    if end < 0:
+        raise ValueError(f"{label}: end marker not found: {end_marker}")
     segment = source[start:end]
     patched = replace_once(segment, old, new, label, changes)
     return source[:start] + patched + source[end:]
@@ -128,13 +124,18 @@ def patch_segment_one_of(
     source: str,
     start_marker: str,
     end_marker: str,
-    options: Iterable[tuple[str, str]],
+    variants: Iterable[Variant],
     label: str,
     changes: list[str],
 ) -> str:
-    start, end = segment_bounds(source, start_marker, end_marker, label)
+    start = source.find(start_marker)
+    if start < 0:
+        raise ValueError(f"{label}: start marker not found: {start_marker}")
+    end = source.find(end_marker, start + len(start_marker))
+    if end < 0:
+        raise ValueError(f"{label}: end marker not found: {end_marker}")
     segment = source[start:end]
-    patched = replace_one_of(segment, options, label, changes)
+    patched = replace_one_of(segment, variants, label, changes)
     return source[:start] + patched + source[end:]
 
 
@@ -179,6 +180,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun HomeSectionPadding(",
         (
             (
+                "legacy",
                 "            .fillMaxSize()\n"
                 "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
                 "            .fillMaxSize()\n"
@@ -186,11 +188,12 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "            .padding(bottom = if (isTv) 32.dp else 0.dp)",
             ),
             (
+                "v09320",
                 "            .fillMaxSize()\n"
-                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)",
                 "            .fillMaxSize()\n"
-                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)\n"
-                "            .qaTvPageContent(isTv, MainDestination.HOME),",
+                "            .qaTvPageContent(isTv, MainDestination.HOME)\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)",
             ),
         ),
         "home-content-marker",
@@ -202,6 +205,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun LiveCatalogScreen(",
         (
             (
+                "legacy",
                 "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
                 "else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {",
                 "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp "
@@ -209,6 +213,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 ".qaTvPageContent(isTv, destination)) {",
             ),
             (
+                "v09320",
                 "    Column(\n"
                 "        Modifier\n"
                 "            .fillMaxSize()\n"
@@ -220,11 +225,11 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "    Column(\n"
                 "        Modifier\n"
                 "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, destination)\n"
                 "            .padding(\n"
                 "                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,\n"
                 "                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
-                "            )\n"
-                "            .qaTvPageContent(isTv, destination),\n"
+                "            ),\n"
                 "    ) {",
             ),
         ),
@@ -237,6 +242,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun LiveStage(",
         (
             (
+                "legacy",
                 "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
                 "else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {",
                 "Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp "
@@ -244,6 +250,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 ".qaTvPageContent(isTv, MainDestination.LIVE)) {",
             ),
             (
+                "v09320",
                 "    Column(\n"
                 "        Modifier\n"
                 "            .fillMaxSize()\n"
@@ -255,11 +262,11 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "    Column(\n"
                 "        Modifier\n"
                 "            .fillMaxSize()\n"
+                "            .qaTvPageContent(isTv, MainDestination.LIVE)\n"
                 "            .padding(\n"
                 "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
                 "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
-                "            )\n"
-                "            .qaTvPageContent(isTv, MainDestination.LIVE),\n"
+                "            ),\n"
                 "    ) {",
             ),
         ),
@@ -272,6 +279,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun FavoritesScreen(",
         (
             (
+                "legacy",
                 "Row(Modifier.fillMaxWidth(), "
                 "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
                 "Row(Modifier.fillMaxWidth().qaMarker(isTv = true, "
@@ -279,6 +287,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "horizontalArrangement = Arrangement.spacedBy(12.dp)) {",
             ),
             (
+                "v09320",
                 "                    Row(\n"
                 "                        Modifier.fillMaxWidth(),\n"
                 "                        horizontalArrangement = Arrangement.spacedBy(12.dp),\n"
@@ -316,11 +325,13 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
             next_name,
             (
                 (
+                    "legacy",
                     "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
                     "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
                     f".qaTvPageContent(isTv, MainDestination.{destination})) {{",
                 ),
                 (
+                    "v09320",
                     "    Column(\n"
                     "        Modifier\n"
                     "            .fillMaxSize()\n"
@@ -329,8 +340,8 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                     "    Column(\n"
                     "        Modifier\n"
                     "            .fillMaxSize()\n"
-                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
-                    f"            .qaTvPageContent(isTv, MainDestination.{destination}),\n"
+                    f"            .qaTvPageContent(isTv, MainDestination.{destination})\n"
+                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
                     "    ) {",
                 ),
             ),
@@ -352,6 +363,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun DownloadProgress(",
         (
             (
+                "legacy",
                 "            .height(if (isTv) 220.dp else 220.dp)\n"
                 "            .clip(shape)",
                 "            .height(if (isTv) 220.dp else 220.dp)\n"
@@ -360,6 +372,7 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "            .clip(shape)",
             ),
             (
+                "v09320",
                 "            .height(if (isTv) 164.dp else 220.dp)\n"
                 "            .clip(shape)",
                 "            .height(if (isTv) 164.dp else 220.dp)\n"
@@ -377,18 +390,20 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
         "private fun AccountMetric(",
         (
             (
+                "legacy",
                 "modifier = Modifier.fillMaxSize(),",
                 "modifier = Modifier.fillMaxSize()"
                 ".qaTvPageContent(isTv, MainDestination.SETTINGS),",
             ),
             (
+                "v09320",
                 "        modifier = Modifier\n"
                 "            .fillMaxSize()\n"
                 "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
                 "        modifier = Modifier\n"
                 "            .fillMaxSize()\n"
-                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp)\n"
-                "            .qaTvPageContent(isTv, MainDestination.SETTINGS),",
+                "            .qaTvPageContent(isTv, MainDestination.SETTINGS)\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),",
             ),
         ),
         "settings-content-marker",

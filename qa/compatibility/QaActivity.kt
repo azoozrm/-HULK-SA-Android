@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import java.io.BufferedInputStream
@@ -30,7 +31,10 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.Locale
+import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -69,7 +73,6 @@ import sa.hulksa.player.ui.theme.HulkTheme
  * therefore absent from release builds.
  */
 class QaActivity : ComponentActivity() {
-    private var downloadServer: QaRangeServer? = null
     private var downloadHarnessState by mutableStateOf<QaDownloadHarness?>(null)
 
     override fun attachBaseContext(newBase: Context) {
@@ -84,6 +87,7 @@ class QaActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val scenario = intent.getStringExtra("scenario") ?: "home"
+        val launchToken = intent.getStringExtra("qaLaunchToken") ?: ""
         requestedOrientation = when (intent.getStringExtra("orientation")) {
             "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
@@ -99,30 +103,46 @@ class QaActivity : ComponentActivity() {
                     initialDestination = scenario.toDestination(),
                     isTv = forcedTv || configTv,
                     downloadHarness = downloadHarnessState,
+                    launchToken = launchToken,
                 )
             }
         }
         if (scenario == "downloads") {
             lifecycleScope.launch {
                 downloadHarnessState = withContext(Dispatchers.IO) {
-                    prepareDownloadHarness()
+                    QaDownloadHarnessProcessOwner.getOrCreate(
+                        applicationContext,
+                        launchToken,
+                    )
                 }
             }
         }
     }
+}
 
-    override fun onDestroy() {
-        downloadServer?.close()
-        downloadServer = null
-        super.onDestroy()
+private object QaDownloadHarnessProcessOwner {
+    private val lock = Any()
+    private var activeLaunchToken: String? = null
+    private var activeHarness: QaDownloadHarness? = null
+
+    fun getOrCreate(context: Context, launchToken: String): QaDownloadHarness = synchronized(lock) {
+        activeHarness
+            ?.takeIf { activeLaunchToken == launchToken }
+            ?.let { return@synchronized it }
+
+        activeHarness?.origin?.close()
+        val harness = prepare(context.applicationContext, launchToken)
+        activeLaunchToken = launchToken
+        activeHarness = harness
+        harness
     }
 
-    private fun prepareDownloadHarness(): QaDownloadHarness {
-        getSharedPreferences("hulk_downloads", Context.MODE_PRIVATE)
+    private fun prepare(context: Context, launchToken: String): QaDownloadHarness {
+        context.getSharedPreferences("hulk_downloads", Context.MODE_PRIVATE)
             .edit()
             .clear()
             .commit()
-        getExternalFilesDirs(Environment.DIRECTORY_MOVIES)
+        context.getExternalFilesDirs(Environment.DIRECTORY_MOVIES)
             .filterNotNull()
             .forEach { directory ->
                 directory.listFiles()
@@ -133,8 +153,7 @@ class QaActivity : ComponentActivity() {
                     ?.forEach { file -> file.delete() }
         }
         val server = QaRangeServer().also(QaRangeServer::start)
-        downloadServer = server
-        val repository = DownloadRepositoryProcessOwner.get(applicationContext)
+        val repository = DownloadRepositoryProcessOwner.get(context)
 
         /*
          * WorkManager can restore a previous debug-fixture worker before this
@@ -169,13 +188,14 @@ class QaActivity : ComponentActivity() {
                 ),
             )
         }
-        return QaDownloadHarness(repository, server)
+        return QaDownloadHarness(repository, server, launchToken)
     }
 }
 
 private data class QaDownloadHarness(
     val repository: DownloadRepository,
     val origin: QaRangeServer,
+    val launchToken: String,
 )
 
 @Composable
@@ -183,6 +203,7 @@ private fun QaAuthenticatedShell(
     initialDestination: MainDestination,
     isTv: Boolean,
     downloadHarness: QaDownloadHarness?,
+    launchToken: String,
 ) {
     val (adaptiveUi, inputController) = rememberAdaptiveUiState(isTv)
     CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
@@ -195,6 +216,7 @@ private fun QaAuthenticatedShell(
                 initialDestination = initialDestination,
                 isTv = isTv,
                 downloadHarness = downloadHarness,
+                launchToken = launchToken,
             )
         }
     }
@@ -205,13 +227,20 @@ private fun FixtureMain(
     initialDestination: MainDestination,
     isTv: Boolean,
     downloadHarness: QaDownloadHarness?,
+    launchToken: String,
 ) {
     val downloadRepository = downloadHarness?.repository
+    val context = LocalContext.current
     var favorites by remember {
         mutableStateOf(setOf("MOVIE:101", "SERIES:301", "LIVE:501"))
     }
     var state by remember(initialDestination) {
         mutableStateOf(fixtureState(initialDestination).copy(favorites = favorites))
+    }
+    LaunchedEffect(state.destination, launchToken) {
+        withContext(Dispatchers.IO) {
+            writeQaPageEvidence(context, state.destination, launchToken)
+        }
     }
     var actionRevision by remember { mutableStateOf(0) }
     var lastDownloadAction by remember { mutableStateOf<String?>(null) }
@@ -230,16 +259,26 @@ private fun FixtureMain(
     }
 
     fun refreshDownloads(repository: DownloadRepository) {
-        state = state.copy(
-            downloads = repository.downloads(),
-            downloadSettings = repository.settings(),
-        )
+        val refreshedDownloads = repository.downloads()
+        val refreshedSettings = repository.settings()
+        if (
+            refreshedDownloads != state.downloads ||
+            refreshedSettings != state.downloadSettings
+        ) {
+            state = state.copy(
+                downloads = refreshedDownloads,
+                downloadSettings = refreshedSettings,
+            )
+        }
     }
 
     LaunchedEffect(downloadHarness) {
         while (downloadHarness != null) {
             refreshDownloads(downloadHarness.repository)
             originBytesServed = downloadHarness.origin.bytesServed()
+            withContext(Dispatchers.IO) {
+                writeQaDownloadEvidence(context, downloadHarness)
+            }
             delay(QA_DOWNLOAD_POLL_MS)
         }
     }
@@ -302,7 +341,7 @@ private fun FixtureMain(
                     repository.remove(item.downloadId)
                     refreshDownloads(repository)
                 }
-                publishDownloadAction("cancel")
+                publishDownloadAction("delete")
             },
             onRetryDownload = { item ->
                 val repository = downloadRepository
@@ -627,7 +666,127 @@ private fun live(
     addedAtEpochSeconds = 1_800_000_000L - id,
 )
 
+private fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().buffered().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+}
+
+private data class QaFileSnapshot(
+    val exists: Boolean,
+    val length: Long,
+    val sha256: String,
+)
+
+private fun snapshotQaFile(file: File): QaFileSnapshot = runCatching {
+    if (!file.isFile) {
+        QaFileSnapshot(exists = false, length = 0L, sha256 = "")
+    } else {
+        QaFileSnapshot(exists = true, length = file.length(), sha256 = sha256(file))
+    }
+}.getOrElse {
+    // SharedPreferences and active partial downloads can be replaced between
+    // the directory listing and open(). Record that volatile snapshot as
+    // absent; the next poll must still produce the required stable evidence.
+    QaFileSnapshot(exists = false, length = 0L, sha256 = "")
+}
+
+private fun jsonString(value: String): String = buildString {
+    append('"')
+    value.forEach { char ->
+        when (char) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            else -> append(char)
+        }
+    }
+    append('"')
+}
+
+private fun writeQaPageEvidence(
+    context: Context,
+    destination: MainDestination,
+    launchToken: String,
+) {
+    val payload = JSONObject()
+        .put("schema_version", 1)
+        .put("page", destination.name.lowercase(Locale.ROOT))
+        .put("launch_token", launchToken)
+        .put("recorded_at_epoch_ms", System.currentTimeMillis())
+        .toString()
+    val target = File(context.filesDir, "qa-page-evidence.json")
+    val temporary = File(context.filesDir, "qa-page-evidence.json.tmp")
+    temporary.writeText(payload, Charsets.UTF_8)
+    if (!temporary.renameTo(target)) {
+        target.writeText(payload, Charsets.UTF_8)
+        temporary.delete()
+    }
+}
+
+private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness) {
+    val records = harness.repository.downloads()
+    val roots = context.getExternalFilesDirs(Environment.DIRECTORY_MOVIES).filterNotNull()
+    val files = roots.flatMap { root ->
+        root.listFiles()?.filter { file -> file.name.startsWith(QA_DOWNLOAD_FILE_PREFIX) } ?: emptyList()
+    }
+    val persisted = File(context.applicationInfo.dataDir, "shared_prefs/hulk_downloads.xml")
+    val fileRecords = files.joinToString(",") { file ->
+        val kind = if (file.name.endsWith(".part")) "partial" else "completed"
+        val snapshot = snapshotQaFile(file)
+        "{" +
+            "\"kind\":" + jsonString(kind) + "," +
+            "\"absolute_path\":" + jsonString(file.absolutePath) + "," +
+            "\"exists\":${snapshot.exists}," +
+            "\"length\":${snapshot.length}," +
+            "\"sha256\":" + jsonString(snapshot.sha256) +
+            "}"
+    }
+    val persistedSnapshot = snapshotQaFile(persisted)
+    val repositoryBytes = records.sumOf { item -> item.bytesDownloaded.coerceAtLeast(0L) }
+    val ledger = harness.origin.requestLedger().joinToString(",") { jsonString(it) }
+    val candidateUrls = records
+        .flatMap(OfflineDownload::sourceCandidates)
+        .distinct()
+        .joinToString(",") { jsonString(it) }
+    val failedRecords = records.count { item -> item.status == OfflineStatus.FAILED }
+    val maximumRetryCount = records.maxOfOrNull(OfflineDownload::retryCount) ?: 0
+    val payload = "{" +
+        "\"schema_version\":2," +
+        "\"launch_token\":" + jsonString(harness.launchToken) + "," +
+        "\"origin_base_url\":" + jsonString(harness.origin.baseUrl) + "," +
+        "\"origin_running\":${harness.origin.isRunning()}," +
+        "\"origin_bytes\":${harness.origin.bytesServed()}," +
+        "\"repository_bytes\":$repositoryBytes," +
+        "\"repository_candidate_urls\":[${candidateUrls}]," +
+        "\"failed_record_count\":$failedRecords," +
+        "\"maximum_retry_count\":$maximumRetryCount," +
+        "\"files\":[${fileRecords}]," +
+        "\"partial_file_bytes\":${files.filter { it.name.endsWith(".part") }.sumOf(File::length)}," +
+        "\"completed_file_bytes\":${files.filterNot { it.name.endsWith(".part") }.sumOf(File::length)}," +
+        "\"persisted_state\":{" +
+            "\"path\":" + jsonString(persisted.absolutePath) + "," +
+            "\"exists\":${persistedSnapshot.exists}," +
+            "\"length\":${persistedSnapshot.length}," +
+            "\"sha256\":" + jsonString(persistedSnapshot.sha256) +
+        "}," +
+        "\"origin_request_ledger\":[${ledger}]" +
+    "}"
+    File(context.filesDir, QA_DOWNLOAD_EVIDENCE_FILE).writeText(payload)
+}
+
+
+
 private const val QA_DOWNLOAD_FILE_PREFIX = "QA_DOWNLOAD"
+private const val QA_DOWNLOAD_EVIDENCE_FILE = "qa-download-file-evidence.json"
 private const val QA_DOWNLOAD_HISTORY_PREFIX = "QA_DOWNLOAD"
 private const val QA_DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 private const val QA_DOWNLOAD_ORIGIN_PROGRESS_MARKER = "qa-download-origin:bytes-positive"
@@ -645,6 +804,7 @@ private const val QA_DOWNLOAD_WRITE_DELAY_MS = 40L
 private class QaRangeServer : Closeable {
     private val running = AtomicBoolean(false)
     private val transferredBytes = AtomicLong(0L)
+    private val requests = CopyOnWriteArrayList<String>()
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val workers = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "hulk-qa-range-client").apply { isDaemon = true }
@@ -653,7 +813,9 @@ private class QaRangeServer : Closeable {
 
     val baseUrl: String = "http://127.0.0.1:${server.localPort}"
 
+    fun isRunning(): Boolean = running.get() && !server.isClosed
     fun bytesServed(): Long = transferredBytes.get()
+    fun requestLedger(): List<String> = requests.toList()
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -704,6 +866,7 @@ private class QaRangeServer : Closeable {
                     rangeHeader = line.substringAfter(':').trim()
                 }
             }
+            requests += "${requestLine.replace("\"", "\\\"")}|Range=${rangeHeader.orEmpty().replace("\"", "\\\"")}"
             val range = parseBoundedRange(rangeHeader)
             if (rangeHeader?.matches(Regex("""bytes=\d+-""")) == true) {
                 val start = rangeHeader.substringAfter("bytes=").substringBefore('-').toLong()
