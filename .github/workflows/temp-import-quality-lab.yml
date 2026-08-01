@@ -29,9 +29,17 @@ jobs:
       - name: Import compatibility-lab-only repair
         run: |
           set -euo pipefail
-          git fetch origin archive/pr57-codex-churn-20260801
+          git fetch origin archive/pr57-codex-churn-20260801 ci/adapt-quality-marker-injection-v09320
           git checkout origin/archive/pr57-codex-churn-20260801 -- qa/compatibility
+          git checkout origin/ci/adapt-quality-marker-injection-v09320 -- \
+            qa/compatibility/inject_quality_markers.py \
+            qa/compatibility/tests/test_marker_injection.py
           git diff --check
+
+      - name: Install Compatibility Lab test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
 
       - name: Validate compatibility and repository contracts
         run: |
