@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import re
 import struct
 from verifier import artifact_checksum
 
@@ -12,6 +11,11 @@ def png_size(data: bytes) -> tuple[int, int]:
     if not data.startswith(b"\x89PNG\r\n\x1a\n") or len(data) < 24:
         raise ValueError("invalid PNG")
     return struct.unpack(">II", data[16:24])
+
+
+def canonical_file(path: Path) -> str:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def main() -> int:
@@ -41,6 +45,8 @@ def main() -> int:
         "markers.log": markers,
         "origin.log": (args.raw / "origin.log").read_text(),
         "repository.log": (args.raw / "repository.log").read_text(),
+        "device-contract.json": canonical_file(args.raw / "device-contract.json"),
+        "retry-evidence.json": canonical_file(args.raw / "retry-evidence.json"),
         "screenshot.json": json.dumps({"width": width, "height": height, "density": args.density}, sort_keys=True),
         "PROVENANCE.json": json.dumps({
             "source_head_sha": args.source_head_sha,
@@ -52,6 +58,9 @@ def main() -> int:
             "process_id": process_id,
         }, sort_keys=True),
     }
+    retry_failure = args.raw / "attempt-1" / "failure-classification.json"
+    if retry_failure.is_file():
+        files["retry-failure-classification.json"] = canonical_file(retry_failure)
     bundle = {
         "schema_version": 1,
         "case_id": "minimal-fixture-runtime",

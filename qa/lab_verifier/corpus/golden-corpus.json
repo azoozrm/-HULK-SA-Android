@@ -10,10 +10,7 @@
       "merge_sha": "cccccccccccccccccccccccccccccccccccccccc",
       "outcome": "PASS",
       "page": "downloads",
-      "physical_size": [
-        1920,
-        1080
-      ],
+      "physical_size": [1920, 1080],
       "process_id": "4242",
       "source_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "target": "row-1-pause",
@@ -22,11 +19,13 @@
     "files": {
       "PROVENANCE.json": "{\"base_sha\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"lab_apk_sha256\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"launch_token\": \"launch-001\", \"merge_sha\": \"cccccccccccccccccccccccccccccccccccccccc\", \"process_id\": \"4242\", \"source_head_sha\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"tested_commit_sha\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
       "activity.txt": "ResumedActivity sa.hulksa.labfixture/.MainActivity\n",
+      "device-contract.json": "{\"effective_density\": 320, \"effective_size\": [1920, 1080], \"errors\": [], \"expected_density\": 320, \"expected_size\": [1920, 1080], \"override_density\": 320, \"override_size\": [1920, 1080], \"physical_density\": 320, \"physical_size\": [1920, 1080], \"schema_version\": 1, \"screenshot_size\": [1920, 1080], \"valid\": true}",
       "focus-events.log": "focused=row-1-pause\nfocused=row-1-pause\n",
       "logcat.txt": "I HULK_FIXTURE ready\n",
       "markers.log": "4242 launch-001 pause 1\n",
       "origin.log": "fixture_server=running\nbytes_served=1024\n",
       "repository.log": "bytes_persisted=1024\n",
+      "retry-evidence.json": "{\"attempts\": 1, \"final_attempt\": \"attempt-1\", \"final_success\": true, \"first_status\": 0, \"retried\": false, \"retry_allowed\": false, \"retry_reason\": null, \"second_status\": null}",
       "screenshot.json": "{\"density\": 320, \"height\": 1080, \"sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"width\": 1920}",
       "ui.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<hierarchy rotation=\"0\"><node text=\"\" content-desc=\"qa-page:downloads qa-launch-token:launch-001\" focused=\"false\" bounds=\"[0,0][1920,1080]\"><node text=\"row-1-pause\" content-desc=\"row-1-pause\" focused=\"true\" focusable=\"true\" clickable=\"true\" bounds=\"[100,100][400,200]\"/></node></hierarchy>",
       "window.txt": "mCurrentFocus=sa.hulksa.labfixture/.MainActivity\n"
@@ -34,88 +33,18 @@
     "schema_version": 1
   },
   "cases": [
-    {
-      "case_id": "known-pass",
-      "outcome": "PASS"
-    },
-    {
-      "case_id": "known-product-failure",
-      "file_overrides": {
-        "markers.log": ""
-      },
-      "outcome": "FAIL_PRODUCT"
-    },
-    {
-      "case_id": "known-lab-failure-stale-token",
-      "file_overrides": {
-        "ui.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<hierarchy rotation=\"0\"><node text=\"\" content-desc=\"qa-page:downloads qa-launch-token:old-launch\" focused=\"false\" bounds=\"[0,0][1920,1080]\"><node text=\"row-1-pause\" content-desc=\"row-1-pause\" focused=\"true\" focusable=\"true\" clickable=\"true\" bounds=\"[100,100][400,200]\"/></node></hierarchy>"
-      },
-      "outcome": "FAIL_LAB"
-    },
-    {
-      "case_id": "known-fixture-failure",
-      "file_overrides": {
-        "origin.log": "fixture_server=stopped\nbytes_served=0\n"
-      },
-      "outcome": "FAIL_FIXTURE"
-    },
-    {
-      "case_id": "known-infrastructure-failure",
-      "file_overrides": {
-        "logcat.txt": "device offline\n"
-      },
-      "outcome": "FAIL_INFRASTRUCTURE"
-    },
-    {
-      "case_id": "known-blocked",
-      "delete_files": [
-        "activity.txt"
-      ],
-      "outcome": "BLOCKED"
-    },
-    {
-      "case_id": "known-navigation-target-mismatch",
-      "file_overrides": {
-        "markers.log": "4242 launch-001 cancel 1\n"
-      },
-      "outcome": "FAIL_LAB"
-    },
-    {
-      "case_id": "known-start-state-not-established",
-      "file_overrides": {
-        "focus-events.log": "focused=toolbar-wifi\nfocused=toolbar-wifi\n"
-      },
-      "outcome": "FAIL_LAB"
-    },
-    {
-      "case_id": "known-callback-not-executed",
-      "file_overrides": {
-        "markers.log": ""
-      },
-      "outcome": "FAIL_PRODUCT"
-    },
-    {
-      "case_id": "known-origin-repository-boundary-mismatch",
-      "file_overrides": {
-        "origin.log": "fixture_server=running\nbytes_served=4096\n",
-        "repository.log": "bytes_persisted=0\n"
-      },
-      "outcome": "FAIL_PRODUCT"
-    },
-    {
-      "case_id": "known-density-mismatch",
-      "file_overrides": {
-        "screenshot.json": "{\"density\": 213, \"height\": 1080, \"sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"width\": 1920}"
-      },
-      "outcome": "FAIL_LAB"
-    },
-    {
-      "case_id": "known-downstream-only",
-      "file_overrides": {
-        "focus-events.log": "focused=toolbar-wifi\nfocused=toolbar-schedule\n"
-      },
-      "outcome": "FAIL_LAB"
-    }
+    {"case_id": "known-pass", "outcome": "PASS"},
+    {"case_id": "known-product-failure", "file_overrides": {"markers.log": ""}, "outcome": "FAIL_PRODUCT"},
+    {"case_id": "known-lab-failure-stale-token", "file_overrides": {"ui.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<hierarchy rotation=\"0\"><node text=\"\" content-desc=\"qa-page:downloads qa-launch-token:old-launch\" focused=\"false\" bounds=\"[0,0][1920,1080]\"><node text=\"row-1-pause\" content-desc=\"row-1-pause\" focused=\"true\" focusable=\"true\" clickable=\"true\" bounds=\"[100,100][400,200]\"/></node></hierarchy>"}, "outcome": "FAIL_LAB"},
+    {"case_id": "known-fixture-failure", "file_overrides": {"origin.log": "fixture_server=stopped\nbytes_served=0\n"}, "outcome": "FAIL_FIXTURE"},
+    {"case_id": "known-infrastructure-failure", "file_overrides": {"logcat.txt": "device offline\n"}, "outcome": "FAIL_INFRASTRUCTURE"},
+    {"case_id": "known-blocked", "delete_files": ["activity.txt"], "outcome": "BLOCKED"},
+    {"case_id": "known-navigation-target-mismatch", "file_overrides": {"markers.log": "4242 launch-001 cancel 1\n"}, "outcome": "FAIL_LAB"},
+    {"case_id": "known-start-state-not-established", "file_overrides": {"focus-events.log": "focused=toolbar-wifi\nfocused=toolbar-wifi\n"}, "outcome": "FAIL_LAB"},
+    {"case_id": "known-callback-not-executed", "file_overrides": {"markers.log": ""}, "outcome": "FAIL_PRODUCT"},
+    {"case_id": "known-origin-repository-boundary-mismatch", "file_overrides": {"origin.log": "fixture_server=running\nbytes_served=4096\n", "repository.log": "bytes_persisted=0\n"}, "outcome": "FAIL_PRODUCT"},
+    {"case_id": "known-density-mismatch", "file_overrides": {"screenshot.json": "{\"density\": 213, \"height\": 1080, \"sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"width\": 1920}"}, "outcome": "FAIL_LAB"},
+    {"case_id": "known-downstream-only", "file_overrides": {"focus-events.log": "focused=toolbar-wifi\nfocused=toolbar-schedule\n"}, "outcome": "FAIL_LAB"}
   ],
   "schema_version": 2
 }

@@ -14,7 +14,11 @@ HEIGHT="${10:?height required}"
 DENSITY="${11:?density required}"
 
 mkdir -p "$OUT"
-adb shell wm density "$DENSITY"
+python3 qa/lab_verifier/device_contract.py \
+  --width "$WIDTH" \
+  --height "$HEIGHT" \
+  --density "$DENSITY" \
+  --out "$OUT/device-contract.json"
 
 run_attempt() {
   local attempt="$1"
