@@ -20,6 +20,9 @@ MARKERS = (
     "qa-tv-rail",
     "qa-tv-page-content:",
     "qa-tv-live-actions",
+    "qa-tv-live-channel:",
+    "qa-tv-live-play",
+    "qa-tv-live-favorite",
     "qa-tv-download-list",
     "qa-tv-download-card:",
 )
@@ -27,8 +30,43 @@ MARKERS = (
 HELPERS = '''
 private const val QA_TV_PAGE_CONTENT_PREFIX = "qa-tv-page-content:"
 private const val QA_TV_LIVE_ACTIONS = "qa-tv-live-actions"
+private const val QA_TV_LIVE_CHANNEL_PREFIX = "qa-tv-live-channel:"
+private const val QA_TV_LIVE_PLAY = "qa-tv-live-play"
+private const val QA_TV_LIVE_FAVORITE = "qa-tv-live-favorite"
 private const val QA_TV_DOWNLOAD_LIST = "qa-tv-download-list"
 private const val QA_TV_DOWNLOAD_CARD_PREFIX = "qa-tv-download-card:"
+private const val QA_FOCUS_TRACE_TAG = "HULK_QA_FOCUS"
+private var qaLastFocusRequestAtMs = -1L
+private var qaLastFocusRequestTarget = ""
+
+private fun DownloadFocusLocation.qaFocusId(): String = when (zone) {
+    DownloadFocusZone.TOOLBAR -> "toolbar-${slot.name.lowercase(Locale.ROOT)}"
+    DownloadFocusZone.CARD -> "row-${row + 1}-${slot.name.lowercase(Locale.ROOT)}"
+}
+
+private fun qaFocusTrace(event: String, target: String, detail: String = "") {
+    if (BuildConfig.DEBUG) {
+        Log.i(
+            QA_FOCUS_TRACE_TAG,
+            "timestamp_ns=${SystemClock.elapsedRealtimeNanos()} event=$event target=$target $detail".trim(),
+        )
+    }
+}
+
+private fun qaTraceFocusRequest(target: DownloadFocusLocation, result: Boolean) {
+    if (!BuildConfig.DEBUG) return
+    val now = SystemClock.elapsedRealtime()
+    val delta = if (qaLastFocusRequestAtMs >= 0L) now - qaLastFocusRequestAtMs else -1L
+    val secondWithin500Ms = qaLastFocusRequestTarget.isNotEmpty() && delta in 0L..500L
+    qaFocusTrace(
+        event = "request-focus",
+        target = target.qaFocusId(),
+        detail = "result=$result second_within_500ms=$secondWithin500Ms " +
+            "previous=$qaLastFocusRequestTarget delta_ms=$delta",
+    )
+    qaLastFocusRequestAtMs = now
+    qaLastFocusRequestTarget = target.qaFocusId()
+}
 
 private fun Modifier.qaTvPageContent(
     isTv: Boolean,
@@ -147,6 +185,15 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
     changes: list[str] = []
     source = replace_once(
         source,
+        "import android.content.Intent\n",
+        "import android.content.Intent\n"
+        "import android.os.SystemClock\n"
+        "import android.util.Log\n",
+        "focus-trace-imports",
+        changes,
+    )
+    source = replace_once(
+        source,
         "import androidx.compose.ui.semantics.Role\n",
         "import androidx.compose.ui.semantics.Role\n"
         "import androidx.compose.ui.semantics.contentDescription\n"
@@ -262,6 +309,19 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
                 "            .qaTvPageContent(isTv, MainDestination.LIVE),\n"
                 "    ) {",
             ),
+            (
+                "            .padding(\n"
+                "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+                "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+                "            )\n"
+                "            .onPreviewKeyEvent { event ->",
+                "            .padding(\n"
+                "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
+                "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
+                "            )\n"
+                "            .qaTvPageContent(isTv, MainDestination.LIVE)\n"
+                "            .onPreviewKeyEvent { event ->",
+            ),
         ),
         "live-content-marker",
         changes,
@@ -291,6 +351,44 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
             ),
         ),
         "live-actions-marker",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private fun LiveCatalogScreen(",
+        "private fun LiveStage(",
+        "                                modifier = Modifier\n"
+        "                                    .focusRequester(requester)\n"
+        "                                    .onPreviewKeyEvent { event ->",
+        "                                modifier = Modifier\n"
+        "                                    .focusRequester(requester)\n"
+        "                                    .qaMarker(true, \"$QA_TV_LIVE_CHANNEL_PREFIX${channel.id}\")\n"
+        "                                    .onPreviewKeyEvent { event ->",
+        "live-channel-focus-marker",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private fun LiveStage(",
+        "private fun FavoritesScreen(",
+        "                                .focusRequester(playRequester)\n"
+        "                                .onPreviewKeyEvent { event ->",
+        "                                .focusRequester(playRequester)\n"
+        "                                .qaMarker(true, QA_TV_LIVE_PLAY)\n"
+        "                                .onPreviewKeyEvent { event ->",
+        "live-play-focus-marker",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private fun LiveStage(",
+        "private fun FavoritesScreen(",
+        "                                .focusRequester(favoriteRequester)\n"
+        "                                .onPreviewKeyEvent { event ->",
+        "                                .focusRequester(favoriteRequester)\n"
+        "                                .qaMarker(true, QA_TV_LIVE_FAVORITE)\n"
+        "                                .onPreviewKeyEvent { event ->",
+        "live-favorite-focus-marker",
         changes,
     )
     for function_name, next_name, destination in (
@@ -411,6 +509,136 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
             ),
         ),
         "settings-content-marker",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private suspend fun requestDownloadFocusWhenReady(",
+        "@Composable\nfun MainShellScreen(",
+        "): Boolean {\n    if (target.zone == DownloadFocusZone.CARD) {",
+        "): Boolean {\n"
+        "    qaFocusTrace(\n"
+        "        event = \"request-start\",\n"
+        "        target = target.qaFocusId(),\n"
+        "        detail = \"visible=${listState.layoutInfo.visibleItemsInfo.map { it.index }}\",\n"
+        "    )\n"
+        "    if (target.zone == DownloadFocusZone.CARD) {",
+        "download-request-start-trace",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private suspend fun requestDownloadFocusWhenReady(",
+        "@Composable\nfun MainShellScreen(",
+        "            listState.scrollToItem(target.row, scrollOffset = 0)",
+        "            qaFocusTrace(\"scroll-start\", target.qaFocusId(), "
+        "\"visible=${listState.layoutInfo.visibleItemsInfo.map { it.index }}\")\n"
+        "            listState.scrollToItem(target.row, scrollOffset = 0)\n"
+        "            qaFocusTrace(\"scroll-end\", target.qaFocusId(), "
+        "\"visible=${listState.layoutInfo.visibleItemsInfo.map { it.index }}\")",
+        "download-scroll-trace",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private suspend fun requestDownloadFocusWhenReady(",
+        "@Composable\nfun MainShellScreen(",
+        "        if (!visible) return false",
+        "        qaFocusTrace(\"layout-ready\", target.qaFocusId(), "
+        "\"visible=$visible items=${listState.layoutInfo.visibleItemsInfo.map { it.index }}\")\n"
+        "        if (!visible) return false",
+        "download-layout-ready-trace",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private suspend fun requestDownloadFocusWhenReady(",
+        "@Composable\nfun MainShellScreen(",
+        "        val requested = requester?.let { "
+        "runCatching { it.requestFocus() }.getOrDefault(false) } == true\n"
+        "        if (requested) return true",
+        "        val requested = requester?.let { "
+        "runCatching { it.requestFocus() }.getOrDefault(false) } == true\n"
+        "        qaTraceFocusRequest(target, requested)\n"
+        "        if (requested) return true",
+        "download-request-result-trace",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private fun DownloadsScreen(",
+        "private fun DownloadCard(",
+        "        val target = nextDownloadFocus(downloads.size, current, move)\n"
+        "        downloadsNavigationJob?.cancel()",
+        "        val target = nextDownloadFocus(downloads.size, current, move)\n"
+        "        qaFocusTrace(\n"
+        "            event = \"key-target\",\n"
+        "            target = current.qaFocusId(),\n"
+        "            detail = \"move=$move calculated=${target?.qaFocusId() ?: \"boundary\"}\",\n"
+        "        )\n"
+        "        downloadsNavigationJob?.cancel()",
+        "download-key-target-trace",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private fun DownloadsScreen(",
+        "private fun DownloadCard(",
+        "            moveDownloadFocus(pendingDownloadFocus ?: focusedTarget, move)",
+        "            val before = pendingDownloadFocus ?: focusedTarget\n"
+        "            val consumed = moveDownloadFocus(before, move)\n"
+        "            qaFocusTrace(\n"
+        "                event = \"key-result\",\n"
+        "                target = before.qaFocusId(),\n"
+        "                detail = \"key=${event.key} consumed=$consumed\",\n"
+        "            )\n"
+        "            consumed",
+        "download-key-result-trace",
+        changes,
+    )
+    source = patch_segment(
+        source,
+        "private fun DownloadsScreen(",
+        "private fun DownloadCard(",
+        "            val restoreTarget = DownloadFocusLocation.card(targetRow, DownloadFocusSlot.PRIMARY)\n"
+        "            downloadsRestoreComplete = requestDownloadFocusWhenReady(",
+        "            val restoreTarget = DownloadFocusLocation.card(targetRow, DownloadFocusSlot.PRIMARY)\n"
+        "            qaFocusTrace(\"restore-activate\", restoreTarget.qaFocusId())\n"
+        "            downloadsRestoreComplete = requestDownloadFocusWhenReady(",
+        "download-restore-trace",
+        changes,
+    )
+    for slot_name, slot_enum in (
+        ("wifi", "WIFI"),
+        ("schedule", "SCHEDULE"),
+        ("concurrent", "CONCURRENT"),
+    ):
+        assignment = (
+            "                        currentDownloadFocus = "
+            f"DownloadFocusLocation.toolbar(DownloadFocusSlot.{slot_enum})\n"
+            "                        if (pendingDownloadFocus == currentDownloadFocus) "
+            "pendingDownloadFocus = null\n"
+            "                        currentDownloadItemId = null"
+        )
+        source = patch_segment(
+            source,
+            "private fun DownloadsScreen(",
+            "private fun DownloadCard(",
+            assignment,
+            assignment + "\n"
+            f"                        qaFocusTrace(\"on-focused\", \"toolbar-{slot_name}\")",
+            f"download-toolbar-{slot_name}-focused-trace",
+            changes,
+        )
+    source = patch_segment(
+        source,
+        "private fun DownloadCard(",
+        "private fun DownloadProgress(",
+        "        onFocusLocation(location)\n        onFocused()",
+        "        onFocusLocation(location)\n"
+        "        qaFocusTrace(\"on-focused\", location.qaFocusId())\n"
+        "        onFocused()",
+        "download-on-focused-trace",
         changes,
     )
 

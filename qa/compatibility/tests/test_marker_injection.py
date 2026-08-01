@@ -23,6 +23,7 @@ SPEC.loader.exec_module(INJECTION)
 
 
 EXPECTED_REPLACEMENTS = (
+    "focus-trace-imports",
     "semantics-imports",
     "marker-helpers",
     "tv-rail-marker",
@@ -30,12 +31,26 @@ EXPECTED_REPLACEMENTS = (
     "poster-catalog-content-marker",
     "live-content-marker",
     "live-actions-marker",
+    "live-channel-focus-marker",
+    "live-play-focus-marker",
+    "live-favorite-focus-marker",
     "favorites-content-marker",
     "search-content-marker",
     "downloads-content-marker",
     "downloads-list-marker",
     "download-card-marker",
     "settings-content-marker",
+    "download-request-start-trace",
+    "download-scroll-trace",
+    "download-layout-ready-trace",
+    "download-request-result-trace",
+    "download-key-target-trace",
+    "download-key-result-trace",
+    "download-restore-trace",
+    "download-toolbar-wifi-focused-trace",
+    "download-toolbar-schedule-focused-trace",
+    "download-toolbar-concurrent-focused-trace",
+    "download-on-focused-trace",
 )
 
 HOME_CANONICAL = (
@@ -71,7 +86,22 @@ LIVE_PRODUCT = (
     "            .padding(\n"
     "                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,\n"
     "                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,\n"
-    "            ),\n"
+    "            )\n"
+    "            .onPreviewKeyEvent { event ->\n"
+    "                if (\n"
+    "                    isTv && event.type == KeyEventType.KeyDown &&\n"
+    "                    event.key in setOf(\n"
+    "                        Key.DirectionLeft,\n"
+    "                        Key.DirectionRight,\n"
+    "                        Key.DirectionUp,\n"
+    "                        Key.DirectionDown,\n"
+    "                    )\n"
+    "                ) {\n"
+    "                    liveUserInteracted = true\n"
+    "                    liveRestoreJob?.cancel()\n"
+    "                }\n"
+    "                false\n"
+    "            },\n"
     "    ) {"
 )
 LIVE_ACTIONS_CANONICAL = (
@@ -277,7 +307,7 @@ def ambiguous_home_shape(source: str) -> str:
 class QualityMarkerInjectionTest(unittest.TestCase):
     def assert_complete_injection(self, source: str) -> None:
         patched, report = INJECTION.inject_text(source)
-        self.assertEqual(13, report["replacement_count"])
+        self.assertEqual(len(EXPECTED_REPLACEMENTS), report["replacement_count"])
         self.assertEqual(list(EXPECTED_REPLACEMENTS), report["replacements"])
         for marker in INJECTION.MARKERS:
             self.assertIn(marker, patched)
@@ -295,6 +325,8 @@ class QualityMarkerInjectionTest(unittest.TestCase):
             )
         self.assertIn("qaTvPageContent(isTv, destination)", patched)
         self.assertIn("BuildConfig.DEBUG", patched)
+        self.assertIn("HULK_QA_FOCUS", patched)
+        self.assertIn("second_within_500ms", patched)
 
     def test_current_source_injection_is_strict_disposable_and_complete(self) -> None:
         original = SOURCE.read_bytes()
@@ -306,7 +338,7 @@ class QualityMarkerInjectionTest(unittest.TestCase):
             report = INJECTION.inject_file(target, report_path)
             patched = target.read_text(encoding="utf-8")
 
-            self.assertEqual(13, report["replacement_count"])
+            self.assertEqual(len(EXPECTED_REPLACEMENTS), report["replacement_count"])
             self.assertEqual(list(EXPECTED_REPLACEMENTS), report["replacements"])
             self.assertNotEqual(
                 report["original_sha256"],

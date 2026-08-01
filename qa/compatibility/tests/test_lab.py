@@ -22,6 +22,7 @@ from analyze import (  # noqa: E402
     analyze_rail_visual,
     analyze_run,
     analyze_download_actions,
+    analyze_focus,
     download_layout_measurement,
     live_action_measurement,
     tv_content_gutter_measurement,
@@ -326,15 +327,17 @@ class ConfigTests(unittest.TestCase):
     def test_download_action_planning_waits_for_stable_restored_focus(self) -> None:
         source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
         helper = source.split(
-            "def wait_for_download_focus_stability(",
+            "def wait_for_stable_focus(",
             maxsplit=1,
         )[1].split("\ndef parse_start_metrics", maxsplit=1)[0]
         audit = source.split(
             "def _deterministic_download_action_audit",
             maxsplit=1,
         )[1]
-        self.assertIn("stable_for: float = 0.65", helper)
-        self.assertIn("target != last_target", helper)
+        self.assertIn("consecutive_reads: int = 2", helper)
+        self.assertIn("matching_reads >= consecutive_reads", helper)
+        self.assertIn("expected_target: str = \"row-1-primary\"", helper)
+        self.assertIn('f"{evidence_path.stem}-read-{read_number}', source)
         self.assertIn("wait_for_download_focus_stability(", audit)
         self.assertLess(
             audit.index("wait_for_download_focus_stability("),
@@ -346,8 +349,8 @@ class ConfigTests(unittest.TestCase):
             LAB_ROOT.parents[1]
             / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
         ).read_text(encoding="utf-8")
-        policy = source.split(
-            "private fun Modifier.applyDownloadFocusPolicy(",
+        coordinator = source.split(
+            "private suspend fun requestDownloadFocusWhenReady(",
             maxsplit=1,
         )[1].split("\n\n\n@Composable", maxsplit=1)[0]
         downloads = source.split(
@@ -358,7 +361,6 @@ class ConfigTests(unittest.TestCase):
             "private fun DownloadCard(",
             maxsplit=1,
         )[1].split("\n@Composable\nprivate fun DownloadProgress", maxsplit=1)[0]
-        self.assertNotIn(".onPreviewKeyEvent", policy)
         self.assertIn("var currentDownloadFocus by remember", downloads)
         self.assertIn("import androidx.compose.ui.input.key.KeyEvent", source)
         self.assertIn(
@@ -382,14 +384,84 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY)", card)
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL)", card)
         self.assertIn("Key.DirectionDown -> DownloadFocusMove.DOWN", downloads)
-        self.assertIn("moveDownloadFocus(current, move)", downloads)
-        self.assertIn("downloadsState.layoutInfo.visibleItemsInfo", downloads)
         self.assertIn(
-            "downloadsState.scrollToItem(target.row, scrollOffset = 0)",
+            "moveDownloadFocus(pendingDownloadFocus ?: focusedTarget, move)",
             downloads,
         )
-        self.assertIn("requester.requestFocus()", downloads)
-        self.assertIn("onFocusLocation = { currentDownloadFocus = it }", downloads)
+        self.assertIn("val consumed =", (LAB_ROOT / "inject_quality_markers.py").read_text())
+        self.assertIn("requestDownloadFocusWhenReady(target, downloadsState", downloads)
+        self.assertIn(
+            "listState.scrollToItem(target.row, scrollOffset = 0)",
+            coordinator,
+        )
+        self.assertIn("snapshotFlow", coordinator)
+        self.assertIn("withFrameNanos", coordinator)
+        self.assertIn("runCatching { it.requestFocus() }", coordinator)
+        self.assertNotIn("delay(", coordinator)
+        self.assertNotIn("yield(", coordinator)
+        self.assertNotIn("applyDownloadFocusPolicy", downloads + card)
+        self.assertNotIn("LaunchedEffect(restoreFocus", card)
+        self.assertIn("currentDownloadFocus = it", downloads)
+        self.assertIn("cardFocus = remember { mutableMapOf", downloads)
+
+    def test_live_focus_audit_requires_real_channel_and_action_targets(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        audit = source.split("    def focus_audit(", maxsplit=1)[1].split(
+            "\n\n    def download_action_audit", maxsplit=1
+        )[0]
+        self.assertIn('expected_start = "live-channel-1"', audit)
+        for target in ("live-channel-1", "live-play", "live-favorite", "live-channel-2"):
+            self.assertIn(target, audit)
+        self.assertIn("START_FOCUS_NOT_ESTABLISHED", audit)
+        self.assertIn("NAVIGATION_TARGET_MISMATCH", audit)
+        self.assertNotIn("expected at least 2", audit)
+        selector_handler = audit.split("except Exception as exc:", maxsplit=1)[1].split(
+            "finally:", maxsplit=1
+        )[0]
+        self.assertIn("HARNESS_SELECTOR_FAILURE", selector_handler)
+        self.assertNotIn("record_harness_error", selector_handler)
+
+    def test_live_focus_coverage_failure_remains_product_critical(self) -> None:
+        device = {
+            "requested_width": 1920,
+            "requested_height": 1080,
+        }
+        entry = {
+            "orientation": "landscape",
+            "page": "live",
+            "trace": [
+                {"focused": {"text": "قناة 1", "class": "View", "bounds": [0, 0, 100, 100]}},
+                {"focused": {"text": "تشغيل", "class": "View", "bounds": [100, 0, 200, 100]}},
+            ],
+            "files": {},
+            "error": None,
+            "failure": None,
+        }
+        _normalized, findings = analyze_focus(Path("."), device, [entry])
+        coverage = next(item for item in findings if item["code"] == "focus_coverage_incomplete")
+        self.assertEqual("critical", coverage["severity"])
+        self.assertEqual("product", coverage["classification"])
+        self.assertTrue(coverage["product_strict"])
+        self.assertEqual("FAIL", coverage["gate_outcome"])
+
+    def test_focus_selector_failure_is_fixture_blocked_not_infrastructure(self) -> None:
+        device = {"requested_width": 1920, "requested_height": 1080}
+        entry = {
+            "orientation": "landscape",
+            "page": "live",
+            "trace": [],
+            "files": {},
+            "error": None,
+            "failure": {
+                "type": "HARNESS_SELECTOR_FAILURE",
+                "reason": "marker could not be normalized",
+            },
+        }
+        normalized, findings = analyze_focus(Path("."), device, [entry])
+        self.assertEqual("BLOCKED", normalized[0]["status"])
+        self.assertFalse(any(item["severity"] == "infrastructure" for item in findings))
+        self.assertTrue(all(item["gate_outcome"] == "BLOCKED" for item in findings))
+        self.assertTrue(all(item["classification"] == "fixture" for item in findings))
 
     def test_product_live_focus_consumes_native_horizontal_keys_at_controls(self) -> None:
         source = (
@@ -404,9 +476,12 @@ class ConfigTests(unittest.TestCase):
             "private fun LiveStage(",
             maxsplit=1,
         )[1].split("\n@Composable\nprivate fun FavoritesScreen", maxsplit=1)[0]
-        self.assertIn("val requestLiveFocus: (FocusRequester) -> Boolean", live)
+        self.assertIn("val requestLiveFocus: (FocusRequester?) -> Boolean", live)
         self.assertIn("requestLiveFocus(playRequester)", live)
-        self.assertIn("requestFocus: (FocusRequester) -> Boolean", stage)
+        self.assertIn("requestFocus: (FocusRequester?) -> Boolean", stage)
+        self.assertIn("channelFocus = remember { mutableMapOf", live)
+        self.assertIn("Key.DirectionDown -> requestLiveFocus", live)
+        self.assertNotIn(".focusProperties", live + stage)
         self.assertEqual(2, stage.count(".onPreviewKeyEvent { event ->"))
         self.assertIn("Key.DirectionLeft -> requestFocus(favoriteRequester)", stage)
         self.assertIn("Key.DirectionRight -> requestFocus(channelRequester)", stage)
@@ -506,7 +581,7 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual("BLOCKED", normalized[0]["status"])
                 incomplete = [
                     item for item in findings
-                    if item["code"] == "download_action_audit_incomplete"
+                    if item["code"] == "missing_mandatory_download_action_evidence"
                 ]
                 self.assertEqual(1, len(incomplete))
                 self.assertIn(missing, incomplete[0]["message"])
@@ -552,7 +627,7 @@ class AnalyzerTests(unittest.TestCase):
             )
         self.assertEqual("BLOCKED", normalized[0]["status"])
         codes = {item["code"] for item in findings}
-        self.assertIn("download_action_audit_incomplete", codes)
+        self.assertIn("missing_mandatory_download_action_evidence", codes)
         self.assertIn("tv_download_action_unreachable", codes)
         self.assertIn("tv_download_action_not_executed", codes)
         self.assertIn("tv_download_row_navigation_incomplete", codes)
