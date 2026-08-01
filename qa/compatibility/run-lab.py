@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 import uuid
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 import xml.etree.ElementTree as ET
 
 from lab_config import PAGES
@@ -26,6 +26,7 @@ PAGE_MARKER_PREFIX = "qa-page:"
 PAGE_MARKER_RE = re.compile(r"qa-page:([a-z]+)")
 DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 DOWNLOAD_ACTION_RE = re.compile(r"qa-download-action:([a-z]+):(\d+)")
+FOCUS_TRACE_TAG = "HULK_QA_FOCUS"
 BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 TRANSIENT_ADB_RE = re.compile(
     r"device offline|device ['\"][^'\"]+['\"] not found|"
@@ -144,6 +145,20 @@ def safe_write(path: Path, data: str | bytes) -> None:
 def command_text(adb: Adb, args: Iterable[str], *, shell: bool = True, timeout: int = 120) -> str:
     result = adb.shell(args, timeout=timeout) if shell else adb.run(args, timeout=timeout)
     return result.text + (("\n" + result.error_text) if result.error_text else "")
+
+
+def write_logcat_with_focus_trace(adb: Adb, logcat_path: Path) -> Path:
+    logcat = command_text(
+        adb,
+        ["logcat", "-d", "-v", "threadtime"],
+        shell=False,
+        timeout=90,
+    )
+    safe_write(logcat_path, logcat)
+    focus_path = logcat_path.with_name("focus-events.log")
+    focus_lines = [line for line in logcat.splitlines() if FOCUS_TRACE_TAG in line]
+    safe_write(focus_path, "\n".join(focus_lines) + ("\n" if focus_lines else ""))
+    return focus_path
 
 
 def dump_xml(adb: Adb, destination: Path, attempts: int = 5) -> bytes:
@@ -454,6 +469,22 @@ def focused_node(xml_bytes: bytes) -> dict[str, Any] | None:
     return None
 
 
+def live_focus_target(xml_bytes: bytes, _display_width: int) -> tuple[str | None, dict[str, Any] | None]:
+    node = focused_node(xml_bytes)
+    text = str((node or {}).get("text") or "")
+    marker = re.search(r"qa-tv-live-(channel:\d+|play|favorite)", text)
+    if marker:
+        return f"live-{marker.group(1).replace(':', '-')}", node
+    if "تشغيل القناة" in text:
+        return "live-play", node
+    if "المفضلة" in text:
+        return "live-favorite", node
+    channel = re.search(r"قناة تجريبية رقم\s+(\d+)", text)
+    if channel:
+        return f"live-channel-{channel.group(1)}", node
+    return None, node
+
+
 def is_expanded_rail_focus(
     node: dict[str, Any] | None,
     display_width: int,
@@ -604,16 +635,51 @@ def poll_download_focus(
     display_width: int,
     timeout: float = 3.5,
 ) -> tuple[bool, str | None, dict[str, Any] | None, bytes]:
+    return wait_for_stable_focus(
+        adb,
+        expected_target,
+        scratch,
+        lambda xml: download_focus_target(xml, display_width),
+        timeout=timeout,
+        consecutive_reads=2,
+    )
+
+
+def wait_for_stable_focus(
+    adb: Adb,
+    expected_target: str,
+    evidence_path: Path,
+    identify: Callable[[bytes], tuple[str | None, dict[str, Any] | None]],
+    *,
+    timeout: float = 5.0,
+    consecutive_reads: int = 2,
+) -> tuple[bool, str | None, dict[str, Any] | None, bytes]:
+    """Prove an exact focused target across consecutive UI hierarchy reads."""
+    if consecutive_reads < 2:
+        raise ValueError("stable focus requires at least two consecutive reads")
     deadline = time.monotonic() + timeout
+    matching_reads = 0
+    read_number = 0
     last_target: str | None = None
     last_node: dict[str, Any] | None = None
     last_xml = b""
     while time.monotonic() < deadline:
-        last_xml = dump_xml(adb, scratch, attempts=1)
-        last_target, last_node = download_focus_target(last_xml, display_width)
+        read_number += 1
+        read_path = evidence_path.with_name(
+            f"{evidence_path.stem}-read-{read_number}{evidence_path.suffix}"
+        )
+        last_xml = dump_xml(adb, read_path, attempts=1)
+        last_target, last_node = identify(last_xml)
         if last_target == expected_target:
-            return True, last_target, last_node, last_xml
-        time.sleep(0.15)
+            matching_reads += 1
+            if matching_reads >= consecutive_reads:
+                safe_write(evidence_path, last_xml)
+                return True, last_target, last_node, last_xml
+        else:
+            matching_reads = 0
+        time.sleep(0.12)
+    if last_xml:
+        safe_write(evidence_path, last_xml)
     return False, last_target, last_node, last_xml
 
 
@@ -621,39 +687,18 @@ def wait_for_download_focus_stability(
     adb: Adb,
     scratch: Path,
     display_width: int,
+    expected_target: str = "row-1-primary",
     timeout: float = 3.5,
-    stable_for: float = 0.65,
+    consecutive_reads: int = 2,
 ) -> tuple[bool, str | None, dict[str, Any] | None, bytes]:
-    """Wait until the initial Downloads focus survives delayed restoration.
-
-    The production Downloads screen restores the remembered card after its
-    asynchronous repository snapshot is composed. Planning a D-pad path before
-    that one-shot restoration settles creates a lab-only race where the card
-    requester steals focus in the middle of a verified path. Require a named
-    target to remain unchanged for a continuous interval before planning.
-    """
-    deadline = time.monotonic() + timeout
-    stable_since: float | None = None
-    last_target: str | None = None
-    last_node: dict[str, Any] | None = None
-    last_xml = b""
-    while time.monotonic() < deadline:
-        now = time.monotonic()
-        last_xml = dump_xml(adb, scratch, attempts=1)
-        target, node = download_focus_target(last_xml, display_width)
-        if target is None:
-            stable_since = None
-            last_target = None
-        elif target != last_target:
-            last_target = target
-            last_node = node
-            stable_since = now
-        else:
-            last_node = node
-            if stable_since is not None and now - stable_since >= stable_for:
-                return True, last_target, last_node, last_xml
-        time.sleep(0.12)
-    return False, last_target, last_node, last_xml
+    return wait_for_stable_focus(
+        adb,
+        expected_target,
+        scratch,
+        lambda xml: download_focus_target(xml, display_width),
+        timeout=timeout,
+        consecutive_reads=consecutive_reads,
+    )
 
 
 
@@ -691,9 +736,17 @@ class DeviceLab:
                 "target": args.target,
                 "arch": args.arch,
                 "profile": args.profile,
+                "hardware_profile": args.profile,
+                "physical_width": args.width,
+                "physical_height": args.height,
                 "requested_width": args.width,
                 "requested_height": args.height,
+                "logical_width": args.width,
+                "logical_height": args.height,
+                "viewport": f"{args.width}x{args.height}",
                 "requested_density": args.density,
+                "result_dir": args.device_id,
+                "artifact_name": f"compatibility-{args.device_id}",
                 "orientations": args.orientations,
                 "font_scales": args.font_scales,
                 "is_tv": args.is_tv,
@@ -1200,55 +1253,82 @@ class DeviceLab:
     def focus_audit(self, page: str, orientation: str) -> None:
         audit_dir = self.out / "focus" / orientation / page
         audit_dir.mkdir(parents=True, exist_ok=True)
+        expected_start: str | None = None
         if self.args.is_tv and page == "live":
-            # RTL path: rail -> channel -> play -> favorite -> play -> channel -> next channel.
+            expected_start = "live-channel-1"
+            # Explicit RTL product path: channel -> play -> favorite -> play -> channel -> next channel.
             key_sequence = [
-                ("LEFT", 21),
-                ("LEFT", 21),
-                ("LEFT", 21),
-                ("RIGHT", 22),
-                ("RIGHT", 22),
-                ("DOWN", 20),
+                ("LEFT", 21, "live-play"),
+                ("LEFT", 21, "live-favorite"),
+                ("RIGHT", 22, "live-play"),
+                ("RIGHT", 22, "live-channel-1"),
+                ("DOWN", 20, "live-channel-2"),
             ]
         elif self.args.is_tv and page == "downloads":
-            # Wi-Fi -> schedule -> concurrent -> row-1 cancel -> row-2 cancel -> priority -> primary.
+            expected_start = "row-1-primary"
+            # Primary -> Wi-Fi -> schedule -> concurrent -> row-1/row-2 action columns.
             key_sequence = [
-                ("LEFT", 21),
-                ("LEFT", 21),
-                ("DOWN", 20),
-                ("DOWN", 20),
-                ("RIGHT", 22),
-                ("RIGHT", 22),
-                ("UP", 19),
-                ("LEFT", 21),
+                ("UP", 19, "toolbar-wifi"),
+                ("LEFT", 21, "toolbar-schedule"),
+                ("LEFT", 21, "toolbar-concurrent"),
+                ("DOWN", 20, "row-1-cancel"),
+                ("DOWN", 20, "row-2-cancel"),
+                ("RIGHT", 22, "row-2-priority"),
+                ("RIGHT", 22, "row-2-primary"),
             ]
         else:
             key_sequence = [
-                ("RIGHT", 22),
-                ("LEFT", 21),
-                ("UP", 19),
-                ("DOWN", 20),
-                ("DOWN", 20),
-                ("DOWN", 20),
-                ("RIGHT", 22),
-                ("RIGHT", 22),
-                ("LEFT", 21),
-                ("UP", 19),
-                ("DOWN", 20),
-                ("DOWN", 20),
+                ("RIGHT", 22, None),
+                ("LEFT", 21, None),
+                ("UP", 19, None),
+                ("DOWN", 20, None),
+                ("DOWN", 20, None),
+                ("DOWN", 20, None),
+                ("RIGHT", 22, None),
+                ("RIGHT", 22, None),
+                ("LEFT", 21, None),
+                ("UP", 19, None),
+                ("DOWN", 20, None),
+                ("DOWN", 20, None),
             ]
         trace: list[dict[str, Any]] = []
         rail_visual: dict[str, dict[str, str]] = {}
         error: str | None = None
+        failure: dict[str, Any] | None = None
         try:
             self.start_page(page, audit_dir)
             is_home_tv = page == "home" and self.args.is_tv
             initial_xml_path = (
                 audit_dir / "rail-collapsed.xml"
                 if is_home_tv
-                else audit_dir / ".focus.xml"
+                else audit_dir / "initial.xml"
             )
-            initial = dump_xml(self.adb, initial_xml_path)
+            display_width, _ = oriented_dimensions(
+                self.args.width,
+                self.args.height,
+                orientation,
+            )
+            initial_target: str | None = None
+            if expected_start == "row-1-primary":
+                stable, initial_target, _initial_node, initial = wait_for_download_focus_stability(
+                    self.adb,
+                    initial_xml_path,
+                    display_width,
+                    expected_target=expected_start,
+                    timeout=5.0,
+                )
+            elif expected_start == "live-channel-1":
+                stable, initial_target, _initial_node, initial = wait_for_stable_focus(
+                    self.adb,
+                    expected_start,
+                    initial_xml_path,
+                    lambda xml: live_focus_target(xml, display_width),
+                    timeout=5.0,
+                    consecutive_reads=2,
+                )
+            else:
+                stable = True
+                initial = dump_xml(self.adb, initial_xml_path)
             if is_home_tv:
                 collapsed_png = audit_dir / "rail-collapsed.png"
                 capture_png(self.adb, collapsed_png)
@@ -1256,18 +1336,68 @@ class DeviceLab:
                     "screenshot": collapsed_png.relative_to(self.out).as_posix(),
                     "xml": initial_xml_path.relative_to(self.out).as_posix(),
                 }
-            trace.append({"step": 0, "key": "INITIAL", "focused": focused_node(initial)})
-            display_width, _ = oriented_dimensions(
-                self.args.width,
-                self.args.height,
-                orientation,
-            )
-            for index, (name, code) in enumerate(key_sequence, start=1):
+            trace.append({
+                "step": 0,
+                "key": "INITIAL",
+                "target": initial_target,
+                "focused": focused_node(initial),
+                "stable": stable,
+            })
+            if not stable:
+                failure = {
+                    "type": "START_FOCUS_NOT_ESTABLISHED",
+                    "expected_target": expected_start,
+                    "actual_target": initial_target,
+                    "reason": (
+                        f"expected {expected_start}, observed {initial_target or 'unknown'}"
+                    ),
+                }
+            for index, (name, code, expected_next) in enumerate(key_sequence, start=1):
+                if failure is not None:
+                    break
                 self.adb.shell(["input", "keyevent", str(code)])
-                time.sleep(0.25)
-                xml = dump_xml(self.adb, audit_dir / ".focus.xml", attempts=2)
+                reached = True
+                actual_target: str | None = None
+                if expected_next and page == "downloads":
+                    reached, actual_target, _node, xml = poll_download_focus(
+                        self.adb,
+                        expected_next,
+                        audit_dir / f"step-{index}.xml",
+                        display_width,
+                        timeout=4.0,
+                    )
+                elif expected_next and page == "live":
+                    reached, actual_target, _node, xml = wait_for_stable_focus(
+                        self.adb,
+                        expected_next,
+                        audit_dir / f"step-{index}.xml",
+                        lambda data: live_focus_target(data, display_width),
+                        timeout=4.0,
+                        consecutive_reads=2,
+                    )
+                else:
+                    time.sleep(0.25)
+                    xml = dump_xml(self.adb, audit_dir / ".focus.xml", attempts=2)
                 focused = focused_node(xml)
-                trace.append({"step": index, "key": name, "focused": focused})
+                trace.append({
+                    "step": index,
+                    "key": name,
+                    "expected_target": expected_next,
+                    "target": actual_target,
+                    "focused": focused,
+                    "stable": reached,
+                })
+                if not reached:
+                    failure = {
+                        "type": "NAVIGATION_TARGET_MISMATCH",
+                        "key": name,
+                        "expected_target": expected_next,
+                        "actual_target": actual_target,
+                        "reason": (
+                            f"{name} expected {expected_next}, observed {actual_target or 'unknown'}"
+                        ),
+                    }
+                    break
                 if (
                     is_home_tv
                     and "expanded" not in rail_visual
@@ -1285,23 +1415,20 @@ class DeviceLab:
                         }
             capture_png(self.adb, audit_dir / "screenshot.png")
             final_xml = dump_xml(self.adb, audit_dir / "ui.xml")
-            safe_write(
-                audit_dir / "logcat.txt",
-                command_text(
-                    self.adb,
-                    ["logcat", "-d", "-v", "threadtime"],
-                    shell=False,
-                    timeout=90,
-                ),
-            )
+            write_logcat_with_focus_trace(self.adb, audit_dir / "logcat.txt")
             safe_write(
                 audit_dir / "window.txt",
                 command_text(self.adb, ["dumpsys", "window", "windows"], timeout=90),
             )
             del final_xml
-        except Exception as exc:
-            error = str(exc)[-1200:]
+        except LabError as exc:
+            error = f"INFRASTRUCTURE_FAILURE: {exc}"[-1200:]
             self.record_harness_error(f"focus:{orientation}:{page}", exc)
+        except Exception as exc:
+            failure = {
+                "type": "HARNESS_SELECTOR_FAILURE",
+                "reason": f"{type(exc).__name__}: {exc}"[-1200:],
+            }
         finally:
             (audit_dir / ".focus.xml").unlink(missing_ok=True)
             result = {
@@ -1310,12 +1437,14 @@ class DeviceLab:
                 "trace": trace,
                 "rail_visual": rail_visual,
                 "error": error,
+                "failure": failure,
                 "files": {
                     key: (audit_dir / filename).relative_to(self.out).as_posix()
                     for key, filename in (
                         ("screenshot", "screenshot.png"),
                         ("xml", "ui.xml"),
                         ("logcat", "logcat.txt"),
+                        ("focus_trace", "focus-events.log"),
                         ("window", "window.txt"),
                     )
                     if (audit_dir / filename).exists()
@@ -1568,13 +1697,13 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
             path = plan_download_focus_path(initial_target, target, row_count=3) if stable else None
             if not stable:
                 reason = (
-                    "DOWNLOAD_ACTION_START_STATE_NOT_STABLE: "
-                    f"initial focus remained {initial_target or 'unknown'}"
+                    "START_FOCUS_NOT_ESTABLISHED: "
+                    f"expected row-1-primary, observed {initial_target or 'unknown'}"
                 )
-                source = "FIXTURE"
+                source = "PRODUCT"
             elif path is None:
                 reason = (
-                    "DOWNLOAD_ACTION_START_STATE_NOT_ESTABLISHED: "
+                    "HARNESS_SELECTOR_FAILURE: "
                     f"initial focus {initial_target or 'unknown'} cannot reach {target}"
                 )
                 source = "FIXTURE"
@@ -1606,10 +1735,10 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
                     current_target = observed
                     if not reached:
                         reason = (
-                            "DOWNLOAD_FOCUS_TARGET_MISMATCH: "
+                            "NAVIGATION_TARGET_MISMATCH: "
                             f"{key_name} expected {expected_next}, observed {observed or 'unknown'}"
                         )
-                        source = "QUALITY_LAB"
+                        source = "PRODUCT"
                         break
                 if reason is None:
                     final_xml = dump_xml(self.adb, step_root / "target.xml", attempts=2)
@@ -1617,14 +1746,34 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
                     markers_before = download_action_markers(final_xml)
                     precondition_established = actual_target == target
                     if not precondition_established:
-                        reason = f"DOWNLOAD_TARGET_PRECONDITION_FAILED: expected {target}, observed {actual_target}"
-                        source = "FIXTURE"
+                        reason = f"START_FOCUS_NOT_ESTABLISHED: expected {target}, observed {actual_target}"
+                        source = "PRODUCT"
             if reason is None and action is not None:
                 label = str((focused_before or {}).get("text") or "")
-                if action == "primary":
-                    expected_action = "resume" if "استئناف" in label else "pause"
-                self.adb.shell(["input", "keyevent", str(DOWNLOAD_KEY_CODES["CENTER"])], check=True)
-                key_press_confirmed = True
+                expected_label = {
+                    "pause": "ايقاف مؤقت",
+                    "resume": "استئناف",
+                }.get(action)
+                if expected_label and expected_label not in label:
+                    label_deadline = time.monotonic() + 5.0
+                    while time.monotonic() < label_deadline:
+                        label_xml = dump_xml(self.adb, step_root / "pre-action-state.xml", attempts=1)
+                        label_target, label_node = download_focus_target(label_xml, display_width)
+                        label = str((label_node or {}).get("text") or "")
+                        if label_target == target and expected_label in label:
+                            focused_before = label_node
+                            break
+                        time.sleep(0.15)
+                if expected_label and expected_label not in label:
+                    reason = (
+                        "UI_STATE_NOT_UPDATED: "
+                        f"{target} expected label {expected_label}, observed {label or 'unknown'}"
+                    )
+                    source = "PRODUCT"
+                else:
+                    self.adb.shell(["input", "keyevent", str(DOWNLOAD_KEY_CODES["CENTER"])], check=True)
+                    key_press_confirmed = True
+            if reason is None and action is not None:
                 deadline = time.monotonic() + 5.0
                 while time.monotonic() < deadline:
                     after_xml = dump_xml(self.adb, step_root / "ui.xml", attempts=1)
@@ -1645,19 +1794,39 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
                 )
                 if wrong:
                     reason = (
-                        "WRONG_ACTION_MARKER: target was proven but callback marker(s) "
+                        "ACTION_CALLBACK_NOT_EXECUTED: callback marker(s) "
                         f"{', '.join(wrong)} do not match {expected_action}"
                     )
-                    source = "QUALITY_LAB"
-                elif not expected_seen:
-                    reason = f"PRODUCT_CALLBACK_MARKER_MISSING: {expected_action} revision did not advance"
                     source = "PRODUCT"
+                elif not expected_seen:
+                    reason = f"ACTION_CALLBACK_NOT_EXECUTED: {expected_action} revision did not advance"
+                    source = "PRODUCT"
+                else:
+                    post_action_target = "row-1-cancel" if action == "delete" else target
+                    focus_stable, observed_focus, focused_after, post_action_xml = wait_for_stable_focus(
+                        self.adb,
+                        post_action_target,
+                        step_root / "post-action-focus.xml",
+                        lambda xml: download_focus_target(xml, display_width),
+                        timeout=5.0,
+                        consecutive_reads=2,
+                    )
+                    markers_after |= download_action_markers(post_action_xml)
+                    if not focus_stable:
+                        reason = (
+                            "UI_STATE_NOT_UPDATED: post-action focus expected "
+                            f"{post_action_target}, observed {observed_focus or 'unknown'}"
+                        )
+                        source = "PRODUCT"
             elif reason is None:
                 markers_after = markers_before
                 focused_after = focused_before
-        except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"[-1200:]
+        except LabError as exc:
+            reason = f"INFRASTRUCTURE_FAILURE: {exc}"[-1200:]
             source = "INFRASTRUCTURE"
+        except Exception as exc:
+            reason = f"HARNESS_SELECTOR_FAILURE: {type(exc).__name__}: {exc}"[-1200:]
+            source = "FIXTURE"
 
         success = reason is None
         if not (step_root / "ui.xml").exists():
@@ -1669,10 +1838,7 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
             capture_png(self.adb, step_root / "screenshot.png")
         except Exception:
             pass
-        safe_write(
-            step_root / "logcat.txt",
-            command_text(self.adb, ["logcat", "-d", "-v", "threadtime"], shell=False, timeout=90),
-        )
+        write_logcat_with_focus_trace(self.adb, step_root / "logcat.txt")
         checks.append(
             {
                 "id": check_id,
@@ -1705,6 +1871,7 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
                         "before_xml": step_root / "target.xml",
                         "xml": step_root / "ui.xml",
                         "logcat": step_root / "logcat.txt",
+                        "focus_trace": step_root / "focus-events.log",
                     }.items()
                     if path.is_file()
                 },
@@ -1732,14 +1899,14 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
             ("top-concurrent-executes", "toolbar-concurrent", "concurrent"),
         ]:
             run_check(check_id, target, action)
-        run_check("row-1-pause", "row-1-primary", "primary")
+        run_check("row-1-pause", "row-1-primary", "pause")
         run_check(
             "row-1-resume",
             "row-1-primary",
-            "primary",
+            "resume",
             restart_page=False,
         )
-        run_check("row-2-pause", "row-2-primary", "primary")
+        run_check("row-2-pause", "row-2-primary", "pause")
         run_check("row-1-priority-executes", "row-1-priority", "priority")
         run_check("delete-row-1-executes", "row-1-cancel", "delete")
     except Exception as exc:

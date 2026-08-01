@@ -1266,7 +1266,7 @@ def analyze_focus(
         evidence = {
             key: value
             for key, value in files.items()
-            if key in {"screenshot", "xml", "logcat", "window"}
+            if key in {"screenshot", "xml", "logcat", "focus_trace", "window"}
         }
         if entry.get("error"):
             item["status"] = "BLOCKED"
@@ -1286,8 +1286,36 @@ def analyze_focus(
         item["observed_focus_steps"] = len(observed)
         item["unique_focus_targets"] = len(signatures)
         item["status"] = "PASS"
+        failure = entry.get("failure") if isinstance(entry.get("failure"), dict) else None
+        failure_root: str | None = None
+        failure_classification: str | None = None
+        if failure:
+            failure_type = str(failure.get("type") or "FOCUS_CONTRACT_FAILURE")
+            failure_classification = (
+                "fixture" if failure_type == "HARNESS_SELECTOR_FAILURE" else "product"
+            )
+            failure_root = (
+                f"focus:{entry.get('orientation')}:{entry.get('page')}:"
+                f"{failure_type.lower()}"
+            )
+            item["status"] = "BLOCKED" if failure_classification == "fixture" else "FAIL"
+            findings.append(
+                finding(
+                    "critical",
+                    failure_type.lower(),
+                    f"{entry.get('orientation')} / {entry.get('page')}: "
+                    f"{failure.get('reason') or failure_type}",
+                    page=entry.get("page"),
+                    evidence=evidence,
+                    classification=failure_classification,
+                    root_cause_id=failure_root,
+                    finding_role="primary",
+                    product_strict=failure_classification == "product",
+                    gate_outcome="FAIL" if failure_classification == "product" else "BLOCKED",
+                )
+            )
         if not observed:
-            item["status"] = "FAIL"
+            item["status"] = "BLOCKED" if failure_classification == "fixture" else "FAIL"
             findings.append(
                 finding(
                     "critical",
@@ -1295,13 +1323,18 @@ def analyze_focus(
                     f"{entry.get('orientation')} / {entry.get('page')}: no focused node after D-pad input",
                     page=entry.get("page"),
                     evidence=evidence,
+                    classification=failure_classification or "product",
+                    root_cause_id=failure_root or f"focus:{entry.get('orientation')}:{entry.get('page')}:missing",
+                    finding_role="downstream" if failure_root else "primary",
+                    product_strict=not bool(failure_root),
+                    gate_outcome="BLOCKED" if failure_root else "FAIL",
                 )
             )
         else:
             minimum_targets = TV_FOCUS_MIN_UNIQUE_TARGETS.get(entry.get("page"), 3)
             item["minimum_unique_focus_targets"] = minimum_targets
             if len(signatures) < minimum_targets:
-                item["status"] = "FAIL"
+                item["status"] = "BLOCKED" if failure_classification == "fixture" else "FAIL"
                 findings.append(
                     finding(
                         "critical",
@@ -1310,6 +1343,11 @@ def analyze_focus(
                         f"{len(signatures)} unique target(s); expected at least {minimum_targets}",
                         page=entry.get("page"),
                         evidence=evidence,
+                        classification=failure_classification or "product",
+                        root_cause_id=failure_root or f"focus:{entry.get('orientation')}:{entry.get('page')}:coverage",
+                        finding_role="downstream" if failure_root else "primary",
+                        product_strict=not bool(failure_root),
+                        gate_outcome="BLOCKED" if failure_root else "FAIL",
                     )
                 )
 
@@ -1485,9 +1523,9 @@ def _classified_download_actions(
         if missing:
             item["status"] = "BLOCKED"
             findings.append(finding(
-                "infrastructure", "download_action_audit_incomplete",
+                "critical", "missing_mandatory_download_action_evidence",
                 f"{orientation} / downloads: missing checks {', '.join(missing)}", page="downloads",
-                classification="infrastructure", root_cause_id=root_id, gate_outcome="BLOCKED",
+                classification="fixture", root_cause_id=root_id, gate_outcome="BLOCKED",
             ))
         primary_root: str | None = None
         for check in checks:
@@ -1504,15 +1542,33 @@ def _classified_download_actions(
             unexpected = list(check.get("unexpected_markers") or [])
             reason = str(check.get("reason") or check.get("precondition_failure") or "contract failed")
             if not precondition:
-                classification = "fixture" if check.get("source") == "FIXTURE" else "quality_lab"
-                code = "download_action_start_state_not_established" if classification == "fixture" else "tv_download_navigation_focus_mismatch"
+                source = str(check.get("source") or "QUALITY_LAB")
+                classification = (
+                    "product" if source == "PRODUCT" else
+                    "fixture" if source == "FIXTURE" else
+                    "quality_lab"
+                )
+                if reason.startswith("START_FOCUS_NOT_ESTABLISHED"):
+                    code = "start_focus_not_established"
+                elif reason.startswith("NAVIGATION_TARGET_MISMATCH"):
+                    code = "navigation_target_mismatch"
+                elif reason.startswith("HARNESS_SELECTOR_FAILURE"):
+                    code = "harness_selector_failure"
+                    classification = "fixture"
+                elif reason.startswith("UI_STATE_NOT_UPDATED"):
+                    code = "ui_state_not_updated"
+                else:
+                    code = "download_action_precondition_not_established"
                 primary_root = primary_root or check_root
+                is_primary = primary_root == check_root
+                product_primary = classification == "product" and is_primary
                 findings.append(finding(
                     "critical", code,
                     f"{orientation} / downloads / {check_id}: {reason}",
                     page="downloads", evidence=evidence, classification=classification,
-                    root_cause_id=primary_root, finding_role="primary" if primary_root == check_root else "downstream",
-                    product_strict=False, gate_outcome="BLOCKED",
+                    root_cause_id=primary_root, finding_role="primary" if is_primary else "downstream",
+                    product_strict=product_primary,
+                    gate_outcome="FAIL" if product_primary else "BLOCKED",
                 ))
                 raw_code = (
                     "tv_download_action_not_executed"
@@ -1527,7 +1583,35 @@ def _classified_download_actions(
                     finding_role="blocked_assertion" if check.get("expected_action") else "downstream",
                     product_strict=False, gate_outcome="BLOCKED",
                 ))
-                item["status"] = "BLOCKED"
+                item["status"] = "FAIL" if classification == "product" else "BLOCKED"
+                continue
+            if reason.startswith("UI_STATE_NOT_UPDATED"):
+                primary_root = primary_root or check_root
+                is_primary = primary_root == check_root
+                findings.append(finding(
+                    "critical", "ui_state_not_updated",
+                    f"{orientation} / downloads / {check_id}: {reason}",
+                    page="downloads", evidence=evidence, classification="product",
+                    root_cause_id=primary_root,
+                    finding_role="primary" if is_primary else "downstream",
+                    product_strict=is_primary,
+                    gate_outcome="FAIL" if is_primary else "BLOCKED",
+                ))
+                item["status"] = "FAIL"
+                continue
+            if reason.startswith("ACTION_CALLBACK_NOT_EXECUTED"):
+                primary_root = primary_root or check_root
+                is_primary = primary_root == check_root
+                findings.append(finding(
+                    "critical", "action_callback_not_executed",
+                    f"{orientation} / downloads / {check_id}: {reason}",
+                    page="downloads", evidence=evidence, classification="product",
+                    root_cause_id=primary_root,
+                    finding_role="primary" if is_primary else "downstream",
+                    product_strict=is_primary,
+                    gate_outcome="FAIL" if is_primary else "BLOCKED",
+                ))
+                item["status"] = "FAIL"
                 continue
             if unexpected:
                 primary_root = primary_root or check_root
@@ -1565,8 +1649,8 @@ def _classified_download_actions(
             findings.append(finding(
                 "critical", "tv_download_row_navigation_incomplete",
                 f"{orientation} / downloads: full second-row traversal remains recorded but is blocked by the first failed precondition",
-                page="downloads", classification="future_stage", root_cause_id=downstream_root,
-                finding_role="downstream", product_strict=False, gate_outcome="RECORDED",
+                page="downloads", classification="product", root_cause_id=downstream_root,
+                finding_role="downstream", product_strict=False, gate_outcome="BLOCKED",
             ))
             if item["status"] == "PASS":
                 item["status"] = "WARN"
@@ -1575,21 +1659,6 @@ def _classified_download_actions(
 
 
 analyze_download_actions = _classified_download_actions
-
-_legacy_analyze_focus = analyze_focus
-
-def analyze_focus(root: Path, device: dict[str, Any], entries: list[dict[str, Any]]):
-    normalized, findings = _legacy_analyze_focus(root, device, entries)
-    for item in findings:
-        if item.get("code") == "focus_coverage_incomplete":
-            item.update({
-                "classification": "future_stage",
-                "root_cause_id": f"future-focus:{item.get('page') or 'unknown'}",
-                "finding_role": "primary",
-                "product_strict": False,
-                "gate_outcome": "RECORDED",
-            })
-    return normalized, findings
 
 
 def summarize_finding_roles(findings: list[dict[str, Any]]) -> dict[str, int]:

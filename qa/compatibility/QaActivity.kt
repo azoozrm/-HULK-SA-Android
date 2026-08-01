@@ -259,10 +259,17 @@ private fun FixtureMain(
     }
 
     fun refreshDownloads(repository: DownloadRepository) {
-        state = state.copy(
-            downloads = repository.downloads(),
-            downloadSettings = repository.settings(),
-        )
+        val refreshedDownloads = repository.downloads()
+        val refreshedSettings = repository.settings()
+        if (
+            refreshedDownloads != state.downloads ||
+            refreshedSettings != state.downloadSettings
+        ) {
+            state = state.copy(
+                downloads = refreshedDownloads,
+                downloadSettings = refreshedSettings,
+            )
+        }
     }
 
     LaunchedEffect(downloadHarness) {
