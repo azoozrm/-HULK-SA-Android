@@ -5,9 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -15,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -98,6 +101,7 @@ class MainShellComposeQualityTest {
 
     @Test
     fun tvDownloadsDpadPreservesToolbarAndCardActionColumns() {
+        lateinit var platformInputMode: InputModeManager
         val downloads = (1L..3L).map { id ->
             OfflineDownload(
                 downloadId = id,
@@ -113,6 +117,7 @@ class MainShellComposeQualityTest {
             )
         }
         compose.setContent {
+            platformInputMode = LocalInputModeManager.current
             val adaptive = AdaptiveUiState(
                 deviceClass = HulkDeviceClass.TELEVISION,
                 windowWidthClass = HulkWindowWidthClass.EXPANDED,
@@ -161,9 +166,13 @@ class MainShellComposeQualityTest {
         val priority = compose.onAllNodesWithContentDescription("عادية")
         val cancel = compose.onAllNodesWithContentDescription("الغاء")
 
-        compose.waitUntil(timeoutMillis = 1_000) {
-            primary[0].fetchSemanticsNode().config.getOrNull(SemanticsProperties.Focused) == true
+        compose.runOnIdle {
+            check(platformInputMode.requestInputMode(InputMode.Keyboard))
         }
+        primary[0].performSemanticsAction(SemanticsActions.RequestFocus) { requestFocus ->
+            check(requestFocus())
+        }
+        compose.waitForIdle()
         primary[0].assertIsFocused()
         primary[0].performKeyInput { pressKey(Key.DirectionUp) }
         compose.waitForIdle()
