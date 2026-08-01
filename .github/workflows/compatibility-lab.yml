@@ -28,6 +28,18 @@ on:
         required: false
         type: string
         default: compatibility-runtime
+      tested_ref:
+        required: false
+        type: string
+        default: ''
+      tested_commit_sha:
+        required: false
+        type: string
+        default: ''
+      merge_sha:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       enforce_findings:
@@ -53,6 +65,8 @@ jobs:
       device_count: ${{ steps.plan.outputs.device_count }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tested_commit_sha || github.sha }}
       - name: Validate and export device matrix
         id: plan
         run: |
@@ -71,6 +85,8 @@ jobs:
     timeout-minutes: 70
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tested_commit_sha || github.sha }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -111,7 +127,7 @@ jobs:
               Path('project/app/src/debug/quality-marker-injection.json').read_text()
           )
           assert report['schema_version'] == 1
-          assert report['replacement_count'] == 13
+          assert report['replacement_count'] == 28
           assert report['original_sha256'] != report['instrumented_sha256']
           assert report['markers']
           print('PASS: disposable marker injection report is complete')
@@ -136,6 +152,8 @@ jobs:
           cp "$APK" lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk
           cp compatibility-lab-build.log lab-apk/
           cp project/app/src/debug/quality-marker-injection.json lab-apk/
+          APK_SHA256="$(sha256sum lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk | awk '{print $1}')"
+          jq -n --arg source_head_sha "${{ inputs.source_head_sha || github.sha }}" --arg base_sha "${{ inputs.base_sha }}" --arg tested_ref "${{ inputs.tested_ref || github.ref }}" --arg tested_commit_sha "${{ inputs.tested_commit_sha || github.sha }}" --arg merge_sha "${{ inputs.merge_sha || github.sha }}" --arg lab_apk_sha256 "$APK_SHA256" --arg workflow_run_id "$GITHUB_RUN_ID" --arg workflow_run_attempt "$GITHUB_RUN_ATTEMPT" '{source_head_sha:$source_head_sha,base_sha:$base_sha,tested_ref:$tested_ref,tested_commit_sha:$tested_commit_sha,merge_sha:$merge_sha,lab_apk_sha256:$lab_apk_sha256,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt}' > lab-apk/PROVENANCE.json
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" > lab-apk/APK-BADGING.txt
           grep -q "package: name='sa.hulksa.player.dev'" lab-apk/APK-BADGING.txt
           grep -q "sa.hulksa.player.qa.QaActivity" <(
@@ -148,6 +166,7 @@ jobs:
               compatibility-lab-build.log \
               APK-BADGING.txt \
               quality-marker-injection.json \
+              PROVENANCE.json \
               > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
@@ -172,6 +191,8 @@ jobs:
       matrix: ${{ fromJSON(needs.lab-plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tested_commit_sha || github.sha }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -194,7 +215,7 @@ jobs:
           import json
           from pathlib import Path
           report = json.loads(Path('lab-apk/quality-marker-injection.json').read_text())
-          assert report['replacement_count'] == 13
+          assert report['replacement_count'] == 28
           assert report['original_sha256'] != report['instrumented_sha256']
           print('PASS: packaged marker evidence verified')
           PY
@@ -221,7 +242,15 @@ jobs:
             --arch '${{ matrix.arch }}' \
             --profile '${{ matrix.profile }}' \
             --skin '${{ matrix.boot_skin }}' \
-            --result-dir 'compatibility-results/${{ matrix.id }}' \
+            --result-dir 'compatibility-results/${{ matrix.result_dir }}' \
+            --contract-device-id '${{ matrix.id }}' \
+            --contract-device-name '${{ matrix.name }}' \
+            --physical-width '${{ matrix.physical_width }}' \
+            --physical-height '${{ matrix.physical_height }}' \
+            --logical-width '${{ matrix.logical_width }}' \
+            --logical-height '${{ matrix.logical_height }}' \
+            --density '${{ matrix.density }}' \
+            --is-tv '${{ matrix.is_tv }}' \
             -- \
             python3 qa/compatibility/run-lab.py \
               --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk \
@@ -238,14 +267,22 @@ jobs:
               --orientations '${{ matrix.orientations }}' \
               --font-scales '${{ matrix.font_scales }}' \
               --is-tv '${{ matrix.is_tv }}' \
-              --out 'compatibility-results/${{ matrix.id }}' \
-              --serial emulator-5554
+              --out 'compatibility-results/${{ matrix.result_dir }}' \
+              --serial emulator-5554 \
+              --source-head-sha '${{ inputs.source_head_sha || github.sha }}' \
+              --base-sha '${{ inputs.base_sha }}' \
+              --tested-ref '${{ inputs.tested_ref || github.ref }}' \
+              --tested-commit-sha '${{ inputs.tested_commit_sha || github.sha }}' \
+              --merge-sha '${{ inputs.merge_sha || github.sha }}' \
+              --lab-apk-sha256 "$(jq -r .lab_apk_sha256 lab-apk/PROVENANCE.json)" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --workflow-run-attempt "$GITHUB_RUN_ATTEMPT"
 
       - name: Check whether emulator retry is required
         id: retry-check
         if: always()
         run: |
-          SUMMARY='compatibility-results/${{ matrix.id }}/summary.json'
+          SUMMARY='compatibility-results/${{ matrix.result_dir }}/summary.json'
           if [[ ! -s "$SUMMARY" ]] || python3 -c \
             'import json,sys; sys.exit(0 if int(json.load(open(sys.argv[1]))["infrastructure_error_count"]) else 1)' \
             "$SUMMARY"; then
@@ -258,7 +295,7 @@ jobs:
         if: steps.retry-check.outputs.needed == 'true'
         run: |
           set -euo pipefail
-          OUT='compatibility-results/${{ matrix.id }}'
+          OUT='compatibility-results/${{ matrix.result_dir }}'
           PRESERVED="$RUNNER_TEMP/${{ matrix.id }}-attempt-1"
           mkdir -p "$OUT"
           if [[ ! -s "$OUT/summary.json" ]]; then
@@ -294,7 +331,15 @@ jobs:
             --arch '${{ matrix.arch }}' \
             --profile '${{ matrix.profile }}' \
             --skin '${{ matrix.boot_skin }}' \
-            --result-dir 'compatibility-results/${{ matrix.id }}' \
+            --result-dir 'compatibility-results/${{ matrix.result_dir }}' \
+            --contract-device-id '${{ matrix.id }}' \
+            --contract-device-name '${{ matrix.name }}' \
+            --physical-width '${{ matrix.physical_width }}' \
+            --physical-height '${{ matrix.physical_height }}' \
+            --logical-width '${{ matrix.logical_width }}' \
+            --logical-height '${{ matrix.logical_height }}' \
+            --density '${{ matrix.density }}' \
+            --is-tv '${{ matrix.is_tv }}' \
             -- \
             python3 qa/compatibility/run-lab.py \
               --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk \
@@ -311,14 +356,22 @@ jobs:
               --orientations '${{ matrix.orientations }}' \
               --font-scales '${{ matrix.font_scales }}' \
               --is-tv '${{ matrix.is_tv }}' \
-              --out 'compatibility-results/${{ matrix.id }}' \
-              --serial emulator-5554
+              --out 'compatibility-results/${{ matrix.result_dir }}' \
+              --serial emulator-5554 \
+              --source-head-sha '${{ inputs.source_head_sha || github.sha }}' \
+              --base-sha '${{ inputs.base_sha }}' \
+              --tested-ref '${{ inputs.tested_ref || github.ref }}' \
+              --tested-commit-sha '${{ inputs.tested_commit_sha || github.sha }}' \
+              --merge-sha '${{ inputs.merge_sha || github.sha }}' \
+              --lab-apk-sha256 "$(jq -r .lab_apk_sha256 lab-apk/PROVENANCE.json)" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --workflow-run-attempt "$GITHUB_RUN_ATTEMPT"
 
       - name: Preserve final result and marker provenance
         if: always()
         run: |
           set -euo pipefail
-          OUT='compatibility-results/${{ matrix.id }}'
+          OUT='compatibility-results/${{ matrix.result_dir }}'
           mkdir -p "$OUT"
           if [[ ! -s "$OUT/summary.json" ]]; then
             python3 qa/compatibility/make-blocked-result.py \
@@ -339,6 +392,7 @@ jobs:
               --reason 'Emulator or capture driver produced no final summary.'
           fi
           cp lab-apk/quality-marker-injection.json "$OUT/quality-marker-injection.json"
+          cp lab-apk/PROVENANCE.json "$OUT/PROVENANCE.json"
           test -s "$OUT/quality-marker-injection.json"
 
       - name: Enforce infrastructure and critical findings
@@ -355,8 +409,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: compatibility-${{ matrix.id }}
-          path: compatibility-results/${{ matrix.id }}/
+          name: ${{ matrix.artifact_name }}
+          path: compatibility-results/${{ matrix.result_dir }}/
           if-no-files-found: error
           retention-days: 14
 
@@ -370,11 +424,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tested_commit_sha || github.sha }}
 
       - uses: actions/download-artifact@v8
         with:
           pattern: compatibility-*
           path: device-artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: HULK-SA-COMPATIBILITY-LAB-APK
+          path: lab-apk
 
       - name: Install report dependencies
         run: |
@@ -383,7 +444,11 @@ jobs:
 
       - name: Build Compatibility and Quality Lab reports
         env:
-          QUALITY_BUILD_SHA: ${{ inputs.source_head_sha || github.sha }}
+          QUALITY_BUILD_SHA: ${{ inputs.tested_commit_sha || github.sha }}
+          QUALITY_TESTED_REF: ${{ inputs.tested_ref || github.ref }}
+          QUALITY_TESTED_COMMIT_SHA: ${{ inputs.tested_commit_sha || github.sha }}
+          QUALITY_MERGE_SHA: ${{ inputs.merge_sha || github.sha }}
+          QUALITY_LAB_APK_SHA256: ${{ 'resolved-from-device-provenance' }}
           QUALITY_SOURCE_HEAD_SHA: ${{ inputs.source_head_sha || github.sha }}
           QUALITY_BASE_SHA: ${{ inputs.base_sha }}
           QUALITY_PR_NUMBER: ${{ inputs.pr_number }}
@@ -391,6 +456,7 @@ jobs:
           QUALITY_TEST_VARIANT: ${{ inputs.test_variant || 'compatibility-runtime' }}
         run: |
           set -euo pipefail
+          export QUALITY_LAB_APK_SHA256="$(jq -r .lab_apk_sha256 lab-apk/PROVENANCE.json)"
           python3 qa/compatibility/aggregate.py device-artifacts aggregate-report
           expected_devices="$(
             python3 -c 'from qa.compatibility.lab_config import DEVICES; print(",".join(item["id"] for item in DEVICES))'
@@ -407,7 +473,11 @@ jobs:
             --source-head-sha "$QUALITY_SOURCE_HEAD_SHA" \
             --base-sha "$QUALITY_BASE_SHA" \
             --test-variant "$QUALITY_TEST_VARIANT" \
-            --expected-devices "$expected_devices"
+            --expected-devices "$expected_devices" \
+            --tested-ref "$QUALITY_TESTED_REF" \
+            --tested-commit-sha "$QUALITY_TESTED_COMMIT_SHA" \
+            --merge-sha "$QUALITY_MERGE_SHA" \
+            --lab-apk-sha256 "$QUALITY_LAB_APK_SHA256"
           cat aggregate-report/GITHUB_STEP_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify mandatory aggregate artifacts

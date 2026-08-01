@@ -298,6 +298,23 @@ class ConfigTests(unittest.TestCase):
             self.assertIn(f'"{check_id}"', source)
         self.assertNotIn('"cancel-row-1-executes"', source)
 
+    def test_runner_blocks_unknown_start_state_as_fixture(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        audit = source.split("def _deterministic_download_action_audit", maxsplit=1)[1]
+        start_block = audit.split("if not stable:", maxsplit=1)[1].split("elif path is None:", maxsplit=1)[0]
+        final_block = audit.split("if not precondition_established:", maxsplit=1)[1].split("if reason is None and action is not None:", maxsplit=1)[0]
+        for block in (start_block, final_block):
+            self.assertIn("START_FOCUS_NOT_ESTABLISHED", block)
+            self.assertIn('source = "FIXTURE"', block)
+            self.assertNotIn('source = "PRODUCT"', block)
+
+    def test_runner_classifies_wrong_marker_as_navigation_mismatch(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        audit = source.split("def _deterministic_download_action_audit", maxsplit=1)[1]
+        block = audit.split("if wrong:", maxsplit=1)[1].split("elif not expected_seen:", maxsplit=1)[0]
+        self.assertIn("NAVIGATION_TARGET_MISMATCH", block)
+        self.assertNotIn("ACTION_CALLBACK_NOT_EXECUTED", block)
+
 
 class AnalyzerTests(unittest.TestCase):
 

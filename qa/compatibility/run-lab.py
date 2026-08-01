@@ -1698,9 +1698,9 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
             if not stable:
                 reason = (
                     "START_FOCUS_NOT_ESTABLISHED: "
-                    f"expected row-1-primary, observed {initial_target or 'unknown'}"
+                    f"expected a stable supported start target, observed {initial_target or 'unknown'}"
                 )
-                source = "PRODUCT"
+                source = "FIXTURE"
             elif path is None:
                 reason = (
                     "HARNESS_SELECTOR_FAILURE: "
@@ -1747,7 +1747,7 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
                     precondition_established = actual_target == target
                     if not precondition_established:
                         reason = f"START_FOCUS_NOT_ESTABLISHED: expected {target}, observed {actual_target}"
-                        source = "PRODUCT"
+                        source = "FIXTURE"
             if reason is None and action is not None:
                 label = str((focused_before or {}).get("text") or "")
                 expected_label = {
@@ -1794,8 +1794,8 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
                 )
                 if wrong:
                     reason = (
-                        "ACTION_CALLBACK_NOT_EXECUTED: callback marker(s) "
-                        f"{', '.join(wrong)} do not match {expected_action}"
+                        "NAVIGATION_TARGET_MISMATCH: callback marker(s) "
+                        f"{', '.join(wrong)} prove a different control received the key instead of {expected_action}"
                     )
                     source = "PRODUCT"
                 elif not expected_seen:
