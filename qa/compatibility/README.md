@@ -57,12 +57,12 @@ external blocker and does not contain or publish account credentials.
 
 Touch devices use a stable x86_64 AVD hardware definition with exact display
 size and density overrides. TV devices use the published Android TV API 36
-x86_64 system image. The 720p profile downsizes a stable 1080p framebuffer;
-1080p uses the native `tv_1080p` hardware profile and 4K uses the native
-`tv_4k` profile. Android can safely reduce, but cannot increase, an emulator
-framebuffer with `wm size`, so using the native 4K profile is required for a
-real 3840×2160 screenshot. The requested geometry is verified from the PNG
-header before every capture. API 34 Android TV currently has x86 and
+x86_64 system image and native, resolution-specific `tv_720p`, `tv_1080p`, and
+`tv_4k` hardware profiles. Their hardware profile, boot skin, physical display,
+logical display, viewport, result directory, and artifact name are one exact
+matrix contract. The native runner verifies physical `wm size` and `wm density`
+before handing control to the lab, and the requested geometry is verified again
+from the PNG header before every capture. API 34 Android TV currently has x86 and
 arm64-v8a images, but no x86_64 image, so it cannot run this app's qualified
 x86_64 emulator ABI.
 
@@ -131,4 +131,3 @@ the Android SDK.
 ## Full TV focus and download-action contract
 
 The TV audit no longer treats two unique focus targets as sufficient. Every page has a minimum focus-coverage policy, and Downloads additionally runs a deterministic physical D-pad action audit. The audit proves that Wi-Fi mode, scheduling, concurrency, pause/resume, priority, cancel and movement across two active rows are both reachable and executable. Debug fixture callbacks call the real `DownloadRepository`; they are never no-ops. Missing evidence is infrastructure `BLOCKED`, while unreachable controls or missing action markers are critical product findings.
-

@@ -83,7 +83,22 @@ def finding(
     case_id: str | None = None,
     page: str | None = None,
     evidence: dict[str, str] | None = None,
+    classification: str | None = None,
+    root_cause_id: str | None = None,
+    finding_role: str = "primary",
+    product_strict: bool | None = None,
+    gate_outcome: str | None = None,
 ) -> dict[str, Any]:
+    classification = classification or ("infrastructure" if severity == "infrastructure" else "product")
+    if product_strict is None:
+        product_strict = classification == "product"
+    if gate_outcome is None:
+        if classification in {"infrastructure", "fixture", "quality_lab"} and severity in {"critical", "infrastructure"}:
+            gate_outcome = "BLOCKED"
+        elif classification == "product" and severity == "critical" and product_strict:
+            gate_outcome = "FAIL"
+        else:
+            gate_outcome = "RECORDED"
     return {
         "severity": severity,
         "code": code,
@@ -91,8 +106,12 @@ def finding(
         "case_id": case_id,
         "page": page,
         "evidence": evidence or {},
+        "classification": classification,
+        "root_cause_id": root_cause_id or f"{code}:{case_id or page or 'global'}",
+        "finding_role": finding_role,
+        "product_strict": bool(product_strict),
+        "gate_outcome": gate_outcome,
     }
-
 
 def app_nodes(root: ET.Element) -> Iterable[ET.Element]:
     for node in root.iter("node"):
@@ -486,12 +505,26 @@ def add_case_findings(
     case_id = case["id"]
     page = case["page"]
     files = relative_files(root, case.get("files", {}))
+    raw_page_precondition = case.get("page_precondition")
+    if isinstance(raw_page_precondition, dict):
+        page_precondition = dict(raw_page_precondition)
+    else:
+        page_precondition = {
+            "established": bool(case.get("marker_found")),
+            "expected_page": page,
+            "actual_page": page if case.get("marker_found") else None,
+            "source": "ui_xml" if case.get("marker_found") else None,
+            "reason": None if case.get("marker_found") else "page marker was not observed",
+        }
+    page_precondition_established = bool(page_precondition.get("established"))
+    page_root_cause_id = f"page_start_precondition:{case_id}"
     result: dict[str, Any] = {
         "id": case_id,
         "page": page,
         "orientation": case["orientation"],
         "font_scale": case["font_scale"],
         "marker_found": bool(case.get("marker_found")),
+        "page_precondition": page_precondition,
         "files": files,
         "image": None,
         "ui": None,
@@ -637,15 +670,36 @@ def add_case_findings(
         result["status"] = "BLOCKED"
         return result, findings
 
-    if not case.get("marker_found"):
+    if not page_precondition_established:
         findings.append(
             finding(
                 "critical",
-                "page_marker_missing",
-                f"{case_id}: expected authenticated page marker {case.get('marker')!r} was not observed",
+                "page_start_precondition_not_established",
+                f"{case_id}: {page_precondition.get('reason') or 'the requested page was not proven active'}",
                 case_id=case_id,
                 page=page,
                 evidence=evidence,
+                classification="fixture",
+                root_cause_id=page_root_cause_id,
+                finding_role="primary",
+                product_strict=False,
+                gate_outcome="BLOCKED",
+            )
+        )
+    elif not case.get("marker_found"):
+        findings.append(
+            finding(
+                "warning",
+                "ui_semantics_page_marker_stale",
+                f"{case_id}: the page was proven by current debug evidence while UI XML reported "
+                f"{page_precondition.get('xml_page')!r}",
+                case_id=case_id,
+                page=page,
+                evidence=evidence,
+                classification="quality_lab",
+                root_cause_id=f"ui_semantics_page_marker_stale:{case_id}",
+                product_strict=False,
+                gate_outcome="RECORDED",
             )
         )
 
@@ -792,26 +846,185 @@ def add_case_findings(
                         )
                     )
             if page == "downloads":
-                repository_progress = bool(ui.get("download_transfer_progress"))
-                origin_progress = bool(ui.get("download_origin_progress"))
+                boundary_path = root / files.get("download_file_evidence", "") if files.get("download_file_evidence") else None
+                boundary = None
+                if boundary_path and boundary_path.is_file():
+                    try:
+                        boundary = json.loads(boundary_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        boundary = None
+                boundary_blocked = False
+                boundary_root: str | None = None
+                boundary_evidence_current = False
+                origin_fixture_unavailable = False
+                if boundary is None:
+                    boundary_blocked = True
+                    boundary_root = f"download-file-evidence:{case_id}"
+                    findings.append(
+                        finding(
+                            "critical",
+                            "download_file_bytes_evidence_missing",
+                            f"{case_id}: direct file-byte boundary evidence is missing or malformed",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                            classification="fixture",
+                            root_cause_id=boundary_root,
+                            finding_role="primary",
+                            product_strict=False,
+                            gate_outcome="BLOCKED",
+                        )
+                    )
+                else:
+                    expected_launch_token = str(page_precondition.get("launch_token") or "")
+                    boundary_launch_token = str(boundary.get("launch_token") or "")
+                    boundary_evidence_current = bool(
+                        not expected_launch_token or boundary_launch_token == expected_launch_token
+                    )
+                    if not boundary_evidence_current:
+                        boundary_blocked = True
+                        boundary_root = f"download-file-evidence:{case_id}"
+                        findings.append(
+                            finding(
+                                "critical",
+                                "download_file_evidence_launch_mismatch",
+                                f"{case_id}: direct download evidence belongs to launch "
+                                f"{boundary_launch_token or 'unknown'}, expected {expected_launch_token}",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                                classification="fixture",
+                                root_cause_id=boundary_root,
+                                finding_role="primary",
+                                product_strict=False,
+                                gate_outcome="BLOCKED",
+                            )
+                        )
+                    origin_bytes = int(boundary.get("origin_bytes") or 0)
+                    repository_bytes = int(boundary.get("repository_bytes") or 0)
+                    partial_bytes = int(boundary.get("partial_file_bytes") or 0)
+                    completed_bytes = int(boundary.get("completed_file_bytes") or 0)
+                    origin_base_url = str(boundary.get("origin_base_url") or "")
+                    candidate_urls = [
+                        str(value)
+                        for value in boundary.get("repository_candidate_urls", [])
+                        if isinstance(value, str)
+                    ]
+                    request_ledger = [
+                        str(value)
+                        for value in boundary.get("origin_request_ledger", [])
+                        if isinstance(value, str)
+                    ]
+                    loopback_candidates = [
+                        value
+                        for value in candidate_urls
+                        if value.startswith("http://127.0.0.1:")
+                    ]
+                    candidate_matches_active_origin = bool(
+                        origin_base_url
+                        and any(
+                            value == origin_base_url or value.startswith(f"{origin_base_url}/")
+                            for value in candidate_urls
+                        )
+                    )
+                    origin_fixture_unavailable = bool(
+                        boundary_evidence_current
+                        and loopback_candidates
+                        and not request_ledger
+                        and origin_bytes <= 0
+                        and repository_bytes <= 0
+                        and (
+                            not bool(boundary.get("origin_running"))
+                            or not candidate_matches_active_origin
+                        )
+                    )
+                    if origin_fixture_unavailable:
+                        boundary_blocked = True
+                        boundary_root = f"download-origin-fixture:{case_id}"
+                        findings.append(
+                            finding(
+                                "critical",
+                                "download_loopback_origin_unavailable",
+                                f"{case_id}: debug download candidates did not match a running "
+                                "process-scoped loopback origin before transport assertions",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                                classification="fixture",
+                                root_cause_id=boundary_root,
+                                finding_role="primary",
+                                product_strict=False,
+                                gate_outcome="BLOCKED",
+                            )
+                        )
+                    if boundary_evidence_current and not origin_fixture_unavailable:
+                        if repository_bytes > 0 and origin_bytes <= 0:
+                            findings.append(finding("critical", "download_repository_origin_boundary_mismatch", f"{case_id}: repository recorded {repository_bytes} bytes without origin bytes", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
+                        if origin_bytes > 0 and repository_bytes <= 0:
+                            findings.append(finding("critical", "download_origin_repository_boundary_mismatch", f"{case_id}: origin served {origin_bytes} bytes without repository progress", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
+                        if repository_bytes > 0 and partial_bytes <= 0 and completed_bytes <= 0:
+                            findings.append(finding("critical", "download_direct_file_bytes_missing", f"{case_id}: repository progress has no independently measured partial or completed file bytes", case_id=case_id, page=page, evidence=evidence, classification="fixture", product_strict=False, gate_outcome="BLOCKED"))
+                direct_repository_progress = bool(
+                    boundary is not None
+                    and boundary_evidence_current
+                    and int(boundary.get("repository_bytes") or 0) > 0
+                )
+                direct_origin_progress = bool(
+                    boundary is not None
+                    and boundary_evidence_current
+                    and int(boundary.get("origin_bytes") or 0) > 0
+                )
+                repository_progress = bool(ui.get("download_transfer_progress")) or direct_repository_progress
+                origin_progress = bool(ui.get("download_origin_progress")) or direct_origin_progress
+                result["download_boundary"] = {
+                    "launch_token": str((boundary or {}).get("launch_token") or ""),
+                    "evidence_current": boundary_evidence_current,
+                    "origin_base_url": str((boundary or {}).get("origin_base_url") or ""),
+                    "origin_running": bool((boundary or {}).get("origin_running")),
+                    "origin_bytes": int((boundary or {}).get("origin_bytes") or 0),
+                    "repository_bytes": int((boundary or {}).get("repository_bytes") or 0),
+                    "partial_file_bytes": int((boundary or {}).get("partial_file_bytes") or 0),
+                    "completed_file_bytes": int((boundary or {}).get("completed_file_bytes") or 0),
+                    "repository_candidate_urls": list((boundary or {}).get("repository_candidate_urls") or []),
+                    "origin_request_count": len((boundary or {}).get("origin_request_ledger") or []),
+                    "origin_progress": origin_progress,
+                    "repository_progress": repository_progress,
+                }
                 if not repository_progress:
-                    boundary = (
+                    boundary_message = (
                         "the loopback origin served body bytes, but the production "
                         "repository exposed zero transferred bytes"
                         if origin_progress
                         else "the production transport did not receive body bytes "
                         "from the loopback origin"
                     )
-                    findings.append(
-                        finding(
-                            "critical",
-                            "download_transfer_no_byte_progress",
-                            f"{case_id}: {boundary}",
-                            case_id=case_id,
-                            page=page,
-                            evidence=evidence,
+                    if boundary_blocked:
+                        findings.append(
+                            finding(
+                                "critical",
+                                "download_transfer_no_byte_progress",
+                                f"{case_id}: {boundary_message}",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                                classification="fixture",
+                                root_cause_id=boundary_root,
+                                finding_role="blocked_assertion",
+                                product_strict=False,
+                                gate_outcome="BLOCKED",
+                            )
                         )
-                    )
+                    else:
+                        findings.append(
+                            finding(
+                                "critical",
+                                "download_transfer_no_byte_progress",
+                                f"{case_id}: {boundary_message}",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                            )
+                        )
                 elif not origin_progress:
                     findings.append(
                         finding(
@@ -953,12 +1166,39 @@ def add_case_findings(
             )
         )
 
-    severities = {item["severity"] for item in findings}
-    if "infrastructure" in severities:
+    if not page_precondition_established:
+        for item in findings:
+            if item.get("root_cause_id") == page_root_cause_id:
+                continue
+            if item.get("severity") == "infrastructure":
+                continue
+            item["classification"] = "fixture"
+            item["root_cause_id"] = page_root_cause_id
+            item["finding_role"] = (
+                "blocked_assertion"
+                if item.get("severity") == "critical"
+                else "downstream"
+            )
+            item["product_strict"] = False
+            item["gate_outcome"] = "BLOCKED" if item.get("severity") == "critical" else "RECORDED"
+
+    blocked = any(
+        item.get("gate_outcome") == "BLOCKED"
+        or item.get("severity") == "infrastructure"
+        for item in findings
+    )
+    product_failures = any(
+        item.get("severity") == "critical"
+        and item.get("classification", "product") == "product"
+        and item.get("product_strict", True)
+        and item.get("finding_role", "primary") == "primary"
+        for item in findings
+    )
+    if blocked:
         result["status"] = "BLOCKED"
-    elif "critical" in severities:
+    elif product_failures:
         result["status"] = "FAIL"
-    elif "warning" in severities:
+    elif any(item.get("severity") == "warning" for item in findings):
         result["status"] = "WARN"
     return result, findings
 
@@ -1026,7 +1266,7 @@ def analyze_focus(
         evidence = {
             key: value
             for key, value in files.items()
-            if key in {"screenshot", "xml", "logcat", "window"}
+            if key in {"screenshot", "xml", "logcat", "focus_trace", "window"}
         }
         if entry.get("error"):
             item["status"] = "BLOCKED"
@@ -1046,8 +1286,36 @@ def analyze_focus(
         item["observed_focus_steps"] = len(observed)
         item["unique_focus_targets"] = len(signatures)
         item["status"] = "PASS"
+        failure = entry.get("failure") if isinstance(entry.get("failure"), dict) else None
+        failure_root: str | None = None
+        failure_classification: str | None = None
+        if failure:
+            failure_type = str(failure.get("type") or "FOCUS_CONTRACT_FAILURE")
+            failure_classification = (
+                "fixture" if failure_type == "HARNESS_SELECTOR_FAILURE" else "product"
+            )
+            failure_root = (
+                f"focus:{entry.get('orientation')}:{entry.get('page')}:"
+                f"{failure_type.lower()}"
+            )
+            item["status"] = "BLOCKED" if failure_classification == "fixture" else "FAIL"
+            findings.append(
+                finding(
+                    "critical",
+                    failure_type.lower(),
+                    f"{entry.get('orientation')} / {entry.get('page')}: "
+                    f"{failure.get('reason') or failure_type}",
+                    page=entry.get("page"),
+                    evidence=evidence,
+                    classification=failure_classification,
+                    root_cause_id=failure_root,
+                    finding_role="primary",
+                    product_strict=failure_classification == "product",
+                    gate_outcome="FAIL" if failure_classification == "product" else "BLOCKED",
+                )
+            )
         if not observed:
-            item["status"] = "FAIL"
+            item["status"] = "BLOCKED" if failure_classification == "fixture" else "FAIL"
             findings.append(
                 finding(
                     "critical",
@@ -1055,13 +1323,18 @@ def analyze_focus(
                     f"{entry.get('orientation')} / {entry.get('page')}: no focused node after D-pad input",
                     page=entry.get("page"),
                     evidence=evidence,
+                    classification=failure_classification or "product",
+                    root_cause_id=failure_root or f"focus:{entry.get('orientation')}:{entry.get('page')}:missing",
+                    finding_role="downstream" if failure_root else "primary",
+                    product_strict=not bool(failure_root),
+                    gate_outcome="BLOCKED" if failure_root else "FAIL",
                 )
             )
         else:
             minimum_targets = TV_FOCUS_MIN_UNIQUE_TARGETS.get(entry.get("page"), 3)
             item["minimum_unique_focus_targets"] = minimum_targets
             if len(signatures) < minimum_targets:
-                item["status"] = "FAIL"
+                item["status"] = "BLOCKED" if failure_classification == "fixture" else "FAIL"
                 findings.append(
                     finding(
                         "critical",
@@ -1070,6 +1343,11 @@ def analyze_focus(
                         f"{len(signatures)} unique target(s); expected at least {minimum_targets}",
                         page=entry.get("page"),
                         evidence=evidence,
+                        classification=failure_classification or "product",
+                        root_cause_id=failure_root or f"focus:{entry.get('orientation')}:{entry.get('page')}:coverage",
+                        finding_role="downstream" if failure_root else "primary",
+                        product_strict=not bool(failure_root),
+                        gate_outcome="BLOCKED" if failure_root else "FAIL",
                     )
                 )
 
@@ -1128,6 +1406,7 @@ def analyze_download_actions(
         "top-concurrent-executes",
         "row-1-primary",
         "row-1-pause",
+        "row-1-resume",
         "row-1-priority",
         "row-1-priority-executes",
         "row-1-cancel",
@@ -1135,7 +1414,7 @@ def analyze_download_actions(
         "row-2-priority",
         "row-2-primary",
         "row-2-pause",
-        "cancel-row-1-executes",
+        "delete-row-1-executes",
     }
     for entry in entries:
         item = dict(entry)
@@ -1206,6 +1485,200 @@ def analyze_download_actions(
             )
         normalized.append(item)
     return normalized, findings
+
+
+def _classified_download_actions(
+    root: Path,
+    device: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not device.get("is_tv"):
+        return [], []
+    required_checks = {
+        "top-wifi-executes", "top-schedule-executes", "top-concurrent-executes",
+        "row-1-primary", "row-1-pause", "row-1-resume", "row-1-priority", "row-1-priority-executes",
+        "row-1-cancel", "row-2-cancel", "row-2-priority", "row-2-primary",
+        "row-2-pause", "delete-row-1-executes",
+    }
+    normalized: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    for entry in entries:
+        item = dict(entry)
+        checks = [dict(check) for check in entry.get("checks", [])]
+        item["checks"] = checks
+        item["status"] = "PASS"
+        orientation = str(entry.get("orientation") or "landscape")
+        root_id = f"download-actions:{orientation}"
+        if entry.get("error"):
+            item["status"] = "BLOCKED"
+            findings.append(finding(
+                "infrastructure", "download_action_audit_error",
+                f"{orientation} / downloads: {entry['error']}", page="downloads",
+                classification="infrastructure", root_cause_id=root_id, gate_outcome="BLOCKED",
+            ))
+            normalized.append(item)
+            continue
+        observed_ids = {check.get("id") for check in checks}
+        missing = sorted(required_checks - observed_ids)
+        if missing:
+            item["status"] = "BLOCKED"
+            findings.append(finding(
+                "critical", "missing_mandatory_download_action_evidence",
+                f"{orientation} / downloads: missing checks {', '.join(missing)}", page="downloads",
+                classification="fixture", root_cause_id=root_id, gate_outcome="BLOCKED",
+            ))
+        primary_root: str | None = None
+        for check in checks:
+            if check.get("success"):
+                continue
+            evidence = {
+                key: value for key, value in check.get("evidence", {}).items()
+                if (root / value).is_file()
+            }
+            check_id = str(check.get("id") or "unknown")
+            check_root = f"{root_id}:{check_id}"
+            precondition = bool(check.get("precondition_established"))
+            key_confirmed = bool(check.get("key_press_confirmed"))
+            unexpected = list(check.get("unexpected_markers") or [])
+            reason = str(check.get("reason") or check.get("precondition_failure") or "contract failed")
+            if not precondition:
+                source = str(check.get("source") or "QUALITY_LAB")
+                classification = (
+                    "product" if source == "PRODUCT" else
+                    "fixture" if source == "FIXTURE" else
+                    "quality_lab"
+                )
+                if reason.startswith("START_FOCUS_NOT_ESTABLISHED"):
+                    code = "start_focus_not_established"
+                elif reason.startswith("NAVIGATION_TARGET_MISMATCH"):
+                    code = "navigation_target_mismatch"
+                elif reason.startswith("HARNESS_SELECTOR_FAILURE"):
+                    code = "harness_selector_failure"
+                    classification = "fixture"
+                elif reason.startswith("UI_STATE_NOT_UPDATED"):
+                    code = "ui_state_not_updated"
+                else:
+                    code = "download_action_precondition_not_established"
+                primary_root = primary_root or check_root
+                is_primary = primary_root == check_root
+                product_primary = classification == "product" and is_primary
+                findings.append(finding(
+                    "critical", code,
+                    f"{orientation} / downloads / {check_id}: {reason}",
+                    page="downloads", evidence=evidence, classification=classification,
+                    root_cause_id=primary_root, finding_role="primary" if is_primary else "downstream",
+                    product_strict=product_primary,
+                    gate_outcome="FAIL" if product_primary else "BLOCKED",
+                ))
+                raw_code = (
+                    "tv_download_action_not_executed"
+                    if check.get("expected_action")
+                    else "tv_download_action_unreachable"
+                )
+                findings.append(finding(
+                    "critical", raw_code,
+                    f"{orientation} / downloads / {check_id}: raw assertion retained but blocked because target focus was not established",
+                    page="downloads", evidence=evidence, classification=classification,
+                    root_cause_id=primary_root,
+                    finding_role="blocked_assertion" if check.get("expected_action") else "downstream",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                item["status"] = "FAIL" if classification == "product" else "BLOCKED"
+                continue
+            if reason.startswith("UI_STATE_NOT_UPDATED"):
+                primary_root = primary_root or check_root
+                is_primary = primary_root == check_root
+                findings.append(finding(
+                    "critical", "ui_state_not_updated",
+                    f"{orientation} / downloads / {check_id}: {reason}",
+                    page="downloads", evidence=evidence, classification="product",
+                    root_cause_id=primary_root,
+                    finding_role="primary" if is_primary else "downstream",
+                    product_strict=is_primary,
+                    gate_outcome="FAIL" if is_primary else "BLOCKED",
+                ))
+                item["status"] = "FAIL"
+                continue
+            if reason.startswith("ACTION_CALLBACK_NOT_EXECUTED"):
+                primary_root = primary_root or check_root
+                is_primary = primary_root == check_root
+                findings.append(finding(
+                    "critical", "action_callback_not_executed",
+                    f"{orientation} / downloads / {check_id}: {reason}",
+                    page="downloads", evidence=evidence, classification="product",
+                    root_cause_id=primary_root,
+                    finding_role="primary" if is_primary else "downstream",
+                    product_strict=is_primary,
+                    gate_outcome="FAIL" if is_primary else "BLOCKED",
+                ))
+                item["status"] = "FAIL"
+                continue
+            if unexpected:
+                primary_root = primary_root or check_root
+                findings.append(finding(
+                    "critical", "tv_download_navigation_focus_mismatch",
+                    f"{orientation} / downloads / {check_id}: a different callback marker was emitted: {', '.join(unexpected)}",
+                    page="downloads", evidence=evidence, classification="quality_lab",
+                    root_cause_id=primary_root, finding_role="primary" if primary_root == check_root else "downstream",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                item["status"] = "BLOCKED"
+                continue
+            if check.get("expected_action") and key_confirmed and check.get("marker_revision_before") is not None:
+                findings.append(finding(
+                    "critical", "tv_download_action_not_executed",
+                    f"{orientation} / downloads / {check_id}: target was proven and key press recorded, but {check.get('expected_action')} marker did not advance",
+                    page="downloads", evidence=evidence, classification="product",
+                    root_cause_id=check_root, finding_role="primary", product_strict=True, gate_outcome="FAIL",
+                ))
+                item["status"] = "FAIL"
+            else:
+                primary_root = primary_root or check_root
+                findings.append(finding(
+                    "critical", "tv_download_action_precondition_incomplete",
+                    f"{orientation} / downloads / {check_id}: callback assertion blocked because required evidence is incomplete",
+                    page="downloads", evidence=evidence, classification="fixture",
+                    root_cause_id=primary_root, finding_role="primary" if primary_root == check_root else "blocked_assertion",
+                    product_strict=False, gate_outcome="BLOCKED",
+                ))
+                item["status"] = "BLOCKED"
+        row_two_ids = {"row-2-cancel", "row-2-priority", "row-2-primary", "row-2-pause"}
+        successful_ids = {check.get("id") for check in checks if check.get("success")}
+        if not row_two_ids.issubset(successful_ids):
+            downstream_root = primary_root or f"{root_id}:row-navigation"
+            findings.append(finding(
+                "critical", "tv_download_row_navigation_incomplete",
+                f"{orientation} / downloads: full second-row traversal remains recorded but is blocked by the first failed precondition",
+                page="downloads", classification="product", root_cause_id=downstream_root,
+                finding_role="downstream", product_strict=False, gate_outcome="BLOCKED",
+            ))
+            if item["status"] == "PASS":
+                item["status"] = "WARN"
+        normalized.append(item)
+    return normalized, findings
+
+
+analyze_download_actions = _classified_download_actions
+
+
+def summarize_finding_roles(findings: list[dict[str, Any]]) -> dict[str, int]:
+    primary_roots = {
+        str(item.get("root_cause_id"))
+        for item in findings
+        if item.get("finding_role", "primary") == "primary"
+        and item.get("severity") in {"critical", "infrastructure"}
+    }
+    return {
+        "primary_root_cause_count": len(primary_roots),
+        "raw_failed_checks_count": sum(item.get("severity") in {"critical", "infrastructure"} for item in findings),
+        "downstream_count": sum(item.get("finding_role") in {"downstream", "blocked_assertion"} for item in findings),
+        "product_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "product" and item.get("product_strict", True) for item in findings),
+        "quality_lab_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "quality_lab" for item in findings),
+        "fixture_critical_count": sum(item.get("severity") == "critical" and item.get("classification") == "fixture" for item in findings),
+        "future_stage_count": sum(item.get("classification") == "future_stage" for item in findings),
+        "false_positives": sum(bool(item.get("reclassified_from")) or item.get("classification") == "false_positive" for item in findings),
+    }
+
 
 
 def rail_logo_measurement(
@@ -1737,15 +2210,23 @@ def junit_xml(summary: dict[str, Any]) -> str:
             f'name="{escape(case["id"])}">'
         )
         relevant = case_findings.get(case["id"], [])
-        critical = [item for item in relevant if item["severity"] == "critical"]
-        infra = [item for item in relevant if item["severity"] == "infrastructure"]
+        blocked = [
+            item for item in relevant
+            if item.get("gate_outcome") == "BLOCKED"
+            or item.get("severity") == "infrastructure"
+        ]
+        critical = [
+            item for item in relevant
+            if item["severity"] == "critical"
+            and item not in blocked
+        ]
         warnings = [item for item in relevant if item["severity"] == "warning"]
         if critical:
             message = "\n".join(item["message"] for item in critical)
             lines.append(f'    <failure message="compatibility failure">{escape(message)}</failure>')
-        if infra:
-            message = "\n".join(item["message"] for item in infra)
-            lines.append(f'    <error message="lab infrastructure failure">{escape(message)}</error>')
+        if blocked:
+            message = "\n".join(item["message"] for item in blocked)
+            lines.append(f'    <error message="lab precondition or infrastructure failure">{escape(message)}</error>')
         if warnings:
             message = "\n".join(item["message"] for item in warnings)
             lines.append(f"    <system-out>{escape(message)}</system-out>")
@@ -1860,11 +2341,25 @@ def analyze_run(root: Path) -> dict[str, Any]:
     infrastructure_count = sum(
         1 for item in findings if item["severity"] == "infrastructure"
     )
+    blocked_count = sum(
+        1
+        for item in findings
+        if item.get("gate_outcome") == "BLOCKED"
+        or item.get("severity") == "infrastructure"
+    )
+    product_failure_count = sum(
+        1
+        for item in findings
+        if item.get("severity") == "critical"
+        and item.get("classification", "product") == "product"
+        and item.get("product_strict", True)
+        and item.get("finding_role", "primary") == "primary"
+    )
     overall = (
         "BLOCKED"
-        if infrastructure_count
+        if infrastructure_count or blocked_count
         else "FAIL"
-        if critical_count
+        if product_failure_count
         else "WARN"
         if warning_count
         else "PASS"
@@ -1888,6 +2383,8 @@ def analyze_run(root: Path) -> dict[str, Any]:
         "download_actions": download_actions,
         "rail_visual": rail_visual,
         "findings": findings,
+        "provenance": manifest.get("provenance", {}),
+        **summarize_finding_roles(findings),
     }
 
     (root / "summary.json").write_text(

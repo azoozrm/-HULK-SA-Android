@@ -42,6 +42,10 @@ is_expanded_rail_focus = RUN_LAB_MODULE.is_expanded_rail_focus
 visible_package_names = RUN_LAB_MODULE.visible_package_names
 download_action_markers = RUN_LAB_MODULE.download_action_markers
 focused_node = RUN_LAB_MODULE.focused_node
+download_focus_target = RUN_LAB_MODULE.download_focus_target
+download_focus_graph = RUN_LAB_MODULE.download_focus_graph
+plan_download_focus_path = RUN_LAB_MODULE.plan_download_focus_path
+evaluate_page_precondition = RUN_LAB_MODULE.evaluate_page_precondition
 
 
 class ConfigTests(unittest.TestCase):
@@ -141,6 +145,44 @@ class ConfigTests(unittest.TestCase):
         ).encode()
         self.assertEqual("ايقاف مؤقت", focused_node(xml)["text"])
 
+    def test_current_debug_page_evidence_overrides_stale_api28_xml(self) -> None:
+        result = evaluate_page_precondition(
+            "downloads",
+            "launch-123",
+            xml_bytes=(
+                '<hierarchy><node package="sa.hulksa.player.dev" '
+                'content-desc="qa-page:search" bounds="[0,0][100,100]" /></hierarchy>'
+            ).encode(),
+            page_evidence={
+                "schema_version": 1,
+                "page": "downloads",
+                "launch_token": "launch-123",
+            },
+        )
+
+        self.assertTrue(result["established"])
+        self.assertEqual("debug_page_evidence", result["source"])
+        self.assertEqual("search", result["xml_page"])
+        self.assertTrue(result["ui_xml_stale"])
+
+    def test_stale_debug_page_evidence_cannot_establish_precondition(self) -> None:
+        result = evaluate_page_precondition(
+            "downloads",
+            "launch-current",
+            xml_bytes=(
+                '<hierarchy><node package="sa.hulksa.player.dev" '
+                'content-desc="qa-page:search" bounds="[0,0][100,100]" /></hierarchy>'
+            ).encode(),
+            page_evidence={
+                "schema_version": 1,
+                "page": "downloads",
+                "launch_token": "launch-old",
+            },
+        )
+
+        self.assertFalse(result["established"])
+        self.assertEqual("search", result["actual_page"])
+
     def test_download_fixture_prepares_repository_off_main_thread(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
         self.assertIn("downloadHarnessState by mutableStateOf<QaDownloadHarness?>(null)", source)
@@ -152,17 +194,23 @@ class ConfigTests(unittest.TestCase):
         source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
         self.assertIn('page == "live"', source)
         self.assertIn('page == "downloads"', source)
-        for scope in (
-            'restart("navigation")',
-            'restart("wifi-action")',
-            'restart("schedule-action")',
-            'restart("concurrent-action")',
-            'restart("pause-action")',
-            'restart("priority-action")',
-            'restart("cancel-action")',
+        self.assertIn("def _deterministic_download_action_audit", source)
+        self.assertIn(
+            "DeviceLab.download_action_audit = _deterministic_download_action_audit",
+            source,
+        )
+        for contract in (
+            '("top-wifi-executes", "toolbar-wifi", "wifi")',
+            '("top-schedule-executes", "toolbar-schedule", "schedule")',
+            '("top-concurrent-executes", "toolbar-concurrent", "concurrent")',
+            'run_check("row-1-pause", "row-1-primary", "pause")',
+            '"row-1-resume"',
+            'restart_page=False',
+            'run_check("delete-row-1-executes", "row-1-cancel", "delete")',
         ):
-            self.assertIn(scope, source)
-        self.assertIn('"before_xml"', source)
+            self.assertIn(contract, source)
+        self.assertIn('"key_events"', source)
+        self.assertIn('"precondition_established"', source)
         self.assertIn("node_text_with_descendants", source)
 
     def test_download_fixture_contains_expected_client_disconnects(self) -> None:
@@ -188,21 +236,20 @@ class ConfigTests(unittest.TestCase):
 
     def test_download_fixture_removes_process_owner_records_before_enqueue(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn("private object QaDownloadHarnessProcessOwner", source)
         prepare = source.split(
-            "    private fun prepareDownloadHarness(): QaDownloadHarness",
+            "    private fun prepare(context: Context, launchToken: String): QaDownloadHarness",
             maxsplit=1,
         )[1].split(
             "\n    }\n}\n\nprivate data class QaDownloadHarness",
             maxsplit=1,
         )[0]
-
         cleanup = "repository.remove(downloadId)"
         enqueue = "repeat(3) { index ->"
         self.assertIn("WorkManager can restore a previous debug-fixture worker", prepare)
         self.assertIn(cleanup, prepare)
         self.assertIn(enqueue, prepare)
         self.assertLess(prepare.index(cleanup), prepare.index(enqueue))
-
 
     def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
@@ -237,6 +284,7 @@ class ConfigTests(unittest.TestCase):
             "top-concurrent-executes",
             "row-1-primary",
             "row-1-pause",
+            "row-1-resume",
             "row-1-priority",
             "row-1-priority-executes",
             "row-1-cancel",
@@ -244,11 +292,11 @@ class ConfigTests(unittest.TestCase):
             "row-2-priority",
             "row-2-primary",
             "row-2-pause",
-            "cancel-row-1-executes",
+            "delete-row-1-executes",
         )
         for check_id in required_ids:
-            self.assertIn(f'inspect("{check_id}"', source)
-        self.assertNotIn('inspect("row-1-pause-executes"', source)
+            self.assertIn(f'"{check_id}"', source)
+        self.assertNotIn('"cancel-row-1-executes"', source)
 
 
 class AnalyzerTests(unittest.TestCase):
@@ -271,7 +319,9 @@ class AnalyzerTests(unittest.TestCase):
                                 "id": "row-1-primary",
                                 "success": False,
                                 "expected_action": None,
-                                "reason": "expected focused control was not reached",
+                                "precondition_established": False,
+                                "source": "FIXTURE",
+                                "reason": "START_FOCUS_NOT_ESTABLISHED",
                                 "evidence": {
                                     "screenshot": "focus/landscape/downloads-actions/01-step/screenshot.png",
                                     "xml": "focus/landscape/downloads-actions/01-step/ui.xml",
@@ -282,7 +332,10 @@ class AnalyzerTests(unittest.TestCase):
                                 "id": "row-1-pause",
                                 "success": False,
                                 "expected_action": "pause",
-                                "reason": "expected action marker was not emitted",
+                                "precondition_established": False,
+                                "key_press_confirmed": False,
+                                "source": "FIXTURE",
+                                "reason": "START_FOCUS_NOT_ESTABLISHED",
                                 "evidence": {},
                             },
                         ],
@@ -291,10 +344,12 @@ class AnalyzerTests(unittest.TestCase):
             )
         self.assertEqual("BLOCKED", normalized[0]["status"])
         codes = {item["code"] for item in findings}
-        self.assertIn("download_action_audit_incomplete", codes)
+        self.assertIn("start_focus_not_established", codes)
+        self.assertIn("missing_mandatory_download_action_evidence", codes)
         self.assertIn("tv_download_action_unreachable", codes)
         self.assertIn("tv_download_action_not_executed", codes)
         self.assertIn("tv_download_row_navigation_incomplete", codes)
+        self.assertTrue(all(item.get("source") != "PRODUCT" for item in findings))
 
     def tv_gutter_xml(self, content_bounds: str, page: str = "live") -> ET.Element:
         return ET.fromstring(
@@ -684,6 +739,111 @@ class AnalyzerTests(unittest.TestCase):
             self.assertNotIn("page_marker_missing", codes)
             self.assertNotIn("empty_hierarchy", codes)
 
+    def test_direct_boundary_bytes_override_stale_download_semantics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["pages"] = [{"id": "downloads", "label": "التنزيلات"}]
+            manifest["navigation"][0].update(
+                {"page": "downloads", "label": "التنزيلات"}
+            )
+            case = manifest["cases"][0]
+            case.update(
+                {
+                    "id": "portrait/font-100/downloads",
+                    "page": "downloads",
+                    "marker": "qa-page:downloads",
+                    "marker_found": False,
+                    "page_precondition": {
+                        "established": True,
+                        "expected_page": "downloads",
+                        "actual_page": "downloads",
+                        "source": "debug_page_evidence",
+                        "xml_page": "search",
+                        "debug_page": "downloads",
+                        "ui_xml_stale": True,
+                        "reason": None,
+                    },
+                }
+            )
+            evidence_path = root / "raw/portrait/font-100/home/download-file-evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "origin_bytes": 171245571,
+                        "repository_bytes": 170393600,
+                        "partial_file_bytes": 36175872,
+                        "completed_file_bytes": 134217728,
+                        "persisted_state": {"exists": True, "length": 4712},
+                        "origin_request_ledger": ["GET /fixture-1.mp4|Range=bytes=0-4194303"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            case["files"]["download_file_evidence"] = (
+                "raw/portrait/font-100/home/download-file-evidence.json"
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            xml_path = root / "raw/portrait/font-100/home/ui.xml"
+            xml_path.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<hierarchy rotation="0"><node package="sa.hulksa.player.dev" '
+                'bounds="[0,0][100,200]" content-desc="qa-page:search">'
+                '<node package="sa.hulksa.player.dev" bounds="[10,30][90,60]" '
+                'text="التنزيلات" /></node></hierarchy>',
+                encoding="utf-8",
+            )
+
+            summary = analyze_run(root)
+
+            codes = {item["code"] for item in summary["findings"]}
+            self.assertNotIn("download_transfer_no_byte_progress", codes)
+            self.assertNotIn("page_start_precondition_not_established", codes)
+            self.assertIn("ui_semantics_page_marker_stale", codes)
+            self.assertEqual(0, summary["product_critical_count"])
+            self.assertEqual(170393600, summary["cases"][0]["download_boundary"]["repository_bytes"])
+
+    def test_invalid_page_precondition_blocks_dependent_product_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root, out_of_bounds=True)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            case = manifest["cases"][0]
+            case["marker_found"] = False
+            case["page_precondition"] = {
+                "established": False,
+                "expected_page": "home",
+                "actual_page": "search",
+                "source": None,
+                "xml_page": "search",
+                "debug_page": "search",
+                "ui_xml_stale": False,
+                "reason": "expected page 'home', observed 'search'",
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            summary = analyze_run(root)
+
+            self.assertEqual("BLOCKED", summary["overall_status"])
+            self.assertEqual(0, summary["product_critical_count"])
+            self.assertGreaterEqual(summary["fixture_critical_count"], 2)
+            self.assertEqual(1, summary["primary_root_cause_count"])
+            self.assertGreaterEqual(summary["downstream_count"], 1)
+            findings = {item["code"]: item for item in summary["findings"]}
+            self.assertEqual(
+                "primary",
+                findings["page_start_precondition_not_established"]["finding_role"],
+            )
+            self.assertEqual("blocked_assertion", findings["out_of_bounds"]["finding_role"])
+            self.assertEqual(
+                findings["page_start_precondition_not_established"]["root_cause_id"],
+                findings["out_of_bounds"]["root_cause_id"],
+            )
+
     def test_unstable_rail_logo_is_a_critical_visual_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -717,3 +877,70 @@ class AnalyzerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DeterministicDownloadFocusTests(unittest.TestCase):
+    @staticmethod
+    def xml(label: str, bounds: str = "[100,100][400,180]") -> bytes:
+        return (
+            '<hierarchy><node package="sa.hulksa.player.dev" focused="true" '
+            'focusable="true" clickable="true" '
+            f'content-desc="{label}" bounds="{bounds}" /></hierarchy>'
+        ).encode()
+
+    def test_focus_can_start_on_wifi(self) -> None:
+        self.assertEqual("toolbar-wifi", download_focus_target(self.xml("WiFi فقط"), 1920)[0])
+        self.assertEqual([], plan_download_focus_path("toolbar-wifi", "toolbar-wifi"))
+
+    def test_focus_can_start_on_concurrent(self) -> None:
+        self.assertEqual("toolbar-concurrent", download_focus_target(self.xml("متزامنة 2"), 1920)[0])
+        self.assertEqual(
+            [("RIGHT", "toolbar-schedule"), ("RIGHT", "toolbar-wifi")],
+            plan_download_focus_path("toolbar-concurrent", "toolbar-wifi"),
+        )
+
+    def test_focus_can_start_on_pause(self) -> None:
+        xml = (
+            '<hierarchy>'
+            '<node package="sa.hulksa.player.dev" focused="true" focusable="true" clickable="true" '
+            'content-desc="ايقاف مؤقت" bounds="[100,300][400,380]" />'
+            '<node package="sa.hulksa.player.dev" focusable="true" clickable="true" '
+            'content-desc="ايقاف مؤقت" bounds="[100,500][400,580]" />'
+            '</hierarchy>'
+        ).encode()
+        self.assertEqual("row-1-primary", download_focus_target(xml, 1920)[0])
+        path = plan_download_focus_path("row-1-primary", "toolbar-wifi")
+        self.assertEqual([("UP", "toolbar-wifi")], path)
+
+    def test_focus_can_start_on_rtl_rail(self) -> None:
+        target, _ = download_focus_target(self.xml("التنزيلات", "[1500,100][1900,200]"), 1920)
+        self.assertEqual("rail-item", target)
+        self.assertEqual([("LEFT", "toolbar-wifi")], plan_download_focus_path(target, "toolbar-wifi"))
+
+    def test_unknown_focus_is_blocked(self) -> None:
+        target, _ = download_focus_target(self.xml("عنصر مجهول"), 1920)
+        self.assertIsNone(target)
+        self.assertIsNone(plan_download_focus_path(target, "toolbar-wifi"))
+
+    def test_rtl_horizontal_graph_matches_contract(self) -> None:
+        graph = download_focus_graph(3)
+        self.assertEqual("toolbar-schedule", graph["toolbar-wifi"]["LEFT"])
+        self.assertEqual("toolbar-concurrent", graph["toolbar-schedule"]["LEFT"])
+        self.assertEqual("row-1-priority", graph["row-1-primary"]["LEFT"])
+        self.assertEqual("row-1-cancel", graph["row-1-priority"]["LEFT"])
+
+
+
+    def test_direct_file_evidence_kotlin_expressions_are_compile_safe(self) -> None:
+        fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertNotIn('endsWith(\\".part\\")', fixture)
+        self.assertIn('files.filter { it.name.endsWith(".part") }', fixture)
+        self.assertIn('files.filterNot { it.name.endsWith(".part") }', fixture)
+
+    def test_direct_file_evidence_contract_is_internal_and_independent(self) -> None:
+        runner = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn('run-as", PACKAGE, "cat", "files/qa-download-file-evidence.json"', runner)
+        self.assertNotIn('run-as",\n                            PACKAGE,\n                            "ls"', runner)
+        for field in ("origin_bytes", "repository_bytes", "partial_file_bytes", "completed_file_bytes", "persisted_state", "origin_request_ledger"):
+            self.assertIn(field, fixture)
+        self.assertIn("MessageDigest.getInstance(\"SHA-256\")", fixture)
