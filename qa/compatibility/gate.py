@@ -5,7 +5,13 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
 from qualification_policy import DOWNSTREAM, gate_decision, normalize_summary
 
 
@@ -18,8 +24,15 @@ def _escape(value: object) -> str:
 
 
 def emit(data: dict[str, Any], summary_path: Path) -> None:
-    primary = [item for item in data.get("findings", []) if item.get("finding_role") != DOWNSTREAM and item.get("severity") in {"critical", "infrastructure"}]
-    downstream = [item for item in data.get("findings", []) if item.get("finding_role") == DOWNSTREAM]
+    primary = [
+        item for item in data.get("findings", [])
+        if item.get("finding_role") != DOWNSTREAM
+        and item.get("severity") in {"critical", "infrastructure"}
+    ]
+    downstream = [
+        item for item in data.get("findings", [])
+        if item.get("finding_role") == DOWNSTREAM
+    ]
     print(f"::group::Primary root diagnostics ({len(primary)})")
     for item in primary:
         classification = str(item.get("classification") or "unknown").upper()
@@ -31,6 +44,7 @@ def emit(data: dict[str, Any], summary_path: Path) -> None:
         print(json.dumps(item, ensure_ascii=False, sort_keys=True))
     print("::endgroup::")
     print(f"DOWNSTREAM_BLOCKED={len(downstream)}")
+
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary:
         with Path(step_summary).open("a", encoding="utf-8") as handle:
@@ -46,6 +60,22 @@ def emit(data: dict[str, Any], summary_path: Path) -> None:
             handle.write(f"- Missing/blocked roots: `{data['blocked_root_count']}`\n")
 
 
+def evaluate_gate(data: dict[str, Any], summary_path: Path, enforce_findings: bool) -> int:
+    normalized = normalize_summary(data)
+    emit(normalized, summary_path)
+    code, decision = gate_decision(normalized, enforce_findings)
+    print(
+        f"{decision}: product_roots={normalized['product_critical_count']}, "
+        f"lab_roots={normalized['quality_lab_critical_count']}, "
+        f"fixture_roots={normalized['fixture_critical_count']}, "
+        f"infrastructure_roots={normalized['infrastructure_invalidity_count']}, "
+        f"blocked_roots={normalized['blocked_root_count']}, "
+        f"downstream={normalized['downstream_count']}, "
+        f"enforce_findings={enforce_findings}"
+    )
+    return code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("summary", type=Path)
@@ -53,16 +83,12 @@ def main() -> int:
     args = parser.parse_args()
     raw = json.loads(args.summary.read_text(encoding="utf-8"))
     data = normalize_summary(raw)
-    args.summary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    emit(data, args.summary)
-    code, decision = gate_decision(data, parse_bool(args.enforce_findings))
-    print(
-        f"{decision}: product_roots={data['product_critical_count']}, "
-        f"lab_roots={data['quality_lab_critical_count']}, fixture_roots={data['fixture_critical_count']}, "
-        f"infrastructure_roots={data['infrastructure_invalidity_count']}, blocked_roots={data['blocked_root_count']}, "
-        f"downstream={data['downstream_count']}, enforce_findings={parse_bool(args.enforce_findings)}"
+    args.summary.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
     )
-    return code
+    return evaluate_gate(data, args.summary, parse_bool(args.enforce_findings))
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 
 HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 SPEC = importlib.util.spec_from_file_location("compatibility_analyzer_core", HERE / "analyzer_core.py")
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("cannot load analyzer_core.py")
