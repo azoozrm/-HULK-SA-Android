@@ -32,16 +32,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.TESTED_COMMIT_SHA }}
-      - name: Enforce lab-only scope
+      - name: Capture and verify lab-only scope
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "${{ github.base_ref }}"
-          invalid="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -Ev '^(qa/lab_verifier/|qa/lab_fixture_app/|qa/compatibility/|\.github/workflows/(quality-lab-independent-qualification|compatibility-lab)\.yml$)' || true)"
-          if [[ -n "$invalid" ]]; then
-            printf 'Non-lab files are forbidden:\n%s\n' "$invalid" >&2
-            exit 1
-          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$TESTED_COMMIT_SHA^{commit}"
+          git diff --name-only "$BASE_SHA" "$TESTED_COMMIT_SHA" > changed-files.txt
+          python3 qa/lab_verifier/scope_check.py changed-files.txt --out scope-report.json
       - name: Run independent unit, control and static tests
         run: |
           set -euo pipefail
@@ -58,6 +57,8 @@ jobs:
         with:
           name: independent-verifier-host-results
           path: |
+            changed-files.txt
+            scope-report.json
             independent-tests.log
             independent-results/
           if-no-files-found: error
