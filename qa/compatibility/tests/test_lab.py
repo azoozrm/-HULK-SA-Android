@@ -190,6 +190,19 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("withContext(Dispatchers.IO)", source)
         self.assertLess(source.index("setContent {"), source.index("withContext(Dispatchers.IO)"))
 
+    def test_download_origin_survives_activity_recreation_for_same_launch(self) -> None:
+        source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn("private object QaDownloadHarnessProcessOwner", source)
+        self.assertIn("activeLaunchToken == launchToken", source)
+        self.assertIn("activeHarness?.origin?.close()", source)
+        self.assertIn("return QaDownloadHarness(repository, server, launchToken)", source)
+        self.assertNotIn("override fun onDestroy()", source)
+        activity = source.split("class QaActivity", maxsplit=1)[1].split(
+            "private object QaDownloadHarnessProcessOwner",
+            maxsplit=1,
+        )[0]
+        self.assertNotIn("QaRangeServer", activity)
+
     def test_tv_focus_sequences_are_page_specific_and_actions_are_isolated(self) -> None:
         source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
         self.assertIn('page == "live"', source)
@@ -231,7 +244,7 @@ class ConfigTests(unittest.TestCase):
     def test_download_fixture_removes_process_owner_records_before_enqueue(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
         prepare = source.split(
-            "    private fun prepareDownloadHarness(): QaDownloadHarness",
+            "    private fun prepare(context: Context, launchToken: String): QaDownloadHarness",
             maxsplit=1,
         )[1].split(
             "\n    }\n}\n\nprivate data class QaDownloadHarness",
@@ -244,6 +257,24 @@ class ConfigTests(unittest.TestCase):
         self.assertIn(cleanup, prepare)
         self.assertIn(enqueue, prepare)
         self.assertLess(prepare.index(cleanup), prepare.index(enqueue))
+
+    def test_download_action_planning_waits_for_stable_restored_focus(self) -> None:
+        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        helper = source.split(
+            "def wait_for_download_focus_stability(",
+            maxsplit=1,
+        )[1].split("\ndef parse_start_metrics", maxsplit=1)[0]
+        audit = source.split(
+            "def _deterministic_download_action_audit",
+            maxsplit=1,
+        )[1]
+        self.assertIn("stable_for: float = 0.65", helper)
+        self.assertIn("target != last_target", helper)
+        self.assertIn("wait_for_download_focus_stability(", audit)
+        self.assertLess(
+            audit.index("wait_for_download_focus_stability("),
+            audit.index("plan_download_focus_path("),
+        )
 
 
     def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:
@@ -793,6 +824,138 @@ class AnalyzerTests(unittest.TestCase):
             self.assertEqual(0, summary["product_critical_count"])
             self.assertEqual(170393600, summary["cases"][0]["download_boundary"]["repository_bytes"])
 
+    def test_mismatched_loopback_origin_blocks_dependent_transfer_assertion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["pages"] = [{"id": "downloads", "label": "التنزيلات"}]
+            manifest["navigation"][0].update(
+                {"page": "downloads", "label": "التنزيلات"}
+            )
+            case = manifest["cases"][0]
+            case.update(
+                {
+                    "id": "portrait/font-100/downloads",
+                    "page": "downloads",
+                    "marker": "qa-page:downloads",
+                    "marker_found": True,
+                }
+            )
+            evidence_path = root / "raw/portrait/font-100/home/download-file-evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "launch_token": "launch-current",
+                        "origin_base_url": "http://127.0.0.1:41000",
+                        "origin_running": True,
+                        "origin_bytes": 0,
+                        "repository_bytes": 0,
+                        "repository_candidate_urls": [
+                            "http://127.0.0.1:39000/fixture-1.mp4"
+                        ],
+                        "failed_record_count": 3,
+                        "maximum_retry_count": 3,
+                        "partial_file_bytes": 0,
+                        "completed_file_bytes": 0,
+                        "persisted_state": {"exists": True, "length": 5002},
+                        "origin_request_ledger": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            case["files"]["download_file_evidence"] = (
+                "raw/portrait/font-100/home/download-file-evidence.json"
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            xml_path = root / "raw/portrait/font-100/home/ui.xml"
+            xml_path.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<hierarchy rotation="0"><node package="sa.hulksa.player.dev" '
+                'bounds="[0,0][100,200]" content-desc="qa-page:downloads">'
+                '<node package="sa.hulksa.player.dev" bounds="[10,30][90,60]" '
+                'text="التنزيلات" /></node></hierarchy>',
+                encoding="utf-8",
+            )
+
+            summary = analyze_run(root)
+
+            self.assertEqual("BLOCKED", summary["overall_status"])
+            self.assertEqual(0, summary["product_critical_count"])
+            self.assertEqual(1, summary["primary_root_cause_count"])
+            findings = {item["code"]: item for item in summary["findings"]}
+            primary = findings["download_loopback_origin_unavailable"]
+            dependent = findings["download_transfer_no_byte_progress"]
+            self.assertEqual("primary", primary["finding_role"])
+            self.assertEqual("blocked_assertion", dependent["finding_role"])
+            self.assertEqual(primary["root_cause_id"], dependent["root_cause_id"])
+
+    def test_running_matching_loopback_origin_without_requests_remains_product_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["pages"] = [{"id": "downloads", "label": "التنزيلات"}]
+            manifest["navigation"][0].update(
+                {"page": "downloads", "label": "التنزيلات"}
+            )
+            case = manifest["cases"][0]
+            case.update(
+                {
+                    "id": "portrait/font-100/downloads",
+                    "page": "downloads",
+                    "marker": "qa-page:downloads",
+                    "marker_found": True,
+                }
+            )
+            evidence_path = root / "raw/portrait/font-100/home/download-file-evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "launch_token": "launch-current",
+                        "origin_base_url": "http://127.0.0.1:41000",
+                        "origin_running": True,
+                        "origin_bytes": 0,
+                        "repository_bytes": 0,
+                        "repository_candidate_urls": [
+                            "http://127.0.0.1:41000/fixture-1.mp4"
+                        ],
+                        "failed_record_count": 3,
+                        "maximum_retry_count": 3,
+                        "partial_file_bytes": 0,
+                        "completed_file_bytes": 0,
+                        "persisted_state": {"exists": True, "length": 5002},
+                        "origin_request_ledger": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            case["files"]["download_file_evidence"] = (
+                "raw/portrait/font-100/home/download-file-evidence.json"
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            xml_path = root / "raw/portrait/font-100/home/ui.xml"
+            xml_path.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<hierarchy rotation="0"><node package="sa.hulksa.player.dev" '
+                'bounds="[0,0][100,200]" content-desc="qa-page:downloads">'
+                '<node package="sa.hulksa.player.dev" bounds="[10,30][90,60]" '
+                'text="التنزيلات" /></node></hierarchy>',
+                encoding="utf-8",
+            )
+
+            summary = analyze_run(root)
+
+            self.assertEqual("FAIL", summary["overall_status"])
+            self.assertEqual(1, summary["product_critical_count"])
+            codes = {item["code"] for item in summary["findings"]}
+            self.assertIn("download_transfer_no_byte_progress", codes)
+            self.assertNotIn("download_loopback_origin_unavailable", codes)
+
     def test_invalid_page_precondition_blocks_dependent_product_checks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -928,6 +1091,19 @@ class DeterministicDownloadFocusTests(unittest.TestCase):
         fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
         self.assertIn('run-as", PACKAGE, "cat", "files/qa-download-file-evidence.json"', runner)
         self.assertNotIn('run-as",\n                            PACKAGE,\n                            "ls"', runner)
-        for field in ("origin_bytes", "repository_bytes", "partial_file_bytes", "completed_file_bytes", "persisted_state", "origin_request_ledger"):
+        for field in (
+            "launch_token",
+            "origin_base_url",
+            "origin_running",
+            "origin_bytes",
+            "repository_bytes",
+            "repository_candidate_urls",
+            "failed_record_count",
+            "maximum_retry_count",
+            "partial_file_bytes",
+            "completed_file_bytes",
+            "persisted_state",
+            "origin_request_ledger",
+        ):
             self.assertIn(field, fixture)
         self.assertIn("MessageDigest.getInstance(\"SHA-256\")", fixture)

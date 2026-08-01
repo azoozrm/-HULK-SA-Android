@@ -617,6 +617,45 @@ def poll_download_focus(
     return False, last_target, last_node, last_xml
 
 
+def wait_for_download_focus_stability(
+    adb: Adb,
+    scratch: Path,
+    display_width: int,
+    timeout: float = 3.5,
+    stable_for: float = 0.65,
+) -> tuple[bool, str | None, dict[str, Any] | None, bytes]:
+    """Wait until the initial Downloads focus survives delayed restoration.
+
+    The production Downloads screen restores the remembered card after its
+    asynchronous repository snapshot is composed. Planning a D-pad path before
+    that one-shot restoration settles creates a lab-only race where the card
+    requester steals focus in the middle of a verified path. Require a named
+    target to remain unchanged for a continuous interval before planning.
+    """
+    deadline = time.monotonic() + timeout
+    stable_since: float | None = None
+    last_target: str | None = None
+    last_node: dict[str, Any] | None = None
+    last_xml = b""
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        last_xml = dump_xml(adb, scratch, attempts=1)
+        target, node = download_focus_target(last_xml, display_width)
+        if target is None:
+            stable_since = None
+            last_target = None
+        elif target != last_target:
+            last_target = target
+            last_node = node
+            stable_since = now
+        else:
+            last_node = node
+            if stable_since is not None and now - stable_since >= stable_for:
+                return True, last_target, last_node, last_xml
+        time.sleep(0.12)
+    return False, last_target, last_node, last_xml
+
+
 
 def parse_start_metrics(text: str) -> dict[str, int]:
     result: dict[str, int] = {}
@@ -1512,11 +1551,20 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
         key_press_confirmed = False
         try:
             self.start_page("downloads", step_root / "restart")
-            initial_xml = dump_xml(self.adb, step_root / "initial.xml", attempts=2)
-            initial_target, initial_node = download_focus_target(initial_xml, display_width)
+            stable, initial_target, initial_node, initial_xml = wait_for_download_focus_stability(
+                self.adb,
+                step_root / "initial.xml",
+                display_width,
+            )
             markers_before = download_action_markers(initial_xml)
-            path = plan_download_focus_path(initial_target, target, row_count=3)
-            if path is None:
+            path = plan_download_focus_path(initial_target, target, row_count=3) if stable else None
+            if not stable:
+                reason = (
+                    "DOWNLOAD_ACTION_START_STATE_NOT_STABLE: "
+                    f"initial focus remained {initial_target or 'unknown'}"
+                )
+                source = "FIXTURE"
+            elif path is None:
                 reason = (
                     "DOWNLOAD_ACTION_START_STATE_NOT_ESTABLISHED: "
                     f"initial focus {initial_target or 'unknown'} cannot reach {target}"

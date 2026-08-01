@@ -73,7 +73,6 @@ import sa.hulksa.player.ui.theme.HulkTheme
  * therefore absent from release builds.
  */
 class QaActivity : ComponentActivity() {
-    private var downloadServer: QaRangeServer? = null
     private var downloadHarnessState by mutableStateOf<QaDownloadHarness?>(null)
 
     override fun attachBaseContext(newBase: Context) {
@@ -111,24 +110,39 @@ class QaActivity : ComponentActivity() {
         if (scenario == "downloads") {
             lifecycleScope.launch {
                 downloadHarnessState = withContext(Dispatchers.IO) {
-                    prepareDownloadHarness()
+                    QaDownloadHarnessProcessOwner.getOrCreate(
+                        applicationContext,
+                        launchToken,
+                    )
                 }
             }
         }
     }
+}
 
-    override fun onDestroy() {
-        downloadServer?.close()
-        downloadServer = null
-        super.onDestroy()
+private object QaDownloadHarnessProcessOwner {
+    private val lock = Any()
+    private var activeLaunchToken: String? = null
+    private var activeHarness: QaDownloadHarness? = null
+
+    fun getOrCreate(context: Context, launchToken: String): QaDownloadHarness = synchronized(lock) {
+        activeHarness
+            ?.takeIf { activeLaunchToken == launchToken }
+            ?.let { return@synchronized it }
+
+        activeHarness?.origin?.close()
+        val harness = prepare(context.applicationContext, launchToken)
+        activeLaunchToken = launchToken
+        activeHarness = harness
+        harness
     }
 
-    private fun prepareDownloadHarness(): QaDownloadHarness {
-        getSharedPreferences("hulk_downloads", Context.MODE_PRIVATE)
+    private fun prepare(context: Context, launchToken: String): QaDownloadHarness {
+        context.getSharedPreferences("hulk_downloads", Context.MODE_PRIVATE)
             .edit()
             .clear()
             .commit()
-        getExternalFilesDirs(Environment.DIRECTORY_MOVIES)
+        context.getExternalFilesDirs(Environment.DIRECTORY_MOVIES)
             .filterNotNull()
             .forEach { directory ->
                 directory.listFiles()
@@ -139,8 +153,7 @@ class QaActivity : ComponentActivity() {
                     ?.forEach { file -> file.delete() }
         }
         val server = QaRangeServer().also(QaRangeServer::start)
-        downloadServer = server
-        val repository = DownloadRepositoryProcessOwner.get(applicationContext)
+        val repository = DownloadRepositoryProcessOwner.get(context)
 
         /*
          * WorkManager can restore a previous debug-fixture worker before this
@@ -175,13 +188,14 @@ class QaActivity : ComponentActivity() {
                 ),
             )
         }
-        return QaDownloadHarness(repository, server)
+        return QaDownloadHarness(repository, server, launchToken)
     }
 }
 
 private data class QaDownloadHarness(
     val repository: DownloadRepository,
     val origin: QaRangeServer,
+    val launchToken: String,
 )
 
 @Composable
@@ -711,10 +725,22 @@ private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness
     }
     val repositoryBytes = records.sumOf { item -> item.bytesDownloaded.coerceAtLeast(0L) }
     val ledger = harness.origin.requestLedger().joinToString(",") { jsonString(it) }
+    val candidateUrls = records
+        .flatMap(OfflineDownload::sourceCandidates)
+        .distinct()
+        .joinToString(",") { jsonString(it) }
+    val failedRecords = records.count { item -> item.status == OfflineStatus.FAILED }
+    val maximumRetryCount = records.maxOfOrNull(OfflineDownload::retryCount) ?: 0
     val payload = "{" +
-        "\"schema_version\":1," +
+        "\"schema_version\":2," +
+        "\"launch_token\":" + jsonString(harness.launchToken) + "," +
+        "\"origin_base_url\":" + jsonString(harness.origin.baseUrl) + "," +
+        "\"origin_running\":${harness.origin.isRunning()}," +
         "\"origin_bytes\":${harness.origin.bytesServed()}," +
         "\"repository_bytes\":$repositoryBytes," +
+        "\"repository_candidate_urls\":[${candidateUrls}]," +
+        "\"failed_record_count\":$failedRecords," +
+        "\"maximum_retry_count\":$maximumRetryCount," +
         "\"files\":[${fileRecords}]," +
         "\"partial_file_bytes\":${files.filter { it.name.endsWith(".part") }.sumOf(File::length)}," +
         "\"completed_file_bytes\":${files.filterNot { it.name.endsWith(".part") }.sumOf(File::length)}," +
@@ -759,6 +785,7 @@ private class QaRangeServer : Closeable {
 
     val baseUrl: String = "http://127.0.0.1:${server.localPort}"
 
+    fun isRunning(): Boolean = running.get() && !server.isClosed
     fun bytesServed(): Long = transferredBytes.get()
     fun requestLedger(): List<String> = requests.toList()
 
