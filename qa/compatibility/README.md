@@ -15,7 +15,7 @@ debug-only authenticated shell:
 1. The official source is reconstructed with the repository's approved release
    preparation chain.
 2. `prepare-harness.py` adds `QaActivity` under `src/debug`, then
-   `inject_quality_markers.py` applies 13 strict measurement-only semantics
+   `inject_quality_markers.py` applies 28 strict measurement-only semantics
    replacements to the disposable checkout's `MainShellScreen.kt`. It records
    the original and instrumented SHA-256 values, rejects an unexpected source
    shape, and verifies that no other `src/main` file changed.
@@ -76,14 +76,16 @@ capture while keeping the standard runner for the other eight stable profiles.
 
 - `PASS`: no deterministic finding.
 - `WARN`: the lab completed, but evidence needs review.
-- `FAIL`: deterministic app crash, ANR, render, bounds, navigation, or focus
-  failure.
-- `BLOCKED`: the emulator, capture, or report infrastructure did not complete.
+- `FAIL`: a Product failure proven after target focus, key delivery, and marker
+  preconditions are all established.
+- `BLOCKED`: infrastructure, missing mandatory evidence, stale page evidence,
+  or a fixture/start-state precondition prevented a valid Product assertion.
 
 Infrastructure errors and deterministic critical application findings fail
 push and pull-request runs. Manual runs enforce them by default and expose
 `enforce_findings` only for an intentional report-only diagnostic run. Warnings
-remain visible advisories and do not fail the workflow.
+remain visible advisories and do not fail the workflow. Raw assertions remain
+in the evidence even when reconciliation marks them downstream or blocked.
 
 For Android TV, every page audit measures the authenticated content surface
 against the navigation rail. The captured `qa-tv-page-content:<page>` and
@@ -109,6 +111,8 @@ Each device artifact contains every raw capture and:
 - `junit.xml`
 - `run-manifest.json`
 - `app/src/debug/quality-marker-injection.json` from the disposable build
+- `PROVENANCE.json` binding the result to source head, tested merge commit,
+  workflow run, attempt, and lab APK SHA-256
 
 The aggregate artifact contains:
 
@@ -130,4 +134,17 @@ the Android SDK.
 
 ## Full TV focus and download-action contract
 
-The TV audit no longer treats two unique focus targets as sufficient. Every page has a minimum focus-coverage policy, and Downloads additionally runs a deterministic physical D-pad action audit. The audit proves that Wi-Fi mode, scheduling, concurrency, pause/resume, priority, cancel and movement across two active rows are both reachable and executable. Debug fixture callbacks call the real `DownloadRepository`; they are never no-ops. Missing evidence is infrastructure `BLOCKED`, while unreachable controls or missing action markers are critical product findings.
+The TV audit no longer treats two unique focus targets as sufficient. Every page
+has a minimum focus-coverage policy, and Downloads additionally runs a
+deterministic physical D-pad action audit. After every restart, the audit reads
+the actual focused node, plans a route through the current RTL graph, and proves
+the target over consecutive UI hierarchy reads before sending CENTER. Wi-Fi
+mode, scheduling, concurrency, pause/resume, priority, delete, and movement
+across two active rows are retained as mandatory evidence.
+
+A fixture or unknown start state is `BLOCKED`; it is never counted as a Product
+callback failure. A callback failure is Product only when target focus, key
+press, marker revision before the key, and absence of a different callback
+marker are all proven. Wrong callback markers are navigation/focus mismatches,
+and dependent findings remain visible as downstream evidence without inflating
+the Product-critical count.
