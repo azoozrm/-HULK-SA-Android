@@ -93,9 +93,37 @@ def adb(*args: str, binary: bool = False) -> str | bytes:
     return completed.stdout if binary else completed.stdout.decode("utf-8", errors="replace")
 
 
+def prepare_contract(width: int, height: int, density: int) -> dict[str, Any]:
+    """Remove stale AVD overrides before applying the requested effective contract.
+
+    A 4K skin can boot with a stale 1080p override. Setting a size equal to the
+    physical display does not reliably clear that override, so reset must happen
+    first. Physical-size validity remains independently enforced afterward.
+    """
+    adb("shell", "wm", "size", "reset")
+    adb("shell", "wm", "density", "reset")
+    time.sleep(0.5)
+
+    size_after_reset = str(adb("shell", "wm", "size"))
+    density_after_reset = str(adb("shell", "wm", "density"))
+    parsed_size = parse_wm_size(size_after_reset)
+    parsed_density = parse_wm_density(density_after_reset)
+
+    if parsed_size["physical_size"] != [width, height]:
+        # Preserve the mismatch as evidence, but set the effective viewport so the
+        # report can distinguish physical-skin invalidity from logical-size setup.
+        adb("shell", "wm", "size", f"{width}x{height}")
+    if parsed_density["effective_density"] != density:
+        adb("shell", "wm", "density", str(density))
+
+    return {
+        "size_after_reset": parsed_size,
+        "density_after_reset": parsed_density,
+    }
+
+
 def apply_contract(width: int, height: int, density: int, timeout: float = 15.0) -> dict[str, Any]:
-    adb("shell", "wm", "size", f"{width}x{height}")
-    adb("shell", "wm", "density", str(density))
+    reset_evidence = prepare_contract(width, height, density)
     deadline = time.monotonic() + timeout
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
@@ -110,6 +138,7 @@ def apply_contract(width: int, height: int, density: int, timeout: float = 15.0)
             height=height,
             density=density,
         )
+        last["reset_evidence"] = reset_evidence
         if last["valid"]:
             return last
         time.sleep(0.5)
