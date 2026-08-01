@@ -83,7 +83,8 @@ jobs:
                       '("top-schedule-executes", "toolbar-schedule", "schedule")',
                       '("top-concurrent-executes", "toolbar-concurrent", "concurrent")',
                       'run_check("row-1-pause", "row-1-primary", "pause")',
-                      'run_check("row-1-resume",',
+                      '"row-1-resume"',
+                      'restart_page=False',
                       'run_check("delete-row-1-executes", "row-1-cancel", "delete")',
                   ):
                       self.assertIn(contract, source)
@@ -188,7 +189,7 @@ jobs:
                       )
                   self.assertEqual("BLOCKED", normalized[0]["status"])
                   codes = {item["code"] for item in findings}
-                  self.assertIn("download_action_precondition_not_established", codes)
+                  self.assertIn("start_focus_not_established", codes)
                   self.assertIn("missing_mandatory_download_action_evidence", codes)
                   self.assertIn("tv_download_action_unreachable", codes)
                   self.assertIn("tv_download_action_not_executed", codes)
