@@ -7,6 +7,7 @@ on:
       - 'qa/lab_verifier/**'
       - 'qa/lab_fixture_app/**'
       - 'qa/compatibility/**'
+      - '.github/workflows/compatibility-lab.yml'
   workflow_dispatch:
 
 permissions:
@@ -29,18 +30,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TESTED_COMMIT_SHA }}
       - name: Enforce lab-only scope
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
           git fetch --no-tags origin "${{ github.base_ref }}"
-          invalid="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -Ev '^(qa/lab_verifier/|qa/lab_fixture_app/|qa/compatibility/|\.github/workflows/quality-lab-independent-qualification\.yml$)' || true)"
+          invalid="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -Ev '^(qa/lab_verifier/|qa/lab_fixture_app/|qa/compatibility/|\.github/workflows/(quality-lab-independent-qualification|compatibility-lab)\.yml$)' || true)"
           if [[ -n "$invalid" ]]; then
-            echo "Non-lab files are forbidden:" >&2
-            echo "$invalid" >&2
+            printf 'Non-lab files are forbidden:\n%s\n' "$invalid" >&2
             exit 1
           fi
-      - name: Compile and run independent tests
+      - name: Run independent unit, control and static tests
         run: |
           set -euo pipefail
           python3 -m py_compile qa/lab_verifier/*.py qa/lab_verifier/tests/*.py
@@ -50,11 +52,8 @@ jobs:
       - name: Golden artifact replay
         run: |
           set -euo pipefail
-          python3 qa/lab_verifier/cli.py replay \
-            --corpus qa/lab_verifier/corpus \
-            --repeat 8 \
-            --out independent-results
-          sha256sum independent-results/* | tee independent-results/SHA256SUMS.txt
+          python3 qa/lab_verifier/cli.py replay --corpus qa/lab_verifier/corpus --repeat 8 --out independent-results
+          sha256sum independent-results/* > independent-results/SHA256SUMS.txt
       - uses: actions/upload-artifact@v7
         with:
           name: independent-verifier-host-results
@@ -72,6 +71,8 @@ jobs:
       apk_sha256: ${{ steps.package.outputs.apk_sha256 }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TESTED_COMMIT_SHA }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -82,7 +83,7 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Install build SDK
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
       - name: Assemble fixture
         run: gradle -p qa/lab_fixture_app --no-daemon :app:assembleDebug
@@ -90,13 +91,13 @@ jobs:
         id: package
         run: |
           set -euo pipefail
-          APK='qa/lab_fixture_app/app/build/outputs/apk/debug/app-debug.apk'
-          test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee fixture-badging.txt
-          grep -q "package: name='sa.hulksa.labfixture'" fixture-badging.txt
           mkdir -p fixture-apk
-          cp "$APK" fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk
+          apk='qa/lab_fixture_app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          cp "$apk" fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk
           cp qa/lab_fixture_app/fixture-contract.json fixture-apk/
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > fixture-badging.txt
+          grep -q "package: name='sa.hulksa.labfixture'" fixture-badging.txt
           sha="$(sha256sum fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk | awk '{print $1}')"
           echo "apk_sha256=$sha" >> "$GITHUB_OUTPUT"
           sha256sum fixture-apk/* > fixture-apk/SHA256SUMS.txt
@@ -116,11 +117,17 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TESTED_COMMIT_SHA }}
       - uses: actions/download-artifact@v8
         with:
           name: independent-lab-fixture-apk
           path: fixture-apk
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm || true
       - name: Run independent 1080p fixture
+        id: runtime
+        continue-on-error: true
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -128,14 +135,21 @@ jobs:
           arch: x86_64
           profile: tv_1080p
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -skin 1920x1080
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -skin 1920x1080
           script: |
-            set -euo pipefail
+            bash -euo pipefail <<'BASH'
+            mkdir -p fixture-smoke
             adb shell wm density 320
             bash qa/lab_fixture_app/run-smoke.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk fixture-smoke fixture-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
             python3 qa/lab_verifier/build_fixture_bundle.py --raw fixture-smoke --out fixture-smoke/bundle.json --source-head-sha "$SOURCE_HEAD_SHA" --base-sha "$BASE_SHA" --tested-commit-sha "$TESTED_COMMIT_SHA" --merge-sha "$MERGE_SHA" --apk-sha256 '${{ needs.build-fixture.outputs.apk_sha256 }}' --width 1920 --height 1080 --density 320
             python3 qa/lab_verifier/cli.py verify-bundle fixture-smoke/bundle.json > fixture-smoke/verifier-report.json
             sha256sum fixture-smoke/* > fixture-smoke/ARTIFACT-SHA256SUMS.txt
+            BASH
+      - name: Preserve runtime result
+        if: always()
+        run: |
+          mkdir -p fixture-smoke
+          printf '%s\n' '${{ steps.runtime.outcome }}' > fixture-smoke/RUNTIME-OUTCOME.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -143,6 +157,9 @@ jobs:
           path: fixture-smoke/
           if-no-files-found: error
           retention-days: 30
+      - name: Enforce smoke
+        if: always()
+        run: test '${{ steps.runtime.outcome }}' = success
 
   fixture-matrix:
     name: Fixture matrix · ${{ matrix.name }}
@@ -151,6 +168,7 @@ jobs:
     timeout-minutes: 40
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include:
           - { id: pixel-4a-api29, name: 'Pixel 4a · API 29', api: 29, target: google_apis, profile: pixel_6, skin: 1080x2340, width: 1080, height: 2340, density: 440 }
@@ -164,11 +182,17 @@ jobs:
           - { id: android-tv-4k-api36, name: 'Android TV 4K · API 36', api: 36, target: android-tv, profile: tv_1080p, skin: 3840x2160, width: 3840, height: 2160, density: 640 }
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TESTED_COMMIT_SHA }}
       - uses: actions/download-artifact@v8
         with:
           name: independent-lab-fixture-apk
           path: fixture-apk
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm || true
       - name: Run fixture profile
+        id: runtime
+        continue-on-error: true
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
@@ -176,15 +200,23 @@ jobs:
           arch: x86_64
           profile: ${{ matrix.profile }}
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -skin ${{ matrix.skin }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -skin ${{ matrix.skin }}
           script: |
-            set -euo pipefail
+            bash -euo pipefail <<'BASH'
             OUT='fixture-matrix/${{ matrix.id }}'
+            mkdir -p "$OUT"
             adb shell wm density '${{ matrix.density }}'
             bash qa/lab_fixture_app/run-smoke.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk "$OUT" fixture-${{ matrix.id }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
             python3 qa/lab_verifier/build_fixture_bundle.py --raw "$OUT" --out "$OUT/bundle.json" --source-head-sha "$SOURCE_HEAD_SHA" --base-sha "$BASE_SHA" --tested-commit-sha "$TESTED_COMMIT_SHA" --merge-sha "$MERGE_SHA" --apk-sha256 '${{ needs.build-fixture.outputs.apk_sha256 }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' --density '${{ matrix.density }}'
             python3 qa/lab_verifier/cli.py verify-bundle "$OUT/bundle.json" > "$OUT/verifier-report.json"
             sha256sum "$OUT"/* > "$OUT/ARTIFACT-SHA256SUMS.txt"
+            BASH
+      - name: Preserve runtime result
+        if: always()
+        run: |
+          OUT='fixture-matrix/${{ matrix.id }}'
+          mkdir -p "$OUT"
+          printf '%s\n' '${{ steps.runtime.outcome }}' > "$OUT/RUNTIME-OUTCOME.txt"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -192,6 +224,9 @@ jobs:
           path: fixture-matrix/${{ matrix.id }}/
           if-no-files-found: error
           retention-days: 30
+      - name: Enforce profile
+        if: always()
+        run: test '${{ steps.runtime.outcome }}' = success
 
   independent-qualification-gate:
     name: Independent qualification gate
