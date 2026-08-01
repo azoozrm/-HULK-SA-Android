@@ -1,0 +1,254 @@
+name: HULK SA Exact Base Product Lab Qualification
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/quality-lab-base-qualification.yml'
+      - '.github/workflows/quality-lab-independent-qualification.yml'
+      - 'qa/compatibility/**'
+      - 'qa/lab_verifier/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-base-product-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LAB_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  PRODUCT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+  MERGE_SHA: ${{ github.sha }}
+  PRODUCT_BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+
+jobs:
+  plan:
+    name: Validate exact Base matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      device_count: ${{ steps.matrix.outputs.device_count }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.LAB_COMMIT_SHA }}
+      - id: matrix
+        run: |
+          set -euo pipefail
+          python3 qa/compatibility/lab_config.py --validate
+          python3 qa/compatibility/lab_config.py --github-output "$GITHUB_OUTPUT"
+
+  build-base-apk:
+    name: Build current Lab over exact Base product
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    outputs:
+      apk_sha256: ${{ steps.package.outputs.apk_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.LAB_COMMIT_SHA }}
+          fetch-depth: 1
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.13'
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+      - name: Install SDK and materialize exact Base product tree
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          git fetch --no-tags --depth=1 origin "$PRODUCT_BASE_SHA"
+          git cat-file -e "$PRODUCT_BASE_SHA^{commit}"
+          git worktree add --detach "$RUNNER_TEMP/tested-product" "$PRODUCT_BASE_SHA"
+          test "$(git -C "$RUNNER_TEMP/tested-product" rev-parse HEAD)" = "$PRODUCT_BASE_SHA"
+          bash qa/compatibility/prepare-project.sh "$GITHUB_WORKSPACE/base-project" "$RUNNER_TEMP/tested-product"
+      - name: Compile and package debug-only Base lab APK
+        run: |
+          set -o pipefail
+          (cd base-project && ./gradlew --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug -PHULK_PORTAL_URL=https://example.invalid --stacktrace) 2>&1 | tee base-lab-build.log
+      - name: Verify exact provenance and package
+        id: package
+        run: |
+          set -euo pipefail
+          apk="$(find base-project/app/build/outputs/apk/debug -name '*.apk' -type f | head -n1)"
+          test -s "$apk"
+          mkdir -p base-lab-apk
+          cp "$apk" base-lab-apk/HULK-SA-BASE-COMPATIBILITY-LAB-debug.apk
+          cp base-lab-build.log base-lab-apk/
+          cp base-project/app/src/debug/quality-marker-injection.json base-lab-apk/
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > base-lab-apk/APK-BADGING.txt
+          grep -q "package: name='sa.hulksa.player.dev'" base-lab-apk/APK-BADGING.txt
+          sha="$(sha256sum "$apk" | awk '{print $1}')"
+          echo "apk_sha256=$sha" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --arg lab_commit_sha "$LAB_COMMIT_SHA" \
+            --arg source_head_sha "$PRODUCT_BASE_SHA" \
+            --arg base_sha "$PRODUCT_BASE_SHA" \
+            --arg tested_ref "$PRODUCT_BASE_REF" \
+            --arg tested_commit_sha "$PRODUCT_BASE_SHA" \
+            --arg merge_sha "$MERGE_SHA" \
+            --arg lab_apk_sha256 "$sha" \
+            --arg workflow_run_id "$GITHUB_RUN_ID" \
+            --arg workflow_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{lab_commit_sha:$lab_commit_sha,source_head_sha:$source_head_sha,base_sha:$base_sha,tested_ref:$tested_ref,tested_commit_sha:$tested_commit_sha,merge_sha:$merge_sha,lab_apk_sha256:$lab_apk_sha256,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt}' \
+            > base-lab-apk/PROVENANCE.json
+          (cd base-lab-apk && find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-EXACT-BASE-LAB-APK
+          path: base-lab-apk/
+          if-no-files-found: error
+          retention-days: 30
+
+  base-matrix:
+    name: Exact Base · ${{ matrix.name }} · API ${{ matrix.api }}
+    needs: [plan, build-base-apk]
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.LAB_COMMIT_SHA }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: actions/download-artifact@v8
+        with:
+          name: HULK-SA-EXACT-BASE-LAB-APK
+          path: base-lab-apk
+      - name: Verify APK and provenance
+        run: |
+          set -euo pipefail
+          (cd base-lab-apk && sha256sum -c SHA256SUMS.txt)
+          test "$(jq -r .lab_commit_sha base-lab-apk/PROVENANCE.json)" = "$LAB_COMMIT_SHA"
+          test "$(jq -r .tested_commit_sha base-lab-apk/PROVENANCE.json)" = "$PRODUCT_BASE_SHA"
+          test "$(jq -r .merge_sha base-lab-apk/PROVENANCE.json)" = "$MERGE_SHA"
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm || true
+      - name: Run current Lab on exact Base product
+        id: runtime
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          out='base-results/${{ matrix.result_dir }}'
+          bash qa/compatibility/run-native-emulator.sh \
+            --api '${{ matrix.api }}' \
+            --target '${{ matrix.target }}' \
+            --arch '${{ matrix.arch }}' \
+            --profile '${{ matrix.profile }}' \
+            --skin '${{ matrix.boot_skin }}' \
+            --result-dir "$out" \
+            --contract-device-id '${{ matrix.id }}' \
+            --contract-device-name '${{ matrix.name }}' \
+            --physical-width '${{ matrix.physical_width }}' \
+            --physical-height '${{ matrix.physical_height }}' \
+            --logical-width '${{ matrix.logical_width }}' \
+            --logical-height '${{ matrix.logical_height }}' \
+            --density '${{ matrix.density }}' \
+            --is-tv '${{ matrix.is_tv }}' \
+            -- \
+            python3 qa/compatibility/run-lab.py \
+              --apk base-lab-apk/HULK-SA-BASE-COMPATIBILITY-LAB-debug.apk \
+              --device-id '${{ matrix.id }}' \
+              --device-name '${{ matrix.name }}' \
+              --family '${{ matrix.family }}' \
+              --api '${{ matrix.api }}' \
+              --target '${{ matrix.target }}' \
+              --arch '${{ matrix.arch }}' \
+              --profile '${{ matrix.profile }}' \
+              --width '${{ matrix.width }}' \
+              --height '${{ matrix.height }}' \
+              --density '${{ matrix.density }}' \
+              --orientations '${{ matrix.orientations }}' \
+              --font-scales '${{ matrix.font_scales }}' \
+              --is-tv '${{ matrix.is_tv }}' \
+              --out "$out" \
+              --serial emulator-5554 \
+              --source-head-sha "$PRODUCT_BASE_SHA" \
+              --base-sha "$PRODUCT_BASE_SHA" \
+              --tested-ref "$PRODUCT_BASE_REF" \
+              --tested-commit-sha "$PRODUCT_BASE_SHA" \
+              --merge-sha "$MERGE_SHA" \
+              --lab-apk-sha256 '${{ needs.build-base-apk.outputs.apk_sha256 }}' \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --workflow-run-attempt "$GITHUB_RUN_ATTEMPT"
+      - name: Preserve and report-only gate exact Base evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          out='base-results/${{ matrix.result_dir }}'
+          mkdir -p "$out"
+          if [[ ! -s "$out/summary.json" ]]; then
+            python3 qa/compatibility/make-blocked-result.py \
+              --out "$out" --device-id '${{ matrix.id }}' --device-name '${{ matrix.name }}' \
+              --family '${{ matrix.family }}' --api '${{ matrix.api }}' --target '${{ matrix.target }}' \
+              --arch '${{ matrix.arch }}' --profile '${{ matrix.profile }}' \
+              --width '${{ matrix.width }}' --height '${{ matrix.height }}' --density '${{ matrix.density }}' \
+              --orientations '${{ matrix.orientations }}' --font-scales '${{ matrix.font_scales }}' \
+              --is-tv '${{ matrix.is_tv }}' --reason 'Exact Base runtime produced no final summary.'
+          fi
+          cp base-lab-apk/PROVENANCE.json "$out/PROVENANCE.json"
+          cp base-lab-apk/quality-marker-injection.json "$out/quality-marker-injection.json"
+          python3 qa/compatibility/gate.py "$out/summary.json" --enforce-findings false
+          (cd "$out" && find . -type f ! -name ARTIFACT-SHA256SUMS.txt -printf '%P\0' | sort -z | xargs -0 sha256sum > ARTIFACT-SHA256SUMS.txt && sha256sum -c ARTIFACT-SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: base-compatibility-${{ matrix.id }}
+          path: base-results/${{ matrix.result_dir }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    name: Aggregate exact Base findings
+    if: always()
+    needs: [plan, build-base-apk, base-matrix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.LAB_COMMIT_SHA }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: base-compatibility-*
+          path: base-device-artifacts
+      - name: Aggregate and enforce evidence validity only
+        env:
+          QUALITY_SOURCE_HEAD_SHA: ${{ env.PRODUCT_BASE_SHA }}
+          QUALITY_BASE_SHA: ${{ env.PRODUCT_BASE_SHA }}
+          QUALITY_TESTED_REF: ${{ env.PRODUCT_BASE_REF }}
+          QUALITY_TESTED_COMMIT_SHA: ${{ env.PRODUCT_BASE_SHA }}
+          QUALITY_MERGE_SHA: ${{ env.MERGE_SHA }}
+          QUALITY_LAB_APK_SHA256: ${{ needs.build-base-apk.outputs.apk_sha256 }}
+          QUALITY_SOURCE_BRANCH: ${{ env.PRODUCT_BASE_REF }}
+          QUALITY_TEST_VARIANT: exact-base-report-only
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r qa/compatibility/requirements.txt
+          python3 qa/compatibility/aggregate.py base-device-artifacts base-aggregate
+          python3 qa/compatibility/gate.py base-aggregate/COMPATIBILITY-LAB-SUMMARY.json --enforce-findings false
+          test "$(jq -r .tested_commit_sha base-aggregate/COMPATIBILITY-LAB-SUMMARY.json)" = "$PRODUCT_BASE_SHA"
+          test "$(jq -r .merge_sha base-aggregate/COMPATIBILITY-LAB-SUMMARY.json)" = "$MERGE_SHA"
+          (cd base-aggregate && find . -type f ! -name SHA256SUMS.txt -printf '%P\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-EXACT-BASE-KNOWN-DEFECTS-AGGREGATE
+          path: base-aggregate/
+          if-no-files-found: error
+          retention-days: 30

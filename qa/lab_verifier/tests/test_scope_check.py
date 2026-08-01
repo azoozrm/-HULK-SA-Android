@@ -14,6 +14,7 @@ class ScopeCheckTests(unittest.TestCase):
                 "qa/lab_fixture_app/app/build.gradle.kts",
                 ".github/workflows/compatibility-lab.yml",
                 ".github/workflows/quality-lab-independent-qualification.yml",
+                ".github/workflows/quality-lab-base-qualification.yml",
             ]
         )
         self.assertTrue(report["valid"])

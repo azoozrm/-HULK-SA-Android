@@ -15,6 +15,7 @@ ALLOWED_PREFIXES = (
 )
 ALLOWED_FILES = {
     ".github/workflows/quality-lab-independent-qualification.yml",
+    ".github/workflows/quality-lab-base-qualification.yml",
     ".github/workflows/compatibility-lab.yml",
 }
 
