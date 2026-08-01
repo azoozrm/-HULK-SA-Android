@@ -1,0 +1,183 @@
+name: Apply adaptive navigation refactor once
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/adaptive-ui-refactor-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-refactor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android build SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Apply exact adaptive shell refactor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          source = path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              '''        } else {
+              Column(Modifier.fillMaxSize()) {
+                  MobileNavigation(state.destination, rememberingSelectDestination)
+                  Box(Modifier.weight(1f)) {
+                      DestinationContent(
+                          state = state,
+                          isTv = false,
+                          navigationMemory = navigationMemory,
+                          isFavorite = resolvedIsFavorite,
+                          onSelectCategory = onSelectCategory,
+                          onSearch = onSearch,
+                          onOpen = onOpen,
+                          onOpenHistory = onOpenHistory,
+                          onToggleFavorite = toggleFavoriteWithFeedback,
+                          onRefresh = onRefresh,
+                          onSelectDestination = onSelectDestination,
+                          onClearHistory = onClearHistory,
+                          onPlayDownload = onPlayDownload,
+                          onDeleteDownload = onDeleteDownload,
+                          onRetryDownload = onRetryDownload,
+                          onToggleWifiOnly = onToggleWifiOnly,
+                          onToggleDownloadSchedule = onToggleDownloadSchedule,
+                          onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+                          onCycleDownloadPriority = onCycleDownloadPriority,
+                          onRunDiagnostics = onRunDiagnostics,
+                          onLogout = onLogout,
+                      )
+                  }
+              }
+          }''',
+              '''        } else {
+              Column(Modifier.fillMaxSize()) {
+                  Box(Modifier.weight(1f)) {
+                      DestinationContent(
+                          state = state,
+                          isTv = false,
+                          navigationMemory = navigationMemory,
+                          isFavorite = resolvedIsFavorite,
+                          onSelectCategory = onSelectCategory,
+                          onSearch = onSearch,
+                          onOpen = onOpen,
+                          onOpenHistory = onOpenHistory,
+                          onToggleFavorite = toggleFavoriteWithFeedback,
+                          onRefresh = onRefresh,
+                          onSelectDestination = rememberingSelectDestination,
+                          onClearHistory = onClearHistory,
+                          onPlayDownload = onPlayDownload,
+                          onDeleteDownload = onDeleteDownload,
+                          onRetryDownload = onRetryDownload,
+                          onToggleWifiOnly = onToggleWifiOnly,
+                          onToggleDownloadSchedule = onToggleDownloadSchedule,
+                          onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+                          onCycleDownloadPriority = onCycleDownloadPriority,
+                          onRunDiagnostics = onRunDiagnostics,
+                          onLogout = onLogout,
+                      )
+                  }
+                  MobileNavigation(state.destination, rememberingSelectDestination)
+              }
+          }''',
+              'mobile bottom navigation',
+          )
+
+          replace_once(
+              '''    var railHasFocus by remember { mutableStateOf(false) }
+          val expanded = railHasFocus
+          val railWidth by animateDpAsState(if (expanded) 202.dp else 90.dp, label = "railWidth")
+          val screenWidthDp = LocalConfiguration.current.screenWidthDp
+          val railLogoSize = tvRailLogoSizeDp(screenWidthDp).dp''',
+              '''    val adaptiveUi = LocalAdaptiveUi.current
+          var railHasFocus by remember { mutableStateOf(false) }
+          val expanded = railHasFocus
+          val collapsedRailWidth = if (adaptiveUi.isTelevision) 90.dp else 76.dp
+          val expandedRailWidth = if (adaptiveUi.isTelevision) 202.dp else 188.dp
+          val railWidth by animateDpAsState(if (expanded) expandedRailWidth else collapsedRailWidth, label = "railWidth")
+          val railLogoSize = tvRailLogoSizeDp(adaptiveUi.screenWidthDp).dp''',
+              'adaptive rail size',
+          )
+
+          replace_once(
+              '''            .background(
+                  Brush.horizontalGradient(
+                      listOf(Color(0xFF090A07), Color(0xF70A0B08)),
+                  ),
+              )
+              .padding(start = 10.dp, end = 10.dp, top = 24.dp, bottom = 18.dp),''',
+              '''            .background(
+                  Brush.horizontalGradient(
+                      listOf(Color(0xFF090A07), Color(0xF70A0B08)),
+                  ),
+              )
+              .then(if (adaptiveUi.isTelevision) Modifier else Modifier.statusBarsPadding())
+              .padding(start = 10.dp, end = 10.dp, top = 16.dp, bottom = 18.dp),''',
+              'rail safe drawing',
+          )
+
+          replace_once(
+              '''            .background(Color(0xFF090A07))
+              .statusBarsPadding()
+              .navigationBarsPadding(),''',
+              '''            .background(Color(0xFF090A07))
+              .navigationBarsPadding(),''',
+              'bottom navigation insets',
+          )
+
+          path.write_text(source, encoding='utf-8')
+          PY
+          git diff --check
+
+      - name: Verify Kotlin and unit tests before committing
+        env:
+          HULK_PORTAL_URL: http://3162356.xyz:8080
+          HULK_CONFIG_URL: ''
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            :app:compileDebugKotlin :app:testDebugUnitTest \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+
+      - name: Commit verified product refactor
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          git diff --cached --quiet && { echo 'No adaptive shell changes produced' >&2; exit 1; }
+          git commit -m 'fix: adapt phone and tablet navigation layout'
+          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
