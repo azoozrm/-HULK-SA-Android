@@ -15,7 +15,7 @@ debug-only authenticated shell:
 1. The official source is reconstructed with the repository's approved release
    preparation chain.
 2. `prepare-harness.py` adds `QaActivity` under `src/debug`, then
-   `inject_quality_markers.py` applies 28 strict measurement-only semantics
+   `inject_quality_markers.py` applies 13 strict measurement-only semantics
    replacements to the disposable checkout's `MainShellScreen.kt`. It records
    the original and instrumented SHA-256 values, rejects an unexpected source
    shape, and verifies that no other `src/main` file changed.
