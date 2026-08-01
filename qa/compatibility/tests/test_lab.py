@@ -379,9 +379,10 @@ class ConfigTests(unittest.TestCase):
             "handleDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean",
             card,
         )
-        self.assertEqual(6, card.count(".onPreviewKeyEvent { event ->"))
+        self.assertEqual(3, card.count(".onPreviewKeyEvent { event ->"))
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY)", card)
         self.assertIn("val primaryActionLabel = when (item.status)", card)
+        self.assertIn("primary = primaryActionHighlighted", card)
         self.assertEqual(1, card.count(".focusRequester(focusRequesters.primary)"))
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY)", card)
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL)", card)

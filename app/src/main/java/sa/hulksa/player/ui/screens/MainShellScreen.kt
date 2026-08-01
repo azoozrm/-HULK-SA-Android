@@ -2066,6 +2066,9 @@ private fun DownloadCard(
                     OfflineStatus.DOWNLOADING,
                     -> "ايقاف مؤقت"
                 }
+                val primaryActionHighlighted = item.status == OfflineStatus.QUEUED ||
+                    item.status == OfflineStatus.CHECKING ||
+                    item.status == OfflineStatus.DOWNLOADING
                 FocusButton(
                     primaryActionLabel,
                     {
@@ -2075,6 +2078,7 @@ private fun DownloadCard(
                             onRetry(item)
                         }
                     },
+                    primary = primaryActionHighlighted,
                     compact = true,
                     onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
                     modifier = Modifier
