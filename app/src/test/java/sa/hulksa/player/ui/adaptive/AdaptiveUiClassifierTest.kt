@@ -8,7 +8,7 @@ import org.junit.Test
 
 class AdaptiveUiClassifierTest {
     @Test
-    fun compactPhoneUsesTouchBottomNavigation() {
+    fun compactPhoneUsesTouchNavigationWithoutTelevisionRail() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
             smallestWidthDp = 411,
@@ -18,11 +18,11 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.MOBILE, device)
         assertEquals(HulkWindowWidthClass.COMPACT, window)
-        assertEquals(HulkNavigationType.BOTTOM_BAR, selectNavigationType(device, window))
+        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
     }
 
     @Test
-    fun compactTabletWindowUsesWindowAppropriateNavigationWithoutChangingFormFactor() {
+    fun compactTabletWindowKeepsTabletFormFactorButUsesCompactNavigation() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
             smallestWidthDp = 800,
@@ -32,7 +32,7 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.TABLET, device)
         assertEquals(HulkWindowWidthClass.COMPACT, window)
-        assertEquals(HulkNavigationType.BOTTOM_BAR, selectNavigationType(device, window))
+        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
     }
 
     @Test
@@ -62,7 +62,7 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.MOBILE, device)
         assertEquals(HulkWindowWidthClass.EXPANDED, window)
-        assertEquals(HulkNavigationType.BOTTOM_BAR, selectNavigationType(device, window))
+        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
         assertEquals(HulkOrientation.LANDSCAPE, classifyOrientation(891, 411))
     }
 
@@ -89,13 +89,13 @@ class AdaptiveUiClassifierTest {
             orientation = HulkOrientation.LANDSCAPE,
             inputMode = HulkInputMode.TOUCH,
         )
-        val portrait = landscape.copy(useTwoPane = resolveAdaptiveLayoutPolicy(
+        val portrait = resolveAdaptiveLayoutPolicy(
             deviceClass = HulkDeviceClass.TABLET,
             windowWidthClass = HulkWindowWidthClass.EXPANDED,
             windowHeightClass = HulkWindowHeightClass.EXPANDED,
             orientation = HulkOrientation.PORTRAIT,
             inputMode = HulkInputMode.TOUCH,
-        ).useTwoPane)
+        )
 
         assertEquals(HulkNavigationType.RAIL, landscape.navigationType)
         assertTrue(landscape.useTwoPane)

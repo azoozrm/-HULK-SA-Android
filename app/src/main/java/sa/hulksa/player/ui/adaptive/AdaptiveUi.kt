@@ -48,9 +48,7 @@ enum class HulkInputMode {
 }
 
 enum class HulkNavigationType {
-    /** Retained for source compatibility with older callers. New policy uses BOTTOM_BAR. */
     TOP_BAR,
-    BOTTOM_BAR,
     RAIL,
 }
 
@@ -122,7 +120,7 @@ val LocalAdaptiveUi = staticCompositionLocalOf {
     AdaptiveUiState(
         deviceClass = HulkDeviceClass.MOBILE,
         windowWidthClass = HulkWindowWidthClass.COMPACT,
-        navigationType = HulkNavigationType.BOTTOM_BAR,
+        navigationType = HulkNavigationType.TOP_BAR,
         inputMode = HulkInputMode.TOUCH,
         screenWidthDp = 360,
         screenHeightDp = 640,
@@ -220,9 +218,8 @@ fun selectNavigationType(
     windowWidthClass: HulkWindowWidthClass,
 ): HulkNavigationType = when {
     deviceClass == HulkDeviceClass.TELEVISION -> HulkNavigationType.RAIL
-    windowWidthClass == HulkWindowWidthClass.COMPACT -> HulkNavigationType.BOTTOM_BAR
-    deviceClass == HulkDeviceClass.TABLET -> HulkNavigationType.RAIL
-    else -> HulkNavigationType.BOTTOM_BAR
+    deviceClass == HulkDeviceClass.TABLET && windowWidthClass != HulkWindowWidthClass.COMPACT -> HulkNavigationType.RAIL
+    else -> HulkNavigationType.TOP_BAR
 }
 
 fun resolveAdaptiveLayoutPolicy(
@@ -268,7 +265,7 @@ fun resolveAdaptiveLayoutPolicy(
         )
 
     else -> AdaptiveLayoutPolicy(
-        navigationType = HulkNavigationType.BOTTOM_BAR,
+        navigationType = HulkNavigationType.TOP_BAR,
         contentDensity = if (windowHeightClass == HulkWindowHeightClass.COMPACT) {
             HulkContentDensity.COMPACT
         } else {
