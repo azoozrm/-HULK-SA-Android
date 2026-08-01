@@ -48,7 +48,6 @@ class MainShellComposeQualityTest {
 
     private fun pressSystemKey(keyCode: Int) {
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(keyCode)
-        Thread.sleep(180)
         compose.waitForIdle()
     }
 
@@ -127,6 +126,7 @@ class MainShellComposeQualityTest {
                 totalBytes = 64_000_000,
             )
         }
+        val downloadState = mutableStateOf(downloads)
         compose.setContent {
             platformInputMode = LocalInputModeManager.current
             val adaptive = AdaptiveUiState(
@@ -144,7 +144,7 @@ class MainShellComposeQualityTest {
                             screen = HulkScreen.MAIN,
                             isStarting = false,
                             destination = MainDestination.DOWNLOADS,
-                            downloads = downloads,
+                            downloads = downloadState.value,
                         ),
                         isTv = true,
                         navigationMemory = remember { NavigationMemoryStore() },
@@ -158,12 +158,34 @@ class MainShellComposeQualityTest {
                         onRefresh = {},
                         onClearHistory = {},
                         onPlayDownload = {},
-                        onDeleteDownload = {},
-                        onRetryDownload = {},
+                        onDeleteDownload = { deleted ->
+                            downloadState.value = downloadState.value.filterNot {
+                                it.downloadId == deleted.downloadId
+                            }
+                        },
+                        onRetryDownload = { selected ->
+                            downloadState.value = downloadState.value.map { item ->
+                                if (item.downloadId != selected.downloadId) item else item.copy(
+                                    status = if (item.status == OfflineStatus.PAUSED) {
+                                        OfflineStatus.DOWNLOADING
+                                    } else {
+                                        OfflineStatus.PAUSED
+                                    },
+                                )
+                            }
+                        },
                         onToggleWifiOnly = {},
                         onToggleDownloadSchedule = {},
                         onCycleConcurrentDownloads = {},
-                        onCycleDownloadPriority = {},
+                        onCycleDownloadPriority = { selected ->
+                            downloadState.value = downloadState.value.map { item ->
+                                if (item.downloadId == selected.downloadId) {
+                                    item.copy(priority = if (item.priority == 1) 0 else 1)
+                                } else {
+                                    item
+                                }
+                            }
+                        },
                         onRunDiagnostics = {},
                         onLogout = {},
                     )
@@ -186,59 +208,67 @@ class MainShellComposeQualityTest {
         compose.waitForIdle()
         primary[0].assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_UP)
-        compose.waitForIdle()
         compose.onNodeWithContentDescription("كل الشبكات").assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
-        Thread.sleep(180)
-        compose.waitForIdle()
         primary[0].assertIsFocused()
 
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_LEFT)
-        compose.waitForIdle()
         priority[0].assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_UP)
-        compose.waitForIdle()
         compose.onNodeWithContentDescription("الجدولة الان").assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
-        Thread.sleep(180)
-        compose.waitForIdle()
         priority[0].assertIsFocused()
 
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_LEFT)
-        compose.waitForIdle()
         cancel[0].assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_UP)
-        compose.waitForIdle()
         compose.onNodeWithContentDescription("متزامنة  2").assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
-        Thread.sleep(180)
-        compose.waitForIdle()
         cancel[0].assertIsFocused()
 
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
-        Thread.sleep(180)
-        compose.waitForIdle()
         cancel[1].assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_UP)
-        compose.waitForIdle()
         cancel[0].assertIsFocused()
 
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
-        compose.waitForIdle()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
-        Thread.sleep(180)
-        compose.waitForIdle()
         priority[1].assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
-        compose.waitForIdle()
         primary[1].assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_UP)
-        compose.waitForIdle()
         primary[0].assertIsFocused()
+
+        // Three-row/off-viewport traversal and the final-row boundary remain
+        // inside the same logical primary column.
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
+        primary[2].assertIsFocused()
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
+        primary[2].assertIsFocused()
+
+        // Status mutation reuses the stable requester and keeps focus on the
+        // logical primary action across pause and resume.
+        primary[2].performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithContentDescription("استئناف")[2].assertIsFocused()
+        compose.onAllNodesWithContentDescription("استئناف")[2].performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithContentDescription("ايقاف مؤقت")[2].assertIsFocused()
+
+        // Deleting the focused final row shrinks the fixture from three rows to
+        // two and relocates focus to the surviving previous row in the same slot.
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_LEFT)
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_LEFT)
+        compose.onAllNodesWithContentDescription("الغاء")[2].assertIsFocused()
+        compose.onAllNodesWithContentDescription("الغاء")[2].performClick()
+        compose.waitForIdle()
+        assertEquals(2, downloadState.value.size)
+        compose.onAllNodesWithContentDescription("الغاء")[1].assertIsFocused()
     }
 
     @Test
-    fun tvLiveDpadRoutesNativeKeysAcrossChannelActions() {
+    fun tvLiveDpadRoutesNativeKeysAcrossChannelsAndActions() {
         lateinit var platformInputMode: InputModeManager
         val channels = (1..2).map { id ->
             ContentItem(
@@ -306,17 +336,21 @@ class MainShellComposeQualityTest {
             check(platformInputMode.requestInputMode(InputMode.Keyboard))
         }
 
-        val channel = compose.onNode(
+        val channelOne = compose.onNode(
             hasClickAction() and hasAnyDescendant(hasText("قناة 1")),
+            useUnmergedTree = true,
+        )
+        val channelTwo = compose.onNode(
+            hasClickAction() and hasAnyDescendant(hasText("قناة 2")),
             useUnmergedTree = true,
         )
         val play = compose.onNodeWithContentDescription("تشغيل القناة")
         val favorite = compose.onNodeWithContentDescription("+ المفضلة")
-        channel.performSemanticsAction(SemanticsActions.RequestFocus) { requestFocus ->
+        channelOne.performSemanticsAction(SemanticsActions.RequestFocus) { requestFocus ->
             check(requestFocus())
         }
         compose.waitForIdle()
-        channel.assertIsFocused()
+        channelOne.assertIsFocused()
 
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_LEFT)
         play.assertIsFocused()
@@ -325,7 +359,12 @@ class MainShellComposeQualityTest {
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
         play.assertIsFocused()
         pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
-        channel.assertIsFocused()
+        channelOne.assertIsFocused()
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_DOWN)
+        channelTwo.assertIsFocused()
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_LEFT)
+        play.assertIsFocused()
+        pressSystemKey(AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
+        channelTwo.assertIsFocused()
     }
-
 }

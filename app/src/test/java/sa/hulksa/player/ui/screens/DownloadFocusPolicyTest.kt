@@ -35,4 +35,34 @@ class DownloadFocusPolicyTest {
         assertNull(nextDownloadFocus(0, DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI), DownloadFocusMove.DOWN))
         assertNull(nextDownloadFocus(2, DownloadFocusLocation.card(1, DownloadFocusSlot.PRIMARY), DownloadFocusMove.DOWN))
     }
+
+    @Test fun `toolbar and horizontal boundaries never escape downloads`() {
+        assertNull(nextDownloadFocus(3, DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI), DownloadFocusMove.UP))
+        assertNull(nextDownloadFocus(3, DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI), DownloadFocusMove.RIGHT))
+        assertNull(nextDownloadFocus(3, DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT), DownloadFocusMove.LEFT))
+        assertNull(nextDownloadFocus(3, DownloadFocusLocation.card(0, DownloadFocusSlot.PRIMARY), DownloadFocusMove.RIGHT))
+        assertNull(nextDownloadFocus(3, DownloadFocusLocation.card(0, DownloadFocusSlot.CANCEL), DownloadFocusMove.LEFT))
+    }
+
+    @Test fun `vertical graph covers both two-row and larger download lists`() {
+        for (rowCount in listOf(2, 4)) {
+            for (row in 0 until rowCount - 1) {
+                for (slot in listOf(
+                    DownloadFocusSlot.PRIMARY,
+                    DownloadFocusSlot.PRIORITY,
+                    DownloadFocusSlot.CANCEL,
+                )) {
+                    val current = DownloadFocusLocation.card(row, slot)
+                    assertEquals(current.copy(row = row + 1), nextDownloadFocus(rowCount, current, DownloadFocusMove.DOWN))
+                }
+            }
+            assertNull(
+                nextDownloadFocus(
+                    rowCount,
+                    DownloadFocusLocation.card(rowCount - 1, DownloadFocusSlot.CANCEL),
+                    DownloadFocusMove.DOWN,
+                ),
+            )
+        }
+    }
 }

@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -75,6 +76,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -106,9 +108,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
@@ -347,15 +353,32 @@ private data class DownloadCardFocusRequesters(
     val cancel: FocusRequester = FocusRequester(),
 )
 
-private fun Modifier.applyDownloadFocusPolicy(
-    current: DownloadFocusLocation,
-    rowCount: Int,
+private const val TV_FOCUS_READY_TIMEOUT_MS = 2_000L
+
+private suspend fun requestDownloadFocusWhenReady(
+    target: DownloadFocusLocation,
+    listState: LazyListState,
     resolve: (DownloadFocusLocation) -> FocusRequester?,
-): Modifier = focusProperties {
-    nextDownloadFocus(rowCount, current, DownloadFocusMove.LEFT)?.let(resolve)?.let { left = it }
-    nextDownloadFocus(rowCount, current, DownloadFocusMove.RIGHT)?.let(resolve)?.let { right = it }
-    nextDownloadFocus(rowCount, current, DownloadFocusMove.UP)?.let(resolve)?.let { up = it }
-    nextDownloadFocus(rowCount, current, DownloadFocusMove.DOWN)?.let(resolve)?.let { down = it }
+): Boolean {
+    if (target.zone == DownloadFocusZone.CARD) {
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == target.row }) {
+            listState.scrollToItem(target.row, scrollOffset = 0)
+        }
+        val visible = withTimeoutOrNull(TV_FOCUS_READY_TIMEOUT_MS) {
+            snapshotFlow {
+                listState.layoutInfo.visibleItemsInfo.any { it.index == target.row }
+            }.filter { it }.first()
+        } ?: false
+        if (!visible) return false
+    }
+
+    repeat(3) {
+        withFrameNanos { }
+        val requester = resolve(target)
+        val requested = requester?.let { runCatching { it.requestFocus() }.getOrDefault(false) } == true
+        if (requested) return true
+    }
+    return false
 }
 
 
@@ -1164,20 +1187,44 @@ private fun LiveCatalogScreen(
     }
     val remembered = navigationMemory.position(MainDestination.LIVE)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
+    val restoreChannelIndex = visible.indexOfFirst {
+        "${it.type}:${it.id}" == remembered.itemKey
+    }.takeIf { it >= 0 } ?: rememberedIndex
+    val restoreChannelKey = visible.getOrNull(restoreChannelIndex)?.let { "${it.type}:${it.id}" }
     var preview by remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
-    val channelRequester = remember { FocusRequester() }
+    val visibleChannelKeys = visible.map { "${it.type}:${it.id}" }
+    val channelFocus = remember { mutableMapOf<String, FocusRequester>() }
+    visibleChannelKeys.forEach { key ->
+        channelFocus.getOrPut(key) { FocusRequester() }
+    }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val liveFocusScope = rememberCoroutineScope()
-    val requestLiveFocus: (FocusRequester) -> Boolean = { requester ->
-        liveFocusScope.launch {
-            // Native Android TV key events must finish dispatch before focus moves.
-            yield()
-            runCatching { requester.requestFocus() }
+    var liveRestoreComplete by remember { mutableStateOf(false) }
+    var liveUserInteracted by remember { mutableStateOf(false) }
+    var liveRestoreJob by remember { mutableStateOf<Job?>(null) }
+    var liveNavigationJob by remember { mutableStateOf<Job?>(null) }
+    val requestLiveFocus: (FocusRequester?) -> Boolean = { requester ->
+        liveUserInteracted = true
+        liveRestoreJob?.cancel()
+        liveNavigationJob?.cancel()
+        if (requester != null) {
+            liveNavigationJob = liveFocusScope.launch {
+                val thisJob = currentCoroutineContext().job
+                try {
+                    withFrameNanos { }
+                    runCatching { requester.requestFocus() }
+                } finally {
+                    if (liveNavigationJob === thisJob) liveNavigationJob = null
+                }
+            }
         }
         true
     }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    LaunchedEffect(visibleChannelKeys) {
+        channelFocus.keys.retainAll(visibleChannelKeys.toSet())
+    }
     LaunchedEffect(listState, visible) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
@@ -1185,12 +1232,49 @@ private fun LiveCatalogScreen(
     }
     LaunchedEffect(visible) {
         if (preview == null || preview !in visible) {
-            preview = visible.firstOrNull { "${it.type}:${it.id}" == remembered.itemKey } ?: visible.getOrNull(rememberedIndex) ?: visible.firstOrNull()
+            preview = visible.getOrNull(restoreChannelIndex) ?: visible.firstOrNull()
         }
-        if (state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty()) {
-            listState.scrollToItem(rememberedIndex)
-            delay(180)
-            runCatching { channelRequester.requestFocus() }
+    }
+    LaunchedEffect(
+        isTv,
+        visible.map { it.id },
+        restoreChannelIndex,
+        state.searchQuery,
+        liveRestoreComplete,
+        liveUserInteracted,
+    ) {
+        if (
+            !isTv || visible.isEmpty() || state.searchQuery.isNotBlank() ||
+            liveRestoreComplete || liveUserInteracted
+        ) {
+            return@LaunchedEffect
+        }
+        val thisJob = currentCoroutineContext().job
+        liveRestoreJob = thisJob
+        try {
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == restoreChannelIndex }) {
+                listState.scrollToItem(restoreChannelIndex)
+            }
+            val visibleInLayout = withTimeoutOrNull(TV_FOCUS_READY_TIMEOUT_MS) {
+                snapshotFlow {
+                    listState.layoutInfo.visibleItemsInfo.any { it.index == restoreChannelIndex }
+                }.filter { it }.first()
+            } ?: false
+            if (visibleInLayout) {
+                val restoreRequester = restoreChannelKey?.let(channelFocus::get)
+                repeat(3) {
+                    withFrameNanos { }
+                    if (
+                        restoreRequester != null &&
+                        runCatching { restoreRequester.requestFocus() }.getOrDefault(false)
+                    ) {
+                        liveRestoreComplete = true
+                        return@LaunchedEffect
+                    }
+                }
+            }
+        } finally {
+            if (liveRestoreJob === thisJob) liveRestoreJob = null
         }
     }
 
@@ -1200,7 +1284,22 @@ private fun LiveCatalogScreen(
             .padding(
                 horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
                 vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
-            ),
+            )
+            .onPreviewKeyEvent { event ->
+                if (
+                    isTv && event.type == KeyEventType.KeyDown &&
+                    event.key in setOf(
+                        Key.DirectionLeft,
+                        Key.DirectionRight,
+                        Key.DirectionUp,
+                        Key.DirectionDown,
+                    )
+                ) {
+                    liveUserInteracted = true
+                    liveRestoreJob?.cancel()
+                }
+                false
+            },
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
@@ -1228,7 +1327,7 @@ private fun LiveCatalogScreen(
                     ) {
                         itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
                             val key = "${channel.type}:${channel.id}"
-                            val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
+                            val requester = checkNotNull(channelFocus[key])
                             ChannelListItem(
                                 item = channel,
                                 selected = preview?.id == channel.id,
@@ -1238,16 +1337,22 @@ private fun LiveCatalogScreen(
                                 },
                                 onClick = { onOpen(channel) },
                                 modifier = Modifier
-                                    .restoreFocus(restore, channelRequester)
+                                    .focusRequester(requester)
                                     .onPreviewKeyEvent { event ->
-                                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                                            requestLiveFocus(playRequester)
-                                        } else {
+                                        if (event.type != KeyEventType.KeyDown) {
                                             false
+                                        } else {
+                                            when (event.key) {
+                                                Key.DirectionLeft -> requestLiveFocus(playRequester)
+                                                Key.DirectionUp -> requestLiveFocus(
+                                                    visibleChannelKeys.getOrNull(index - 1)?.let(channelFocus::get),
+                                                )
+                                                Key.DirectionDown -> requestLiveFocus(
+                                                    visibleChannelKeys.getOrNull(index + 1)?.let(channelFocus::get),
+                                                )
+                                                else -> false
+                                            }
                                         }
-                                    }
-                                    .focusProperties {
-                                        left = playRequester
                                     },
                                 isFavorite = isFavorite(channel),
                                 onLongClick = { onToggleFavorite(channel) },
@@ -1258,7 +1363,9 @@ private fun LiveCatalogScreen(
                 LiveStage(
                     item = preview,
                     isFavorite = preview?.let(isFavorite) == true,
-                    channelRequester = channelRequester,
+                    channelRequester = preview
+                        ?.let { "${it.type}:${it.id}" }
+                        ?.let(channelFocus::get),
                     playRequester = playRequester,
                     favoriteRequester = favoriteRequester,
                     requestFocus = requestLiveFocus,
@@ -1288,10 +1395,10 @@ private fun LiveCatalogScreen(
 private fun LiveStage(
     item: ContentItem?,
     isFavorite: Boolean,
-    channelRequester: FocusRequester,
+    channelRequester: FocusRequester?,
     playRequester: FocusRequester,
     favoriteRequester: FocusRequester,
-    requestFocus: (FocusRequester) -> Boolean,
+    requestFocus: (FocusRequester?) -> Boolean,
     onWatch: () -> Unit,
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1337,10 +1444,6 @@ private fun LiveStage(
                                             else -> false
                                         }
                                     }
-                                }
-                                .focusProperties {
-                                    left = favoriteRequester
-                                    right = channelRequester
                                 },
                             compact = true,
                         )
@@ -1360,10 +1463,6 @@ private fun LiveStage(
                                             else -> false
                                         }
                                     }
-                                }
-                                .focusProperties {
-                                    left = channelRequester
-                                    right = playRequester
                                 },
                             primary = false,
                             compact = true,
@@ -1578,12 +1677,19 @@ private fun DownloadsScreen(
     val rememberedIndex = remembered.itemIndex.coerceIn(0, downloads.lastIndex.coerceAtLeast(0))
     val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val downloadsFocusScope = rememberCoroutineScope()
-    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
     val toolbarFocus = remember { DownloadToolbarFocusRequesters() }
-    val cardFocus = remember(downloads.map { it.downloadId }) {
-        downloads.associate { item -> item.downloadId to DownloadCardFocusRequesters() }
+    val downloadIds = downloads.map { it.downloadId }
+    val cardFocus = remember { mutableMapOf<Long, DownloadCardFocusRequesters>() }
+    downloadIds.forEach { downloadId ->
+        cardFocus.getOrPut(downloadId) { DownloadCardFocusRequesters() }
     }
     var currentDownloadFocus by remember { mutableStateOf<DownloadFocusLocation?>(null) }
+    var pendingDownloadFocus by remember { mutableStateOf<DownloadFocusLocation?>(null) }
+    var currentDownloadItemId by remember { mutableStateOf<Long?>(null) }
+    var downloadsNavigationJob by remember { mutableStateOf<Job?>(null) }
+    var downloadsRestoreJob by remember { mutableStateOf<Job?>(null) }
+    var downloadsRestoreComplete by remember { mutableStateOf(false) }
+    var downloadsUserInteracted by remember { mutableStateOf(false) }
     val resolveDownloadFocus: (DownloadFocusLocation) -> FocusRequester? = { location ->
         when (location.zone) {
             DownloadFocusZone.TOOLBAR -> when (location.slot) {
@@ -1604,32 +1710,35 @@ private fun DownloadsScreen(
                 }
         }
     }
-    var downloadsNavigationJob by remember { mutableStateOf<Job?>(null) }
-    val moveDownloadFocus: (DownloadFocusLocation, DownloadFocusMove) -> Boolean = focusMove@{ current, move ->
-        val target = nextDownloadFocus(downloads.size, current, move) ?: return@focusMove false
-        val requester = resolveDownloadFocus(target) ?: return@focusMove false
+
+    val moveDownloadFocus: (DownloadFocusLocation, DownloadFocusMove) -> Boolean = { current, move ->
+        val target = nextDownloadFocus(downloads.size, current, move)
         downloadsNavigationJob?.cancel()
-        downloadsNavigationJob = downloadsFocusScope.launch {
-            runCatching {
-                val targetIsVisible = target.zone != DownloadFocusZone.CARD ||
-                    downloadsState.layoutInfo.visibleItemsInfo.any { it.index == target.row }
-                if (!targetIsVisible) {
-                    downloadsState.scrollToItem(target.row, scrollOffset = 0)
-                    delay(48)
-                } else {
-                    // A focus request issued inside the active KeyDown dispatch can be
-                    // rejected, after which Compose falls back to geometric search and
-                    // repeatedly selects the first row's primary action. Defer one turn
-                    // and consume the key so the explicit TV graph remains authoritative.
-                    yield()
+        pendingDownloadFocus = target
+        if (target != null) {
+            downloadsNavigationJob = downloadsFocusScope.launch {
+                val thisJob = currentCoroutineContext().job
+                try {
+                    val requested = requestDownloadFocusWhenReady(
+                        target,
+                        downloadsState,
+                        resolveDownloadFocus,
+                    )
+                    if (!requested && pendingDownloadFocus == target) {
+                        pendingDownloadFocus = null
+                    }
+                } finally {
+                    if (downloadsNavigationJob === thisJob) downloadsNavigationJob = null
                 }
-                requester.requestFocus()
             }
         }
+        // Every directional key from a known Downloads target is consumed, including
+        // boundaries, so Compose geometric search cannot leave the page or pick a
+        // different action while the explicit graph is waiting for LazyColumn layout.
         true
     }
     val handleDownloadDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean =
-        directionalKey@{ current, event ->
+        directionalKey@{ focusedTarget, event ->
             if (!isTv || event.type != KeyEventType.KeyDown) return@directionalKey false
             val move = when (event.key) {
                 Key.DirectionLeft -> DownloadFocusMove.LEFT
@@ -1638,8 +1747,75 @@ private fun DownloadsScreen(
                 Key.DirectionDown -> DownloadFocusMove.DOWN
                 else -> return@directionalKey false
             }
-            moveDownloadFocus(current, move)
+            downloadsUserInteracted = true
+            downloadsRestoreJob?.cancel()
+            moveDownloadFocus(pendingDownloadFocus ?: focusedTarget, move)
         }
+
+    LaunchedEffect(
+        isTv,
+        downloadIds,
+        remembered.itemKey,
+        rememberedIndex,
+        downloadsRestoreComplete,
+        downloadsUserInteracted,
+    ) {
+        if (!isTv || downloadIds.isEmpty() || downloadsRestoreComplete || downloadsUserInteracted) {
+            return@LaunchedEffect
+        }
+        val thisJob = currentCoroutineContext().job
+        downloadsRestoreJob = thisJob
+        try {
+            val rememberedId = remembered.itemKey.toLongOrNull()
+            val targetRow = rememberedId
+                ?.let(downloadIds::indexOf)
+                ?.takeIf { it >= 0 }
+                ?: rememberedIndex.coerceIn(0, downloadIds.lastIndex)
+            val restoreTarget = DownloadFocusLocation.card(targetRow, DownloadFocusSlot.PRIMARY)
+            downloadsRestoreComplete = requestDownloadFocusWhenReady(
+                restoreTarget,
+                downloadsState,
+                resolveDownloadFocus,
+            )
+        } finally {
+            if (downloadsRestoreJob === thisJob) downloadsRestoreJob = null
+        }
+    }
+
+    LaunchedEffect(downloadIds) {
+        cardFocus.keys.retainAll(downloadIds.toSet())
+        if (downloadIds.isEmpty()) {
+            downloadsNavigationJob?.cancel()
+            currentDownloadFocus = null
+            pendingDownloadFocus = null
+            currentDownloadItemId = null
+            return@LaunchedEffect
+        }
+        val focusedLocation = currentDownloadFocus
+            ?.takeIf { it.zone == DownloadFocusZone.CARD }
+            ?: return@LaunchedEffect
+        val focusedId = currentDownloadItemId ?: return@LaunchedEffect
+        val survivingIndex = downloadIds.indexOf(focusedId)
+        if (survivingIndex >= 0) {
+            currentDownloadFocus = focusedLocation.copy(row = survivingIndex)
+            return@LaunchedEffect
+        }
+
+        downloadsRestoreJob?.cancel()
+        downloadsNavigationJob?.cancel()
+        val target = focusedLocation.copy(row = focusedLocation.row.coerceAtMost(downloadIds.lastIndex))
+        currentDownloadFocus = null
+        pendingDownloadFocus = target
+        currentDownloadItemId = null
+        val thisJob = currentCoroutineContext().job
+        downloadsNavigationJob = thisJob
+        try {
+            val requested = requestDownloadFocusWhenReady(target, downloadsState, resolveDownloadFocus)
+            if (!requested && pendingDownloadFocus == target) pendingDownloadFocus = null
+        } finally {
+            if (downloadsNavigationJob === thisJob) downloadsNavigationJob = null
+        }
+    }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
@@ -1673,6 +1849,8 @@ private fun DownloadsScreen(
                     outlined = !settings.wifiOnly,
                     onFocused = {
                         currentDownloadFocus = DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI)
+                        if (pendingDownloadFocus == currentDownloadFocus) pendingDownloadFocus = null
+                        currentDownloadItemId = null
                     },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.wifi)
@@ -1681,12 +1859,7 @@ private fun DownloadsScreen(
                                 DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
                                 event,
                             )
-                        }
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
-                            downloads.size,
-                            resolveDownloadFocus,
-                        ),
+                        },
                 )
             }
             item {
@@ -1698,6 +1871,8 @@ private fun DownloadsScreen(
                     outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
                     onFocused = {
                         currentDownloadFocus = DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE)
+                        if (pendingDownloadFocus == currentDownloadFocus) pendingDownloadFocus = null
+                        currentDownloadItemId = null
                     },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.schedule)
@@ -1706,12 +1881,7 @@ private fun DownloadsScreen(
                                 DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
                                 event,
                             )
-                        }
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
-                            downloads.size,
-                            resolveDownloadFocus,
-                        ),
+                        },
                 )
             }
             item {
@@ -1723,6 +1893,8 @@ private fun DownloadsScreen(
                     outlined = true,
                     onFocused = {
                         currentDownloadFocus = DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT)
+                        if (pendingDownloadFocus == currentDownloadFocus) pendingDownloadFocus = null
+                        currentDownloadItemId = null
                     },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.concurrent)
@@ -1731,12 +1903,7 @@ private fun DownloadsScreen(
                                 DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
                                 event,
                             )
-                        }
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
-                            downloads.size,
-                            resolveDownloadFocus,
-                        ),
+                        },
                 )
             }
         }
@@ -1757,39 +1924,15 @@ private fun DownloadsScreen(
                         item = item,
                         isTv = isTv,
                         rowIndex = index,
-                        rowCount = downloads.size,
                         focusRequesters = requesters,
-                        resolveFocus = resolveDownloadFocus,
                         handleDirectionalKey = handleDownloadDirectionalKey,
-                        onFocusLocation = { currentDownloadFocus = it },
-                        restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
+                        onFocusLocation = {
+                            currentDownloadFocus = it
+                            if (pendingDownloadFocus == it) pendingDownloadFocus = null
+                            currentDownloadItemId = item.downloadId
+                        },
                         onFocused = {
                             navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
-                            if (isTv) {
-                                downloadsFocusJob?.cancel()
-                                val visibleItem = downloadsState.layoutInfo.visibleItemsInfo
-                                    .firstOrNull { it.index == index }
-                                val cardIsFullyVisible = visibleItem != null &&
-                                    visibleItem.offset >= downloadsState.layoutInfo.viewportStartOffset &&
-                                    visibleItem.offset + visibleItem.size <= downloadsState.layoutInfo.viewportEndOffset
-                                if (!cardIsFullyVisible) {
-                                    val focusedLocation = currentDownloadFocus
-                                        ?.takeIf { it.zone == DownloadFocusZone.CARD && it.row == index }
-                                    downloadsFocusJob = downloadsFocusScope.launch {
-                                        // Only re-anchor clipped cards. Scrolling an already visible
-                                        // card after focus settles rebuilds its focus targets and can
-                                        // reset a D-pad move to the first row's primary action.
-                                        delay(120)
-                                        runCatching {
-                                            downloadsState.scrollToItem(index, scrollOffset = 0)
-                                            yield()
-                                            focusedLocation
-                                                ?.let(resolveDownloadFocus)
-                                                ?.requestFocus()
-                                        }
-                                    }
-                                }
-                            }
                         },
                         onPlay = onPlay,
                         onDelete = onDelete,
@@ -1810,12 +1953,9 @@ private fun DownloadCard(
     item: OfflineDownload,
     isTv: Boolean,
     rowIndex: Int,
-    rowCount: Int,
     focusRequesters: DownloadCardFocusRequesters,
-    resolveFocus: (DownloadFocusLocation) -> FocusRequester?,
     handleDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean,
     onFocusLocation: (DownloadFocusLocation) -> Unit,
-    restoreFocus: Boolean,
     onFocused: () -> Unit,
     onPlay: (OfflineDownload) -> Unit,
     onDelete: (OfflineDownload) -> Unit,
@@ -1826,11 +1966,9 @@ private fun DownloadCard(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val recordActionFocus: (DownloadFocusSlot) -> Unit = { slot ->
-        onFocusLocation(DownloadFocusLocation.card(rowIndex, slot))
+        val location = DownloadFocusLocation.card(rowIndex, slot)
+        onFocusLocation(location)
         onFocused()
-    }
-    LaunchedEffect(restoreFocus, item.downloadId) {
-        if (restoreFocus) { delay(220); runCatching { focusRequesters.primary.requestFocus() } }
     }
     val shape = RoundedCornerShape(17.dp)
     Row(
@@ -1934,12 +2072,7 @@ private fun DownloadCard(
                                     DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                     event,
                                 )
-                            }
-                            .applyDownloadFocusPolicy(
-                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                rowCount,
-                                resolveFocus,
-                            ),
+                            },
                     )
                     OfflineStatus.FAILED -> FocusButton(
                         "اعادة المحاولة",
@@ -1955,12 +2088,7 @@ private fun DownloadCard(
                                     DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                     event,
                                 )
-                            }
-                            .applyDownloadFocusPolicy(
-                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                rowCount,
-                                resolveFocus,
-                            ),
+                            },
                     )
                     OfflineStatus.PAUSED,
                     OfflineStatus.WAITING_SCHEDULE,
@@ -1980,12 +2108,7 @@ private fun DownloadCard(
                                     DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                     event,
                                 )
-                            }
-                            .applyDownloadFocusPolicy(
-                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                rowCount,
-                                resolveFocus,
-                            ),
+                            },
                     )
                     OfflineStatus.QUEUED,
                     OfflineStatus.CHECKING,
@@ -2005,12 +2128,7 @@ private fun DownloadCard(
                                     DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                     event,
                                 )
-                            }
-                            .applyDownloadFocusPolicy(
-                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                rowCount,
-                                resolveFocus,
-                            ),
+                            },
                     )
                 }
                 FocusButton(
@@ -2029,12 +2147,7 @@ private fun DownloadCard(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
                                 event,
                             )
-                        }
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
-                            rowCount,
-                            resolveFocus,
-                        ),
+                        },
                 )
                 FocusButton(
                     if (item.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
@@ -2052,12 +2165,7 @@ private fun DownloadCard(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
                                 event,
                             )
-                        }
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
-                            rowCount,
-                            resolveFocus,
-                        ),
+                        },
                 )
             }
         }
