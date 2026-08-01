@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.Locale
+import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -87,6 +88,7 @@ class QaActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val scenario = intent.getStringExtra("scenario") ?: "home"
+        val launchToken = intent.getStringExtra("qaLaunchToken") ?: ""
         requestedOrientation = when (intent.getStringExtra("orientation")) {
             "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             "landscape" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
@@ -102,6 +104,7 @@ class QaActivity : ComponentActivity() {
                     initialDestination = scenario.toDestination(),
                     isTv = forcedTv || configTv,
                     downloadHarness = downloadHarnessState,
+                    launchToken = launchToken,
                 )
             }
         }
@@ -186,6 +189,7 @@ private fun QaAuthenticatedShell(
     initialDestination: MainDestination,
     isTv: Boolean,
     downloadHarness: QaDownloadHarness?,
+    launchToken: String,
 ) {
     val (adaptiveUi, inputController) = rememberAdaptiveUiState(isTv)
     CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
@@ -198,6 +202,7 @@ private fun QaAuthenticatedShell(
                 initialDestination = initialDestination,
                 isTv = isTv,
                 downloadHarness = downloadHarness,
+                launchToken = launchToken,
             )
         }
     }
@@ -208,6 +213,7 @@ private fun FixtureMain(
     initialDestination: MainDestination,
     isTv: Boolean,
     downloadHarness: QaDownloadHarness?,
+    launchToken: String,
 ) {
     val downloadRepository = downloadHarness?.repository
     val context = LocalContext.current
@@ -216,6 +222,11 @@ private fun FixtureMain(
     }
     var state by remember(initialDestination) {
         mutableStateOf(fixtureState(initialDestination).copy(favorites = favorites))
+    }
+    LaunchedEffect(state.destination, launchToken) {
+        withContext(Dispatchers.IO) {
+            writeQaPageEvidence(context, state.destination, launchToken)
+        }
     }
     var actionRevision by remember { mutableStateOf(0) }
     var lastDownloadAction by remember { mutableStateOf<String?>(null) }
@@ -659,6 +670,26 @@ private fun jsonString(value: String): String = buildString {
         }
     }
     append('"')
+}
+
+private fun writeQaPageEvidence(
+    context: Context,
+    destination: MainDestination,
+    launchToken: String,
+) {
+    val payload = JSONObject()
+        .put("schema_version", 1)
+        .put("page", destination.name.lowercase(Locale.ROOT))
+        .put("launch_token", launchToken)
+        .put("recorded_at_epoch_ms", System.currentTimeMillis())
+        .toString()
+    val target = File(context.filesDir, "qa-page-evidence.json")
+    val temporary = File(context.filesDir, "qa-page-evidence.json.tmp")
+    temporary.writeText(payload, Charsets.UTF_8)
+    if (!temporary.renameTo(target)) {
+        target.writeText(payload, Charsets.UTF_8)
+        temporary.delete()
+    }
 }
 
 private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness) {

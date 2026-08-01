@@ -13,6 +13,7 @@ import struct
 import subprocess
 import sys
 import time
+import uuid
 from typing import Any, Iterable
 import xml.etree.ElementTree as ET
 
@@ -22,6 +23,7 @@ from lab_config import PAGES
 PACKAGE = "sa.hulksa.player.dev"
 ACTIVITY = "sa.hulksa.player.qa.QaActivity"
 PAGE_MARKER_PREFIX = "qa-page:"
+PAGE_MARKER_RE = re.compile(r"qa-page:([a-z]+)")
 DOWNLOAD_PROGRESS_MARKER = "qa-download-transfer:bytes-positive"
 DOWNLOAD_ACTION_RE = re.compile(r"qa-download-action:([a-z]+):(\d+)")
 BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
@@ -213,6 +215,117 @@ def wait_for_marker(adb: Adb, marker: str, scratch: Path, timeout: float = 12.0)
             pass
         time.sleep(0.5)
     return False
+
+
+def read_qa_page_evidence(adb: Adb) -> dict[str, Any] | None:
+    result = adb.shell(
+        ["run-as", PACKAGE, "cat", "files/qa-page-evidence.json"],
+        timeout=15,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def observed_page_from_xml(xml_bytes: bytes | None) -> str | None:
+    if not xml_bytes:
+        return None
+    match = PAGE_MARKER_RE.search(xml_bytes.decode("utf-8", errors="ignore"))
+    return match.group(1) if match else None
+
+
+def evaluate_page_precondition(
+    expected_page: str,
+    launch_token: str,
+    *,
+    xml_bytes: bytes | None,
+    page_evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    xml_page = observed_page_from_xml(xml_bytes)
+    evidence_token = str((page_evidence or {}).get("launch_token") or "")
+    evidence_page = str((page_evidence or {}).get("page") or "") or None
+    evidence_current = bool(launch_token and evidence_token == launch_token)
+    if xml_page == expected_page:
+        return {
+            "established": True,
+            "expected_page": expected_page,
+            "actual_page": expected_page,
+            "source": "ui_xml",
+            "launch_token": launch_token,
+            "xml_page": xml_page,
+            "debug_page": evidence_page if evidence_current else None,
+            "ui_xml_stale": False,
+            "reason": None,
+        }
+    if evidence_current and evidence_page == expected_page:
+        return {
+            "established": True,
+            "expected_page": expected_page,
+            "actual_page": expected_page,
+            "source": "debug_page_evidence",
+            "launch_token": launch_token,
+            "xml_page": xml_page,
+            "debug_page": evidence_page,
+            "ui_xml_stale": bool(xml_page and xml_page != expected_page),
+            "reason": None,
+        }
+    actual_page = evidence_page if evidence_current else xml_page
+    reason = (
+        f"expected page {expected_page!r}, observed {actual_page!r}"
+        if actual_page
+        else f"expected page {expected_page!r}, but no current page evidence was observed"
+    )
+    return {
+        "established": False,
+        "expected_page": expected_page,
+        "actual_page": actual_page,
+        "source": None,
+        "launch_token": launch_token,
+        "xml_page": xml_page,
+        "debug_page": evidence_page if evidence_current else None,
+        "ui_xml_stale": False,
+        "reason": reason,
+    }
+
+
+def wait_for_page_precondition(
+    adb: Adb,
+    expected_page: str,
+    launch_token: str,
+    scratch: Path,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last = evaluate_page_precondition(
+        expected_page, launch_token, xml_bytes=None, page_evidence=None
+    )
+    while time.monotonic() < deadline:
+        xml_bytes: bytes | None = None
+        try:
+            xml_bytes = dump_xml(adb, scratch, attempts=1)
+            dialog_center = external_error_dialog_center(xml_bytes)
+            if dialog_center:
+                adb.shell(["input", "tap", str(dialog_center[0]), str(dialog_center[1])])
+                time.sleep(0.8)
+                continue
+        except LabError:
+            pass
+        page_evidence = read_qa_page_evidence(adb)
+        last = evaluate_page_precondition(
+            expected_page,
+            launch_token,
+            xml_bytes=xml_bytes,
+            page_evidence=page_evidence,
+        )
+        last["debug_evidence"] = page_evidence
+        if last["established"]:
+            return last
+        time.sleep(0.5)
+    return last
 
 
 def node_text(node: ET.Element) -> str:
@@ -648,11 +761,12 @@ class DeviceLab:
         self.adb.shell(["am", "force-stop", PACKAGE])
         time.sleep(1.0)
 
-    def start_page(self, page: str, case_dir: Path) -> tuple[str, bool]:
+    def start_page(self, page: str, case_dir: Path) -> tuple[str, dict[str, Any]]:
         self.adb.shell(["logcat", "-c"])
         self.adb.shell(["logcat", "-b", "crash", "-c"])
         self.adb.shell(["dumpsys", "gfxinfo", PACKAGE, "reset"])
         is_tv = "true" if self.args.is_tv else "false"
+        launch_token = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}"
         start = self.adb.shell(
             [
                 "am",
@@ -670,6 +784,9 @@ class DeviceLab:
                 "--es",
                 "orientation",
                 self.current_orientation,
+                "--es",
+                "qaLaunchToken",
+                launch_token,
             ],
             timeout=90,
         )
@@ -679,12 +796,19 @@ class DeviceLab:
             raise LabError(f"activity launch failed for {page}: {start_text[-1000:]}")
         marker = f"{PAGE_MARKER_PREFIX}{page}"
         marker_scratch = case_dir / ".marker.xml"
-        marker_found = wait_for_marker(
+        page_precondition = wait_for_page_precondition(
             self.adb,
-            marker,
+            page,
+            launch_token,
             marker_scratch,
             timeout=15,
         )
+        debug_evidence = page_precondition.pop("debug_evidence", None)
+        if debug_evidence is not None:
+            safe_write(
+                case_dir / "page-evidence.json",
+                json.dumps(debug_evidence, ensure_ascii=False, indent=2) + "\n",
+            )
         expected = oriented_dimensions(
             self.args.width,
             self.args.height,
@@ -717,7 +841,7 @@ class DeviceLab:
             (case_dir / ".download-progress.xml").unlink(missing_ok=True)
         else:
             time.sleep(0.8)
-        return start_text, marker_found
+        return start_text, page_precondition
 
     def capture_case(self, page: str, orientation: str, font_scale: float) -> None:
         scale_id = f"font-{int(round(font_scale * 100)):03d}"
@@ -731,16 +855,24 @@ class DeviceLab:
             "font_scale": font_scale,
             "marker": f"{PAGE_MARKER_PREFIX}{page}",
             "marker_found": False,
+            "page_precondition": {
+                "established": False,
+                "expected_page": page,
+                "actual_page": None,
+                "source": None,
+                "reason": "page launch has not completed",
+            },
             "files": {},
             "capture_error": None,
             "retry_count": 0,
             "attempts": [],
         }
         try:
-            start_text, marker_found = self.start_page(page, case_dir)
-            record["marker_found"] = marker_found
+            start_text, page_precondition = self.start_page(page, case_dir)
+            record["page_precondition"] = page_precondition
+            record["marker_found"] = page_precondition.get("source") == "ui_xml"
             record["start_metrics_ms"] = parse_start_metrics(start_text)
-            if not marker_found:
+            if not page_precondition.get("established"):
                 attempt_dir = case_dir / "attempts" / "1"
                 attempt_xml = dump_xml(self.adb, attempt_dir / "ui.xml")
                 observed_packages = visible_package_names(attempt_xml)
@@ -795,8 +927,9 @@ class DeviceLab:
                     self.adb.shell(["input", "keyevent", "4"])
                     time.sleep(0.8)
                     retry_dir = case_dir / "attempts" / "2-launch"
-                    start_text, marker_found = self.start_page(page, retry_dir)
-                    record["marker_found"] = marker_found
+                    start_text, page_precondition = self.start_page(page, retry_dir)
+                    record["page_precondition"] = page_precondition
+                    record["marker_found"] = page_precondition.get("source") == "ui_xml"
                     record["start_metrics_ms"] = parse_start_metrics(start_text)
 
             file_map = {
@@ -810,6 +943,9 @@ class DeviceLab:
                 "window": case_dir / "window.txt",
                 "activity": case_dir / "activity.txt",
             }
+            page_evidence_path = case_dir / "page-evidence.json"
+            if page_evidence_path.is_file():
+                file_map["page_evidence"] = page_evidence_path
             if page == "downloads":
                 file_map.update(
                     {
@@ -917,7 +1053,8 @@ class DeviceLab:
         audit_dir.mkdir(parents=True, exist_ok=True)
         entries: list[dict[str, Any]] = []
         try:
-            _, home_marker_found = self.start_page("home", audit_dir)
+            _, home_precondition = self.start_page("home", audit_dir)
+            navigation_launch_token = str(home_precondition.get("launch_token") or "")
             for page in PAGES:
                 page_id = page["id"]
                 label = page["label"]
@@ -926,8 +1063,9 @@ class DeviceLab:
                     "orientation": orientation,
                     "page": page_id,
                     "label": label,
-                    "success": page_id == "home" and home_marker_found,
+                    "success": page_id == "home" and bool(home_precondition.get("established")),
                     "reason": None,
+                    "page_precondition": home_precondition if page_id == "home" else None,
                 }
                 if page_id == "home":
                     if not entry["success"]:
@@ -962,14 +1100,25 @@ class DeviceLab:
                 else:
                     entry["tap"] = list(center)
                     self.adb.shell(["input", "tap", str(center[0]), str(center[1])])
-                    entry["success"] = wait_for_marker(
+                    page_precondition = wait_for_page_precondition(
                         self.adb,
-                        marker,
+                        page_id,
+                        navigation_launch_token,
                         audit_dir / ".navigation-target.xml",
                         timeout=10,
                     )
+                    debug_evidence = page_precondition.pop("debug_evidence", None)
+                    entry["page_precondition"] = page_precondition
+                    entry["success"] = bool(page_precondition.get("established"))
+                    if debug_evidence is not None:
+                        evidence_file = audit_dir / f"{page_id}-page-evidence.json"
+                        safe_write(
+                            evidence_file,
+                            json.dumps(debug_evidence, ensure_ascii=False, indent=2) + "\n",
+                        )
+                        entry["page_evidence"] = evidence_file.relative_to(self.out).as_posix()
                     if not entry["success"]:
-                        entry["reason"] = f"destination marker did not become {marker}"
+                        entry["reason"] = str(page_precondition.get("reason") or f"destination marker did not become {marker}")
                 if not entry["success"]:
                     evidence = audit_dir / page_id
                     evidence.mkdir(parents=True, exist_ok=True)
