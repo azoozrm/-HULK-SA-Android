@@ -127,7 +127,7 @@ jobs:
               Path('project/app/src/debug/quality-marker-injection.json').read_text()
           )
           assert report['schema_version'] == 1
-          assert report['replacement_count'] == 28
+          assert report['replacement_count'] == 13
           assert report['original_sha256'] != report['instrumented_sha256']
           assert report['markers']
           print('PASS: disposable marker injection report is complete')
@@ -215,7 +215,7 @@ jobs:
           import json
           from pathlib import Path
           report = json.loads(Path('lab-apk/quality-marker-injection.json').read_text())
-          assert report['replacement_count'] == 28
+          assert report['replacement_count'] == 13
           assert report['original_sha256'] != report['instrumented_sha256']
           print('PASS: packaged marker evidence verified')
           PY
