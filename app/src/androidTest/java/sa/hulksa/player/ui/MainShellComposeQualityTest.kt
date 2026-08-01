@@ -178,6 +178,7 @@ class MainShellComposeQualityTest {
         compose.waitForIdle()
         compose.onNodeWithContentDescription("كل الشبكات").assertIsFocused()
         compose.onNodeWithContentDescription("كل الشبكات").performKeyInput { pressKey(Key.DirectionDown) }
+        Thread.sleep(180)
         compose.waitForIdle()
         primary[0].assertIsFocused()
 
@@ -188,6 +189,7 @@ class MainShellComposeQualityTest {
         compose.waitForIdle()
         compose.onNodeWithContentDescription("الجدولة الان").assertIsFocused()
         compose.onNodeWithContentDescription("الجدولة الان").performKeyInput { pressKey(Key.DirectionDown) }
+        Thread.sleep(180)
         compose.waitForIdle()
         priority[0].assertIsFocused()
 
@@ -198,10 +200,12 @@ class MainShellComposeQualityTest {
         compose.waitForIdle()
         compose.onNodeWithContentDescription("متزامنة  2").assertIsFocused()
         compose.onNodeWithContentDescription("متزامنة  2").performKeyInput { pressKey(Key.DirectionDown) }
+        Thread.sleep(180)
         compose.waitForIdle()
         cancel[0].assertIsFocused()
 
         cancel[0].performKeyInput { pressKey(Key.DirectionDown) }
+        Thread.sleep(180)
         compose.waitForIdle()
         cancel[1].assertIsFocused()
         cancel[1].performKeyInput { pressKey(Key.DirectionUp) }
@@ -211,6 +215,7 @@ class MainShellComposeQualityTest {
         cancel[0].performKeyInput { pressKey(Key.DirectionRight) }
         compose.waitForIdle()
         priority[0].performKeyInput { pressKey(Key.DirectionDown) }
+        Thread.sleep(180)
         compose.waitForIdle()
         priority[1].assertIsFocused()
         priority[1].performKeyInput { pressKey(Key.DirectionRight) }

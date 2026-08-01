@@ -1693,13 +1693,26 @@ private fun DownloadsScreen(
                             navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
                             if (isTv) {
                                 downloadsFocusJob?.cancel()
-                                downloadsFocusJob = downloadsFocusScope.launch {
-                                    // Compose's TV focus relocation can pivot a focused action
-                                    // above the LazyColumn viewport. Re-anchor the owning card
-                                    // after that relocation so its top edge is never clipped.
-                                    delay(120)
-                                    runCatching {
-                                        downloadsState.scrollToItem(index, scrollOffset = 0)
+                                val visibleItem = downloadsState.layoutInfo.visibleItemsInfo
+                                    .firstOrNull { it.index == index }
+                                val cardIsFullyVisible = visibleItem != null &&
+                                    visibleItem.offset >= downloadsState.layoutInfo.viewportStartOffset &&
+                                    visibleItem.offset + visibleItem.size <= downloadsState.layoutInfo.viewportEndOffset
+                                if (!cardIsFullyVisible) {
+                                    val focusedLocation = currentDownloadFocus
+                                        ?.takeIf { it.zone == DownloadFocusZone.CARD && it.row == index }
+                                    downloadsFocusJob = downloadsFocusScope.launch {
+                                        // Only re-anchor clipped cards. Scrolling an already visible
+                                        // card after focus settles rebuilds its focus targets and can
+                                        // reset a D-pad move to the first row's primary action.
+                                        delay(120)
+                                        runCatching {
+                                            downloadsState.scrollToItem(index, scrollOffset = 0)
+                                            yield()
+                                            focusedLocation
+                                                ?.let(resolveDownloadFocus)
+                                                ?.requestFocus()
+                                        }
                                     }
                                 }
                             }
