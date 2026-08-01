@@ -87,6 +87,24 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("original_sha256", source)
         self.assertIn("instrumented_sha256", source)
 
+    def test_generated_source_snapshot_binds_head_and_merge_provenance(self) -> None:
+        source = self.source("generated-source-snapshot.yml")
+        for expected in (
+            "ref: ${{ github.sha }}",
+            "SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+            "BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}",
+            "TESTED_REF: ${{ github.ref }}",
+            "TESTED_COMMIT_SHA: ${{ github.sha }}",
+            "MERGE_SHA: ${{ github.sha }}",
+            "test \"$TESTED_COMMIT_SHA\" = \"$MERGE_SHA\"",
+            "source_head_sha:$source_head_sha",
+            "tested_ref:$tested_ref",
+            "merge_sha:$merge_sha",
+            "workflow_run_id:$workflow_run_id",
+        ):
+            self.assertIn(expected, source)
+        self.assertNotIn("github.event.pull_request.merge_commit_sha", source)
+
     def test_pr_workflows_do_not_receive_signing_or_production_credentials(self) -> None:
         for filename in (
             "quality-pr.yml",

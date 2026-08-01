@@ -14,13 +14,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Separate canonical production source from debug-instrumented source
         env:
-          TESTED_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          TESTED_REF: ${{ github.ref }}
+          TESTED_COMMIT_SHA: ${{ github.sha }}
+          MERGE_SHA: ${{ github.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          test -n "$SOURCE_HEAD_SHA"
+          test -n "$TESTED_REF"
+          test -n "$TESTED_COMMIT_SHA"
+          test -n "$MERGE_SHA"
+          if [[ "$TESTED_REF" == refs/pull/*/merge ]]; then
+            test -n "$BASE_SHA"
+            test "$TESTED_COMMIT_SHA" = "$MERGE_SHA"
+          fi
           mkdir -p snapshot/canonical-production-source snapshot/debug-instrumented-source
           SOURCE='app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt'
           cp "$SOURCE" snapshot/canonical-production-source/MainShellScreen.kt
@@ -31,7 +45,20 @@ jobs:
           cp project/app/src/debug/quality-marker-injection.json snapshot/quality-marker-injection.json
           ORIGINAL_SHA="$(sha256sum snapshot/canonical-production-source/MainShellScreen.kt | awk '{print $1}')"
           INSTRUMENTED_SHA="$(sha256sum snapshot/debug-instrumented-source/MainShellScreen.kt | awk '{print $1}')"
-          jq -n --arg original_source_sha "$ORIGINAL_SHA" --arg instrumented_source_sha "$INSTRUMENTED_SHA" --arg tested_commit_sha "$TESTED_COMMIT_SHA" --arg product_source 'canonical-production-source/MainShellScreen.kt' --arg debug_source 'debug-instrumented-source/MainShellScreen.kt' '{schema_version:2,original_source_sha:$original_source_sha,instrumented_source_sha:$instrumented_source_sha,tested_commit_sha:$tested_commit_sha,product_source:$product_source,debug_instrumented_source:$debug_source,marker_injection_report:"quality-marker-injection.json"}' > snapshot/MANIFEST.json
+          jq -n \
+            --arg source_head_sha "$SOURCE_HEAD_SHA" \
+            --arg base_sha "$BASE_SHA" \
+            --arg tested_ref "$TESTED_REF" \
+            --arg tested_commit_sha "$TESTED_COMMIT_SHA" \
+            --arg merge_sha "$MERGE_SHA" \
+            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
+            --arg workflow_run_attempt "$WORKFLOW_RUN_ATTEMPT" \
+            --arg original_source_sha "$ORIGINAL_SHA" \
+            --arg instrumented_source_sha "$INSTRUMENTED_SHA" \
+            --arg product_source 'canonical-production-source/MainShellScreen.kt' \
+            --arg debug_source 'debug-instrumented-source/MainShellScreen.kt' \
+            '{schema_version:3,source_head_sha:$source_head_sha,base_sha:$base_sha,tested_ref:$tested_ref,tested_commit_sha:$tested_commit_sha,merge_sha:$merge_sha,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt,original_source_sha:$original_source_sha,instrumented_source_sha:$instrumented_source_sha,product_source:$product_source,debug_instrumented_source:$debug_source,marker_injection_report:"quality-marker-injection.json"}' \
+            > snapshot/MANIFEST.json
           test "$ORIGINAL_SHA" != "$INSTRUMENTED_SHA"
           (cd snapshot && sha256sum canonical-production-source/MainShellScreen.kt debug-instrumented-source/MainShellScreen.kt quality-marker-injection.json MANIFEST.json > SHA256SUMS && sha256sum -c SHA256SUMS)
       - uses: actions/upload-artifact@v7
