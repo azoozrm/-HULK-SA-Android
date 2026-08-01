@@ -1,11 +1,12 @@
 name: Temporary Lab Supported Start Fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/quality-lab-tv-preconditions-20260801
+      - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - '.github/lab-supported-start.trigger'
+      - '.github/workflows/temp-fix-lab-supported-start.yml'
 
 permissions:
   contents: write
