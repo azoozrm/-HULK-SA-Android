@@ -1,0 +1,123 @@
+name: HULK SA Compatibility V2 - Targeted Retest
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile_id:
+        description: Exact profile id from quality/compatibility-v2/config/device-matrix.json
+        required: true
+        default: tv-logical-960x540-api35
+        type: string
+      test_class:
+        description: Exact Android instrumentation class
+        required: true
+        default: sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-profile:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.profile.outputs.api }}
+      target: ${{ steps.profile.outputs.target }}
+      profile: ${{ steps.profile.outputs.profile }}
+      width: ${{ steps.profile.outputs.width }}
+      height: ${{ steps.profile.outputs.height }}
+      density: ${{ steps.profile.outputs.density }}
+      font_scale: ${{ steps.profile.outputs.font_scale }}
+      rotation: ${{ steps.profile.outputs.rotation }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: profile
+        env:
+          PROFILE_ID: ${{ inputs.profile_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          profile_id = os.environ['PROFILE_ID']
+          data = json.loads(Path('quality/compatibility-v2/config/device-matrix.json').read_text())
+          profile = next((item for item in data['profiles'] if item['id'] == profile_id), None)
+          if profile is None:
+              raise SystemExit(f'Unknown profile id: {profile_id}')
+          target = profile['target']
+          avd_profile = 'tv_1080p' if target == 'android-tv' else 'pixel_2'
+          rotation = 1 if profile['orientation'] == 'landscape' and profile['form_factor'] != 'television' else 0
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              for key, value in {
+                  'api': profile['api'], 'target': target, 'profile': avd_profile,
+                  'width': profile['width_px'], 'height': profile['height_px'],
+                  'density': profile['density_dpi'], 'font_scale': profile['font_scale'],
+                  'rotation': rotation,
+              }.items():
+                  out.write(f'{key}={value}\n')
+          PY
+
+  targeted:
+    needs: resolve-profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      HULK_PORTAL_URL: http://3162356.xyz:8080
+      HULK_CONFIG_URL: ''
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+      - name: Build target APKs
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleDebugAndroidTest \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+      - name: Execute selected profile and selected test class
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ needs.resolve-profile.outputs.api }}
+          target: ${{ needs.resolve-profile.outputs.target }}
+          arch: x86_64
+          profile: ${{ needs.resolve-profile.outputs.profile }}
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -euo pipefail
+            adb shell wm size ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
+            adb shell wm density ${{ needs.resolve-profile.outputs.density }}
+            adb shell settings put system font_scale ${{ needs.resolve-profile.outputs.font_scale }}
+            adb shell settings put system accelerometer_rotation 0
+            adb shell settings put system user_rotation ${{ needs.resolve-profile.outputs.rotation }}
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb logcat -c
+            bash quality/compatibility-v2/collect_runtime_evidence.sh \
+              '${{ inputs.profile_id }}' 'build/compatibility-v2/targeted/${{ inputs.profile_id }}' \
+              '${{ inputs.test_class }}'
+      - name: Enforce targeted evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime \
+            --evidence-root 'build/compatibility-v2/targeted/${{ inputs.profile_id }}' \
+            --out 'build/compatibility-v2/targeted/${{ inputs.profile_id }}/gate'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-TARGETED-${{ inputs.profile_id }}-${{ github.run_id }}
+          path: build/compatibility-v2/targeted/${{ inputs.profile_id }}/
+          if-no-files-found: error
+          retention-days: 21

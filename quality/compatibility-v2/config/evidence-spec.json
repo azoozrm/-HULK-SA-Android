@@ -12,6 +12,7 @@
       "DEVICE-PROFILE.txt",
       "WINDOW-METRICS.txt",
       "INSTRUMENTATION.txt",
+      "INSTRUMENTATION.xml",
       "logcat.txt",
       "window.xml",
       "full-window.png",

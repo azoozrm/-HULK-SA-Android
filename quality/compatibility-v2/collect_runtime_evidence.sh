@@ -3,6 +3,7 @@ set -euo pipefail
 
 profile="${1:?profile id is required}"
 out="${2:?output directory is required}"
+test_class="${3:-sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest}"
 mkdir -p "$out"
 
 package="sa.hulksa.player.dev"
@@ -12,6 +13,7 @@ status=0
 
 {
   echo "profile=$profile"
+  echo "test_class=$test_class"
   echo "serial=${ANDROID_SERIAL:-$(adb get-serialno)}"
   echo "sdk=$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
   echo "model=$(adb shell getprop ro.product.model | tr -d '\r')"
@@ -30,10 +32,14 @@ status=0
 
 set +e
 adb shell am instrument -w -r \
-  -e class sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest \
+  -e class "$test_class" \
   "$test_package/$runner" > "$out/INSTRUMENTATION.txt" 2>&1
 status=$?
+python3 quality/compatibility-v2/instrumentation_to_junit.py \
+  "$out/INSTRUMENTATION.txt" "$out/INSTRUMENTATION.xml" --process-status "$status"
+parser_status=$?
 set -e
+if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
 
 adb logcat -d -v threadtime > "$out/logcat.txt" 2>&1 || true
 adb shell uiautomator dump /sdcard/compatibility-v2-window.xml > /dev/null 2>&1 || true
@@ -42,7 +48,7 @@ adb exec-out screencap -p > "$out/full-window.png" || true
 adb shell dumpsys activity top > "$out/ACTIVITY-TOP.txt" 2>&1 || true
 adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1 || true
 
-for required in DEVICE-PROFILE.txt WINDOW-METRICS.txt INSTRUMENTATION.txt logcat.txt window.xml full-window.png; do
+for required in DEVICE-PROFILE.txt WINDOW-METRICS.txt INSTRUMENTATION.txt INSTRUMENTATION.xml logcat.txt window.xml full-window.png; do
   if [[ ! -s "$out/$required" ]]; then
     echo "Missing mandatory runtime evidence: $required" >&2
     status=1
