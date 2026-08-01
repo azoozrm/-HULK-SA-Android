@@ -181,7 +181,7 @@ jobs:
           - { id: nexus-9-api28, name: 'Nexus 9 · API 28', api: 28, target: google_apis, profile: pixel_6, skin: 1536x2048, width: 1536, height: 2048, density: 320 }
           - { id: android-tv-720p-api36, name: 'Android TV 720p · API 36', api: 36, target: android-tv, profile: tv_720p, skin: 1280x720, width: 1280, height: 720, density: 213 }
           - { id: android-tv-1080p-api36, name: 'Android TV 1080p · API 36', api: 36, target: android-tv, profile: tv_1080p, skin: 1920x1080, width: 1920, height: 1080, density: 320 }
-          - { id: android-tv-4k-api36, name: 'Android TV 4K · API 36', api: 36, target: android-tv, profile: tv_1080p, skin: 3840x2160, width: 3840, height: 2160, density: 640 }
+          - { id: android-tv-4k-api36, name: 'Android TV 4K · API 36', api: 36, target: android-tv, profile: tv_4k, skin: 3840x2160, width: 3840, height: 2160, density: 640 }
     steps:
       - uses: actions/checkout@v7
         with:
