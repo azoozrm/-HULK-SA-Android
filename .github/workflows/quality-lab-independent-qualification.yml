@@ -1,0 +1,208 @@
+name: HULK SA Independent Lab Qualification
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/quality-lab-independent-qualification.yml'
+      - 'qa/lab_verifier/**'
+      - 'qa/lab_fixture_app/**'
+      - 'qa/compatibility/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-lab-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+  TESTED_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  MERGE_SHA: ${{ github.sha }}
+
+jobs:
+  host-verifier:
+    name: Independent host verifier, controls and replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enforce lab-only scope
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          invalid="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -Ev '^(qa/lab_verifier/|qa/lab_fixture_app/|qa/compatibility/|\.github/workflows/quality-lab-independent-qualification\.yml$)' || true)"
+          if [[ -n "$invalid" ]]; then
+            echo "Non-lab files are forbidden:" >&2
+            echo "$invalid" >&2
+            exit 1
+          fi
+      - name: Compile and run independent tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile qa/lab_verifier/*.py qa/lab_verifier/tests/*.py
+          python3 -m unittest discover -s qa/lab_verifier/tests -v 2>&1 | tee independent-tests.log
+          bash -n qa/lab_fixture_app/run-smoke.sh
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/quality-lab-independent-qualification.yml')"
+      - name: Golden artifact replay
+        run: |
+          set -euo pipefail
+          python3 qa/lab_verifier/cli.py replay \
+            --corpus qa/lab_verifier/corpus \
+            --repeat 8 \
+            --out independent-results
+          sha256sum independent-results/* | tee independent-results/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: independent-verifier-host-results
+          path: |
+            independent-tests.log
+            independent-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  build-fixture:
+    name: Build minimal deterministic fixture APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      apk_sha256: ${{ steps.package.outputs.apk_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.13'
+      - uses: android-actions/setup-android@v4
+      - name: Install build SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Assemble fixture
+        run: gradle -p qa/lab_fixture_app --no-daemon :app:assembleDebug
+      - name: Verify and package fixture
+        id: package
+        run: |
+          set -euo pipefail
+          APK='qa/lab_fixture_app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee fixture-badging.txt
+          grep -q "package: name='sa.hulksa.labfixture'" fixture-badging.txt
+          mkdir -p fixture-apk
+          cp "$APK" fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk
+          cp qa/lab_fixture_app/fixture-contract.json fixture-apk/
+          sha="$(sha256sum fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk | awk '{print $1}')"
+          echo "apk_sha256=$sha" >> "$GITHUB_OUTPUT"
+          sha256sum fixture-apk/* > fixture-apk/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: independent-lab-fixture-apk
+          path: |
+            fixture-apk/
+            fixture-badging.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  fixture-smoke:
+    name: Independent fixture smoke · Android TV 1080p
+    needs: [host-verifier, build-fixture]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: independent-lab-fixture-apk
+          path: fixture-apk
+      - name: Run independent 1080p fixture
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: android-tv
+          arch: x86_64
+          profile: tv_1080p
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -skin 1920x1080
+          script: |
+            set -euo pipefail
+            adb shell wm density 320
+            bash qa/lab_fixture_app/run-smoke.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk fixture-smoke fixture-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+            python3 qa/lab_verifier/build_fixture_bundle.py --raw fixture-smoke --out fixture-smoke/bundle.json --source-head-sha "$SOURCE_HEAD_SHA" --base-sha "$BASE_SHA" --tested-commit-sha "$TESTED_COMMIT_SHA" --merge-sha "$MERGE_SHA" --apk-sha256 '${{ needs.build-fixture.outputs.apk_sha256 }}' --width 1920 --height 1080 --density 320
+            python3 qa/lab_verifier/cli.py verify-bundle fixture-smoke/bundle.json > fixture-smoke/verifier-report.json
+            sha256sum fixture-smoke/* > fixture-smoke/ARTIFACT-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: independent-fixture-smoke-tv-1080p
+          path: fixture-smoke/
+          if-no-files-found: error
+          retention-days: 30
+
+  fixture-matrix:
+    name: Fixture matrix · ${{ matrix.name }}
+    needs: [build-fixture, fixture-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: pixel-4a-api29, name: 'Pixel 4a · API 29', api: 29, target: google_apis, profile: pixel_6, skin: 1080x2340, width: 1080, height: 2340, density: 440 }
+          - { id: pixel-6-api31, name: 'Pixel 6 · API 31', api: 31, target: google_apis, profile: pixel_6, skin: 1080x2400, width: 1080, height: 2400, density: 420 }
+          - { id: pixel-8-pro-api35, name: 'Pixel 8 Pro · API 35', api: 35, target: google_apis, profile: pixel_6, skin: 1344x2992, width: 1344, height: 2992, density: 480 }
+          - { id: galaxy-s24-ultra-api35, name: 'Galaxy S24 Ultra · API 35', api: 35, target: google_apis, profile: pixel_6, skin: 1440x3120, width: 1440, height: 3120, density: 560 }
+          - { id: pixel-tablet-api35, name: 'Pixel Tablet · API 35', api: 35, target: google_apis, profile: pixel_6, skin: 1600x2560, width: 1600, height: 2560, density: 320 }
+          - { id: nexus-9-api28, name: 'Nexus 9 · API 28', api: 28, target: google_apis, profile: pixel_6, skin: 1536x2048, width: 1536, height: 2048, density: 320 }
+          - { id: android-tv-720p-api36, name: 'Android TV 720p · API 36', api: 36, target: android-tv, profile: tv_720p, skin: 1280x720, width: 1280, height: 720, density: 213 }
+          - { id: android-tv-1080p-api36, name: 'Android TV 1080p · API 36', api: 36, target: android-tv, profile: tv_1080p, skin: 1920x1080, width: 1920, height: 1080, density: 320 }
+          - { id: android-tv-4k-api36, name: 'Android TV 4K · API 36', api: 36, target: android-tv, profile: tv_1080p, skin: 3840x2160, width: 3840, height: 2160, density: 640 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: independent-lab-fixture-apk
+          path: fixture-apk
+      - name: Run fixture profile
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -skin ${{ matrix.skin }}
+          script: |
+            set -euo pipefail
+            OUT='fixture-matrix/${{ matrix.id }}'
+            adb shell wm density '${{ matrix.density }}'
+            bash qa/lab_fixture_app/run-smoke.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk "$OUT" fixture-${{ matrix.id }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+            python3 qa/lab_verifier/build_fixture_bundle.py --raw "$OUT" --out "$OUT/bundle.json" --source-head-sha "$SOURCE_HEAD_SHA" --base-sha "$BASE_SHA" --tested-commit-sha "$TESTED_COMMIT_SHA" --merge-sha "$MERGE_SHA" --apk-sha256 '${{ needs.build-fixture.outputs.apk_sha256 }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' --density '${{ matrix.density }}'
+            python3 qa/lab_verifier/cli.py verify-bundle "$OUT/bundle.json" > "$OUT/verifier-report.json"
+            sha256sum "$OUT"/* > "$OUT/ARTIFACT-SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: independent-fixture-${{ matrix.id }}
+          path: fixture-matrix/${{ matrix.id }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  independent-qualification-gate:
+    name: Independent qualification gate
+    if: always()
+    needs: [host-verifier, build-fixture, fixture-smoke, fixture-matrix]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce all independent layers
+        run: |
+          set -euo pipefail
+          test '${{ needs.host-verifier.result }}' = success
+          test '${{ needs.build-fixture.result }}' = success
+          test '${{ needs.fixture-smoke.result }}' = success
+          test '${{ needs.fixture-matrix.result }}' = success
