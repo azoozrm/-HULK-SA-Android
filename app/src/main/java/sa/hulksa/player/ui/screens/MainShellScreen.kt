@@ -1168,6 +1168,15 @@ private fun LiveCatalogScreen(
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
+    val liveFocusScope = rememberCoroutineScope()
+    val requestLiveFocus: (FocusRequester) -> Boolean = { requester ->
+        liveFocusScope.launch {
+            // Native Android TV key events must finish dispatch before focus moves.
+            yield()
+            runCatching { requester.requestFocus() }
+        }
+        true
+    }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     LaunchedEffect(listState, visible) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
@@ -1228,9 +1237,18 @@ private fun LiveCatalogScreen(
                                     navigationMemory.save(MainDestination.LIVE, key, index)
                                 },
                                 onClick = { onOpen(channel) },
-                                modifier = Modifier.restoreFocus(restore, channelRequester).focusProperties {
-                                    left = playRequester
-                                },
+                                modifier = Modifier
+                                    .restoreFocus(restore, channelRequester)
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                                            requestLiveFocus(playRequester)
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    .focusProperties {
+                                        left = playRequester
+                                    },
                                 isFavorite = isFavorite(channel),
                                 onLongClick = { onToggleFavorite(channel) },
                             )
@@ -1243,6 +1261,7 @@ private fun LiveCatalogScreen(
                     channelRequester = channelRequester,
                     playRequester = playRequester,
                     favoriteRequester = favoriteRequester,
+                    requestFocus = requestLiveFocus,
                     onWatch = { preview?.let(onOpen) },
                     onToggleFavorite = { preview?.let(onToggleFavorite) },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -1272,6 +1291,7 @@ private fun LiveStage(
     channelRequester: FocusRequester,
     playRequester: FocusRequester,
     favoriteRequester: FocusRequester,
+    requestFocus: (FocusRequester) -> Boolean,
     onWatch: () -> Unit,
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1303,15 +1323,50 @@ private fun LiveStage(
                     ) {
                         FocusButton(
                             "تشغيل القناة", onWatch,
-                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester).focusProperties {
-                                left = favoriteRequester; right = channelRequester
-                            }, compact = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .focusRequester(playRequester)
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) {
+                                        false
+                                    } else {
+                                        when (event.key) {
+                                            Key.DirectionLeft -> requestFocus(favoriteRequester)
+                                            Key.DirectionRight -> requestFocus(channelRequester)
+                                            else -> false
+                                        }
+                                    }
+                                }
+                                .focusProperties {
+                                    left = favoriteRequester
+                                    right = channelRequester
+                                },
+                            compact = true,
                         )
                         FocusButton(
                             if (isFavorite) "★ في المفضلة" else "+ المفضلة", onToggleFavorite,
-                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
-                                left = channelRequester; right = playRequester
-                            }, primary = false, compact = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .focusRequester(favoriteRequester)
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) {
+                                        false
+                                    } else {
+                                        when (event.key) {
+                                            Key.DirectionLeft -> requestFocus(channelRequester)
+                                            Key.DirectionRight -> requestFocus(playRequester)
+                                            else -> false
+                                        }
+                                    }
+                                }
+                                .focusProperties {
+                                    left = channelRequester
+                                    right = playRequester
+                                },
+                            primary = false,
+                            compact = true,
                         )
                     }
                 }
@@ -1573,17 +1628,18 @@ private fun DownloadsScreen(
         }
         true
     }
-    val handleDownloadDirectionalKey: (KeyEvent) -> Boolean = directionalKey@{ event ->
-        if (!isTv || event.type != KeyEventType.KeyDown) return@directionalKey false
-        val move = when (event.key) {
-            Key.DirectionLeft -> DownloadFocusMove.LEFT
-            Key.DirectionRight -> DownloadFocusMove.RIGHT
-            Key.DirectionUp -> DownloadFocusMove.UP
-            Key.DirectionDown -> DownloadFocusMove.DOWN
-            else -> return@directionalKey false
+    val handleDownloadDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean =
+        directionalKey@{ current, event ->
+            if (!isTv || event.type != KeyEventType.KeyDown) return@directionalKey false
+            val move = when (event.key) {
+                Key.DirectionLeft -> DownloadFocusMove.LEFT
+                Key.DirectionRight -> DownloadFocusMove.RIGHT
+                Key.DirectionUp -> DownloadFocusMove.UP
+                Key.DirectionDown -> DownloadFocusMove.DOWN
+                else -> return@directionalKey false
+            }
+            moveDownloadFocus(current, move)
         }
-        currentDownloadFocus?.let { moveDownloadFocus(it, move) } ?: false
-    }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
@@ -1592,8 +1648,7 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
-            .onPreviewKeyEvent(handleDownloadDirectionalKey),
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
@@ -1621,6 +1676,12 @@ private fun DownloadsScreen(
                     },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.wifi)
+                        .onPreviewKeyEvent { event ->
+                            handleDownloadDirectionalKey(
+                                DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
+                                event,
+                            )
+                        }
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
                             downloads.size,
@@ -1640,6 +1701,12 @@ private fun DownloadsScreen(
                     },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.schedule)
+                        .onPreviewKeyEvent { event ->
+                            handleDownloadDirectionalKey(
+                                DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
+                                event,
+                            )
+                        }
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
                             downloads.size,
@@ -1659,6 +1726,12 @@ private fun DownloadsScreen(
                     },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.concurrent)
+                        .onPreviewKeyEvent { event ->
+                            handleDownloadDirectionalKey(
+                                DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
+                                event,
+                            )
+                        }
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
                             downloads.size,
@@ -1687,6 +1760,7 @@ private fun DownloadsScreen(
                         rowCount = downloads.size,
                         focusRequesters = requesters,
                         resolveFocus = resolveDownloadFocus,
+                        handleDirectionalKey = handleDownloadDirectionalKey,
                         onFocusLocation = { currentDownloadFocus = it },
                         restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
                         onFocused = {
@@ -1739,6 +1813,7 @@ private fun DownloadCard(
     rowCount: Int,
     focusRequesters: DownloadCardFocusRequesters,
     resolveFocus: (DownloadFocusLocation) -> FocusRequester?,
+    handleDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean,
     onFocusLocation: (DownloadFocusLocation) -> Unit,
     restoreFocus: Boolean,
     onFocused: () -> Unit,
@@ -1854,6 +1929,12 @@ private fun DownloadCard(
                             .weight(1.35f)
                             .fillMaxHeight()
                             .focusRequester(focusRequesters.primary)
+                            .onPreviewKeyEvent { event ->
+                                handleDirectionalKey(
+                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                    event,
+                                )
+                            }
                             .applyDownloadFocusPolicy(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
@@ -1869,6 +1950,12 @@ private fun DownloadCard(
                             .weight(1.35f)
                             .fillMaxHeight()
                             .focusRequester(focusRequesters.primary)
+                            .onPreviewKeyEvent { event ->
+                                handleDirectionalKey(
+                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                    event,
+                                )
+                            }
                             .applyDownloadFocusPolicy(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
@@ -1888,6 +1975,12 @@ private fun DownloadCard(
                             .weight(1.35f)
                             .fillMaxHeight()
                             .focusRequester(focusRequesters.primary)
+                            .onPreviewKeyEvent { event ->
+                                handleDirectionalKey(
+                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                    event,
+                                )
+                            }
                             .applyDownloadFocusPolicy(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
@@ -1907,6 +2000,12 @@ private fun DownloadCard(
                             .weight(1.35f)
                             .fillMaxHeight()
                             .focusRequester(focusRequesters.primary)
+                            .onPreviewKeyEvent { event ->
+                                handleDirectionalKey(
+                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                    event,
+                                )
+                            }
                             .applyDownloadFocusPolicy(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
@@ -1925,6 +2024,12 @@ private fun DownloadCard(
                         .weight(1f)
                         .fillMaxHeight()
                         .focusRequester(focusRequesters.priority)
+                        .onPreviewKeyEvent { event ->
+                            handleDirectionalKey(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
+                                event,
+                            )
+                        }
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
                             rowCount,
@@ -1942,6 +2047,12 @@ private fun DownloadCard(
                         .weight(1f)
                         .fillMaxHeight()
                         .focusRequester(focusRequesters.cancel)
+                        .onPreviewKeyEvent { event ->
+                            handleDirectionalKey(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
+                                event,
+                            )
+                        }
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
                             rowCount,
