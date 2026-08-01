@@ -242,7 +242,15 @@ jobs:
             --arch '${{ matrix.arch }}' \
             --profile '${{ matrix.profile }}' \
             --skin '${{ matrix.boot_skin }}' \
-            --result-dir 'compatibility-results/${{ matrix.id }}' \
+            --result-dir 'compatibility-results/${{ matrix.result_dir }}' \
+            --contract-device-id '${{ matrix.id }}' \
+            --contract-device-name '${{ matrix.name }}' \
+            --physical-width '${{ matrix.physical_width }}' \
+            --physical-height '${{ matrix.physical_height }}' \
+            --logical-width '${{ matrix.logical_width }}' \
+            --logical-height '${{ matrix.logical_height }}' \
+            --density '${{ matrix.density }}' \
+            --is-tv '${{ matrix.is_tv }}' \
             -- \
             python3 qa/compatibility/run-lab.py \
               --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk \
@@ -259,7 +267,7 @@ jobs:
               --orientations '${{ matrix.orientations }}' \
               --font-scales '${{ matrix.font_scales }}' \
               --is-tv '${{ matrix.is_tv }}' \
-              --out 'compatibility-results/${{ matrix.id }}' \
+              --out 'compatibility-results/${{ matrix.result_dir }}' \
               --serial emulator-5554 \
               --source-head-sha '${{ inputs.source_head_sha || github.sha }}' \
               --base-sha '${{ inputs.base_sha }}' \
@@ -274,7 +282,7 @@ jobs:
         id: retry-check
         if: always()
         run: |
-          SUMMARY='compatibility-results/${{ matrix.id }}/summary.json'
+          SUMMARY='compatibility-results/${{ matrix.result_dir }}/summary.json'
           if [[ ! -s "$SUMMARY" ]] || python3 -c \
             'import json,sys; sys.exit(0 if int(json.load(open(sys.argv[1]))["infrastructure_error_count"]) else 1)' \
             "$SUMMARY"; then
@@ -287,7 +295,7 @@ jobs:
         if: steps.retry-check.outputs.needed == 'true'
         run: |
           set -euo pipefail
-          OUT='compatibility-results/${{ matrix.id }}'
+          OUT='compatibility-results/${{ matrix.result_dir }}'
           PRESERVED="$RUNNER_TEMP/${{ matrix.id }}-attempt-1"
           mkdir -p "$OUT"
           if [[ ! -s "$OUT/summary.json" ]]; then
@@ -323,7 +331,15 @@ jobs:
             --arch '${{ matrix.arch }}' \
             --profile '${{ matrix.profile }}' \
             --skin '${{ matrix.boot_skin }}' \
-            --result-dir 'compatibility-results/${{ matrix.id }}' \
+            --result-dir 'compatibility-results/${{ matrix.result_dir }}' \
+            --contract-device-id '${{ matrix.id }}' \
+            --contract-device-name '${{ matrix.name }}' \
+            --physical-width '${{ matrix.physical_width }}' \
+            --physical-height '${{ matrix.physical_height }}' \
+            --logical-width '${{ matrix.logical_width }}' \
+            --logical-height '${{ matrix.logical_height }}' \
+            --density '${{ matrix.density }}' \
+            --is-tv '${{ matrix.is_tv }}' \
             -- \
             python3 qa/compatibility/run-lab.py \
               --apk lab-apk/HULK-SA-COMPATIBILITY-LAB-debug.apk \
@@ -340,7 +356,7 @@ jobs:
               --orientations '${{ matrix.orientations }}' \
               --font-scales '${{ matrix.font_scales }}' \
               --is-tv '${{ matrix.is_tv }}' \
-              --out 'compatibility-results/${{ matrix.id }}' \
+              --out 'compatibility-results/${{ matrix.result_dir }}' \
               --serial emulator-5554 \
               --source-head-sha '${{ inputs.source_head_sha || github.sha }}' \
               --base-sha '${{ inputs.base_sha }}' \
@@ -355,7 +371,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          OUT='compatibility-results/${{ matrix.id }}'
+          OUT='compatibility-results/${{ matrix.result_dir }}'
           mkdir -p "$OUT"
           if [[ ! -s "$OUT/summary.json" ]]; then
             python3 qa/compatibility/make-blocked-result.py \
@@ -393,8 +409,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: compatibility-${{ matrix.id }}
-          path: compatibility-results/${{ matrix.id }}/
+          name: ${{ matrix.artifact_name }}
+          path: compatibility-results/${{ matrix.result_dir }}/
           if-no-files-found: error
           retention-days: 14
 

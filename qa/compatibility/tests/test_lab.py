@@ -26,7 +26,7 @@ from analyze import (  # noqa: E402
     live_action_measurement,
     tv_content_gutter_measurement,
 )
-from lab_config import DEVICES, PAGES, matrix_json, validate  # noqa: E402
+from lab_config import DEVICES, PAGES, TV_DISPLAY_CONTRACTS, matrix_json, validate  # noqa: E402
 
 RUN_LAB_SPEC = importlib.util.spec_from_file_location(
     "compatibility_run_lab",
@@ -73,6 +73,71 @@ class ConfigTests(unittest.TestCase):
         tv_4k = next(device for device in DEVICES if device["id"] == "android-tv-4k-api36")
         self.assertEqual("tv_4k", tv_4k["profile"])
         self.assertEqual("3840x2160", tv_4k["boot_skin"])
+
+    def test_tv_matrix_has_exact_end_to_end_display_contracts(self) -> None:
+        televisions = {device["id"]: device for device in DEVICES if device["is_tv"]}
+        self.assertEqual(set(TV_DISPLAY_CONTRACTS), set(televisions))
+        for device_id, expected in TV_DISPLAY_CONTRACTS.items():
+            device = televisions[device_id]
+            self.assertEqual(
+                expected,
+                {
+                    key: device[key]
+                    for key in ("name", "profile", "boot_skin", "width", "height", "density")
+                },
+            )
+            self.assertEqual((device["width"], device["height"]), (
+                device["physical_width"], device["physical_height"]
+            ))
+            self.assertEqual((device["width"], device["height"]), (
+                device["logical_width"], device["logical_height"]
+            ))
+            self.assertEqual(f"{device['width']}x{device['height']}", device["viewport"])
+            self.assertEqual(device_id, device["result_dir"])
+            self.assertEqual(f"compatibility-{device_id}", device["artifact_name"])
+
+    def test_workflow_passes_the_same_matrix_contract_to_runner_and_lab(self) -> None:
+        workflow = (LAB_ROOT.parents[1] / ".github/workflows/compatibility-lab.yml").read_text()
+        for argument, matrix_field in (
+            ("--profile", "profile"),
+            ("--skin", "boot_skin"),
+            ("--contract-device-id", "id"),
+            ("--contract-device-name", "name"),
+            ("--physical-width", "physical_width"),
+            ("--physical-height", "physical_height"),
+            ("--logical-width", "logical_width"),
+            ("--logical-height", "logical_height"),
+            ("--density", "density"),
+            ("--is-tv", "is_tv"),
+        ):
+            self.assertGreaterEqual(
+                workflow.count(f"{argument} '${{{{ matrix.{matrix_field} }}}}'"),
+                2,
+                f"runner contract missing {argument}",
+            )
+        self.assertIn("--out 'compatibility-results/${{ matrix.result_dir }}'", workflow)
+        self.assertIn("name: ${{ matrix.artifact_name }}", workflow)
+
+    def test_native_runner_rejects_a_tv_skin_contract_mismatch_before_boot(self) -> None:
+        runner = LAB_ROOT / "run-native-emulator.sh"
+        result = subprocess.run(
+            [
+                "bash", str(runner),
+                "--api", "36", "--target", "android-tv", "--arch", "x86_64",
+                "--profile", "tv_720p", "--skin", "1920x1080",
+                "--result-dir", "/tmp/hulk-runner-contract-test",
+                "--contract-device-id", "android-tv-720p-api36",
+                "--contract-device-name", "Android TV 720p",
+                "--physical-width", "1280", "--physical-height", "720",
+                "--logical-width", "1280", "--logical-height", "720",
+                "--density", "213", "--is-tv", "true", "--", "true",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("skin 1920x1080 != physical size 1280x720", result.stderr)
 
     def test_png_dimensions_reads_screencap_header(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".png") as temporary:

@@ -26,7 +26,7 @@ PAGES: tuple[dict[str, str], ...] = (
 # a stable Pixel hardware definition and override size/density through wm so the
 # resulting dp canvas matches the named device. TV profiles use a real Android TV
 # x86_64 image; API 36 is the first currently published TV image with x86_64.
-DEVICES: tuple[dict[str, Any], ...] = (
+_DEVICE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "id": "pixel-4a-api29",
         "name": "Pixel 4a",
@@ -130,8 +130,8 @@ DEVICES: tuple[dict[str, Any], ...] = (
         "api": 36,
         "target": "android-tv",
         "arch": "x86_64",
-        "profile": "tv_1080p",
-        "boot_skin": "1920x1080",
+        "profile": "tv_720p",
+        "boot_skin": "1280x720",
         "width": 1280,
         "height": 720,
         "density": 213,
@@ -174,6 +174,54 @@ DEVICES: tuple[dict[str, Any], ...] = (
 )
 
 
+def _with_display_contract(device: dict[str, Any]) -> dict[str, Any]:
+    physical_width, physical_height = map(int, str(device["boot_skin"]).split("x"))
+    device_id = str(device["id"])
+    return {
+        **device,
+        "physical_width": physical_width,
+        "physical_height": physical_height,
+        "logical_width": int(device["width"]),
+        "logical_height": int(device["height"]),
+        "viewport": f"{device['width']}x{device['height']}",
+        "result_dir": device_id,
+        "artifact_name": f"compatibility-{device_id}",
+    }
+
+
+DEVICES: tuple[dict[str, Any], ...] = tuple(
+    _with_display_contract(device) for device in _DEVICE_DEFINITIONS
+)
+
+
+TV_DISPLAY_CONTRACTS: dict[str, dict[str, Any]] = {
+    "android-tv-720p-api36": {
+        "name": "Android TV 720p",
+        "profile": "tv_720p",
+        "boot_skin": "1280x720",
+        "width": 1280,
+        "height": 720,
+        "density": 213,
+    },
+    "android-tv-1080p-api36": {
+        "name": "Android TV 1080p",
+        "profile": "tv_1080p",
+        "boot_skin": "1920x1080",
+        "width": 1920,
+        "height": 1080,
+        "density": 320,
+    },
+    "android-tv-4k-api36": {
+        "name": "Android TV 4K",
+        "profile": "tv_4k",
+        "boot_skin": "3840x2160",
+        "width": 3840,
+        "height": 2160,
+        "density": 640,
+    },
+}
+
+
 def validate() -> None:
     required = {
         "id",
@@ -190,6 +238,13 @@ def validate() -> None:
         "orientations",
         "font_scales",
         "is_tv",
+        "physical_width",
+        "physical_height",
+        "logical_width",
+        "logical_height",
+        "viewport",
+        "result_dir",
+        "artifact_name",
     }
     ids: set[str] = set()
     for device in DEVICES:
@@ -206,6 +261,22 @@ def validate() -> None:
         if not re.fullmatch(r"[1-9]\d*x[1-9]\d*", str(device["boot_skin"])):
             raise ValueError(f"{device['id']}: invalid boot skin")
         boot_width, boot_height = map(int, str(device["boot_skin"]).split("x"))
+        if (boot_width, boot_height) != (
+            int(device["physical_width"]),
+            int(device["physical_height"]),
+        ):
+            raise ValueError(f"{device['id']}: boot skin and physical geometry disagree")
+        if (int(device["width"]), int(device["height"])) != (
+            int(device["logical_width"]),
+            int(device["logical_height"]),
+        ):
+            raise ValueError(f"{device['id']}: tested and logical geometry disagree")
+        if device["viewport"] != f"{device['logical_width']}x{device['logical_height']}":
+            raise ValueError(f"{device['id']}: viewport and logical geometry disagree")
+        if device["result_dir"] != device["id"]:
+            raise ValueError(f"{device['id']}: result directory must equal the device id")
+        if device["artifact_name"] != f"compatibility-{device['id']}":
+            raise ValueError(f"{device['id']}: artifact name must derive from the device id")
         if boot_width < int(device["width"]) or boot_height < int(device["height"]):
             raise ValueError(
                 f"{device['id']}: boot framebuffer cannot be smaller than tested geometry"
@@ -219,6 +290,15 @@ def validate() -> None:
             device["api"] != 36 or device["target"] != "android-tv" or device["arch"] != "x86_64"
         ):
             raise ValueError(f"{device['id']}: TV profiles must use the published API 36 x86_64 image")
+        if device["is_tv"]:
+            expected = TV_DISPLAY_CONTRACTS.get(str(device["id"]))
+            actual = {key: device[key] for key in ("name", "profile", "boot_skin", "width", "height", "density")}
+            if expected != actual:
+                raise ValueError(
+                    f"{device['id']}: TV display contract mismatch: expected {expected}, got {actual}"
+                )
+            if (boot_width, boot_height) != (int(device["width"]), int(device["height"])):
+                raise ValueError(f"{device['id']}: TV physical and logical resolutions must match")
 
     page_ids = [page["id"] for page in PAGES]
     if len(page_ids) != len(set(page_ids)):
