@@ -1,0 +1,47 @@
+name: Temporary Compatibility Lab Import
+
+on:
+  push:
+    branches:
+      - fix/quality-lab-tv-preconditions-20260801
+    paths:
+      - '.github/quality-lab-import.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  import-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Import compatibility-lab-only repair
+        run: |
+          set -euo pipefail
+          git fetch origin archive/pr57-codex-churn-20260801
+          git checkout origin/archive/pr57-codex-churn-20260801 -- qa/compatibility
+          git diff --check
+
+      - name: Validate compatibility and repository contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile qa/compatibility/*.py qa/compatibility/tests/*.py
+          python3 -m unittest discover -s qa/compatibility/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s qa/quality/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
+          python3 qa/compatibility/lab_config.py --validate
+          bash -n qa/compatibility/prepare-project.sh
+          bash -n qa/compatibility/run-native-emulator.sh
+
+      - name: Commit isolated compatibility repair
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add qa/compatibility
+          git commit -m 'fix(lab): restore deterministic TV preconditions and evidence'
+          git push origin HEAD:fix/quality-lab-tv-preconditions-20260801
