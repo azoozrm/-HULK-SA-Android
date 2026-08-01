@@ -33,7 +33,7 @@ e6354de8cd1e666d49035de3391fa12d43eaf8c5f3d537a2e05ca442c38baa84  app/src/main/j
 28c0cd9680f35840bab618f165c7df2420629f697efaa3f7ae7f4acdd0903712  app/src/main/java/sa/hulksa/player/ui/screens/DownloadFocusPolicy.kt
 45ee15418b4a54f2c7769dde022fb1b3a6b95c90d40392bc7f79175ad974a974  app/src/main/java/sa/hulksa/player/ui/screens/HomeScreen.kt
 28d6509550f3264fc70f7f69233ec4b3c3b3187baec880f686fe5b946d7ed57e  app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt
-5ce7346120f47c3dd21cc982bc69b662f2e1f6ae02c851e42461ca6a0fc5f04f  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+129a55dc37c1f1cb6e2e0a187a4e86715d39f43dc0d9077bc1ee82f4a30f74c0  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 87e0a9dfb54427781adf14991a464b8dec0ef29cc11d53840fb98cdb16107d98  app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
 8a43849b9bc6a097e7594e5ca1ceb7992157077a7a87f7e32a1e52cbe5724d2a  app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 169f06c1dc391d2533bc2573f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt

@@ -1193,9 +1193,8 @@ private fun LiveCatalogScreen(
     val restoreChannelKey = visible.getOrNull(restoreChannelIndex)?.let { "${it.type}:${it.id}" }
     var preview by remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
     val visibleChannelKeys = visible.map { "${it.type}:${it.id}" }
-    val channelFocus = remember { mutableMapOf<String, FocusRequester>() }
-    visibleChannelKeys.forEach { key ->
-        channelFocus.getOrPut(key) { FocusRequester() }
+    val channelFocus = remember(visibleChannelKeys) {
+        visibleChannelKeys.associateWith { FocusRequester() }
     }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
