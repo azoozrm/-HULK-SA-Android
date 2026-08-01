@@ -251,8 +251,9 @@ class MainShellComposeQualityTest {
         // logical primary action across pause and resume.
         primary[2].performClick()
         compose.waitForIdle()
-        compose.onAllNodesWithContentDescription("استئناف")[2].assertIsFocused()
-        compose.onAllNodesWithContentDescription("استئناف")[2].performClick()
+        val resume = compose.onNodeWithContentDescription("استئناف")
+        resume.assertIsFocused()
+        resume.performClick()
         compose.waitForIdle()
         compose.onAllNodesWithContentDescription("ايقاف مؤقت")[2].assertIsFocused()
 
