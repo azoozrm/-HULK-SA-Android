@@ -702,6 +702,49 @@ def wait_for_download_focus_stability(
 
 
 
+def wait_for_supported_download_focus(
+    adb: Adb,
+    scratch: Path,
+    display_width: int,
+    *,
+    timeout: float = 5.0,
+    consecutive_reads: int = 2,
+) -> tuple[bool, str | None, dict[str, Any] | None, bytes]:
+    """Prove any recognized Downloads start target across stable XML reads."""
+    if consecutive_reads < 2:
+        raise ValueError("stable focus requires at least two consecutive reads")
+    deadline = time.monotonic() + timeout
+    matching_reads = 0
+    read_number = 0
+    previous_target: str | None = None
+    last_target: str | None = None
+    last_node: dict[str, Any] | None = None
+    last_xml = b""
+    while time.monotonic() < deadline:
+        read_number += 1
+        read_path = scratch.with_name(
+            f"{scratch.stem}-read-{read_number}{scratch.suffix}"
+        )
+        last_xml = dump_xml(adb, read_path, attempts=1)
+        last_target, last_node = download_focus_target(last_xml, display_width)
+        if last_target is not None and last_target == previous_target:
+            matching_reads += 1
+        elif last_target is not None:
+            previous_target = last_target
+            matching_reads = 1
+        else:
+            previous_target = None
+            matching_reads = 0
+        if matching_reads >= consecutive_reads:
+            safe_write(scratch, last_xml)
+            return True, last_target, last_node, last_xml
+        time.sleep(0.12)
+    if last_xml:
+        safe_write(scratch, last_xml)
+    return False, last_target, last_node, last_xml
+
+
+
 def parse_start_metrics(text: str) -> dict[str, int]:
     result: dict[str, int] = {}
     for key in ("ThisTime", "TotalTime", "WaitTime"):
@@ -1688,7 +1731,7 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
         try:
             if restart_page:
                 self.start_page("downloads", step_root / "restart")
-            stable, initial_target, initial_node, initial_xml = wait_for_download_focus_stability(
+            stable, initial_target, initial_node, initial_xml = wait_for_supported_download_focus(
                 self.adb,
                 step_root / "initial.xml",
                 display_width,

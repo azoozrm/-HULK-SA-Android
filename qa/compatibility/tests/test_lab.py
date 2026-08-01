@@ -46,6 +46,7 @@ download_focus_target = RUN_LAB_MODULE.download_focus_target
 download_focus_graph = RUN_LAB_MODULE.download_focus_graph
 plan_download_focus_path = RUN_LAB_MODULE.plan_download_focus_path
 evaluate_page_precondition = RUN_LAB_MODULE.evaluate_page_precondition
+wait_for_supported_download_focus = RUN_LAB_MODULE.wait_for_supported_download_focus
 
 
 class ConfigTests(unittest.TestCase):
@@ -100,6 +101,32 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         self.assertEqual(b"device", result.stdout)
         self.assertEqual(3, mocked_run.call_count)
+
+    def test_supported_download_start_accepts_stable_toolbar_concurrent(self) -> None:
+        node = {"text": "متزامنة 2", "bounds": [10, 10, 100, 60]}
+        with tempfile.TemporaryDirectory() as temporary:
+            with (
+                patch(
+                    "compatibility_run_lab.dump_xml",
+                    side_effect=(b"first", b"second"),
+                ),
+                patch(
+                    "compatibility_run_lab.download_focus_target",
+                    side_effect=(("toolbar-concurrent", node), ("toolbar-concurrent", node)),
+                ),
+                patch("compatibility_run_lab.time.sleep"),
+            ):
+                stable, target, observed, xml = wait_for_supported_download_focus(
+                    object(),
+                    Path(temporary) / "initial.xml",
+                    1280,
+                    timeout=1.0,
+                    consecutive_reads=2,
+                )
+        self.assertTrue(stable)
+        self.assertEqual("toolbar-concurrent", target)
+        self.assertEqual(node, observed)
+        self.assertEqual(b"second", xml)
 
     def test_external_error_dialog_close_target_is_detected(self) -> None:
         xml = (
