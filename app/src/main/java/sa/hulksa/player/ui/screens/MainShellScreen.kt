@@ -78,6 +78,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -349,25 +350,11 @@ private fun Modifier.applyDownloadFocusPolicy(
     current: DownloadFocusLocation,
     rowCount: Int,
     resolve: (DownloadFocusLocation) -> FocusRequester?,
-    moveFocus: (DownloadFocusLocation, DownloadFocusMove) -> Boolean,
 ): Modifier = focusProperties {
     nextDownloadFocus(rowCount, current, DownloadFocusMove.LEFT)?.let(resolve)?.let { left = it }
     nextDownloadFocus(rowCount, current, DownloadFocusMove.RIGHT)?.let(resolve)?.let { right = it }
     nextDownloadFocus(rowCount, current, DownloadFocusMove.UP)?.let(resolve)?.let { up = it }
     nextDownloadFocus(rowCount, current, DownloadFocusMove.DOWN)?.let(resolve)?.let { down = it }
-}.onPreviewKeyEvent { event ->
-    if (event.type != KeyEventType.KeyDown) {
-        false
-    } else {
-        val move = when (event.key) {
-            Key.DirectionLeft -> DownloadFocusMove.LEFT
-            Key.DirectionRight -> DownloadFocusMove.RIGHT
-            Key.DirectionUp -> DownloadFocusMove.UP
-            Key.DirectionDown -> DownloadFocusMove.DOWN
-            else -> null
-        }
-        move?.let { moveFocus(current, it) } ?: false
-    }
 }
 
 
@@ -1540,6 +1527,7 @@ private fun DownloadsScreen(
     val cardFocus = remember(downloads.map { it.downloadId }) {
         downloads.associate { item -> item.downloadId to DownloadCardFocusRequesters() }
     }
+    var currentDownloadFocus by remember { mutableStateOf<DownloadFocusLocation?>(null) }
     val resolveDownloadFocus: (DownloadFocusLocation) -> FocusRequester? = { location ->
         when (location.zone) {
             DownloadFocusZone.TOOLBAR -> when (location.slot) {
@@ -1566,20 +1554,32 @@ private fun DownloadsScreen(
         val requester = resolveDownloadFocus(target) ?: return@focusMove false
         downloadsNavigationJob?.cancel()
         if (target.zone == DownloadFocusZone.CARD) {
+            val targetIsVisible = downloadsState.layoutInfo.visibleItemsInfo.any { it.index == target.row }
+            if (targetIsVisible) {
+                return@focusMove runCatching { requester.requestFocus() }.getOrDefault(false)
+            }
             downloadsNavigationJob = downloadsFocusScope.launch {
                 runCatching {
                     downloadsState.scrollToItem(target.row, scrollOffset = 0)
-                    delay(32)
+                    delay(48)
                     requester.requestFocus()
                 }
             }
             true
         } else {
-            runCatching {
-                requester.requestFocus()
-                true
-            }.getOrDefault(false)
+            runCatching { requester.requestFocus() }.getOrDefault(false)
         }
+    }
+    val handleDownloadDirectionalKey: (KeyEvent) -> Boolean = directionalKey@{ event ->
+        if (!isTv || event.type != KeyEventType.KeyDown) return@directionalKey false
+        val move = when (event.key) {
+            Key.DirectionLeft -> DownloadFocusMove.LEFT
+            Key.DirectionRight -> DownloadFocusMove.RIGHT
+            Key.DirectionUp -> DownloadFocusMove.UP
+            Key.DirectionDown -> DownloadFocusMove.DOWN
+            else -> return@directionalKey false
+        }
+        currentDownloadFocus?.let { moveDownloadFocus(it, move) } ?: false
     }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
@@ -1589,7 +1589,8 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)
+            .onPreviewKeyEvent(handleDownloadDirectionalKey),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
@@ -1612,13 +1613,15 @@ private fun DownloadsScreen(
                     primary = settings.wifiOnly,
                     compact = true,
                     outlined = !settings.wifiOnly,
+                    onFocused = {
+                        currentDownloadFocus = DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI)
+                    },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.wifi)
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
                             downloads.size,
                             resolveDownloadFocus,
-                            moveDownloadFocus,
                         ),
                 )
             }
@@ -1629,13 +1632,15 @@ private fun DownloadsScreen(
                     primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
                     compact = true,
                     outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
+                    onFocused = {
+                        currentDownloadFocus = DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE)
+                    },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.schedule)
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
                             downloads.size,
                             resolveDownloadFocus,
-                            moveDownloadFocus,
                         ),
                 )
             }
@@ -1646,13 +1651,15 @@ private fun DownloadsScreen(
                     primary = false,
                     compact = true,
                     outlined = true,
+                    onFocused = {
+                        currentDownloadFocus = DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT)
+                    },
                     modifier = Modifier
                         .focusRequester(toolbarFocus.concurrent)
                         .applyDownloadFocusPolicy(
                             DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
                             downloads.size,
                             resolveDownloadFocus,
-                            moveDownloadFocus,
                         ),
                 )
             }
@@ -1677,7 +1684,7 @@ private fun DownloadsScreen(
                         rowCount = downloads.size,
                         focusRequesters = requesters,
                         resolveFocus = resolveDownloadFocus,
-                        moveFocus = moveDownloadFocus,
+                        onFocusLocation = { currentDownloadFocus = it },
                         restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
                         onFocused = {
                             navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
@@ -1716,7 +1723,7 @@ private fun DownloadCard(
     rowCount: Int,
     focusRequesters: DownloadCardFocusRequesters,
     resolveFocus: (DownloadFocusLocation) -> FocusRequester?,
-    moveFocus: (DownloadFocusLocation, DownloadFocusMove) -> Boolean,
+    onFocusLocation: (DownloadFocusLocation) -> Unit,
     restoreFocus: Boolean,
     onFocused: () -> Unit,
     onPlay: (OfflineDownload) -> Unit,
@@ -1727,6 +1734,10 @@ private fun DownloadCard(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
+    val recordActionFocus: (DownloadFocusSlot) -> Unit = { slot ->
+        onFocusLocation(DownloadFocusLocation.card(rowIndex, slot))
+        onFocused()
+    }
     LaunchedEffect(restoreFocus, item.downloadId) {
         if (restoreFocus) { delay(220); runCatching { focusRequesters.primary.requestFocus() } }
     }
@@ -1822,7 +1833,7 @@ private fun DownloadCard(
                         "تشغيل",
                         { onPlay(item) },
                         compact = true,
-                        onFocused = onFocused,
+                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
                         modifier = Modifier
                             .weight(1.35f)
                             .fillMaxHeight()
@@ -1831,14 +1842,13 @@ private fun DownloadCard(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
                                 resolveFocus,
-                                moveFocus,
                             ),
                     )
                     OfflineStatus.FAILED -> FocusButton(
                         "اعادة المحاولة",
                         { onRetry(item) },
                         compact = true,
-                        onFocused = onFocused,
+                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
                         modifier = Modifier
                             .weight(1.35f)
                             .fillMaxHeight()
@@ -1847,7 +1857,6 @@ private fun DownloadCard(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
                                 resolveFocus,
-                                moveFocus,
                             ),
                     )
                     OfflineStatus.PAUSED,
@@ -1858,7 +1867,7 @@ private fun DownloadCard(
                         "استئناف",
                         { onRetry(item) },
                         compact = true,
-                        onFocused = onFocused,
+                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
                         modifier = Modifier
                             .weight(1.35f)
                             .fillMaxHeight()
@@ -1867,7 +1876,6 @@ private fun DownloadCard(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
                                 resolveFocus,
-                                moveFocus,
                             ),
                     )
                     OfflineStatus.QUEUED,
@@ -1878,7 +1886,7 @@ private fun DownloadCard(
                         { onRetry(item) },
                         primary = true,
                         compact = true,
-                        onFocused = onFocused,
+                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
                         modifier = Modifier
                             .weight(1.35f)
                             .fillMaxHeight()
@@ -1887,7 +1895,6 @@ private fun DownloadCard(
                                 DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
                                 rowCount,
                                 resolveFocus,
-                                moveFocus,
                             ),
                     )
                 }
@@ -1897,7 +1904,7 @@ private fun DownloadCard(
                     primary = item.priority == 1,
                     compact = true,
                     outlined = item.priority != 1,
-                    onFocused = onFocused,
+                    onFocused = { recordActionFocus(DownloadFocusSlot.PRIORITY) },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
@@ -1906,7 +1913,6 @@ private fun DownloadCard(
                             DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY),
                             rowCount,
                             resolveFocus,
-                            moveFocus,
                         ),
                 )
                 FocusButton(
@@ -1915,7 +1921,7 @@ private fun DownloadCard(
                     primary = false,
                     compact = true,
                     outlined = true,
-                    onFocused = onFocused,
+                    onFocused = { recordActionFocus(DownloadFocusSlot.CANCEL) },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
@@ -1924,7 +1930,6 @@ private fun DownloadCard(
                             DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL),
                             rowCount,
                             resolveFocus,
-                            moveFocus,
                         ),
                 )
             }

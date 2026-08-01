@@ -310,30 +310,49 @@ def inject_text(source: str) -> tuple[str, dict[str, Any]]:
             "DOWNLOADS",
         ),
     ):
-        source = patch_segment_one_of(
-            source,
-            function_name,
-            next_name,
+        options = [
             (
-                (
-                    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
-                    "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
-                    f".qaTvPageContent(isTv, MainDestination.{destination})) {{",
-                ),
+                "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {",
+                "Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)"
+                f".qaTvPageContent(isTv, MainDestination.{destination})) {{",
+            ),
+            (
+                "    Column(\n"
+                "        Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
+                "    ) {",
+                "    Column(\n"
+                "        Modifier\n"
+                "            .fillMaxSize()\n"
+                "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
+                f"            .qaTvPageContent(isTv, MainDestination.{destination}),\n"
+                "    ) {",
+            ),
+        ]
+        if destination == "DOWNLOADS":
+            options.append(
                 (
                     "    Column(\n"
                     "        Modifier\n"
                     "            .fillMaxSize()\n"
-                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
+                    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
+                    "            .onPreviewKeyEvent(handleDownloadDirectionalKey),\n"
                     "    ) {",
                     "    Column(\n"
                     "        Modifier\n"
                     "            .fillMaxSize()\n"
                     "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
-                    f"            .qaTvPageContent(isTv, MainDestination.{destination}),\n"
+                    f"            .qaTvPageContent(isTv, MainDestination.{destination})\n"
+                    "            .onPreviewKeyEvent(handleDownloadDirectionalKey),\n"
                     "    ) {",
-                ),
-            ),
+                )
+            )
+        source = patch_segment_one_of(
+            source,
+            function_name,
+            next_name,
+            tuple(options),
             f"{destination.lower()}-content-marker",
             changes,
         )

@@ -276,7 +276,7 @@ class ConfigTests(unittest.TestCase):
             audit.index("plan_download_focus_path("),
         )
 
-    def test_product_download_focus_consumes_directional_keys_and_scrolls_target_card(self) -> None:
+    def test_product_download_focus_consumes_directional_keys_at_screen_boundary(self) -> None:
         source = (
             LAB_ROOT.parents[1]
             / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
@@ -289,15 +289,20 @@ class ConfigTests(unittest.TestCase):
             "private fun DownloadsScreen(",
             maxsplit=1,
         )[1].split("\n@Composable\nprivate fun DownloadCard", maxsplit=1)[0]
-        self.assertIn(".onPreviewKeyEvent { event ->", policy)
-        self.assertIn("Key.DirectionDown -> DownloadFocusMove.DOWN", policy)
-        self.assertIn("moveFocus(current, it)", policy)
+        self.assertNotIn(".onPreviewKeyEvent", policy)
+        self.assertIn("var currentDownloadFocus by remember", downloads)
+        self.assertIn("import androidx.compose.ui.input.key.KeyEvent", source)
+        self.assertIn("val handleDownloadDirectionalKey: (KeyEvent) -> Boolean", downloads)
+        self.assertIn(".onPreviewKeyEvent(handleDownloadDirectionalKey)", downloads)
+        self.assertIn("Key.DirectionDown -> DownloadFocusMove.DOWN", downloads)
+        self.assertIn("currentDownloadFocus?.let { moveDownloadFocus(it, move) }", downloads)
+        self.assertIn("downloadsState.layoutInfo.visibleItemsInfo", downloads)
         self.assertIn(
             "downloadsState.scrollToItem(target.row, scrollOffset = 0)",
             downloads,
         )
         self.assertIn("requester.requestFocus()", downloads)
-        self.assertIn("moveFocus = moveDownloadFocus", downloads)
+        self.assertIn("onFocusLocation = { currentDownloadFocus = it }", downloads)
 
 
     def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:

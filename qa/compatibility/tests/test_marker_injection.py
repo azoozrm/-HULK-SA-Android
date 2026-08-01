@@ -94,6 +94,14 @@ PAGE_PRODUCT = (
     "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
     "    ) {"
 )
+DOWNLOADS_PRODUCT = (
+    "    Column(\n"
+    "        Modifier\n"
+    "            .fillMaxSize()\n"
+    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
+    "            .onPreviewKeyEvent(handleDownloadDirectionalKey),\n"
+    "    ) {"
+)
 DOWNLOAD_CARD_CANONICAL = (
     "            .height(if (isTv) 220.dp else 220.dp)\n"
     "            .clip(shape)"
@@ -225,12 +233,13 @@ def layout_shape(source: str, target: str) -> str:
             "downloads",
         ),
     ):
+        product_shape = DOWNLOADS_PRODUCT if destination == "downloads" else PAGE_PRODUCT
         source = normalize_segment_shape(
             source,
             function_name,
             next_name,
             PAGE_CANONICAL,
-            PAGE_PRODUCT,
+            product_shape,
             target,
             destination,
         )
