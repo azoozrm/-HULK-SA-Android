@@ -2053,80 +2053,41 @@ private fun DownloadCard(
                 modifier = Modifier.fillMaxWidth().height(44.dp).focusGroup(),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                when (item.status) {
-                    OfflineStatus.COMPLETED -> FocusButton(
-                        "تشغيل",
-                        { onPlay(item) },
-                        compact = true,
-                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
-                        modifier = Modifier
-                            .weight(1.35f)
-                            .fillMaxHeight()
-                            .focusRequester(focusRequesters.primary)
-                            .onPreviewKeyEvent { event ->
-                                handleDirectionalKey(
-                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                    event,
-                                )
-                            },
-                    )
-                    OfflineStatus.FAILED -> FocusButton(
-                        "اعادة المحاولة",
-                        { onRetry(item) },
-                        compact = true,
-                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
-                        modifier = Modifier
-                            .weight(1.35f)
-                            .fillMaxHeight()
-                            .focusRequester(focusRequesters.primary)
-                            .onPreviewKeyEvent { event ->
-                                handleDirectionalKey(
-                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                    event,
-                                )
-                            },
-                    )
+                val primaryActionLabel = when (item.status) {
+                    OfflineStatus.COMPLETED -> "تشغيل"
+                    OfflineStatus.FAILED -> "اعادة المحاولة"
                     OfflineStatus.PAUSED,
                     OfflineStatus.WAITING_SCHEDULE,
                     OfflineStatus.WAITING_NETWORK,
                     OfflineStatus.WAITING_STORAGE,
-                    -> FocusButton(
-                        "استئناف",
-                        { onRetry(item) },
-                        compact = true,
-                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
-                        modifier = Modifier
-                            .weight(1.35f)
-                            .fillMaxHeight()
-                            .focusRequester(focusRequesters.primary)
-                            .onPreviewKeyEvent { event ->
-                                handleDirectionalKey(
-                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                    event,
-                                )
-                            },
-                    )
+                    -> "استئناف"
                     OfflineStatus.QUEUED,
                     OfflineStatus.CHECKING,
                     OfflineStatus.DOWNLOADING,
-                    -> FocusButton(
-                        "ايقاف مؤقت",
-                        { onRetry(item) },
-                        primary = true,
-                        compact = true,
-                        onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
-                        modifier = Modifier
-                            .weight(1.35f)
-                            .fillMaxHeight()
-                            .focusRequester(focusRequesters.primary)
-                            .onPreviewKeyEvent { event ->
-                                handleDirectionalKey(
-                                    DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
-                                    event,
-                                )
-                            },
-                    )
+                    -> "ايقاف مؤقت"
                 }
+                FocusButton(
+                    primaryActionLabel,
+                    {
+                        if (item.status == OfflineStatus.COMPLETED) {
+                            onPlay(item)
+                        } else {
+                            onRetry(item)
+                        }
+                    },
+                    compact = true,
+                    onFocused = { recordActionFocus(DownloadFocusSlot.PRIMARY) },
+                    modifier = Modifier
+                        .weight(1.35f)
+                        .fillMaxHeight()
+                        .focusRequester(focusRequesters.primary)
+                        .onPreviewKeyEvent { event ->
+                            handleDirectionalKey(
+                                DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY),
+                                event,
+                            )
+                        },
+                )
                 FocusButton(
                     priorityShortLabel(item.priority),
                     { onCyclePriority(item) },

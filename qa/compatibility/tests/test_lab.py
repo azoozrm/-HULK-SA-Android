@@ -381,6 +381,8 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(6, card.count(".onPreviewKeyEvent { event ->"))
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY)", card)
+        self.assertIn("val primaryActionLabel = when (item.status)", card)
+        self.assertEqual(1, card.count(".focusRequester(focusRequesters.primary)"))
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY)", card)
         self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL)", card)
         self.assertIn("Key.DirectionDown -> DownloadFocusMove.DOWN", downloads)
