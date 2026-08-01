@@ -108,6 +108,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
@@ -1553,22 +1554,24 @@ private fun DownloadsScreen(
         val target = nextDownloadFocus(downloads.size, current, move) ?: return@focusMove false
         val requester = resolveDownloadFocus(target) ?: return@focusMove false
         downloadsNavigationJob?.cancel()
-        if (target.zone == DownloadFocusZone.CARD) {
-            val targetIsVisible = downloadsState.layoutInfo.visibleItemsInfo.any { it.index == target.row }
-            if (targetIsVisible) {
-                return@focusMove runCatching { requester.requestFocus() }.getOrDefault(false)
-            }
-            downloadsNavigationJob = downloadsFocusScope.launch {
-                runCatching {
+        downloadsNavigationJob = downloadsFocusScope.launch {
+            runCatching {
+                val targetIsVisible = target.zone != DownloadFocusZone.CARD ||
+                    downloadsState.layoutInfo.visibleItemsInfo.any { it.index == target.row }
+                if (!targetIsVisible) {
                     downloadsState.scrollToItem(target.row, scrollOffset = 0)
                     delay(48)
-                    requester.requestFocus()
+                } else {
+                    // A focus request issued inside the active KeyDown dispatch can be
+                    // rejected, after which Compose falls back to geometric search and
+                    // repeatedly selects the first row's primary action. Defer one turn
+                    // and consume the key so the explicit TV graph remains authoritative.
+                    yield()
                 }
+                requester.requestFocus()
             }
-            true
-        } else {
-            runCatching { requester.requestFocus() }.getOrDefault(false)
         }
+        true
     }
     val handleDownloadDirectionalKey: (KeyEvent) -> Boolean = directionalKey@{ event ->
         if (!isTv || event.type != KeyEventType.KeyDown) return@directionalKey false

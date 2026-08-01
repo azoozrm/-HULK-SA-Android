@@ -2,7 +2,7 @@ b31a9649932e43d9153bd0b0f6737cbadf89a4ea1f01d084d0dcf1bc654dc1fc  app/build.grad
 be84ea0d7f23b1aa8b5958470ea0f622a63aa05eefd40899e0e9c52e85924fba  app/proguard-rules.pro
 8b0145a8d17a7ecb1cb6046fad5032566a4aa36beeb3d47760c57a0a124098a1  app/src/androidTest/java/sa/hulksa/player/CompatibilitySmokeTest.kt
 b6d9f1c99130f3ef9f452f148b17a3a0277566cfdefbedfae9ef2d3ee3961225  app/src/androidTest/java/sa/hulksa/player/data/DownloadRepositoryFixtureTest.kt
-449ebe0de3967114a5e10a197df1605b3d739b02f374a294ececad9a0ed9ffb0  app/src/androidTest/java/sa/hulksa/player/ui/MainShellComposeQualityTest.kt
+86fee808de1643c65699901da24c6bafa836897f8ba405e95510f038ef671a7e  app/src/androidTest/java/sa/hulksa/player/ui/MainShellComposeQualityTest.kt
 7984461c4a356e5e3d0bb4e7166035eb346126577fb07039c4f6c3915c60f601  app/src/main/AndroidManifest.xml
 8cbfc148646cd02c4bc554993006f506e854e9e0b8c19d94fbedba4072bccd5a  app/src/main/java/sa/hulksa/player/DownloadNotificationPermission.kt
 c530816818aa0b879c1cde1a8439aa5722d8d2a0e11b54259a1b83790e984338  app/src/main/java/sa/hulksa/player/HulkViewModel.kt
@@ -33,7 +33,7 @@ e6354de8cd1e666d49035de3391fa12d43eaf8c5f3d537a2e05ca442c38baa84  app/src/main/j
 28c0cd9680f35840bab618f165c7df2420629f697efaa3f7ae7f4acdd0903712  app/src/main/java/sa/hulksa/player/ui/screens/DownloadFocusPolicy.kt
 45ee15418b4a54f2c7769dde022fb1b3a6b95c90d40392bc7f79175ad974a974  app/src/main/java/sa/hulksa/player/ui/screens/HomeScreen.kt
 28d6509550f3264fc70f7f69233ec4b3c3b3187baec880f686fe5b946d7ed57e  app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt
-7dcde3c9aac8a4dfe738fdd60645dc9d2b8d5d958be1c5f11036dff88d986d86  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+2f2c29d1f6f7c14f44228da3b0c0679226b8259c389f051344531507c2e266f0  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
 87e0a9dfb54427781adf14991a464b8dec0ef29cc11d53840fb98cdb16107d98  app/src/main/java/sa/hulksa/player/ui/screens/MovieDetailsScreen.kt
 8a43849b9bc6a097e7594e5ca1ceb7992157077a7a87f7e32a1e52cbe5724d2a  app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt
 169f06c1dc391d2533bc2573f3584cb5049456cae493f900b025a7e8a4309f12  app/src/main/java/sa/hulksa/player/ui/screens/SeriesScreen.kt
