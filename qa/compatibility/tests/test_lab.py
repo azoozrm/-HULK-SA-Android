@@ -956,6 +956,71 @@ class AnalyzerTests(unittest.TestCase):
             self.assertIn("download_transfer_no_byte_progress", codes)
             self.assertNotIn("download_loopback_origin_unavailable", codes)
 
+    def test_stale_download_file_evidence_is_blocked_by_launch_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_run(root)
+            manifest_path = root / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["pages"] = [{"id": "downloads", "label": "التنزيلات"}]
+            manifest["navigation"][0].update({"page": "downloads", "label": "التنزيلات"})
+            case = manifest["cases"][0]
+            case.update(
+                {
+                    "id": "portrait/font-100/downloads",
+                    "page": "downloads",
+                    "marker": "qa-page:downloads",
+                    "marker_found": True,
+                    "page_precondition": {
+                        "established": True,
+                        "expected_page": "downloads",
+                        "actual_page": "downloads",
+                        "source": "ui_xml",
+                        "launch_token": "launch-current",
+                        "reason": None,
+                    },
+                }
+            )
+            evidence_path = root / "raw/portrait/font-100/home/download-file-evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "launch_token": "launch-stale",
+                        "origin_base_url": "http://127.0.0.1:41000",
+                        "origin_running": True,
+                        "origin_bytes": 100,
+                        "repository_bytes": 100,
+                        "repository_candidate_urls": ["http://127.0.0.1:41000/fixture-1.mp4"],
+                        "partial_file_bytes": 100,
+                        "completed_file_bytes": 0,
+                        "persisted_state": {"exists": True, "length": 100},
+                        "origin_request_ledger": ["bytes=0-99"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            case["files"]["download_file_evidence"] = "raw/portrait/font-100/home/download-file-evidence.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            xml_path = root / "raw/portrait/font-100/home/ui.xml"
+            xml_path.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<hierarchy rotation="0"><node package="sa.hulksa.player.dev" '
+                'bounds="[0,0][100,200]" content-desc="qa-page:downloads">'
+                '<node package="sa.hulksa.player.dev" bounds="[10,30][90,60]" '
+                'text="التنزيلات" /></node></hierarchy>',
+                encoding="utf-8",
+            )
+
+            summary = analyze_run(root)
+
+            self.assertEqual("BLOCKED", summary["overall_status"])
+            self.assertEqual(0, summary["product_critical_count"])
+            findings = {item["code"]: item for item in summary["findings"]}
+            self.assertEqual("primary", findings["download_file_evidence_launch_mismatch"]["finding_role"])
+            self.assertEqual("blocked_assertion", findings["download_transfer_no_byte_progress"]["finding_role"])
+            self.assertFalse(summary["cases"][0]["download_boundary"]["evidence_current"])
+
     def test_invalid_page_precondition_blocks_dependent_product_checks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

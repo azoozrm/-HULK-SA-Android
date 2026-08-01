@@ -853,11 +853,53 @@ def add_case_findings(
                         boundary = json.loads(boundary_path.read_text(encoding="utf-8"))
                     except Exception:
                         boundary = None
+                boundary_blocked = False
+                boundary_root: str | None = None
+                boundary_evidence_current = False
+                origin_fixture_unavailable = False
                 if boundary is None:
-                    findings.append(finding("critical", "download_file_bytes_evidence_missing", f"{case_id}: direct file-byte boundary evidence is missing or malformed", case_id=case_id, page=page, evidence=evidence, classification="fixture", product_strict=False, gate_outcome="BLOCKED"))
-                    origin_fixture_unavailable = False
-                    origin_fixture_root = None
+                    boundary_blocked = True
+                    boundary_root = f"download-file-evidence:{case_id}"
+                    findings.append(
+                        finding(
+                            "critical",
+                            "download_file_bytes_evidence_missing",
+                            f"{case_id}: direct file-byte boundary evidence is missing or malformed",
+                            case_id=case_id,
+                            page=page,
+                            evidence=evidence,
+                            classification="fixture",
+                            root_cause_id=boundary_root,
+                            finding_role="primary",
+                            product_strict=False,
+                            gate_outcome="BLOCKED",
+                        )
+                    )
                 else:
+                    expected_launch_token = str(page_precondition.get("launch_token") or "")
+                    boundary_launch_token = str(boundary.get("launch_token") or "")
+                    boundary_evidence_current = bool(
+                        not expected_launch_token or boundary_launch_token == expected_launch_token
+                    )
+                    if not boundary_evidence_current:
+                        boundary_blocked = True
+                        boundary_root = f"download-file-evidence:{case_id}"
+                        findings.append(
+                            finding(
+                                "critical",
+                                "download_file_evidence_launch_mismatch",
+                                f"{case_id}: direct download evidence belongs to launch "
+                                f"{boundary_launch_token or 'unknown'}, expected {expected_launch_token}",
+                                case_id=case_id,
+                                page=page,
+                                evidence=evidence,
+                                classification="fixture",
+                                root_cause_id=boundary_root,
+                                finding_role="primary",
+                                product_strict=False,
+                                gate_outcome="BLOCKED",
+                            )
+                        )
                     origin_bytes = int(boundary.get("origin_bytes") or 0)
                     repository_bytes = int(boundary.get("repository_bytes") or 0)
                     partial_bytes = int(boundary.get("partial_file_bytes") or 0)
@@ -886,7 +928,8 @@ def add_case_findings(
                         )
                     )
                     origin_fixture_unavailable = bool(
-                        loopback_candidates
+                        boundary_evidence_current
+                        and loopback_candidates
                         and not request_ledger
                         and origin_bytes <= 0
                         and repository_bytes <= 0
@@ -895,8 +938,9 @@ def add_case_findings(
                             or not candidate_matches_active_origin
                         )
                     )
-                    origin_fixture_root = f"download-origin-fixture:{case_id}"
                     if origin_fixture_unavailable:
+                        boundary_blocked = True
+                        boundary_root = f"download-origin-fixture:{case_id}"
                         findings.append(
                             finding(
                                 "critical",
@@ -907,27 +951,34 @@ def add_case_findings(
                                 page=page,
                                 evidence=evidence,
                                 classification="fixture",
-                                root_cause_id=origin_fixture_root,
+                                root_cause_id=boundary_root,
                                 finding_role="primary",
                                 product_strict=False,
                                 gate_outcome="BLOCKED",
                             )
                         )
-                    if repository_bytes > 0 and origin_bytes <= 0:
-                        findings.append(finding("critical", "download_repository_origin_boundary_mismatch", f"{case_id}: repository recorded {repository_bytes} bytes without origin bytes", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
-                    if origin_bytes > 0 and repository_bytes <= 0:
-                        findings.append(finding("critical", "download_origin_repository_boundary_mismatch", f"{case_id}: origin served {origin_bytes} bytes without repository progress", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
-                    if repository_bytes > 0 and partial_bytes <= 0 and completed_bytes <= 0:
-                        findings.append(finding("critical", "download_direct_file_bytes_missing", f"{case_id}: repository progress has no independently measured partial or completed file bytes", case_id=case_id, page=page, evidence=evidence, classification="fixture", product_strict=False, gate_outcome="BLOCKED"))
+                    if boundary_evidence_current and not origin_fixture_unavailable:
+                        if repository_bytes > 0 and origin_bytes <= 0:
+                            findings.append(finding("critical", "download_repository_origin_boundary_mismatch", f"{case_id}: repository recorded {repository_bytes} bytes without origin bytes", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
+                        if origin_bytes > 0 and repository_bytes <= 0:
+                            findings.append(finding("critical", "download_origin_repository_boundary_mismatch", f"{case_id}: origin served {origin_bytes} bytes without repository progress", case_id=case_id, page=page, evidence=evidence, classification="product", product_strict=True, gate_outcome="FAIL"))
+                        if repository_bytes > 0 and partial_bytes <= 0 and completed_bytes <= 0:
+                            findings.append(finding("critical", "download_direct_file_bytes_missing", f"{case_id}: repository progress has no independently measured partial or completed file bytes", case_id=case_id, page=page, evidence=evidence, classification="fixture", product_strict=False, gate_outcome="BLOCKED"))
                 direct_repository_progress = bool(
-                    boundary is not None and int(boundary.get("repository_bytes") or 0) > 0
+                    boundary is not None
+                    and boundary_evidence_current
+                    and int(boundary.get("repository_bytes") or 0) > 0
                 )
                 direct_origin_progress = bool(
-                    boundary is not None and int(boundary.get("origin_bytes") or 0) > 0
+                    boundary is not None
+                    and boundary_evidence_current
+                    and int(boundary.get("origin_bytes") or 0) > 0
                 )
                 repository_progress = bool(ui.get("download_transfer_progress")) or direct_repository_progress
                 origin_progress = bool(ui.get("download_origin_progress")) or direct_origin_progress
                 result["download_boundary"] = {
+                    "launch_token": str((boundary or {}).get("launch_token") or ""),
+                    "evidence_current": boundary_evidence_current,
                     "origin_base_url": str((boundary or {}).get("origin_base_url") or ""),
                     "origin_running": bool((boundary or {}).get("origin_running")),
                     "origin_bytes": int((boundary or {}).get("origin_bytes") or 0),
@@ -947,7 +998,7 @@ def add_case_findings(
                         else "the production transport did not receive body bytes "
                         "from the loopback origin"
                     )
-                    if origin_fixture_unavailable:
+                    if boundary_blocked:
                         findings.append(
                             finding(
                                 "critical",
@@ -957,7 +1008,7 @@ def add_case_findings(
                                 page=page,
                                 evidence=evidence,
                                 classification="fixture",
-                                root_cause_id=origin_fixture_root,
+                                root_cause_id=boundary_root,
                                 finding_role="blocked_assertion",
                                 product_strict=False,
                                 gate_outcome="BLOCKED",
