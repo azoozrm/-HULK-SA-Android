@@ -1,7 +1,10 @@
 package sa.hulksa.player.compatibilityv2
 
+import android.app.UiModeManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.view.KeyEvent
 import androidx.lifecycle.Lifecycle
@@ -15,6 +18,8 @@ import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import sa.hulksa.player.MainActivity
@@ -26,8 +31,23 @@ class CompatibilityV2InstrumentationTest {
     private val targetContext = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
 
+    private fun isTelevision(): Boolean {
+        val mode = (targetContext.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType
+        return mode == Configuration.UI_MODE_TYPE_TELEVISION
+    }
+
+    private fun launchMainPackage(): Boolean {
+        val component = ComponentName(targetContext, MainActivity::class.java)
+        val intent = Intent.makeMainActivity(component).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+        targetContext.startActivity(intent)
+        return device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L)
+    }
+
     @Test
     fun phoneLauncherStartsRealApplicationAndSurvivesRecreation() {
+        assumeFalse("Phone lifecycle test is not applicable to television UI mode", isTelevision())
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 assertFalse(activity.isFinishing)
@@ -45,21 +65,12 @@ class CompatibilityV2InstrumentationTest {
 
     @Test
     fun explicitLauncherIntentResolvesToInstalledDebugPackage() {
-        val component = ComponentName(targetContext, MainActivity::class.java)
-        val intent = Intent.makeMainActivity(component).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        }
-        targetContext.startActivity(intent)
-
-        val appeared = device.wait(
-            Until.hasObject(By.pkg(targetContext.packageName).depth(0)),
-            15_000L,
-        )
-        assertTrue("Application package did not become visible", appeared)
+        assertTrue("Application package did not become visible", launchMainPackage())
     }
 
     @Test
-    fun televisionActivityAcceptsRapidDirectionalInputWithoutCrash() {
+    fun televisionActivityAcceptsRapidDirectionalInputAndRetainsVisibleFocus() {
+        assumeTrue("D-pad ownership test requires television UI mode", isTelevision())
         ActivityScenario.launch(TvMainActivity::class.java).use { scenario ->
             repeat(12) { index ->
                 val keyCode = when (index % 4) {
@@ -74,16 +85,16 @@ class CompatibilityV2InstrumentationTest {
             scenario.onActivity { activity ->
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
-                assertNotNull(activity.currentFocus ?: activity.window.decorView)
             }
+            val focused = device.wait(Until.findObject(By.focused(true)), 5_000L)
+            assertNotNull("No visible focused accessibility node after D-pad input", focused)
+            assertTrue("Focused node is outside the display", focused.visibleBounds.width() > 0 && focused.visibleBounds.height() > 0)
         }
     }
 
     @Test
     fun visibleApplicationNodesHaveNonZeroBoundsInsideDisplay() {
-        val component = ComponentName(targetContext, MainActivity::class.java)
-        targetContext.startActivity(Intent.makeMainActivity(component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        assertTrue(device.wait(Until.hasObject(By.pkg(targetContext.packageName)), 15_000L))
+        assertTrue("Application package did not become visible", launchMainPackage())
 
         val display = Rect(0, 0, device.displayWidth, device.displayHeight)
         val nodes = device.findObjects(By.pkg(targetContext.packageName))
@@ -97,9 +108,7 @@ class CompatibilityV2InstrumentationTest {
 
     @Test
     fun capturesFullWindowScreenshotAndHierarchyWithoutCropping() {
-        val component = ComponentName(targetContext, MainActivity::class.java)
-        targetContext.startActivity(Intent.makeMainActivity(component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        assertTrue(device.wait(Until.hasObject(By.pkg(targetContext.packageName)), 15_000L))
+        assertTrue("Application package did not become visible", launchMainPackage())
 
         val output = File(targetContext.getExternalFilesDir(null), "compatibility-v2").apply { mkdirs() }
         val screenshot = File(output, "instrumentation-full-window.png")
