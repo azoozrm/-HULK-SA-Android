@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -39,15 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -57,8 +57,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.BrandLogo
+import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
@@ -85,14 +85,8 @@ fun LoginScreen(
     var rememberAccount by remember { mutableStateOf(true) }
     val hideKeyboard: () -> Unit = {
         keyboardController?.hide()
-        val hidePlatformIme: () -> Unit = {
-            (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                ?.hideSoftInputFromWindow(view.windowToken, 0)
-            Unit
-        }
-        view.post(hidePlatformIme)
-        view.postDelayed(hidePlatformIme, 100L)
-        view.postDelayed(hidePlatformIme, 260L)
+        (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(view.windowToken, 0)
         Unit
     }
     val dismissKeyboard: () -> Unit = {
@@ -123,13 +117,12 @@ fun LoginScreen(
                         Color(0xFF090A07).copy(alpha = .42f),
                         Color.Transparent,
                     ),
-                    center = Offset(if (isTv) 265f else 80f, if (isTv) 380f else 120f),
-                    radius = if (isTv) 680f else 520f,
                 ),
             )
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { dismissKeyboard() })
             }
+            .safeDrawingPadding()
             .imePadding(),
     ) {
         if (isStarting) {
@@ -140,14 +133,20 @@ fun LoginScreen(
             return@BoxWithConstraints
         }
 
-        val wide = isTv || maxWidth >= 760.dp
+        val wideThreshold = if (isTv) 1180.dp else 760.dp
+        val wide = maxWidth >= wideThreshold
         if (wide) {
+            val horizontalPadding = when {
+                isTv && maxWidth >= 1440.dp -> 58.dp
+                isTv -> 30.dp
+                else -> 36.dp
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(
-                        horizontal = if (isTv) 58.dp else 36.dp,
-                        vertical = if (isTv) 34.dp else 24.dp,
+                        horizontal = horizontalPadding,
+                        vertical = if (isTv) 24.dp else 20.dp,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -155,9 +154,9 @@ fun LoginScreen(
                     modifier = Modifier
                         .widthIn(max = 1110.dp)
                         .fillMaxWidth()
-                        .heightIn(min = 570.dp, max = 680.dp),
+                        .heightIn(max = 680.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 48.dp else 34.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 36.dp else 30.dp),
                 ) {
                     LoginPanel(
                         username = username,
@@ -173,7 +172,7 @@ fun LoginScreen(
                         onSubmit = submit,
                         onOpenWebsite = openWebsite,
                         onNonTextFocus = hideKeyboard,
-                        modifier = Modifier.width(if (isTv) 474.dp else 430.dp),
+                        modifier = Modifier.width(if (isTv) 450.dp else 430.dp),
                     )
 
                     Box(
@@ -204,11 +203,17 @@ fun LoginScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 28.dp),
+                    .padding(
+                        horizontal = if (isTv) 24.dp else 20.dp,
+                        vertical = if (isTv) 18.dp else 24.dp,
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                LoginBrand(isTv = false, modifier = Modifier.height(210.dp))
-                Spacer(Modifier.height(18.dp))
+                LoginBrand(
+                    isTv = false,
+                    modifier = Modifier.height(if (isTv) 176.dp else 200.dp),
+                )
+                Spacer(Modifier.height(if (isTv) 10.dp else 16.dp))
                 LoginPanel(
                     username = username,
                     onUsernameChange = { username = it },
@@ -223,7 +228,9 @@ fun LoginScreen(
                     onSubmit = submit,
                     onOpenWebsite = openWebsite,
                     onNonTextFocus = hideKeyboard,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 474.dp),
                 )
             }
         }
@@ -242,7 +249,7 @@ private fun LoginBrand(
     ) {
         Box(
             modifier = Modifier
-                .size(if (isTv) 390.dp else 210.dp)
+                .size(if (isTv) 390.dp else 196.dp)
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
@@ -257,7 +264,7 @@ private fun LoginBrand(
             val logoShape = RoundedCornerShape(if (isTv) 32.dp else 22.dp)
             Box(
                 modifier = Modifier
-                    .size(if (isTv) 306.dp else 172.dp)
+                    .size(if (isTv) 306.dp else 160.dp)
                     .clip(logoShape)
                     .background(Color.Black)
                     .border(1.dp, colors.gold.copy(alpha = .20f), logoShape)
@@ -305,7 +312,7 @@ private fun LoginPanel(
                 ),
             )
             .border(1.dp, Color.White.copy(alpha = .075f), panelShape)
-            .padding(horizontal = 34.dp, vertical = 24.dp),
+            .padding(horizontal = 28.dp, vertical = 22.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -340,7 +347,7 @@ private fun LoginPanel(
             label = "اسم المستخدم",
             modifier = Modifier
                 .fillMaxWidth()
-                .height(55.dp),
+                .heightIn(min = 55.dp),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Ascii,
                 imeAction = ImeAction.Next,
@@ -353,7 +360,7 @@ private fun LoginPanel(
             label = "كلمة المرور",
             modifier = Modifier
                 .fillMaxWidth()
-                .height(55.dp),
+                .heightIn(min = 55.dp),
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
@@ -388,7 +395,7 @@ private fun LoginPanel(
             enabled = !isLoading,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp),
+                .heightIn(min = 52.dp),
             onFocused = onNonTextFocus,
         )
         Spacer(Modifier.height(8.dp))
@@ -397,12 +404,12 @@ private fun LoginPanel(
             onClick = onOpenWebsite,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp),
+                .heightIn(min = 52.dp),
             primary = false,
             onFocused = onNonTextFocus,
             outlined = true,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             text = "hulksa.com",
             color = colors.goldBright.copy(alpha = .86f),
@@ -410,9 +417,10 @@ private fun LoginPanel(
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
             modifier = Modifier
+                .heightIn(min = 48.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .clickable(role = Role.Button, onClick = onOpenWebsite)
-                .padding(horizontal = 14.dp, vertical = 5.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
         )
     }
 }
@@ -438,7 +446,7 @@ private fun LoginOption(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(35.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(background)
             .border(if (focused) 1.dp else 0.dp, outline, RoundedCornerShape(10.dp))
@@ -447,12 +455,12 @@ private fun LoginOption(
                 if (it.isFocused) onFocused()
             }
             .clickable(role = Role.Checkbox, onClick = onClick)
-            .padding(horizontal = 7.dp),
+            .padding(horizontal = 7.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(19.dp)
+                .size(20.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(if (checked) colors.gold else Color(0xFF1B1C17))
                 .border(
@@ -472,7 +480,7 @@ private fun LoginOption(
             color = if (focused) colors.text else colors.textMuted,
             fontSize = 12.sp,
             fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
+            maxLines = 2,
         )
     }
 }
