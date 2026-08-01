@@ -280,6 +280,7 @@ fun resolveAdaptiveLayoutPolicy(
         useTwoPane = false,
         restoreFocus = inputMode != HulkInputMode.TOUCH,
     )
+}
 
 fun shouldShowFocusHighlights(
     deviceClass: HulkDeviceClass,
