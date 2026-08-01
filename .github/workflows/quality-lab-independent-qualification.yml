@@ -47,12 +47,14 @@ jobs:
           python3 -m py_compile qa/lab_verifier/*.py qa/lab_verifier/tests/*.py
           python3 -m unittest discover -s qa/lab_verifier/tests -v 2>&1 | tee independent-tests.log
           bash -n qa/lab_fixture_app/run-smoke.sh
+          bash -n qa/lab_fixture_app/run-profile.sh
+          bash -n qa/compatibility/prepare-project.sh
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/quality-lab-independent-qualification.yml')"
       - name: Golden artifact replay
         run: |
           set -euo pipefail
           python3 qa/lab_verifier/cli.py replay --corpus qa/lab_verifier/corpus --repeat 8 --out independent-results
-          sha256sum independent-results/* > independent-results/SHA256SUMS.txt
+          python3 qa/lab_verifier/write_sha256_manifest.py independent-results --output SHA256SUMS.txt
       - uses: actions/upload-artifact@v7
         with:
           name: independent-verifier-host-results
@@ -101,7 +103,7 @@ jobs:
           grep -q "package: name='sa.hulksa.labfixture'" fixture-badging.txt
           sha="$(sha256sum fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk | awk '{print $1}')"
           echo "apk_sha256=$sha" >> "$GITHUB_OUTPUT"
-          sha256sum fixture-apk/* > fixture-apk/SHA256SUMS.txt
+          python3 qa/lab_verifier/write_sha256_manifest.py fixture-apk --output SHA256SUMS.txt
       - uses: actions/upload-artifact@v7
         with:
           name: independent-lab-fixture-apk
@@ -129,7 +131,7 @@ jobs:
           set -euo pipefail
           test -s fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk
           test -s fixture-apk/fixture-contract.json
-          sha256sum -c fixture-apk/SHA256SUMS.txt
+          (cd fixture-apk && sha256sum -c SHA256SUMS.txt)
           grep -q "package: name='sa.hulksa.labfixture'" fixture-badging.txt
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm || true
@@ -144,13 +146,7 @@ jobs:
           profile: tv_1080p
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -skin 1920x1080
-          script: |
-            mkdir -p fixture-smoke
-            adb shell wm density 320
-            bash qa/lab_fixture_app/run-smoke.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk fixture-smoke fixture-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
-            python3 qa/lab_verifier/build_fixture_bundle.py --raw fixture-smoke --out fixture-smoke/bundle.json --source-head-sha "$SOURCE_HEAD_SHA" --base-sha "$BASE_SHA" --tested-commit-sha "$TESTED_COMMIT_SHA" --merge-sha "$MERGE_SHA" --apk-sha256 '${{ needs.build-fixture.outputs.apk_sha256 }}' --width 1920 --height 1080 --density 320
-            python3 qa/lab_verifier/cli.py verify-bundle fixture-smoke/bundle.json > fixture-smoke/verifier-report.json
-            sha256sum fixture-smoke/* > fixture-smoke/ARTIFACT-SHA256SUMS.txt
+          script: bash qa/lab_fixture_app/run-profile.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk fixture-smoke fixture-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} "$SOURCE_HEAD_SHA" "$BASE_SHA" "$TESTED_COMMIT_SHA" "$MERGE_SHA" '${{ needs.build-fixture.outputs.apk_sha256 }}' 1920 1080 320
       - name: Preserve runtime result
         if: always()
         run: |
@@ -199,7 +195,7 @@ jobs:
           set -euo pipefail
           test -s fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk
           test -s fixture-apk/fixture-contract.json
-          sha256sum -c fixture-apk/SHA256SUMS.txt
+          (cd fixture-apk && sha256sum -c SHA256SUMS.txt)
           grep -q "package: name='sa.hulksa.labfixture'" fixture-badging.txt
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm || true
@@ -214,20 +210,12 @@ jobs:
           profile: ${{ matrix.profile }}
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -skin ${{ matrix.skin }}
-          script: |
-            OUT='fixture-matrix/${{ matrix.id }}'
-            mkdir -p "$OUT"
-            adb shell wm density '${{ matrix.density }}'
-            bash qa/lab_fixture_app/run-smoke.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk "$OUT" fixture-${{ matrix.id }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
-            python3 qa/lab_verifier/build_fixture_bundle.py --raw "$OUT" --out "$OUT/bundle.json" --source-head-sha "$SOURCE_HEAD_SHA" --base-sha "$BASE_SHA" --tested-commit-sha "$TESTED_COMMIT_SHA" --merge-sha "$MERGE_SHA" --apk-sha256 '${{ needs.build-fixture.outputs.apk_sha256 }}' --width '${{ matrix.width }}' --height '${{ matrix.height }}' --density '${{ matrix.density }}'
-            python3 qa/lab_verifier/cli.py verify-bundle "$OUT/bundle.json" > "$OUT/verifier-report.json"
-            sha256sum "$OUT"/* > "$OUT/ARTIFACT-SHA256SUMS.txt"
+          script: bash qa/lab_fixture_app/run-profile.sh fixture-apk/HULK-SA-LAB-FIXTURE-debug.apk fixture-matrix/${{ matrix.id }} fixture-${{ matrix.id }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} "$SOURCE_HEAD_SHA" "$BASE_SHA" "$TESTED_COMMIT_SHA" "$MERGE_SHA" '${{ needs.build-fixture.outputs.apk_sha256 }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}'
       - name: Preserve runtime result
         if: always()
         run: |
-          OUT='fixture-matrix/${{ matrix.id }}'
-          mkdir -p "$OUT"
-          printf '%s\n' '${{ steps.runtime.outcome }}' > "$OUT/RUNTIME-OUTCOME.txt"
+          mkdir -p 'fixture-matrix/${{ matrix.id }}'
+          printf '%s\n' '${{ steps.runtime.outcome }}' > 'fixture-matrix/${{ matrix.id }}/RUNTIME-OUTCOME.txt'
       - uses: actions/upload-artifact@v7
         if: always()
         with:

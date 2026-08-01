@@ -49,7 +49,22 @@ adb shell wm density >"$OUT/wm-density.txt"
 adb shell dumpsys window windows >"$OUT/window.txt"
 adb shell dumpsys activity activities >"$OUT/activity.txt"
 adb logcat -d -v brief >"$OUT/logcat.txt"
-printf 'focused=row-1-primary\nfocused=row-1-primary\n' >"$OUT/focus-events.log"
+python3 - "$OUT/target-1.xml" "$OUT/target-2.xml" "$OUT/focus-events.log" <<'PY'
+import sys, xml.etree.ElementTree as ET
+output=[]
+for filename in sys.argv[1:3]:
+    root=ET.parse(filename).getroot()
+    labels=[]
+    for node in root.iter('node'):
+        if node.attrib.get('focused') == 'true':
+            label=' '.join(filter(None, (node.attrib.get('text',''), node.attrib.get('content-desc','')))).strip()
+            if label:
+                labels.append(label)
+    if len(labels) != 1:
+        raise SystemExit(f'exactly one focused target required in {filename}: {labels!r}')
+    output.append(f'focused={labels[0]}')
+open(sys.argv[3], 'w', encoding='utf-8').write('\n'.join(output) + '\n')
+PY
 grep 'HULK_FIXTURE.*MARKER' "$OUT/logcat.txt" | sed -E 's/.*MARKER //' >"$OUT/markers.log"
 grep 'HULK_FIXTURE.*STATE' "$OUT/logcat.txt" | sed -E 's/.*STATE //' >"$OUT/state.log"
 tail -1 "$OUT/state.log" | grep -o 'fixture_server=[^ ]*\|bytes_served=[0-9]*' >"$OUT/origin.log"
@@ -58,4 +73,4 @@ grep -q ' primary 1$' "$OUT/markers.log"
 grep -q 'bytes_served=4096' "$OUT/state.log"
 grep -q 'bytes_persisted=4096' "$OUT/state.log"
 printf '%s\n' "$TOKEN" >"$OUT/launch-token.txt"
-sha256sum "$OUT"/* >"$OUT/SHA256SUMS.txt"
+python3 qa/lab_verifier/write_sha256_manifest.py "$OUT" --output SHA256SUMS.txt
