@@ -62,6 +62,8 @@ jobs:
             quality/compatibility-v2/evidence_gate.py \
             quality/compatibility-v2/instrumentation_to_junit.py
           bash -n quality/compatibility-v2/collect_runtime_evidence.sh
+          bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/visual_regression.sh
 
       - name: Static validation
         run: |
@@ -94,6 +96,8 @@ jobs:
           import xml.etree.ElementTree as ET
           root = pathlib.Path('build/compatibility-v2/fast')
           files = sorted((root / 'unit-raw').glob('*.xml'))
+          if not files:
+              raise SystemExit('Missing Gradle unit-test XML; evidence cannot be synthesized')
           tests = failures = errors = skipped = 0
           for file in files:
               suite = ET.parse(file).getroot()
@@ -101,6 +105,8 @@ jobs:
               failures += int(float(suite.attrib.get('failures', 0)))
               errors += int(float(suite.attrib.get('errors', 0)))
               skipped += int(float(suite.attrib.get('skipped', 0)))
+          if tests <= 0:
+              raise SystemExit('Gradle unit-test XML contains zero executed tests')
           output = root / 'UNIT-TESTS.xml'
           output.write_text(
               f'<testsuite name="gradle-unit-summary" tests="{tests}" failures="{failures}" errors="{errors}" skipped="{skipped}" sourceFiles="{len(files)}"/>\n',
@@ -128,6 +134,7 @@ jobs:
           (
             cd "$EVIDENCE"
             find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            test -s SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
 

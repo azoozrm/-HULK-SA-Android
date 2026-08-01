@@ -7,6 +7,7 @@ on:
       - rebuild/adaptive-ui-compatibility-lab-v2
     paths:
       - 'app/**'
+      - 'quality/compatibility-v2/**'
       - 'gradle/**'
       - 'gradlew'
       - 'gradlew.bat'
@@ -20,6 +21,7 @@ on:
       - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - 'app/**'
+      - 'quality/compatibility-v2/**'
       - 'gradle/**'
       - 'gradlew'
       - 'gradlew.bat'
@@ -68,7 +70,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
 
-      - name: Verify clean production checkout
+      - name: Verify clean production checkout and V2 policy
         run: |
           set -euo pipefail
           test -f settings.gradle.kts
@@ -76,7 +78,11 @@ jobs:
           test -d app/src/main
           test ! -e qa/compatibility
           test ! -e qa/quality
+          test ! -e qa/canonical
           test ! -e app/src/main/java/sa/hulksa/player/qa
+          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
+          python3 quality/compatibility-v2/static_validate.py \
+            --repo-root . --out build/compatibility-v2/canonical-static
           ./gradlew --version
 
       - name: Build debug, unit tests and lint
@@ -125,13 +131,21 @@ jobs:
           find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -exec cp {} build-evidence/ \; || true
           if [[ -d build/reports ]]; then cp -a build/reports build-evidence/; fi
           if [[ -d app/build/reports ]]; then cp -a app/build/reports build-evidence/app-reports; fi
+          if [[ -d build/compatibility-v2/canonical-static ]]; then
+            cp -a build/compatibility-v2/canonical-static build-evidence/static-validation
+          fi
           {
             echo "commit=${GITHUB_SHA}"
             echo 'package=sa.hulksa.player'
             echo 'versionName=0.9.3.20'
             echo 'versionCode=64'
           } > build-evidence/BUILD-METADATA.txt
-          find build-evidence -type f -print0 | sort -z | xargs -0 sha256sum > build-evidence/SHA256SUMS.txt
+          (
+            cd build-evidence
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            test -s SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
 
       - uses: actions/upload-artifact@v7
         if: always()
