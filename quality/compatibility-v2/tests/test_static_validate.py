@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ MODULE_PATH = Path(__file__).parents[1] / "static_validate.py"
 SPEC = importlib.util.spec_from_file_location("compatibility_v2_static", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
+sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
