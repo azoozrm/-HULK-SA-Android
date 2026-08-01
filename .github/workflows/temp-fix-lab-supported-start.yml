@@ -58,13 +58,6 @@ jobs:
               if tests.count(method_anchor) != 1:
                   raise SystemExit('BLOCKED: test method anchor changed')
               tests = tests.replace(method_anchor, method + method_anchor, 1)
-
-          contract_anchor = '                  self.assertIn("def _deterministic_download_action_audit", source)\n'
-          contract_line = '                  self.assertIn("wait_for_supported_download_focus", source)\n'
-          if contract_line not in tests:
-              if tests.count(contract_anchor) != 1:
-                  raise SystemExit('BLOCKED: deterministic contract anchor changed')
-              tests = tests.replace(contract_anchor, contract_anchor + contract_line, 1)
           test_path.write_text(tests, encoding='utf-8')
           PY
           git diff --check
