@@ -15,6 +15,15 @@ capture_xml() {
   adb shell uiautomator dump --compressed /sdcard/fixture.xml >/dev/null
   adb exec-out cat /sdcard/fixture.xml >"$OUT/$name"
 }
+capture_failure_evidence() {
+  adb exec-out screencap -p >"$OUT/failure-screenshot.png" || true
+  adb shell wm size >"$OUT/failure-wm-size.txt" || true
+  adb shell wm density >"$OUT/failure-wm-density.txt" || true
+  adb shell dumpsys window windows >"$OUT/failure-window.txt" || true
+  adb shell dumpsys activity activities >"$OUT/failure-activity.txt" || true
+  adb logcat -d -v brief >"$OUT/failure-logcat.txt" || true
+  python3 qa/lab_verifier/write_sha256_manifest.py "$OUT" --output SHA256SUMS.txt || true
+}
 assert_focus() {
   local file="$1" label="$2"
   python3 - "$file" "$label" <<'PY'
@@ -31,6 +40,14 @@ PY
 capture_xml initial-1.xml
 sleep 0.4
 capture_xml initial-2.xml
+set +e
+python3 qa/lab_verifier/runtime_guard.py "$OUT/initial-2.xml" --out "$OUT/failure-classification.json"
+guard_status=$?
+set -e
+if [[ "$guard_status" -ne 0 ]]; then
+  capture_failure_evidence
+  exit "$guard_status"
+fi
 assert_focus "$OUT/initial-1.xml" toolbar-wifi
 assert_focus "$OUT/initial-2.xml" toolbar-wifi
 adb shell input keyevent 20
