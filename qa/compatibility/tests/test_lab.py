@@ -276,6 +276,29 @@ class ConfigTests(unittest.TestCase):
             audit.index("plan_download_focus_path("),
         )
 
+    def test_product_download_focus_consumes_directional_keys_and_scrolls_target_card(self) -> None:
+        source = (
+            LAB_ROOT.parents[1]
+            / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+        ).read_text(encoding="utf-8")
+        policy = source.split(
+            "private fun Modifier.applyDownloadFocusPolicy(",
+            maxsplit=1,
+        )[1].split("\n\n\n@Composable", maxsplit=1)[0]
+        downloads = source.split(
+            "private fun DownloadsScreen(",
+            maxsplit=1,
+        )[1].split("\n@Composable\nprivate fun DownloadCard", maxsplit=1)[0]
+        self.assertIn(".onPreviewKeyEvent { event ->", policy)
+        self.assertIn("Key.DirectionDown -> DownloadFocusMove.DOWN", policy)
+        self.assertIn("moveFocus(current, it)", policy)
+        self.assertIn(
+            "downloadsState.scrollToItem(target.row, scrollOffset = 0)",
+            downloads,
+        )
+        self.assertIn("requester.requestFocus()", downloads)
+        self.assertIn("moveFocus = moveDownloadFocus", downloads)
+
 
     def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
