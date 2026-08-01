@@ -16,6 +16,7 @@ COMPOSABLE_RE = re.compile(
 )
 ACTIVITY_RE = re.compile(r"class\s+([A-Za-z0-9_]+)\s*:\s*(?:ComponentActivity|Activity)\s*\(")
 ACTION_PARAM_RE = re.compile(r"\b(on[A-Z][A-Za-z0-9_]*)\s*:\s*\(")
+STATE_OBSERVER_CALLBACKS = frozenset({"onFocusLocation"})
 DESTINATION_RE = re.compile(r"enum class MainDestination\s*\{([^}]+)\}", re.DOTALL)
 
 STATE_SCREENS: tuple[tuple[str, str], ...] = (
@@ -120,7 +121,7 @@ def discover(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                     }
                 )
             signature = _balanced_signature(source, match.start())
-            for action in sorted(set(ACTION_PARAM_RE.findall(signature))):
+            for action in sorted(set(ACTION_PARAM_RE.findall(signature)) - STATE_OBSERVER_CALLBACKS):
                 lowered = action.lower()
                 interaction = (
                     "long-click"

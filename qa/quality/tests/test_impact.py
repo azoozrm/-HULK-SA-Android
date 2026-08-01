@@ -63,6 +63,12 @@ class UiInventoryTest(unittest.TestCase):
         self.assertTrue(any(item["action"] == "long-click" for item in actions))
         self.assertTrue(any(item["review_required"] for item in screens))
 
+    def test_focus_state_observers_are_not_inventoried_as_click_actions(self) -> None:
+        _, actions = discover(ROOT)
+        action_ids = {item["id"] for item in actions}
+        self.assertNotIn("DownloadCard:onFocusLocation", action_ids)
+        self.assertIn("DownloadCard:onDelete", action_ids)
+
     def test_inventory_is_deterministic(self) -> None:
         first = discover(ROOT)
         second = discover(ROOT)
