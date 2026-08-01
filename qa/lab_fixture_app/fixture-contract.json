@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "package": "sa.hulksa.labfixture",
+  "activity": "sa.hulksa.labfixture.MainActivity",
+  "page": "fixture",
+  "initial_target": "toolbar-wifi",
+  "stability_reads": 2,
+  "controls": [
+    "toolbar-wifi", "toolbar-schedule", "toolbar-concurrent",
+    "row-1-primary", "row-1-pause", "row-1-resume", "row-1-cancel", "row-1-priority", "row-1-delete",
+    "row-2-primary", "row-2-pause", "row-2-resume", "row-2-cancel", "row-2-priority", "row-2-delete",
+    "live-item-1", "live-item-2"
+  ],
+  "paths": {
+    "toolbar-schedule": ["RIGHT"],
+    "toolbar-concurrent": ["RIGHT", "RIGHT"],
+    "row-1-primary": ["DOWN"],
+    "row-1-cancel": ["RIGHT", "RIGHT", "DOWN"],
+    "row-2-primary": ["DOWN", "DOWN"],
+    "row-2-delete": ["RIGHT", "RIGHT", "DOWN", "RIGHT", "RIGHT", "DOWN"],
+    "live-item-1": ["DOWN", "DOWN", "DOWN"]
+  },
+  "actions": ["wifi", "schedule", "concurrent", "primary", "pause", "resume", "cancel", "priority", "delete", "live-select"],
+  "faults": ["none", "server_stopped", "origin_only", "repository_only"]
+}
