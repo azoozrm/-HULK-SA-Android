@@ -32,12 +32,12 @@ jobs:
           git fetch origin \
             archive/pr57-codex-churn-20260801 \
             ci/adapt-quality-marker-injection-v09320 \
-            e18a2c920b55d0bd84e11e4f19d0cab190a718b0
+            7a28b217bae94cb22ee01ea1a9d381c79c019d83
           git checkout origin/archive/pr57-codex-churn-20260801 -- qa/compatibility
           git checkout origin/ci/adapt-quality-marker-injection-v09320 -- \
             qa/compatibility/inject_quality_markers.py \
             qa/compatibility/tests/test_marker_injection.py
-          git checkout e18a2c920b55d0bd84e11e4f19d0cab190a718b0 -- \
+          git checkout 7a28b217bae94cb22ee01ea1a9d381c79c019d83 -- \
             qa/compatibility/tests/test_lab.py
           git diff --check
 
