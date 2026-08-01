@@ -304,6 +304,16 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("requester.requestFocus()", downloads)
         self.assertIn("onFocusLocation = { currentDownloadFocus = it }", downloads)
 
+    def test_download_evidence_snapshots_volatile_files_without_toctou(self) -> None:
+        source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        writer = source.split(
+            "private fun writeQaDownloadEvidence",
+            maxsplit=1,
+        )[1].split("private const val QA_DOWNLOAD_FILE_PREFIX", maxsplit=1)[0]
+        self.assertIn("private fun snapshotQaFile", source)
+        self.assertIn("val persistedSnapshot = snapshotQaFile(persisted)", writer)
+        self.assertNotIn("if (persisted.isFile) sha256(persisted)", writer)
+
 
     def test_download_fixture_uses_real_repository_actions_and_slow_active_transfer(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")

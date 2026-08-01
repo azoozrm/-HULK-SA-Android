@@ -672,6 +672,25 @@ private fun sha256(file: File): String {
     return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
 }
 
+private data class QaFileSnapshot(
+    val exists: Boolean,
+    val length: Long,
+    val sha256: String,
+)
+
+private fun snapshotQaFile(file: File): QaFileSnapshot = runCatching {
+    if (!file.isFile) {
+        QaFileSnapshot(exists = false, length = 0L, sha256 = "")
+    } else {
+        QaFileSnapshot(exists = true, length = file.length(), sha256 = sha256(file))
+    }
+}.getOrElse {
+    // SharedPreferences and active partial downloads can be replaced between
+    // the directory listing and open(). Record that volatile snapshot as
+    // absent; the next poll must still produce the required stable evidence.
+    QaFileSnapshot(exists = false, length = 0L, sha256 = "")
+}
+
 private fun jsonString(value: String): String = buildString {
     append('"')
     value.forEach { char ->
@@ -715,14 +734,16 @@ private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness
     val persisted = File(context.applicationInfo.dataDir, "shared_prefs/hulk_downloads.xml")
     val fileRecords = files.joinToString(",") { file ->
         val kind = if (file.name.endsWith(".part")) "partial" else "completed"
+        val snapshot = snapshotQaFile(file)
         "{" +
             "\"kind\":" + jsonString(kind) + "," +
             "\"absolute_path\":" + jsonString(file.absolutePath) + "," +
-            "\"exists\":${file.exists()}," +
-            "\"length\":${file.length()}," +
-            "\"sha256\":" + jsonString(if (file.isFile) sha256(file) else "") +
+            "\"exists\":${snapshot.exists}," +
+            "\"length\":${snapshot.length}," +
+            "\"sha256\":" + jsonString(snapshot.sha256) +
             "}"
     }
+    val persistedSnapshot = snapshotQaFile(persisted)
     val repositoryBytes = records.sumOf { item -> item.bytesDownloaded.coerceAtLeast(0L) }
     val ledger = harness.origin.requestLedger().joinToString(",") { jsonString(it) }
     val candidateUrls = records
@@ -746,9 +767,9 @@ private fun writeQaDownloadEvidence(context: Context, harness: QaDownloadHarness
         "\"completed_file_bytes\":${files.filterNot { it.name.endsWith(".part") }.sumOf(File::length)}," +
         "\"persisted_state\":{" +
             "\"path\":" + jsonString(persisted.absolutePath) + "," +
-            "\"exists\":${persisted.exists()}," +
-            "\"length\":${if (persisted.exists()) persisted.length() else 0}," +
-            "\"sha256\":" + jsonString(if (persisted.isFile) sha256(persisted) else "") +
+            "\"exists\":${persistedSnapshot.exists}," +
+            "\"length\":${persistedSnapshot.length}," +
+            "\"sha256\":" + jsonString(persistedSnapshot.sha256) +
         "}," +
         "\"origin_request_ledger\":[${ledger}]" +
     "}"
