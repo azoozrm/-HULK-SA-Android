@@ -1221,9 +1221,6 @@ private fun LiveCatalogScreen(
         }
         true
     }
-    LaunchedEffect(visibleChannelKeys) {
-        channelFocus.keys.retainAll(visibleChannelKeys.toSet())
-    }
     LaunchedEffect(listState, visible) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
