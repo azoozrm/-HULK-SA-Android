@@ -1470,6 +1470,7 @@ class DeviceLab:
             restart("pause-action")
             inspect("pause-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
             inspect("row-1-pause", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="pause")
+            inspect("row-1-resume", key_code=23, expected_labels=("ايقاف مؤقت", "استئناف"), expected_action="resume")
 
             restart("row-2-pause-action")
             inspect("row-2-pause-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
@@ -1481,11 +1482,11 @@ class DeviceLab:
             inspect("priority-row-1-focus", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
             inspect("row-1-priority-executes", key_code=23, expected_labels=("عالية", "عادية", "منخفضة"), expected_action="priority")
 
-            restart("cancel-action")
+            restart("delete-action")
             inspect("cancel-row-1-primary", key_code=20, expected_labels=("ايقاف مؤقت", "استئناف"))
             inspect("cancel-row-1-priority", key_code=21, expected_labels=("عالية", "عادية", "منخفضة"))
             inspect("cancel-row-1-focus", key_code=21, expected_labels=("الغاء",))
-            inspect("cancel-row-1-executes", key_code=23, expected_labels=("الغاء",), expected_action="cancel")
+            inspect("delete-row-1-executes", key_code=23, expected_labels=("الغاء",), expected_action="delete")
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"[-1200:]
             self.record_harness_error(f"download-actions:{orientation}", exc)
@@ -1531,7 +1532,13 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
     sequence_number = 0
     audit_error: str | None = None
 
-    def run_check(check_id: str, target: str, action: str | None = None) -> bool:
+    def run_check(
+        check_id: str,
+        target: str,
+        action: str | None = None,
+        *,
+        restart_page: bool = True,
+    ) -> bool:
         nonlocal sequence_number
         sequence_number += 1
         step_root = audit_root / f"{sequence_number:02d}-{check_id}"
@@ -1550,7 +1557,8 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
         expected_action = action
         key_press_confirmed = False
         try:
-            self.start_page("downloads", step_root / "restart")
+            if restart_page:
+                self.start_page("downloads", step_root / "restart")
             stable, initial_target, initial_node, initial_xml = wait_for_download_focus_stability(
                 self.adb,
                 step_root / "initial.xml",
@@ -1722,12 +1730,18 @@ def _deterministic_download_action_audit(self: DeviceLab, orientation: str) -> N
             ("top-wifi-executes", "toolbar-wifi", "wifi"),
             ("top-schedule-executes", "toolbar-schedule", "schedule"),
             ("top-concurrent-executes", "toolbar-concurrent", "concurrent"),
-            ("row-1-pause", "row-1-primary", "primary"),
-            ("row-2-pause", "row-2-primary", "primary"),
-            ("row-1-priority-executes", "row-1-priority", "priority"),
-            ("cancel-row-1-executes", "row-1-cancel", "cancel"),
         ]:
             run_check(check_id, target, action)
+        run_check("row-1-pause", "row-1-primary", "primary")
+        run_check(
+            "row-1-resume",
+            "row-1-primary",
+            "primary",
+            restart_page=False,
+        )
+        run_check("row-2-pause", "row-2-primary", "primary")
+        run_check("row-1-priority-executes", "row-1-priority", "priority")
+        run_check("delete-row-1-executes", "row-1-cancel", "delete")
     except Exception as exc:
         audit_error = f"{type(exc).__name__}: {exc}"[-1200:]
         self.record_harness_error(f"download-actions:{orientation}", exc)

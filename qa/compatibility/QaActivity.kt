@@ -334,7 +334,7 @@ private fun FixtureMain(
                     repository.remove(item.downloadId)
                     refreshDownloads(repository)
                 }
-                publishDownloadAction("cancel")
+                publishDownloadAction("delete")
             },
             onRetryDownload = { item ->
                 val repository = downloadRepository

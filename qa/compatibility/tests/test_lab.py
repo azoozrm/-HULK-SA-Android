@@ -214,7 +214,7 @@ class ConfigTests(unittest.TestCase):
             'restart("concurrent-action")',
             'restart("pause-action")',
             'restart("priority-action")',
-            'restart("cancel-action")',
+            'restart("delete-action")',
         ):
             self.assertIn(scope, source)
         self.assertIn('"before_xml"', source)
@@ -331,13 +331,15 @@ class ConfigTests(unittest.TestCase):
 
 
     def test_download_action_runner_matches_analyzer_required_ids(self) -> None:
-        source = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        runner = (LAB_ROOT / "run-lab.py").read_text(encoding="utf-8")
+        analyzer = (LAB_ROOT / "analyze.py").read_text(encoding="utf-8")
         required_ids = (
             "top-wifi-executes",
             "top-schedule-executes",
             "top-concurrent-executes",
             "row-1-primary",
             "row-1-pause",
+            "row-1-resume",
             "row-1-priority",
             "row-1-priority-executes",
             "row-1-cancel",
@@ -345,11 +347,50 @@ class ConfigTests(unittest.TestCase):
             "row-2-priority",
             "row-2-primary",
             "row-2-pause",
-            "cancel-row-1-executes",
+            "delete-row-1-executes",
         )
         for check_id in required_ids:
-            self.assertIn(f'inspect("{check_id}"', source)
-        self.assertNotIn('inspect("row-1-pause-executes"', source)
+            self.assertIn(f'"{check_id}"', runner)
+            self.assertIn(f'"{check_id}"', analyzer)
+        self.assertIn('restart_page=False', runner)
+        fixture = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
+        self.assertIn('publishDownloadAction("delete")', fixture)
+
+    def test_download_action_analyzer_blocks_missing_resume_or_delete(self) -> None:
+        required_ids = {
+            "top-wifi-executes",
+            "top-schedule-executes",
+            "top-concurrent-executes",
+            "row-1-primary",
+            "row-1-pause",
+            "row-1-resume",
+            "row-1-priority",
+            "row-1-priority-executes",
+            "row-1-cancel",
+            "row-2-cancel",
+            "row-2-priority",
+            "row-2-primary",
+            "row-2-pause",
+            "delete-row-1-executes",
+        }
+        for missing in ("row-1-resume", "delete-row-1-executes"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temporary:
+                checks = [
+                    {"id": check_id, "success": True}
+                    for check_id in sorted(required_ids - {missing})
+                ]
+                normalized, findings = analyze_download_actions(
+                    Path(temporary),
+                    {"is_tv": True},
+                    [{"orientation": "landscape", "checks": checks}],
+                )
+                self.assertEqual("BLOCKED", normalized[0]["status"])
+                incomplete = [
+                    item for item in findings
+                    if item["code"] == "download_action_audit_incomplete"
+                ]
+                self.assertEqual(1, len(incomplete))
+                self.assertIn(missing, incomplete[0]["message"])
 
 
 class AnalyzerTests(unittest.TestCase):

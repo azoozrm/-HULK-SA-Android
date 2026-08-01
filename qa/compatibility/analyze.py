@@ -1368,6 +1368,7 @@ def analyze_download_actions(
         "top-concurrent-executes",
         "row-1-primary",
         "row-1-pause",
+        "row-1-resume",
         "row-1-priority",
         "row-1-priority-executes",
         "row-1-cancel",
@@ -1375,7 +1376,7 @@ def analyze_download_actions(
         "row-2-priority",
         "row-2-primary",
         "row-2-pause",
-        "cancel-row-1-executes",
+        "delete-row-1-executes",
     }
     for entry in entries:
         item = dict(entry)
@@ -1457,9 +1458,9 @@ def _classified_download_actions(
         return [], []
     required_checks = {
         "top-wifi-executes", "top-schedule-executes", "top-concurrent-executes",
-        "row-1-primary", "row-1-pause", "row-1-priority", "row-1-priority-executes",
+        "row-1-primary", "row-1-pause", "row-1-resume", "row-1-priority", "row-1-priority-executes",
         "row-1-cancel", "row-2-cancel", "row-2-priority", "row-2-primary",
-        "row-2-pause", "cancel-row-1-executes",
+        "row-2-pause", "delete-row-1-executes",
     }
     normalized: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
