@@ -1,6 +1,12 @@
 name: Temporary Compatibility Lab Import
 
 on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - '.github/quality-lab-import.trigger'
+      - '.github/workflows/temp-import-quality-lab.yml'
   push:
     branches:
       - fix/quality-lab-tv-preconditions-20260801
@@ -17,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Import compatibility-lab-only repair
@@ -40,6 +47,10 @@ jobs:
       - name: Commit isolated compatibility repair
         run: |
           set -euo pipefail
+          if git diff --quiet -- qa/compatibility; then
+            echo 'No compatibility changes remain to import.'
+            exit 0
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add qa/compatibility
