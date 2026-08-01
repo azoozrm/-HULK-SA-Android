@@ -94,14 +94,7 @@ PAGE_PRODUCT = (
     "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),\n"
     "    ) {"
 )
-DOWNLOADS_PRODUCT = (
-    "    Column(\n"
-    "        Modifier\n"
-    "            .fillMaxSize()\n"
-    "            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp)\n"
-    "            .onPreviewKeyEvent(handleDownloadDirectionalKey),\n"
-    "    ) {"
-)
+DOWNLOADS_PRODUCT = PAGE_PRODUCT
 DOWNLOAD_CARD_CANONICAL = (
     "            .height(if (isTv) 220.dp else 220.dp)\n"
     "            .clip(shape)"

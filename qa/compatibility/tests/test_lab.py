@@ -276,7 +276,7 @@ class ConfigTests(unittest.TestCase):
             audit.index("plan_download_focus_path("),
         )
 
-    def test_product_download_focus_consumes_directional_keys_at_screen_boundary(self) -> None:
+    def test_product_download_focus_consumes_directional_keys_at_focused_controls(self) -> None:
         source = (
             LAB_ROOT.parents[1]
             / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
@@ -289,13 +289,35 @@ class ConfigTests(unittest.TestCase):
             "private fun DownloadsScreen(",
             maxsplit=1,
         )[1].split("\n@Composable\nprivate fun DownloadCard", maxsplit=1)[0]
+        card = source.split(
+            "private fun DownloadCard(",
+            maxsplit=1,
+        )[1].split("\n@Composable\nprivate fun DownloadProgress", maxsplit=1)[0]
         self.assertNotIn(".onPreviewKeyEvent", policy)
         self.assertIn("var currentDownloadFocus by remember", downloads)
         self.assertIn("import androidx.compose.ui.input.key.KeyEvent", source)
-        self.assertIn("val handleDownloadDirectionalKey: (KeyEvent) -> Boolean", downloads)
-        self.assertIn(".onPreviewKeyEvent(handleDownloadDirectionalKey)", downloads)
+        self.assertIn(
+            "val handleDownloadDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean",
+            downloads,
+        )
+        self.assertNotIn(".onPreviewKeyEvent(handleDownloadDirectionalKey)", downloads)
+        self.assertEqual(3, downloads.count("handleDownloadDirectionalKey(\n"))
+        for slot in ("WIFI", "SCHEDULE", "CONCURRENT"):
+            self.assertIn(
+                f"DownloadFocusLocation.toolbar(DownloadFocusSlot.{slot})",
+                downloads,
+            )
+        self.assertIn("handleDirectionalKey = handleDownloadDirectionalKey", downloads)
+        self.assertIn(
+            "handleDirectionalKey: (DownloadFocusLocation, KeyEvent) -> Boolean",
+            card,
+        )
+        self.assertEqual(6, card.count(".onPreviewKeyEvent { event ->"))
+        self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIMARY)", card)
+        self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.PRIORITY)", card)
+        self.assertIn("DownloadFocusLocation.card(rowIndex, DownloadFocusSlot.CANCEL)", card)
         self.assertIn("Key.DirectionDown -> DownloadFocusMove.DOWN", downloads)
-        self.assertIn("currentDownloadFocus?.let { moveDownloadFocus(it, move) }", downloads)
+        self.assertIn("moveDownloadFocus(current, move)", downloads)
         self.assertIn("downloadsState.layoutInfo.visibleItemsInfo", downloads)
         self.assertIn(
             "downloadsState.scrollToItem(target.row, scrollOffset = 0)",
@@ -303,6 +325,28 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertIn("requester.requestFocus()", downloads)
         self.assertIn("onFocusLocation = { currentDownloadFocus = it }", downloads)
+
+    def test_product_live_focus_consumes_native_horizontal_keys_at_controls(self) -> None:
+        source = (
+            LAB_ROOT.parents[1]
+            / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+        ).read_text(encoding="utf-8")
+        live = source.split(
+            "private fun LiveCatalogScreen(",
+            maxsplit=1,
+        )[1].split("\n@Composable\nprivate fun LiveStage", maxsplit=1)[0]
+        stage = source.split(
+            "private fun LiveStage(",
+            maxsplit=1,
+        )[1].split("\n@Composable\nprivate fun FavoritesScreen", maxsplit=1)[0]
+        self.assertIn("val requestLiveFocus: (FocusRequester) -> Boolean", live)
+        self.assertIn("requestLiveFocus(playRequester)", live)
+        self.assertIn("requestFocus: (FocusRequester) -> Boolean", stage)
+        self.assertEqual(2, stage.count(".onPreviewKeyEvent { event ->"))
+        self.assertIn("Key.DirectionLeft -> requestFocus(favoriteRequester)", stage)
+        self.assertIn("Key.DirectionRight -> requestFocus(channelRequester)", stage)
+        self.assertIn("Key.DirectionLeft -> requestFocus(channelRequester)", stage)
+        self.assertIn("Key.DirectionRight -> requestFocus(playRequester)", stage)
 
     def test_download_evidence_snapshots_volatile_files_without_toctou(self) -> None:
         source = (LAB_ROOT / "QaActivity.kt").read_text(encoding="utf-8")
