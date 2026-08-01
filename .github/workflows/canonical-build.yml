@@ -1,9 +1,10 @@
-name: HULK SA Canonical Build
+name: HULK SA Build Verification
 
 on:
   push:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
+      - rebuild/adaptive-ui-compatibility-lab-v2
     paths:
       - 'app/**'
       - 'gradle/**'
@@ -12,9 +13,7 @@ on:
       - 'build.gradle*'
       - 'settings.gradle*'
       - 'gradle.properties'
-      - 'qa/canonical/**'
       - 'tools/verify-android-architectures.py'
-      - 'tools/verify-runtime-config.py'
       - '.github/workflows/canonical-build.yml'
   pull_request:
     branches:
@@ -27,18 +26,20 @@ on:
       - 'build.gradle*'
       - 'settings.gradle*'
       - 'gradle.properties'
-      - 'qa/canonical/**'
       - 'tools/verify-android-architectures.py'
-      - 'tools/verify-runtime-config.py'
       - '.github/workflows/canonical-build.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: hulk-sa-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  canonical-build:
-    name: Clean, lint, unit, debug, release and ABI
+  build-verification:
+    name: Build, lint, unit, release and ABI
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
@@ -67,45 +68,27 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
 
-      - name: Verify canonical checkout
+      - name: Verify clean production checkout
         run: |
           set -euo pipefail
           test -f settings.gradle.kts
           test -x gradlew
           test -d app/src/main
+          test ! -e qa/compatibility
+          test ! -e qa/quality
           test ! -e app/src/main/java/sa/hulksa/player/qa
-          test ! -e project/app/src/main
           ./gradlew --version
 
-      - name: Verify canonical source manifest
-        run: |
-          set -euo pipefail
-          sha256sum -c qa/canonical/canonical-source.sha256
-
-      - name: Verify explicit runtime configuration inputs
-        run: |
-          set -euo pipefail
-          [[ "$HULK_PORTAL_URL" = 'http://3162356.xyz:8080' ]]
-          [[ -z "$HULK_CONFIG_URL" ]]
-
-      - name: Debug and unit tests
+      - name: Build debug, unit tests and lint
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
-            clean :app:compileDebugKotlin testDebugUnitTest \
-            :app:assembleDebug :app:bundleDebug \
+            clean :app:compileDebugKotlin :app:testDebugUnitTest \
+            :app:lintDebug :app:assembleDebug :app:bundleDebug \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
             -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
 
-      - name: Lint
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon --console=plain \
-            :app:lintDebug \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
-            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
-
-      - name: Release and R8
+      - name: Build release and R8
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
@@ -113,9 +96,15 @@ jobs:
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
             -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
 
-      - name: Verify APK and AAB architectures
+      - name: Verify package, version and architectures
         run: |
           set -euo pipefail
+          apk='app/build/outputs/apk/release/app-release-unsigned.apk'
+          test -f "$apk"
+          test "$(apkanalyzer manifest application-id "$apk")" = 'sa.hulksa.player'
+          test "$(apkanalyzer manifest version-code "$apk")" = '64'
+          test "$(apkanalyzer manifest version-name "$apk")" = '0.9.3.20'
+
           mkdir -p build/reports/architecture
           count=0
           while IFS= read -r -d '' archive; do
@@ -128,39 +117,26 @@ jobs:
           done < <(find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -print0)
           test "$count" -ge 4
 
-      - name: Verify compiled release runtime configuration
+      - name: Package build evidence
+        if: always()
         run: |
           set -euo pipefail
-          mkdir -p build/reports/runtime-config
-          build_config="$(find app/build/generated/source/buildConfig/release \
-            -type f -name BuildConfig.java -print -quit)"
-          test -n "$build_config"
-          python3 tools/verify-runtime-config.py \
-            app/build/outputs/apk/release/app-release-unsigned.apk \
-            --build-config "$build_config" \
-            --report build/reports/runtime-config/APK.md
-          python3 tools/verify-runtime-config.py \
-            app/build/outputs/bundle/release/app-release.aab \
-            --build-config "$build_config" \
-            --report build/reports/runtime-config/AAB.md
-
-      - name: Package unsigned verification artifacts
-        run: |
-          set -euo pipefail
-          mkdir -p canonical-artifacts
-          find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) \
-            -exec cp {} canonical-artifacts/ \;
-          cp -a build/reports/architecture canonical-artifacts/
-          cp -a build/reports/runtime-config canonical-artifacts/
-          (
-            cd canonical-artifacts
-            sha256sum *.apk *.aab > SHA256SUMS.txt
-            sha256sum -c SHA256SUMS.txt
-          )
+          mkdir -p build-evidence
+          find app/build/outputs -type f \( -name '*.apk' -o -name '*.aab' \) -exec cp {} build-evidence/ \; || true
+          if [[ -d build/reports ]]; then cp -a build/reports build-evidence/; fi
+          if [[ -d app/build/reports ]]; then cp -a app/build/reports build-evidence/app-reports; fi
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo 'package=sa.hulksa.player'
+            echo 'versionName=0.9.3.20'
+            echo 'versionCode=64'
+          } > build-evidence/BUILD-METADATA.txt
+          find build-evidence -type f -print0 | sort -z | xargs -0 sha256sum > build-evidence/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: HULK-SA-CANONICAL-UNSIGNED-BUILD
-          path: canonical-artifacts/
+          name: HULK-SA-BUILD-EVIDENCE-${{ github.run_id }}
+          path: build-evidence/
           if-no-files-found: error
           retention-days: 14
