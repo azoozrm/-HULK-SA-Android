@@ -87,6 +87,46 @@ class CompatibilityV2InstrumentationTest {
     }
 
     @Test
+    fun shortLandscapePhoneCanScrollToPrimaryLoginActions() {
+        assumeFalse("Short landscape phone test is not applicable to television UI mode", isTelevision())
+        assumeTrue(
+            "Short landscape phone test requires a landscape display no taller than 1200 px",
+            device.displayWidth > device.displayHeight && device.displayHeight <= 1200,
+        )
+        assertTrue("Application package did not become visible", launchMainPackage())
+
+        val loginSelector = By.textContains("دخول")
+        val subscribeSelector = By.textContains("اشترك")
+        var loginVisible = device.hasObject(loginSelector)
+        var subscribeVisible = device.hasObject(subscribeSelector)
+
+        repeat(8) {
+            if (!loginVisible || !subscribeVisible) {
+                device.swipe(
+                    device.displayWidth / 2,
+                    device.displayHeight * 4 / 5,
+                    device.displayWidth / 2,
+                    device.displayHeight / 5,
+                    30,
+                )
+                instrumentation.waitForIdleSync()
+                SystemClock.sleep(250L)
+                loginVisible = device.hasObject(loginSelector)
+                subscribeVisible = device.hasObject(subscribeSelector)
+            }
+        }
+
+        assertTrue("Primary login action is not reachable after scrolling", loginVisible)
+        assertTrue("Subscribe or renew action is not reachable after scrolling", subscribeVisible)
+
+        val display = Rect(0, 0, device.displayWidth, device.displayHeight)
+        val loginBounds = device.findObject(loginSelector).visibleBounds
+        val subscribeBounds = device.findObject(subscribeSelector).visibleBounds
+        assertTrue("Primary login action is outside the display", Rect.intersects(display, loginBounds))
+        assertTrue("Subscribe or renew action is outside the display", Rect.intersects(display, subscribeBounds))
+    }
+
+    @Test
     fun televisionLoginStartsWithImeHidden() {
         assumeTrue("Initial IME visibility contract requires television UI mode", isTelevision())
         launchScenario().use { scenario ->
