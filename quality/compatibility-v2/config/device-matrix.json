@@ -72,10 +72,10 @@
       "locale": "en-US"
     },
     {
-      "id": "tv-logical-960x540-api35",
+      "id": "tv-logical-960x540-api36",
       "group": "fast",
       "form_factor": "television",
-      "api": 35,
+      "api": 36,
       "target": "android-tv",
       "width_px": 960,
       "height_px": 540,
@@ -86,10 +86,10 @@
       "locale": "ar-SA"
     },
     {
-      "id": "tv-720p-api35",
+      "id": "tv-720p-api36",
       "group": "full",
       "form_factor": "television",
-      "api": 35,
+      "api": 36,
       "target": "android-tv",
       "width_px": 1280,
       "height_px": 720,
