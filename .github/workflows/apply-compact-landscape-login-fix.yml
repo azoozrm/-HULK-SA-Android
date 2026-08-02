@@ -61,15 +61,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body '## Compact landscape Login correction applied
-
-The short-landscape Login now uses a full-height scrollable panel and genuinely compact fields, buttons and option rows. Static tests plus Debug and androidTest APK compilation passed before commit. Physical Galaxy landscape qualification must be rerun; no merge or release was performed.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Compact landscape Login correction applied\n\nThe short-landscape Login now uses a full-height scrollable panel and genuinely compact fields, buttons and option rows. Static tests plus Debug and androidTest APK compilation passed before commit. Physical Galaxy landscape qualification must be rerun; no merge or release was performed.'
 
       - name: Report failure
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body '## Compact landscape Login correction stopped safely
-
-The guarded patch, static gate or compile gate failed before a source commit. No pass was claimed. Inspect the latest Apply Compact Landscape Login Fix run.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Compact landscape Login correction stopped safely\n\nThe guarded patch, static gate or compile gate failed before a source commit. No pass was claimed. Inspect the latest Apply Compact Landscape Login Fix run.'
