@@ -27,11 +27,14 @@ class MobileWindowContractTest(unittest.TestCase):
         theme = (REPO_ROOT / "app/src/main/res/values/themes.xml").read_text(encoding="utf-8")
         self.assertIn("LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS", policy)
         self.assertIn("LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES", policy)
+        self.assertIn("Build.VERSION.SDK_INT >= Build.VERSION_CODES.P", policy)
         self.assertIn("controller.show(WindowInsets.Type.systemBars())", policy)
         self.assertIn("window.navigationBarColor = Color.TRANSPARENT", policy)
         self.assertIn("window.isNavigationBarContrastEnforced = false", policy)
-        self.assertIn("android:windowLayoutInDisplayCutoutMode\">shortEdges", theme)
         self.assertIn("android:navigationBarColor\">@android:color/transparent", theme)
+        self.assertNotIn("android:windowLayoutInDisplayCutoutMode", theme)
+        self.assertNotIn("android:enforceNavigationBarContrast", theme)
+        self.assertNotIn("android:windowLightNavigationBar", theme)
 
     def test_short_landscape_login_has_real_compact_dimensions(self) -> None:
         login = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt").read_text(encoding="utf-8")
