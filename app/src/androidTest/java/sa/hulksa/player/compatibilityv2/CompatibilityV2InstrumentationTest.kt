@@ -5,6 +5,7 @@ import android.app.UiModeManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Rect
@@ -30,6 +31,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import sa.hulksa.player.MainActivity
 import sa.hulksa.player.TvMainActivity
+import sa.hulksa.player.ui.adaptive.restoreOrientationRequest
 
 @RunWith(AndroidJUnit4::class)
 class CompatibilityV2InstrumentationTest {
@@ -63,6 +65,20 @@ class CompatibilityV2InstrumentationTest {
     private fun launchScenario(): ActivityScenario<Activity> =
         ActivityScenario.launch(explicitLauncherIntent())
 
+    private fun waitForDisplayOrientation(landscape: Boolean, timeoutMs: Long = 10_000L): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            val matches = if (landscape) {
+                device.displayWidth > device.displayHeight
+            } else {
+                device.displayHeight > device.displayWidth
+            }
+            if (matches) return true
+            SystemClock.sleep(100L)
+        }
+        return false
+    }
+
     @Test
     fun phoneLauncherStartsRealApplicationAndSurvivesRecreation() {
         assumeFalse("Phone lifecycle test is not applicable to television UI mode", isTelevision())
@@ -80,6 +96,35 @@ class CompatibilityV2InstrumentationTest {
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
             }
+        }
+    }
+
+    @Test
+    fun phonePortraitOrientationRestoresAfterLandscapePlayback() {
+        assumeFalse("Phone orientation restore is not applicable to television UI mode", isTelevision())
+        assumeTrue(
+            "Orientation restore contract is limited to phones",
+            targetContext.resources.configuration.smallestScreenWidthDp < 600,
+        )
+        assumeTrue("Orientation restore test must start in portrait", device.displayHeight > device.displayWidth)
+
+        launchScenario().use { scenario ->
+            scenario.onActivity { activity ->
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+            assertTrue(
+                "Phone did not enter landscape playback orientation",
+                waitForDisplayOrientation(landscape = true),
+            )
+
+            scenario.onActivity { activity ->
+                activity.requestedOrientation =
+                    restoreOrientationRequest(Configuration.ORIENTATION_PORTRAIT)
+            }
+            assertTrue(
+                "Phone did not restore portrait orientation after playback",
+                waitForDisplayOrientation(landscape = false),
+            )
         }
     }
 
