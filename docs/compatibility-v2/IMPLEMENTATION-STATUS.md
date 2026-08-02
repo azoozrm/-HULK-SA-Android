@@ -27,6 +27,7 @@
 - Added an instrumentation test that scrolls the short landscape screen and proves the Login and Subscribe actions remain reachable.
 - Added semantic geometry enforcement: the runtime PNG and application hierarchy must match the requested `WIDTH×HEIGHT`; swapped or double-rotated evidence is rejected.
 - Added an install-over qualification that builds the preserved PR #57 baseline and candidate with one isolated Debug signer, updates with `adb install -r`, proves private data preservation, reruns instrumentation, and requires the updated HULK application to remain foreground in the final screenshot and hierarchy.
+- Added a production-signing qualification that fails closed unless all protected inputs are present and the generated APK/AAB match the expected production certificate, package, version, and ABI policy.
 - Full Matrix, Targeted Retest, and Install Over workflows are manual-only. Heavy emulator jobs do not run automatically on every commit.
 
 ## Current product build evidence
@@ -134,6 +135,62 @@ This qualification proves the Android update mechanism and application-data rete
 
 The permanent `.github/workflows/compatibility-v2-install-over.yml` workflow is manual-only. The temporary one-time evidence workflow was deleted after successful qualification.
 
+## Production-signed release qualification — PASS
+
+The five protected inputs were validated by the production-signing environment without exposing their values:
+
+- `HULK_RELEASE_KEYSTORE_BASE64`
+- `HULK_RELEASE_KEY_ALIAS`
+- `HULK_RELEASE_STORE_PASSWORD`
+- `HULK_RELEASE_KEY_PASSWORD`
+- `HULK_RELEASE_CERT_SHA256`
+
+Qualification results:
+
+- Run: `30749549026` — `PASS`.
+- Artifact: `HULK-SA-SIGNED-RELEASE-QUALIFICATION-30749549026` (`8834026890`).
+- Artifact digest: `sha256:7918bf7b8f97d60f347cc151558f7a5f534deb55db6734b3c5d511225cf6efc6`.
+- Signed APK and signed AAB: present and verified.
+- Package: `sa.hulksa.player`.
+- Version: `0.9.3.20` (`versionCode 64`).
+- Certificate SHA-256: matched the protected expected certificate.
+- APK signature schemes v1, v2, and v3: verified.
+- Exact ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`; legacy `x86` absent.
+- APK SHA-256: `9f904d0927de7181b7cf2760b9873d386885c9526bcd289bac250bfad17b5e69`.
+- AAB SHA-256: `e706667128383e76da7929ee4c784fb8171bb235632abfb1b171fd4903da6443`.
+- Artifact checksums: all files verified manually.
+
+No signing secret or keystore value was printed, copied into the repository, or modified.
+
+## Production-signed PR #57 source-lineage install-over — PASS
+
+This qualification rebuilt the preserved PR #57 source and the current candidate with the same protected production certificate, then performed an in-place Android update on API 35.
+
+- Preserved baseline source: `c291fa7df2f3ee3a04d020cd831f02073a44d514`.
+- Qualified candidate APK source: `849cc1b68feb27811256acdf149abbce853109cb`; changes after the product revision are qualification-workflow and documentation only.
+- Package on both APKs: `sa.hulksa.player`.
+- Version on both APKs: `0.9.3.20` (`versionCode 64`).
+- Production certificate continuity: `PASS`.
+- Baseline APK SHA-256: `c1ee19bfdb04afc367c35b6594689160138129c09fb0074e1daddd27239f46bf`.
+- Candidate APK SHA-256: `dc201bd6c2c14658f11a63b33d3e508fadc441639bac506ae1bc976fe25b4b51`.
+- Baseline installation: `PASS`.
+- Candidate update with `adb install --no-streaming -r`: `PASS`.
+- Application ID/UID remained `10209`: `PASS`.
+- Application data directory remained unchanged: `PASS`.
+- `firstInstallTime` remained unchanged: `PASS`.
+- Candidate cold launch: `Status: ok`, `LaunchState: COLD`, `MainActivity` foreground.
+- Foreground stability: `3/3` consecutive probes.
+- Final screenshot: exactly `1080×2340`, visually inspected; approved HULK Login is fully visible with no Launcher, permission window, or other system overlay.
+- Final hierarchy: `36` nodes and only package `sa.hulksa.player`.
+- Evidence checksums: all files verified manually.
+- Final run: `30750753716` — `PASS`.
+- Final artifact: `HULK-SA-PRODUCTION-INSTALL-OVER-FINAL-30750753716` (`8834384026`).
+- Artifact digest: `sha256:879afb3ad189122775c97254883580b0c14e02e82b13cd63046a8ba67988fac9`.
+
+This proves production-certificate continuity and Android in-place update behavior between two APKs rebuilt from the preserved PR #57 source lineage. It does **not** prove byte-for-byte upgrade compatibility from the exact APK binary previously distributed to users; that binary must be supplied and tested separately.
+
+All one-time production qualification workflows were deleted after evidence collection. The permanent fail-closed signed-release workflow remains in `.github/workflows/signed-release-qualification.yml`.
+
 ## Branding integrity
 
 The approved files remain protected by static SHA-256 checks:
@@ -148,8 +205,8 @@ No shield, HS letters, HULK SA name, color, gradient, background, package ID, ve
 ## Remaining BLOCKED qualification
 
 - Visual regression approval: `BLOCKED: HUMAN-APPROVED FULL-WINDOW BASELINES REQUIRED`.
-- Production certificate continuity and installation over the actually distributed signed APK: `BLOCKED: PRODUCTION SIGNING MATERIAL AND DISTRIBUTED APK REQUIRED`.
+- Installation over the exact APK binary previously distributed to users: `BLOCKED: DISTRIBUTED PRODUCTION APK BINARY REQUIRED`.
 - Xiaomi receiver, TCL television, Galaxy phone, real small phone, real tablet, and real-service downloads: `BLOCKED: PHYSICAL DEVICE OR REAL SERVICE VERIFICATION REQUIRED`.
-- PR remains Draft. No merge, release, force push, automatic baseline update, or production signing operation has been performed.
+- PR remains Draft. No merge, release, force push, signing-secret change, keystore change, package/version change, or automatic baseline approval has been performed.
 
 No blocked item is recorded as PASS.
