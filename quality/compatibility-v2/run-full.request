@@ -1,4 +1,4 @@
-requested_for_head=a6ea5893dd9bfe25041e85b78b8440edb0d928e0
-reason=retest-with-single-bash-runtime-entrypoint
-request_sequence=5
-requested_at=2026-08-02T00:32:00Z
+requested_for_head=145ca88bd3b045356bd425dd6b9b8fe793e8b01b
+reason=retest-after-framework-service-readiness-fix
+request_sequence=6
+requested_at=2026-08-02T00:42:00Z
