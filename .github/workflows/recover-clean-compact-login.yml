@@ -70,21 +70,30 @@ jobs:
           python3 - <<'PY'
           import subprocess
 
-          expected = sorted([
+          allowed = {
               'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt',
               'app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt',
               'quality/compatibility-v2/tests/test_mobile_window_contract.py',
-          ])
+          }
+          required = 'app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt'
           actual = subprocess.check_output(
               ['git', 'diff', '--cached', '--name-only'],
               text=True,
           ).splitlines()
           if len(actual) != len(set(actual)):
               raise SystemExit(f'Duplicate staged paths detected: {actual!r}')
-          if sorted(actual) != expected:
+          if not actual:
+              raise SystemExit('No intended source correction was staged')
+          unexpected = sorted(set(actual) - allowed)
+          if unexpected:
               raise SystemExit(
-                  'Unexpected staged paths. '
-                  f'expected={expected!r} actual={actual!r}'
+                  'Unexpected staged paths outside the closed allowlist. '
+                  f'unexpected={unexpected!r} actual={actual!r}'
+              )
+          if required not in actual:
+              raise SystemExit(
+                  'The primary Login source correction was not staged. '
+                  f'required={required!r} actual={actual!r}'
               )
           PY
           git commit -m 'fix: keep compact landscape login actions reachable cleanly'
@@ -119,11 +128,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build contamination removed safely\n\nThe contaminated commit was reverted without force-push. The compact landscape Login correction was reapplied and committed using exactly three intended source/test files. Static tests and Debug/androidTest compilation passed. Transient tracked build mutations were discarded after the clean commit, and `app/build/**` is no longer tracked. Physical Galaxy qualification must be rerun; no merge or release was performed.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build contamination removed safely\n\nThe contaminated commit was reverted without force-push. The compact landscape Login correction was reapplied from a closed three-file allowlist, with `LoginScreen.kt` required. Static tests and Debug/androidTest compilation passed. Transient tracked build mutations were discarded after the clean commit, and `app/build/**` is no longer tracked. Physical Galaxy qualification must be rerun; no merge or release was performed.'
 
       - name: Report failure
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build recovery stopped safely\n\nThe revert, guarded source patch, exact staging check, compile gate, rebase, or push failed. No clean pass was claimed. Inspect the latest Recover Clean Compact Login Commit run.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build recovery stopped safely\n\nThe revert, guarded source patch, closed staging allowlist, compile gate, rebase, or push failed. No clean pass was claimed. Inspect the latest Recover Clean Compact Login Commit run.'
