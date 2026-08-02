@@ -1,4 +1,4 @@
-requested_for_head=618d0b442301bf06aad4cd0d05574e9b311c35cb
-reason=retest-with-kvm-and-api36-tv-image
-request_sequence=3
-requested_at=2026-08-02T00:15:00Z
+requested_for_head=3b85fb8f914eb0c6133b32d8275f89e3a0bc0d85
+reason=retest-with-posix-emulator-script-and-optional-kvm
+request_sequence=4
+requested_at=2026-08-02T00:24:00Z
