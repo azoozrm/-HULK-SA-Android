@@ -96,11 +96,22 @@ if [[ "$baseline_registration_stable" -lt 3 ]]; then
   exit 71
 fi
 
+adb shell pm grant "$app_package" android.permission.POST_NOTIFICATIONS \
+  > "$evidence_root/BASELINE-NOTIFICATION-PERMISSION.txt" 2>&1 || true
 adb shell am start -W -n "$app_package/$main_activity" | tee "$evidence_root/BASELINE-LAUNCH.txt"
 grep -Fq "Status: ok" "$evidence_root/BASELINE-LAUNCH.txt"
-adb shell run-as "$app_package" mkdir -p files
-printf '%s' "$sentinel" | adb shell run-as "$app_package" sh -c 'cat > files/install-over-sentinel.txt'
-baseline_value="$(adb shell run-as "$app_package" cat files/install-over-sentinel.txt | tr -d '\r')"
+
+app_data_dir="$(adb shell run-as "$app_package" pwd | tr -d '\r')"
+if [[ "$app_data_dir" != /data/* || "$app_data_dir" != *"/$app_package" ]]; then
+  echo "Unexpected run-as data directory: $app_data_dir" >&2
+  exit 73
+fi
+sentinel_path="$app_data_dir/files/install-over-sentinel.txt"
+printf 'app_data_dir=%s\nsentinel_path=%s\n' \
+  "$app_data_dir" "$sentinel_path" > "$evidence_root/APP-DATA-PATH.txt"
+adb shell run-as "$app_package" mkdir -p "$app_data_dir/files"
+printf '%s' "$sentinel" | adb shell run-as "$app_package" tee "$sentinel_path" >/dev/null
+baseline_value="$(adb shell run-as "$app_package" cat "$sentinel_path" | tr -d '\r')"
 test "$baseline_value" = "$sentinel"
 printf 'expected=%s\nactual=%s\nresult=PASS\n' \
   "$sentinel" "$baseline_value" > "$evidence_root/BASELINE-DATA.txt"
@@ -129,7 +140,7 @@ if [[ "$candidate_registration_stable" -lt 3 ]]; then
   exit 72
 fi
 
-preserved="$(adb shell run-as "$app_package" cat files/install-over-sentinel.txt | tr -d '\r')"
+preserved="$(adb shell run-as "$app_package" cat "$sentinel_path" | tr -d '\r')"
 test "$preserved" = "$sentinel"
 printf 'expected=%s\nactual=%s\nresult=PASS\n' \
   "$sentinel" "$preserved" > "$evidence_root/DATA-PRESERVATION.txt"
@@ -159,7 +170,7 @@ grep -Eq 'tests="7"' "$evidence_root/INSTRUMENTATION.xml"
 grep -Eq 'failures="0"' "$evidence_root/INSTRUMENTATION.xml"
 grep -Eq 'errors="0"' "$evidence_root/INSTRUMENTATION.xml"
 
-final_value="$(adb shell run-as "$app_package" cat files/install-over-sentinel.txt | tr -d '\r')"
+final_value="$(adb shell run-as "$app_package" cat "$sentinel_path" | tr -d '\r')"
 test "$final_value" = "$sentinel"
 printf 'expected=%s\nactual=%s\nresult=PASS\n' \
   "$sentinel" "$final_value" > "$evidence_root/POST-INSTRUMENTATION-DATA.txt"
