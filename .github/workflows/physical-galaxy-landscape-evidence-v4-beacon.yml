@@ -1,0 +1,32 @@
+name: Galaxy Landscape Evidence V4 Beacon
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/physical-galaxy-landscape-evidence-v4-beacon.yml'
+
+permissions:
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  expose-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish V4 run locator
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sleep 10
+          runs="$(gh api -X GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/physical-galaxy-landscape-evidence-v4.yml/runs" \
+            -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
+            -f event='push' \
+            -f per_page='5' \
+            --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
+          test -n "$runs"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Galaxy landscape evidence V4 locator\n\n$runs"
