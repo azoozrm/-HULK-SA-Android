@@ -64,7 +64,6 @@ jobs:
 
           target = profile['target']
           avd_profile = 'tv_1080p' if target == 'android-tv' else 'pixel_2'
-          rotation = 1 if profile['orientation'] == 'landscape' and profile['form_factor'] != 'television' else 0
           values = {
               'profile_id': profile_id,
               'test_class': test_class,
@@ -75,7 +74,10 @@ jobs:
               'height': profile['height_px'],
               'density': profile['density_dpi'],
               'font_scale': profile['font_scale'],
-              'rotation': rotation,
+              # The emulator skin and wm size already use the final requested
+              # orientation. Applying user_rotation again would swap landscape
+              # phone geometry back to portrait.
+              'rotation': 0,
               'locale': profile['locale'],
           }
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
