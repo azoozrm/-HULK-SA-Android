@@ -10,6 +10,7 @@
     ],
     "runtime": [
       "PROFILE-CONFIG.txt",
+      "APPLICATION-LOCALE.txt",
       "DEVICE-PROFILE.txt",
       "WINDOW-METRICS.txt",
       "INSTRUMENTATION.txt",
