@@ -127,6 +127,31 @@ class CompatibilityV2InstrumentationTest {
     }
 
     @Test
+    fun phoneWindowKeepsStatusBarAndHidesNavigationBar() {
+        assumeFalse("Phone window contract is not applicable to television UI mode", isTelevision())
+        launchScenario().use { scenario ->
+            assertTrue(
+                "Application package did not become visible",
+                device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L),
+            )
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(900L)
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                assertTrue(
+                    "Phone status bar must remain visible outside playback",
+                    insets?.isVisible(WindowInsetsCompat.Type.statusBars()) == true,
+                )
+                assertFalse(
+                    "Phone navigation bar must be hidden so the shell does not reserve a false bottom inset",
+                    insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) == true,
+                )
+            }
+        }
+    }
+
+    @Test
     fun televisionLoginStartsWithImeHidden() {
         assumeTrue("Initial IME visibility contract requires television UI mode", isTelevision())
         launchScenario().use { scenario ->
