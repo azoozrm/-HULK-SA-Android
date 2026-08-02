@@ -9,7 +9,7 @@ font_scale="${5:?font scale is required}"
 rotation="${6:?rotation is required}"
 locale="${7:?BCP-47 locale is required}"
 test_class="${8:-sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest}"
-out="${EVIDENCE_ROOT:-build/compatibility-v2/runtime/$profile}"
+out="${9:-${EVIDENCE_ROOT:-build/compatibility-v2/runtime/$profile}}"
 
 bash quality/compatibility-v2/configure_emulator_profile.sh \
   "$profile" "$width" "$height" "$density" "$font_scale" "$rotation" "$locale" \
