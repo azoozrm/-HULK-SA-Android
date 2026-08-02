@@ -42,9 +42,11 @@ def parse_instrumentation(text: str, process_status: int) -> list[TestCase]:
             elif code in (-1, -2):
                 case.status = "FAIL"
                 case.detail = pending.get("stack") or pending.get("stream") or f"instrumentation status code {code}"
-            elif code == -3:
+            elif code in (-3, -4):
                 case.status = "SKIPPED"
-                case.detail = pending.get("stream", "ignored")
+                case.detail = pending.get("stack") or pending.get("stream") or (
+                    "ignored" if code == -3 else "assumption not satisfied"
+                )
             pending = {}
 
     if not cases:
