@@ -4,9 +4,14 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">@color/hulk_black</item>
-        <item name="android:navigationBarColor">@color/hulk_black</item>
-        <item name="android:windowBackground">@color/hulk_black</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:windowBackground">@color/hulk_surface</item>
         <item name="android:colorAccent">@color/hulk_gold</item>
     </style>
     <style name="Theme.HulkSA.TV" parent="Theme.HulkSA">

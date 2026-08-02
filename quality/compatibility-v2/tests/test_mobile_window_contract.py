@@ -6,85 +6,65 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
 class MobileWindowContractTest(unittest.TestCase):
-    def test_mobile_navigation_does_not_apply_bottom_navigation_inset_at_top(self) -> None:
-        shell = (
-            REPO_ROOT
-            / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
-        ).read_text(encoding="utf-8")
-
-        mobile_navigation = shell.split("private fun MobileNavigation", 1)[1].split(
-            "private fun DestinationContent", 1
-        )[0]
-        self.assertIn(".statusBarsPadding(),", mobile_navigation)
+    def test_mobile_navigation_uses_central_safe_drawing_insets(self) -> None:
+        shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
+        mobile_navigation = shell.split("private fun MobileNavigation", 1)[1].split("private fun DestinationContent", 1)[0]
+        self.assertNotIn("statusBarsPadding", mobile_navigation)
         self.assertNotIn("navigationBarsPadding", mobile_navigation)
+        self.assertIn("compactLandscape", mobile_navigation)
 
-    def test_mobile_root_reserves_navigation_controls_without_shrinking_background(self) -> None:
-        app = (
-            REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn(".fillMaxSize()\n                .background(colors.background)", app)
-        self.assertIn("val applyNavigationSafeArea =", app)
+    def test_mobile_root_fills_window_and_reserves_complete_safe_drawing(self) -> None:
+        app = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt").read_text(encoding="utf-8")
+        self.assertIn(".fillMaxSize()\n                .background(windowBackground)", app)
+        self.assertIn("Modifier.windowInsetsPadding(WindowInsets.safeDrawing)", app)
         self.assertIn("state.screen != HulkScreen.PLAYER", app)
         self.assertIn("state.screen != HulkScreen.LOGIN", app)
-        self.assertIn("Modifier.navigationBarsPadding()", app)
 
-    def test_mobile_catalogs_do_not_reserve_persistent_hint_rows(self) -> None:
-        shell = (
-            REPO_ROOT
-            / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("if (isTv) CatalogInteractionHints(true)", shell)
-        self.assertIn("if (isTv) LiveInteractionHints(true)", shell)
-        self.assertIn("Spacer(Modifier.height(if (isTv) 9.dp else 4.dp))", shell)
-        self.assertIn("Spacer(Modifier.height(if (isTv) 8.dp else 4.dp))", shell)
-
-    def test_mobile_shell_is_edge_to_edge_without_triggering_immersive_cling(self) -> None:
-        policy = (
-            REPO_ROOT
-            / "app/src/main/java/sa/hulksa/player/ui/adaptive/WindowPresentationPolicy.kt"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("HulkSystemBarsMode.EDGE_TO_EDGE", policy)
+    def test_window_policy_draws_behind_display_cutout_without_immersive_normal_pages(self) -> None:
+        policy = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/adaptive/WindowPresentationPolicy.kt").read_text(encoding="utf-8")
+        theme = (REPO_ROOT / "app/src/main/res/values/themes.xml").read_text(encoding="utf-8")
+        self.assertIn("LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS", policy)
+        self.assertIn("LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES", policy)
         self.assertIn("controller.show(WindowInsets.Type.systemBars())", policy)
         self.assertIn("window.navigationBarColor = Color.TRANSPARENT", policy)
         self.assertIn("window.isNavigationBarContrastEnforced = false", policy)
-        self.assertNotIn("HulkSystemBarsMode.STATUS_ONLY", policy)
+        self.assertIn("android:windowLayoutInDisplayCutoutMode\">shortEdges", theme)
+        self.assertIn("android:navigationBarColor\">@android:color/transparent", theme)
+
+    def test_short_landscape_login_has_real_compact_dimensions(self) -> None:
+        login = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt").read_text(encoding="utf-8")
+        self.assertIn("compactMobileLandscape", login)
+        self.assertIn("compact -> 112.dp", login)
+        self.assertIn("compact -> 92.dp", login)
+        self.assertIn("min = if (compact) 42.dp else 55.dp", login)
+        self.assertIn("if (!compact)", login)
+
+    def test_short_landscape_catalogs_use_one_vertical_scroll_surface(self) -> None:
+        shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
+        self.assertIn("private fun CompactLandscapePosterCatalog", shell)
+        self.assertIn("item(key = \"catalog-header\", span = { GridItemSpan(maxLineSpan) })", shell)
+        self.assertIn("item(key = \"catalog-categories\", span = { GridItemSpan(maxLineSpan) })", shell)
+        self.assertIn("private fun CompactLandscapeLiveCatalog", shell)
+        live = shell.split("private fun CompactLandscapeLiveCatalog", 1)[1].split("private fun LiveStage", 1)[0]
+        self.assertIn("LazyColumn(", live)
+        self.assertIn("item(key = \"live-header\")", live)
+        self.assertIn("item(key = \"live-categories\")", live)
 
     def test_mobile_player_restores_real_pre_player_orientation(self) -> None:
-        app = (
-            REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
-        ).read_text(encoding="utf-8")
-        policy = (
-            REPO_ROOT
-            / "app/src/main/java/sa/hulksa/player/ui/adaptive/WindowPresentationPolicy.kt"
-        ).read_text(encoding="utf-8")
-
+        app = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt").read_text(encoding="utf-8")
+        policy = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/adaptive/WindowPresentationPolicy.kt").read_text(encoding="utf-8")
         self.assertIn("ApplyAdaptiveWindowPresentation(", app)
         self.assertIn("isPlayer = state.screen == HulkScreen.PLAYER", app)
-        self.assertIn("HulkSystemBarsMode.IMMERSIVE", policy)
-        self.assertIn("HulkOrientationRequest.SENSOR_LANDSCAPE", policy)
         self.assertIn("prePlayerOrientation = activity.resources.configuration.orientation", policy)
         self.assertIn("restoreOrientationRequest(prePlayerOrientation)", policy)
         self.assertIn("ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT", policy)
         self.assertIn("controller.hide(WindowInsets.Type.systemBars())", policy)
-        self.assertNotIn("activity.requestedOrientation = previousOrientation", policy)
 
-    def test_runtime_suite_checks_edge_to_edge_without_immersive_overlay(self) -> None:
-        instrumentation = (
-            REPO_ROOT
-            / "app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn(
-            "fun phoneWindowUsesTransparentEdgeToEdgeSystemBars()",
-            instrumentation,
-        )
-        self.assertIn("WindowInsetsCompat.Type.statusBars()", instrumentation)
-        self.assertIn("WindowInsetsCompat.Type.navigationBars()", instrumentation)
-        self.assertIn("Color.TRANSPARENT", instrumentation)
+    def test_runtime_suite_checks_safe_drawing_and_cutout(self) -> None:
+        instrumentation = (REPO_ROOT / "app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt").read_text(encoding="utf-8")
+        self.assertIn("WindowInsetsCompat.Type.displayCutout()", instrumentation)
         self.assertIn("safeContentBounds", instrumentation)
+        self.assertIn("layoutInDisplayCutoutMode", instrumentation)
         self.assertIn("immersive_cling_title", instrumentation)
 
 

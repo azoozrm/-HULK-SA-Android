@@ -10,6 +10,7 @@ import android.os.Build
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -130,6 +131,17 @@ private fun applySystemBars(activity: Activity, mode: HulkSystemBarsMode) {
         window.isStatusBarContrastEnforced = false
         window.isNavigationBarContrastEnforced = false
     }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val attributes = window.attributes
+        attributes.layoutInDisplayCutoutMode =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        window.attributes = attributes
+    }
+    window.decorView.setBackgroundColor(Color.rgb(17, 17, 8))
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         window.insetsController?.let { controller ->

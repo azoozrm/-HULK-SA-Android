@@ -9,8 +9,10 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Rect
+import android.os.Build
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -204,13 +206,24 @@ class CompatibilityV2InstrumentationTest {
                     Color.TRANSPARENT,
                     activity.window.navigationBarColor,
                 )
-                val navigationInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-                safeContentBounds = Rect(
-                    navigationInsets.left,
-                    0,
-                    activity.window.decorView.width - navigationInsets.right,
-                    activity.window.decorView.height - navigationInsets.bottom,
+                val safeInsets = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
                 )
+                safeContentBounds = Rect(
+                    safeInsets.left,
+                    safeInsets.top,
+                    activity.window.decorView.width - safeInsets.right,
+                    activity.window.decorView.height - safeInsets.bottom,
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    assertTrue(
+                        "Window must draw behind short-edge display cutouts",
+                        activity.window.attributes.layoutInDisplayCutoutMode ==
+                            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES ||
+                            activity.window.attributes.layoutInDisplayCutoutMode ==
+                            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+                    )
+                }
                 assertTrue("Navigation safe content width is invalid", safeContentBounds.width() > 0)
                 assertTrue("Navigation safe content height is invalid", safeContentBounds.height() > 0)
             }

@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.isImeVisible
@@ -40,6 +39,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -413,7 +413,7 @@ fun MainShellScreen(
             }
         }
     }
-    Box(Modifier.fillMaxSize().background(colors.background)) {
+    Box(Modifier.fillMaxSize().background(colors.surface)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
@@ -580,6 +580,10 @@ private fun NavigationItem(
 
 @Composable
 private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactLandscape =
+        adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
     val navigationState = rememberLazyListState()
     LaunchedEffect(selected) {
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
@@ -588,21 +592,23 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF090A07))
-            .statusBarsPadding(),
+            .background(colors.surface),
         state = navigationState,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(
+            horizontal = 8.dp,
+            vertical = if (compactLandscape) 4.dp else 8.dp,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(if (compactLandscape) 4.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        item { BrandBadge(Modifier.size(40.dp)) }
+        item { BrandBadge(Modifier.size(if (compactLandscape) 34.dp else 40.dp)) }
         items(destinations, key = { it.destination.name }) { entry ->
             FocusButton(
                 text = entry.label,
                 onClick = { onSelect(entry.destination) },
                 primary = selected == entry.destination,
                 compact = true,
-                modifier = Modifier.heightIn(min = 48.dp),
+                modifier = Modifier.heightIn(min = if (compactLandscape) 42.dp else 48.dp),
             )
         }
     }
@@ -1084,6 +1090,35 @@ private fun PosterCatalogScreen(
     }
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactLandscape =
+        !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
+
+    if (compactLandscape) {
+        CompactLandscapePosterCatalog(
+            title = title,
+            type = type,
+            destination = destination,
+            state = state,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onOpenHistory = onOpenHistory,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            categories = catalog?.categories.orEmpty(),
+            ordered = ordered,
+            visible = visible,
+            continueWatching = continueWatching,
+            showingContinue = showingContinue,
+            resultCount = resultCount,
+            catalogAvailable = catalog != null,
+        )
+        return
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -1118,6 +1153,98 @@ private fun PosterCatalogScreen(
 }
 
 @Composable
+private fun CompactLandscapePosterCatalog(
+    title: String,
+    type: ContentType,
+    destination: MainDestination,
+    state: HulkUiState,
+    navigationMemory: NavigationMemoryStore,
+    isFavorite: (ContentItem) -> Boolean,
+    onSelectCategory: (String?) -> Unit,
+    onSearch: (String) -> Unit,
+    onOpen: (ContentItem) -> Unit,
+    onOpenHistory: (HistoryEntry) -> Unit,
+    onToggleFavorite: (ContentItem) -> Unit,
+    onRefresh: () -> Unit,
+    categories: List<Category>,
+    ordered: List<ContentItem>,
+    visible: List<ContentItem>,
+    continueWatching: List<HistoryEntry>,
+    showingContinue: Boolean,
+    resultCount: Int,
+    catalogAvailable: Boolean,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(if (showingContinue) 180.dp else 105.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, top = 7.dp, end = 12.dp, bottom = 28.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        item(key = "catalog-header", span = { GridItemSpan(maxLineSpan) }) {
+            CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, false)
+        }
+        if (state.errorMessage != null) {
+            item(key = "catalog-error", span = { GridItemSpan(maxLineSpan) }) {
+                ErrorNotice(state.errorMessage)
+            }
+        }
+        item(key = "catalog-categories", span = { GridItemSpan(maxLineSpan) }) {
+            ReorderableCatalogCategoryBar(
+                type,
+                categories,
+                ordered,
+                state.selectedCategoryId,
+                onSelectCategory,
+                false,
+            )
+        }
+        when {
+            showingContinue && continueWatching.isNotEmpty() -> {
+                itemsIndexed(continueWatching, key = { _, entry -> entry.key }) { index, entry ->
+                    HistoryCard(
+                        entry = entry,
+                        onClick = { onOpenHistory(entry) },
+                        modifier = Modifier.fillMaxWidth(),
+                        onFocused = { navigationMemory.save(destination, entry.key, index) },
+                    )
+                }
+            }
+            showingContinue -> {
+                item(key = "catalog-empty-history", span = { GridItemSpan(maxLineSpan) }) {
+                    EmptyState("لا توجد مشاهدة غير مكتملة في $title")
+                }
+            }
+            !catalogAvailable && type in state.loadingTypes -> {
+                item(key = "catalog-loading", span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                        LoadingRing(label = "جاري تحميل $title…")
+                    }
+                }
+            }
+            visible.isEmpty() -> {
+                item(key = "catalog-empty", span = { GridItemSpan(maxLineSpan) }) {
+                    EmptyState("لا توجد نتائج مطابقة")
+                }
+            }
+            else -> {
+                itemsIndexed(visible, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
+                    val key = "${item.type}:${item.id}"
+                    CompactPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = Modifier.fillMaxWidth(),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = { navigationMemory.save(destination, key, index) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LiveCatalogScreen(
     state: HulkUiState,
     isTv: Boolean,
@@ -1136,6 +1263,28 @@ private fun LiveCatalogScreen(
                 item.matchesSearch(state.searchQuery)
         }
     }
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactLandscape =
+        !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
+
+    if (compactLandscape) {
+        CompactLandscapeLiveCatalog(
+            state = state,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            categories = catalog?.categories.orEmpty(),
+            allItems = catalog?.items.orEmpty(),
+            visible = visible,
+            catalogAvailable = catalog != null,
+        )
+        return
+    }
+
     val remembered = navigationMemory.position(MainDestination.LIVE)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
     var preview by remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
@@ -1235,6 +1384,69 @@ private fun LiveCatalogScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CompactLandscapeLiveCatalog(
+    state: HulkUiState,
+    navigationMemory: NavigationMemoryStore,
+    isFavorite: (ContentItem) -> Boolean,
+    onSelectCategory: (String?) -> Unit,
+    onSearch: (String) -> Unit,
+    onOpen: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem) -> Unit,
+    onRefresh: () -> Unit,
+    categories: List<Category>,
+    allItems: List<ContentItem>,
+    visible: List<ContentItem>,
+    catalogAvailable: Boolean,
+) {
+    val remembered = navigationMemory.position(MainDestination.LIVE)
+    val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, top = 7.dp, end = 12.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        item(key = "live-header") {
+            CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, false)
+        }
+        if (state.errorMessage != null) {
+            item(key = "live-error") { ErrorNotice(state.errorMessage) }
+        }
+        item(key = "live-categories") {
+            ReorderableLiveCategoryBar(categories, allItems, state.selectedCategoryId, onSelectCategory)
+        }
+        when {
+            !catalogAvailable && ContentType.LIVE in state.loadingTypes -> {
+                item(key = "live-loading") {
+                    Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                        LoadingRing(label = "جاري تحميل القنوات…")
+                    }
+                }
+            }
+            visible.isEmpty() -> item(key = "live-empty") { EmptyState("لا توجد قنوات مطابقة") }
+            else -> itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
+                ChannelListItem(
+                    item = channel,
+                    selected = false,
+                    onFocused = {
+                        navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index)
+                    },
+                    onClick = { onOpen(channel) },
+                    isFavorite = isFavorite(channel),
+                    onLongClick = { onToggleFavorite(channel) },
+                )
+            }
+        }
+    }
+    LaunchedEffect(visible, remembered.itemKey) {
+        if (visible.isNotEmpty() && remembered.itemKey.isNotBlank()) {
+            listState.scrollToItem(rememberedIndex + 2)
         }
     }
 }

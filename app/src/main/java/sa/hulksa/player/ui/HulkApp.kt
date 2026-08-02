@@ -4,8 +4,10 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -39,7 +41,13 @@ fun HulkApp(
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
     val colors = LocalHulkColors.current
-    val applyNavigationSafeArea =
+    val windowBackground =
+        if (state.screen == HulkScreen.LOGIN || state.screen == HulkScreen.PLAYER) {
+            colors.background
+        } else {
+            colors.surface
+        }
+    val applySafeDrawingInsets =
         !isTv && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
@@ -59,15 +67,15 @@ fun HulkApp(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(colors.background)
+                .background(windowBackground)
                 .trackAdaptiveInput(adaptiveInputController),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(
-                        if (applyNavigationSafeArea) {
-                            Modifier.navigationBarsPadding()
+                        if (applySafeDrawingInsets) {
+                            Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
                         } else {
                             Modifier
                         },
