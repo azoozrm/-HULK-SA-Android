@@ -188,6 +188,11 @@ replace_once(
     "if (value.isEmpty()) Text(label, color = colors.textMuted, fontSize = if (compact) 12.sp else 14.sp)",
 )
 
+replace_once(
+    contract,
+    '        self.assertIn("min = if (compact) 42.dp else 55.dp", login)\n',
+    '        self.assertIn("min = if (compact) 38.dp else 55.dp", login)\n',
+)
 contract_text = (ROOT / contract).read_text(encoding="utf-8")
 anchor = """        self.assertIn(\"if (!compact)\", login)\n"""
 addition = """        self.assertIn(\"Modifier.fillMaxHeight()\", login)\n        self.assertIn(\"Modifier.verticalScroll(panelScrollState)\", login)\n        self.assertIn(\"compact = compact\", login)\n"""
