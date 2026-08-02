@@ -86,25 +86,28 @@ if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
 
 is_tv=false
 category="android.intent.category.LAUNCHER"
+activity_class="sa.hulksa.player.MainActivity"
 if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then
   is_tv=true
   category="android.intent.category.LEANBACK_LAUNCHER"
+  activity_class="sa.hulksa.player.TvMainActivity"
 fi
-
-resolve_output="$(adb shell cmd package resolve-activity --brief \
-  -a android.intent.action.MAIN \
-  -c "$category" \
-  "$package" 2>&1 | tr -d '\r')"
-resolved_activity="$(printf '%s\n' "$resolve_output" | awk '/^[^[:space:]]+\/[^[:space:]]+$/ { component=$0 } END { print component }')"
+resolved_activity="${package}/${activity_class}"
+component_declared=false
+if adb shell dumpsys package "$package" 2>/dev/null | tr -d '\r' | grep -Fq "$activity_class"; then
+  component_declared=true
+fi
 
 {
   echo "package=$package"
   echo "is_tv=$is_tv"
   echo "category=$category"
-  echo "resolve_output=${resolve_output//$'\n'/ | }"
+  echo "launch_contract=explicit-manifest-component"
+  echo "activity_class=$activity_class"
   echo "resolved_activity=$resolved_activity"
-  if [[ -z "$resolved_activity" ]]; then
-    echo "Unable to resolve an explicit launcher component"
+  echo "component_declared=$component_declared"
+  if [[ "$component_declared" != true ]]; then
+    echo "Canonical launcher component is not declared in the installed package"
     exit 1
   fi
   adb shell am force-stop "$package"
@@ -145,8 +148,8 @@ if [[ "$ime_hidden" != true ]]; then
 fi
 
 # A BACK used to dismiss a genuinely visible IME must never leave the launcher
-# as the captured foreground. Re-resolve and relaunch the application once if
-# the platform consumed BACK as activity navigation instead of IME dismissal.
+# as the captured foreground. Relaunch the canonical component once if the
+# platform consumed BACK as activity navigation instead of IME dismissal.
 if ! wait_for_foreground 3; then
   foreground_relaunch_after_ime=true
   adb shell am start -W -n "$resolved_activity" >> "$out/FOREGROUND-APP.txt" 2>&1 || status=1
