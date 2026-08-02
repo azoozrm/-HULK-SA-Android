@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.graphics.Color
 import android.os.Build
 import android.view.View
 import android.view.WindowInsets
@@ -12,9 +13,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowCompat
 
 internal enum class HulkSystemBarsMode {
-    STATUS_ONLY,
+    EDGE_TO_EDGE,
     IMMERSIVE,
 }
 
@@ -43,7 +45,7 @@ internal fun resolveWindowPresentationPolicy(
     )
 
     else -> HulkWindowPresentationPolicy(
-        systemBarsMode = HulkSystemBarsMode.STATUS_ONLY,
+        systemBarsMode = HulkSystemBarsMode.EDGE_TO_EDGE,
         orientationRequest = HulkOrientationRequest.KEEP_CURRENT,
     )
 }
@@ -89,19 +91,31 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 
 @Suppress("DEPRECATION")
 private fun applySystemBars(activity: Activity, mode: HulkSystemBarsMode) {
+    val window = activity.window
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    window.statusBarColor = Color.TRANSPARENT
+    window.navigationBarColor = Color.TRANSPARENT
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        window.isStatusBarContrastEnforced = false
+        window.isNavigationBarContrastEnforced = false
+    }
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        activity.window.insetsController?.let { controller ->
-            controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        window.insetsController?.let { controller ->
             when (mode) {
-                HulkSystemBarsMode.IMMERSIVE -> controller.hide(WindowInsets.Type.systemBars())
-                HulkSystemBarsMode.STATUS_ONLY -> {
-                    controller.show(WindowInsets.Type.statusBars())
-                    controller.hide(WindowInsets.Type.navigationBars())
+                HulkSystemBarsMode.IMMERSIVE -> {
+                    controller.systemBarsBehavior =
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(WindowInsets.Type.systemBars())
+                }
+
+                HulkSystemBarsMode.EDGE_TO_EDGE -> {
+                    controller.show(WindowInsets.Type.systemBars())
                 }
             }
         }
     } else {
-        activity.window.decorView.systemUiVisibility = when (mode) {
+        window.decorView.systemUiVisibility = when (mode) {
             HulkSystemBarsMode.IMMERSIVE ->
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
                     View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -110,9 +124,8 @@ private fun applySystemBars(activity: Activity, mode: HulkSystemBarsMode) {
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
 
-            HulkSystemBarsMode.STATUS_ONLY ->
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            HulkSystemBarsMode.EDGE_TO_EDGE ->
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         }
