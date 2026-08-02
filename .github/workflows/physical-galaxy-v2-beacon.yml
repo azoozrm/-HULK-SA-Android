@@ -1,3 +1,4 @@
+# Locate final Portrait, Landscape and production-signing qualification after V3 passed.
 name: HULK SA Physical Galaxy V2 Beacon
 
 on:
@@ -25,7 +26,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/actions/workflows/physical-galaxy-final-qualification-v2.yml/runs" \
             -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
             -f event='push' \
-            -f per_page='3' \
+            -f per_page='5' \
             --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
           test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Physical Galaxy V2 run locator\n\n$runs\n\nOnly the run whose head contains the current application correction is eligible for inspection. No merge or release was performed."
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Final clean Galaxy qualification locator\n\n$runs\n\nOnly the run on the final clean compact-Login source is eligible. No merge or release was performed."
