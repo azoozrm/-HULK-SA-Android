@@ -18,6 +18,17 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn(".statusBarsPadding(),", mobile_navigation)
         self.assertNotIn("navigationBarsPadding", mobile_navigation)
 
+    def test_mobile_root_reserves_navigation_controls_without_shrinking_background(self) -> None:
+        app = (
+            REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(".fillMaxSize()\n                .background(colors.background)", app)
+        self.assertIn("val applyNavigationSafeArea =", app)
+        self.assertIn("state.screen != HulkScreen.PLAYER", app)
+        self.assertIn("state.screen != HulkScreen.LOGIN", app)
+        self.assertIn("Modifier.navigationBarsPadding()", app)
+
     def test_mobile_catalogs_do_not_reserve_persistent_hint_rows(self) -> None:
         shell = (
             REPO_ROOT
@@ -41,7 +52,7 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("window.isNavigationBarContrastEnforced = false", policy)
         self.assertNotIn("HulkSystemBarsMode.STATUS_ONLY", policy)
 
-    def test_mobile_player_uses_adaptive_immersive_landscape_policy(self) -> None:
+    def test_mobile_player_restores_real_pre_player_orientation(self) -> None:
         app = (
             REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
         ).read_text(encoding="utf-8")
@@ -54,7 +65,11 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("isPlayer = state.screen == HulkScreen.PLAYER", app)
         self.assertIn("HulkSystemBarsMode.IMMERSIVE", policy)
         self.assertIn("HulkOrientationRequest.SENSOR_LANDSCAPE", policy)
+        self.assertIn("prePlayerOrientation = activity.resources.configuration.orientation", policy)
+        self.assertIn("restoreOrientationRequest(prePlayerOrientation)", policy)
+        self.assertIn("ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT", policy)
         self.assertIn("controller.hide(WindowInsets.Type.systemBars())", policy)
+        self.assertNotIn("activity.requestedOrientation = previousOrientation", policy)
 
     def test_runtime_suite_checks_edge_to_edge_without_immersive_overlay(self) -> None:
         instrumentation = (
@@ -69,6 +84,7 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("WindowInsetsCompat.Type.statusBars()", instrumentation)
         self.assertIn("WindowInsetsCompat.Type.navigationBars()", instrumentation)
         self.assertIn("Color.TRANSPARENT", instrumentation)
+        self.assertIn("safeContentBounds", instrumentation)
         self.assertIn("immersive_cling_title", instrumentation)
 
 
