@@ -29,6 +29,18 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("Spacer(Modifier.height(if (isTv) 9.dp else 4.dp))", shell)
         self.assertIn("Spacer(Modifier.height(if (isTv) 8.dp else 4.dp))", shell)
 
+    def test_mobile_shell_is_edge_to_edge_without_triggering_immersive_cling(self) -> None:
+        policy = (
+            REPO_ROOT
+            / "app/src/main/java/sa/hulksa/player/ui/adaptive/WindowPresentationPolicy.kt"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("HulkSystemBarsMode.EDGE_TO_EDGE", policy)
+        self.assertIn("controller.show(WindowInsets.Type.systemBars())", policy)
+        self.assertIn("window.navigationBarColor = Color.TRANSPARENT", policy)
+        self.assertIn("window.isNavigationBarContrastEnforced = false", policy)
+        self.assertNotIn("HulkSystemBarsMode.STATUS_ONLY", policy)
+
     def test_mobile_player_uses_adaptive_immersive_landscape_policy(self) -> None:
         app = (
             REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
@@ -43,20 +55,21 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("HulkSystemBarsMode.IMMERSIVE", policy)
         self.assertIn("HulkOrientationRequest.SENSOR_LANDSCAPE", policy)
         self.assertIn("controller.hide(WindowInsets.Type.systemBars())", policy)
-        self.assertIn("controller.hide(WindowInsets.Type.navigationBars())", policy)
 
-    def test_runtime_suite_checks_real_phone_system_bar_visibility(self) -> None:
+    def test_runtime_suite_checks_edge_to_edge_without_immersive_overlay(self) -> None:
         instrumentation = (
             REPO_ROOT
             / "app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt"
         ).read_text(encoding="utf-8")
 
         self.assertIn(
-            "fun phoneWindowKeepsStatusBarAndHidesNavigationBar()",
+            "fun phoneWindowUsesTransparentEdgeToEdgeSystemBars()",
             instrumentation,
         )
         self.assertIn("WindowInsetsCompat.Type.statusBars()", instrumentation)
         self.assertIn("WindowInsetsCompat.Type.navigationBars()", instrumentation)
+        self.assertIn("Color.TRANSPARENT", instrumentation)
+        self.assertIn("immersive_cling_title", instrumentation)
 
 
 if __name__ == "__main__":
