@@ -22,6 +22,34 @@ if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:andro
 fi
 resolved_activity="${package}/${activity_class}"
 
+# Android may display its first-use immersive-mode confirmation above the app.
+# Confirm the platform education overlay before launching so final hierarchy and
+# screenshot evidence always belong to HULK SA rather than a system-owned cling.
+immersive_confirmation_status=0
+immersive_confirmation_output="not-required"
+if [[ "$is_tv" != true ]]; then
+  set +e
+  immersive_confirmation_output="$(adb shell settings put secure immersive_mode_confirmations confirmed 2>&1)"
+  immersive_confirmation_status=$?
+  set -e
+fi
+{
+  echo "is_tv=$is_tv"
+  echo "setting=secure/immersive_mode_confirmations"
+  echo "requested_value=confirmed"
+  echo "status=$immersive_confirmation_status"
+  echo "output=${immersive_confirmation_output//$'\n'/ | }"
+  if [[ "$immersive_confirmation_status" -eq 0 ]]; then
+    echo "result=PASS"
+  else
+    echo "result=BLOCKED"
+    echo "failure_reason=unable to suppress the Android first-use immersive confirmation overlay"
+  fi
+} > "$out/SYSTEM-OVERLAY-PRECONDITION.txt"
+if [[ "$immersive_confirmation_status" -ne 0 ]]; then
+  status=1
+fi
+
 capture_window_windows() {
   adb shell dumpsys window windows > "$1" 2>&1 || true
 }
@@ -258,6 +286,7 @@ for required in \
   INSTALLED-PACKAGE-DUMP.txt \
   APPLICATION-LOCALE.txt \
   RUNTIME-PERMISSIONS.txt \
+  SYSTEM-OVERLAY-PRECONDITION.txt \
   DEVICE-PROFILE.txt \
   WINDOW-METRICS.txt \
   INSTRUMENTATION.txt \
