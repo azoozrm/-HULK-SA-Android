@@ -1,0 +1,79 @@
+name: HULK SA Compatibility V2 - API35 Smoke Once
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - .github/workflows/compatibility-v2-api35-smoke-once.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: compatibility-v2-api35-smoke-once
+  cancel-in-progress: true
+
+jobs:
+  phone-medium-api35:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EVIDENCE_ROOT: build/compatibility-v2/smoke/phone-medium-api35
+      APP_APK: build/compatibility-v2/fast/apks/app-debug.apk
+      TEST_APK: build/compatibility-v2/fast/apks/app-debug-androidTest.apk
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-FAST-30730229247
+          path: build/compatibility-v2/fast
+          run-id: 30730229247
+          github-token: ${{ github.token }}
+
+      - name: Verify exact tested APKs
+        run: |
+          set -euo pipefail
+          test -s "$APP_APK"
+          test -s "$TEST_APK"
+          sha256sum "$APP_APK" "$TEST_APK"
+
+      - name: Configure Linux KVM when available
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod a+rw /dev/kvm
+            ls -l /dev/kvm
+          fi
+
+      - name: Run API35 phone smoke with canonical component contract
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 1080x2340
+          script: bash quality/compatibility-v2/run_runtime_profile.sh 'phone-medium-api35' '1080' '2340' '420' '1.0' '0' 'ar-SA' 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' "$EVIDENCE_ROOT"
+
+      - name: Enforce runtime evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime \
+            --evidence-root "$EVIDENCE_ROOT" \
+            --out "$EVIDENCE_ROOT/gate"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-API35-SMOKE-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_ROOT }}/
+          if-no-files-found: error
+          retention-days: 7
