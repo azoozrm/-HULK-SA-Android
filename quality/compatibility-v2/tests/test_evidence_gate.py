@@ -46,15 +46,24 @@ class EvidenceGateTest(unittest.TestCase):
             checks = MODULE.gate_evidence(spec, "fast", root)
             self.assertTrue(all(check.status == "PASS" for check in checks))
 
-    def write_runtime_fixture(self, root: Path, *, app_foreground: bool, locale_verified: bool = True) -> Path:
+    def write_runtime_fixture(
+        self,
+        root: Path,
+        *,
+        app_foreground: bool,
+        locale_verified: bool = True,
+        ime_hidden: bool = True,
+    ) -> Path:
         package = "sa.hulksa.player.dev"
         visible_package = package if app_foreground else "com.android.settings"
         locale_result = "result=PASS\nlocale_verified=true\n" if locale_verified else "result=BLOCKED\n"
+        ime_result = "result=PASS\nime_hidden=true\n" if ime_hidden else "result=FAIL\nime_hidden=false\n"
         files = {
             "PROFILE-CONFIG.txt": "result=PASS\nprofile_verified=true\nlocale_mode=system-root\n",
             "APPLICATION-LOCALE.txt": f"requested_locale=ar-SA\n{locale_result}",
-            "INSTRUMENTATION.xml": '<testsuite tests="5" failures="0" errors="0" skipped="1"/>\n',
+            "INSTRUMENTATION.xml": '<testsuite tests="6" failures="0" errors="0" skipped="1"/>\n',
             "FOREGROUND-APP.txt": f"package={package}\nresolved_activity={package}/.MainActivity\nStatus: ok\n",
+            "IME-STATE.txt": ime_result,
             "ACTIVITY-TOP.txt": f"ACTIVITY {visible_package}/.MainActivity\n",
             "window.xml": f'<hierarchy><node package="{visible_package}" /></hierarchy>\n',
         }
@@ -81,6 +90,7 @@ class EvidenceGateTest(unittest.TestCase):
                             "APPLICATION-LOCALE.txt",
                             "INSTRUMENTATION.xml",
                             "FOREGROUND-APP.txt",
+                            "IME-STATE.txt",
                             "ACTIVITY-TOP.txt",
                             "window.xml",
                             "full-window.png",
@@ -116,6 +126,14 @@ class EvidenceGateTest(unittest.TestCase):
             checks = MODULE.gate_evidence(spec, "runtime", root)
             failures = {check.id for check in checks if check.status == "FAIL"}
             self.assertIn("runtime-effective-locale", failures)
+
+    def test_visible_ime_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = self.write_runtime_fixture(root, app_foreground=True, ime_hidden=False)
+            checks = MODULE.gate_evidence(spec, "runtime", root)
+            failures = {check.id for check in checks if check.status == "FAIL"}
+            self.assertIn("runtime-ime-hidden", failures)
 
 
 if __name__ == "__main__":
