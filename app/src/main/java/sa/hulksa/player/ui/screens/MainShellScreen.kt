@@ -84,6 +84,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -450,7 +451,7 @@ fun MainShellScreen(
         } else {
             Column(Modifier.fillMaxSize()) {
                 MobileNavigation(state.destination, rememberingSelectDestination)
-                Box(Modifier.weight(1f)) {
+                Box(Modifier.weight(1f).clipToBounds()) {
                     DestinationContent(
                         state = state,
                         isTv = false,

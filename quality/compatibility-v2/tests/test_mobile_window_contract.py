@@ -58,6 +58,11 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("item(key = \"live-header\")", live)
         self.assertIn("item(key = \"live-categories\")", live)
 
+    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:
+        shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
+        self.assertEqual(shell.count("Box(Modifier.weight(1f).clipToBounds())"), 1)
+        self.assertIn("import androidx.compose.ui.draw.clipToBounds", shell)
+
     def test_mobile_player_restores_real_pre_player_orientation(self) -> None:
         app = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt").read_text(encoding="utf-8")
         policy = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/adaptive/WindowPresentationPolicy.kt").read_text(encoding="utf-8")
