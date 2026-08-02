@@ -34,8 +34,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git revert --no-edit 1b6b6613c7a8e969eddc9c71e60096c09a056ca8
-          if git ls-files 'app/build/**' | grep -q .; then
+          tracked_build_files="$(git ls-files 'app/build/**')"
+          if [ -n "$tracked_build_files" ]; then
             echo 'Tracked app/build files remain after revert' >&2
+            printf '%s\n' "$tracked_build_files" | sed -n '1,20p' >&2
             exit 81
           fi
 
@@ -87,8 +89,10 @@ jobs:
           PY
           git commit -m 'fix: keep compact landscape login actions reachable cleanly'
           rm -rf app/build
-          if git ls-files 'app/build/**' | grep -q .; then
+          tracked_build_files="$(git ls-files 'app/build/**')"
+          if [ -n "$tracked_build_files" ]; then
             echo 'Generated app/build files are still tracked' >&2
+            printf '%s\n' "$tracked_build_files" | sed -n '1,20p' >&2
             exit 82
           fi
           test -z "$(git status --porcelain --untracked-files=no)"
@@ -99,8 +103,10 @@ jobs:
           branch='rebuild/adaptive-ui-compatibility-lab-v2'
           git fetch origin "$branch"
           git rebase "origin/$branch"
-          if git ls-files 'app/build/**' | grep -q .; then
+          tracked_build_files="$(git ls-files 'app/build/**')"
+          if [ -n "$tracked_build_files" ]; then
             echo 'Generated app/build files returned after rebase' >&2
+            printf '%s\n' "$tracked_build_files" | sed -n '1,20p' >&2
             exit 83
           fi
           git push origin HEAD:"$branch"
