@@ -26,7 +26,8 @@
 - Added a scrollable compact-height Login fallback for short landscape phones with enlarged font scale.
 - Added an instrumentation test that scrolls the short landscape screen and proves the Login and Subscribe actions remain reachable.
 - Added semantic geometry enforcement: the runtime PNG and application hierarchy must match the requested `WIDTH×HEIGHT`; swapped or double-rotated evidence is rejected.
-- Full Matrix and Targeted Retest workflows are manual-only. Heavy emulator jobs do not run automatically on every commit.
+- Added an install-over qualification that builds the preserved PR #57 baseline and candidate with one isolated Debug signer, updates with `adb install -r`, proves private data preservation, reruns instrumentation, and requires the updated HULK application to remain foreground in the final screenshot and hierarchy.
+- Full Matrix, Targeted Retest, and Install Over workflows are manual-only. Heavy emulator jobs do not run automatically on every commit.
 
 ## Current product build evidence
 
@@ -108,6 +109,31 @@ A prior short-landscape artifact reported profile success while the final PNG/XM
 
 After correcting orientation, visual inspection found the wide Login panel clipped primary actions at font scale 1.5. The product now switches short non-TV windows to a vertically scrollable compact-height layout, and instrumentation proves the primary actions are reachable after scrolling.
 
+## Install-over qualification — Debug lineage PASS
+
+This qualification proves the Android update mechanism and application-data retention using an isolated Debug certificate generated inside one GitHub Actions runner. It does not claim production-signing continuity.
+
+- Preserved baseline source: `c291fa7df2f3ee3a04d020cd831f02073a44d514` from PR #57.
+- Candidate application revision: `2c695f63856d75d9431db6eddbbe8f48a539ba30`; later commits only strengthen the qualification harness and documentation.
+- Package: `sa.hulksa.player.dev`.
+- Version code on both Debug APKs: `64`.
+- One isolated Debug certificate used for both builds: `PASS`.
+- Baseline installation with `adb install --no-streaming`: `PASS`.
+- Candidate update with `adb install --no-streaming -r`: `PASS`.
+- Private sentinel data before update: `PASS`.
+- Private sentinel data immediately after update: `PASS`.
+- Private sentinel data after instrumentation: `PASS`.
+- Instrumentation: `7 tests`, `0 failures`, `3 device-not-applicable skips`.
+- Final candidate cold launch: `Status: ok`.
+- Candidate foreground stability: `3/3` consecutive probes.
+- Final screenshot: `1080×2340`, HULK Login visually inspected.
+- Final hierarchy package: only `sa.hulksa.player.dev`.
+- Evidence checksums: all files verified.
+- Final evidence run: `30748646117`.
+- Final artifact: `HULK-SA-COMPATIBILITY-V2-INSTALL-OVER-FOREGROUND-30748646117` (`8833740167`).
+
+The permanent `.github/workflows/compatibility-v2-install-over.yml` workflow is manual-only. The temporary one-time evidence workflow was deleted after successful qualification.
+
 ## Branding integrity
 
 The approved files remain protected by static SHA-256 checks:
@@ -122,7 +148,8 @@ No shield, HS letters, HULK SA name, color, gradient, background, package ID, ve
 ## Remaining BLOCKED qualification
 
 - Visual regression approval: `BLOCKED: HUMAN-APPROVED FULL-WINDOW BASELINES REQUIRED`.
-- Xiaomi receiver, TCL television, Galaxy phone, real small phone, real tablet, install-over-existing-version, signing continuity, and real-service downloads: `BLOCKED: PHYSICAL DEVICE OR REAL SERVICE VERIFICATION REQUIRED`.
+- Production certificate continuity and installation over the actually distributed signed APK: `BLOCKED: PRODUCTION SIGNING MATERIAL AND DISTRIBUTED APK REQUIRED`.
+- Xiaomi receiver, TCL television, Galaxy phone, real small phone, real tablet, and real-service downloads: `BLOCKED: PHYSICAL DEVICE OR REAL SERVICE VERIFICATION REQUIRED`.
 - PR remains Draft. No merge, release, force push, automatic baseline update, or production signing operation has been performed.
 
 No blocked item is recorded as PASS.
