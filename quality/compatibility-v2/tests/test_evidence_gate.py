@@ -46,13 +46,15 @@ class EvidenceGateTest(unittest.TestCase):
             checks = MODULE.gate_evidence(spec, "fast", root)
             self.assertTrue(all(check.status == "PASS" for check in checks))
 
-    def write_runtime_fixture(self, root: Path, *, app_foreground: bool) -> Path:
+    def write_runtime_fixture(self, root: Path, *, app_foreground: bool, locale_verified: bool = True) -> Path:
         package = "sa.hulksa.player.dev"
         visible_package = package if app_foreground else "com.android.settings"
+        locale_result = "result=PASS\nlocale_verified=true\n" if locale_verified else "result=BLOCKED\n"
         files = {
-            "PROFILE-CONFIG.txt": "result=PASS\nprofile_verified=true\n",
+            "PROFILE-CONFIG.txt": "result=PASS\nprofile_verified=true\nlocale_mode=system-root\n",
+            "APPLICATION-LOCALE.txt": f"requested_locale=ar-SA\n{locale_result}",
             "INSTRUMENTATION.xml": '<testsuite tests="5" failures="0" errors="0" skipped="1"/>\n',
-            "FOREGROUND-APP.txt": f"package={package}\nStatus: ok\n",
+            "FOREGROUND-APP.txt": f"package={package}\nresolved_activity={package}/.MainActivity\nStatus: ok\n",
             "ACTIVITY-TOP.txt": f"ACTIVITY {visible_package}/.MainActivity\n",
             "window.xml": f'<hierarchy><node package="{visible_package}" /></hierarchy>\n',
         }
@@ -76,6 +78,7 @@ class EvidenceGateTest(unittest.TestCase):
                     "scopes": {
                         "runtime": [
                             "PROFILE-CONFIG.txt",
+                            "APPLICATION-LOCALE.txt",
                             "INSTRUMENTATION.xml",
                             "FOREGROUND-APP.txt",
                             "ACTIVITY-TOP.txt",
@@ -105,6 +108,14 @@ class EvidenceGateTest(unittest.TestCase):
             failures = {check.id for check in checks if check.status == "FAIL"}
             self.assertIn("runtime-foreground-activity", failures)
             self.assertIn("runtime-window-package", failures)
+
+    def test_unverified_effective_locale_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = self.write_runtime_fixture(root, app_foreground=True, locale_verified=False)
+            checks = MODULE.gate_evidence(spec, "runtime", root)
+            failures = {check.id for check in checks if check.status == "FAIL"}
+            self.assertIn("runtime-effective-locale", failures)
 
 
 if __name__ == "__main__":
