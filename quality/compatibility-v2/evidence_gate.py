@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -15,6 +16,8 @@ from pathlib import Path
 
 
 APP_PACKAGE = "sa.hulksa.player.dev"
+SIZE_PATTERN = re.compile(r"^requested_size=(\d+)x(\d+)$", re.MULTILINE)
+BOUNDS_PATTERN = re.compile(r"^\[0,0\]\[(\d+),(\d+)\]$")
 
 
 @dataclass(frozen=True)
@@ -67,17 +70,74 @@ def check_instrumentation_junit(path: Path) -> EvidenceCheck:
     )
 
 
+def png_dimensions(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:24]
+    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        raise ValueError("invalid PNG signature or IHDR")
+    width, height = struct.unpack(">II", header[16:24])
+    if width <= 0 or height <= 0:
+        raise ValueError("PNG dimensions are zero")
+    return width, height
+
+
 def check_png(path: Path) -> EvidenceCheck:
     try:
-        header = path.read_bytes()[:24]
-        if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
-            raise ValueError("invalid PNG signature or IHDR")
-        width, height = struct.unpack(">II", header[16:24])
+        width, height = png_dimensions(path)
     except (OSError, ValueError, struct.error) as exc:
         return EvidenceCheck("runtime-full-window-png", "FAIL", f"Invalid full-window PNG: {exc}", [str(path)])
-    if width <= 0 or height <= 0:
-        return EvidenceCheck("runtime-full-window-png", "FAIL", "PNG dimensions are zero", [str(path)])
     return EvidenceCheck("runtime-full-window-png", "PASS", f"Valid full-window PNG: {width}x{height}", [str(path)])
+
+
+def requested_dimensions(path: Path) -> tuple[int, int]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    match = SIZE_PATTERN.search(text)
+    if match is None:
+        raise ValueError("PROFILE-CONFIG.txt does not contain requested_size=WIDTHxHEIGHT")
+    return int(match.group(1)), int(match.group(2))
+
+
+def application_bounds(path: Path) -> tuple[int, int]:
+    root = ET.parse(path).getroot()
+    for node in root.iter("node"):
+        if node.attrib.get("package") != APP_PACKAGE:
+            continue
+        bounds = node.attrib.get("bounds", "")
+        match = BOUNDS_PATTERN.match(bounds)
+        if match is not None:
+            return int(match.group(1)), int(match.group(2))
+    raise ValueError(f"window.xml has no full application bounds for {APP_PACKAGE}")
+
+
+def check_runtime_window_geometry(evidence_root: Path) -> EvidenceCheck:
+    profile = evidence_root / "PROFILE-CONFIG.txt"
+    screenshot = evidence_root / "full-window.png"
+    hierarchy = evidence_root / "window.xml"
+    evidence = [str(profile), str(screenshot), str(hierarchy)]
+    try:
+        expected = requested_dimensions(profile)
+        png_size = png_dimensions(screenshot)
+        xml_size = application_bounds(hierarchy)
+    except (OSError, ValueError, struct.error, ET.ParseError) as exc:
+        return EvidenceCheck("runtime-window-geometry", "FAIL", f"Unable to verify runtime geometry: {exc}", evidence)
+
+    mismatches: list[str] = []
+    if png_size != expected:
+        mismatches.append(f"PNG={png_size[0]}x{png_size[1]}")
+    if xml_size != expected:
+        mismatches.append(f"XML={xml_size[0]}x{xml_size[1]}")
+    if mismatches:
+        return EvidenceCheck(
+            "runtime-window-geometry",
+            "FAIL",
+            f"Requested {expected[0]}x{expected[1]} but " + ", ".join(mismatches),
+            evidence,
+        )
+    return EvidenceCheck(
+        "runtime-window-geometry",
+        "PASS",
+        f"PNG and application hierarchy match requested geometry {expected[0]}x{expected[1]}",
+        evidence,
+    )
 
 
 def check_checksums(root: Path, manifest: Path) -> EvidenceCheck:
@@ -109,7 +169,7 @@ def runtime_semantic_checks(evidence_root: Path) -> list[EvidenceCheck]:
     return [
         check_text_contains(
             evidence_root / "PROFILE-CONFIG.txt",
-            ["result=PASS", "profile_verified=true", "locale_mode="],
+            ["result=PASS", "profile_verified=true", "locale_mode=", "requested_size="],
             "runtime-profile-contract",
         ),
         check_text_contains(
@@ -139,6 +199,7 @@ def runtime_semantic_checks(evidence_root: Path) -> list[EvidenceCheck]:
             "runtime-window-package",
         ),
         check_png(evidence_root / "full-window.png"),
+        check_runtime_window_geometry(evidence_root),
         check_checksums(evidence_root, evidence_root / "SHA256SUMS.txt"),
     ]
 
