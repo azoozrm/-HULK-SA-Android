@@ -1,4 +1,4 @@
-# Rerun after aligning the static contract with the compact 38dp field size.
+# Reapply the validated compact Login correction and rebase before pushing.
 name: Apply Compact Landscape Login Fix
 
 on:
@@ -47,26 +47,29 @@ jobs:
             -PHULK_PORTAL_URL='http://3162356.xyz:8080' \
             -PHULK_CONFIG_URL=''
 
-      - name: Commit correction
+      - name: Commit, rebase and push correction
         run: |
           set -euo pipefail
+          branch='rebuild/adaptive-ui-compatibility-lab-v2'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app quality
           test -n "$(git status --porcelain)"
           git commit -m 'fix: keep compact landscape login actions reachable'
-          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          git push origin HEAD:"$branch"
 
       - name: Report success
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Compact landscape Login correction applied\n\nThe short-landscape Login now uses a full-height scrollable panel and genuinely compact fields, buttons and option rows. Static tests plus Debug and androidTest APK compilation passed before commit. Physical Galaxy landscape qualification must be rerun; no merge or release was performed.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Compact landscape Login correction applied\n\nThe short-landscape Login now uses a full-height scrollable panel and genuinely compact fields, buttons and option rows. Static tests plus Debug and androidTest APK compilation passed before commit. The commit was rebased onto the latest branch head before push. Physical Galaxy landscape qualification must be rerun; no merge or release was performed.'
 
       - name: Report failure
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Compact landscape Login correction stopped safely\n\nThe guarded patch, static gate or compile gate failed before a source commit. No pass was claimed. Inspect the latest Apply Compact Landscape Login Fix run.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Compact landscape Login correction stopped safely\n\nThe guarded patch, static gate, compile gate, rebase or push failed before a source commit reached the branch. No pass was claimed. Inspect the latest Apply Compact Landscape Login Fix run.'
