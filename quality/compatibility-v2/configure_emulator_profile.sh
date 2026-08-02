@@ -20,6 +20,7 @@ record() {
 capture_device_state() {
   {
     echo "diagnostic_stage=$stage"
+    echo "diagnostic_shell_uid=$(adb shell id -u 2>/dev/null | tr -d '\r' || true)"
     echo "diagnostic_locale=$(adb shell getprop persist.sys.locale 2>/dev/null | tr -d '\r' || true)"
     echo "diagnostic_boot_completed=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
     echo "diagnostic_wm_size=$(adb shell wm size 2>/dev/null | tr -d '\r' || true)"
@@ -69,16 +70,32 @@ wait_for_services
 record "initial_locale=$(adb shell getprop persist.sys.locale | tr -d '\r')"
 record "initial_wm_size=$(adb shell wm size | tr -d '\r')"
 
+stage="request-adb-root"
+set +e
+root_output="$(adb root 2>&1)"
+root_status=$?
+set -e
+record "adb_root_status=$root_status"
+record "adb_root_output=${root_output//$'\n'/ | }"
+adb wait-for-device
+wait_for_services
+shell_uid="$(adb shell id -u | tr -d '\r')"
+record "shell_uid_after_adb_root=$shell_uid"
+if [[ "$root_status" -ne 0 || "$shell_uid" != "0" ]]; then
+  record "result=BLOCKED"
+  record "failure_reason=emulator image does not permit root required for deterministic locale qualification"
+  capture_device_state
+  exit 3
+fi
+
 actual_locale="$(adb shell getprop persist.sys.locale | tr -d '\r')"
 if [[ "$actual_locale" != "$locale" ]]; then
-  stage="locale-reboot"
-  record "locale_reboot_required=true"
-  adb shell setprop persist.sys.locale "$locale"
-  adb reboot
-  wait_for_boot
+  stage="apply-locale-framework-restart"
+  record "locale_restart_required=true"
+  adb shell "setprop persist.sys.locale '$locale'; stop; sleep 5; start"
   wait_for_services
 else
-  record "locale_reboot_required=false"
+  record "locale_restart_required=false"
 fi
 
 stage="apply-window-profile"
@@ -105,7 +122,7 @@ record "ui_mode=$(adb shell dumpsys uimode | tr -d '\r')"
 
 if [[ "$actual_locale" != "$locale" ]]; then
   record "result=BLOCKED"
-  record "failure_reason=locale mismatch after full reboot"
+  record "failure_reason=locale mismatch after rooted framework restart"
   capture_device_state
   exit 3
 fi
