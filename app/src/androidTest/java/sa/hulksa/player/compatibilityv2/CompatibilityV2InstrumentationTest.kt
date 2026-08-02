@@ -2,6 +2,7 @@ package sa.hulksa.player.compatibilityv2
 
 import android.app.Activity
 import android.app.UiModeManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -38,17 +39,22 @@ class CompatibilityV2InstrumentationTest {
         if (isTelevision()) Intent.CATEGORY_LEANBACK_LAUNCHER else Intent.CATEGORY_LAUNCHER
 
     private fun resolvedLauncherIntent(): Intent {
-        val intent = Intent(Intent.ACTION_MAIN).apply {
+        val queryIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(launcherCategory())
             setPackage(targetContext.packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
-        val resolved = targetContext.packageManager.resolveActivity(intent, 0)
+        val resolved = targetContext.packageManager.resolveActivity(queryIntent, 0)
         assertNotNull(
             "No ${launcherCategory()} activity resolves for ${targetContext.packageName}",
             resolved,
         )
-        return intent
+        val activityInfo = requireNotNull(resolved.activityInfo) {
+            "Resolved launcher has no ActivityInfo for ${targetContext.packageName}"
+        }
+        return Intent(queryIntent).apply {
+            component = ComponentName(activityInfo.packageName, activityInfo.name)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
     }
 
     private fun launchMainPackage(): Boolean {
