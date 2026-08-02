@@ -36,9 +36,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -79,6 +82,7 @@ fun LoginScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val view = LocalView.current
+    val tvInitialFocusRequester = remember { FocusRequester() }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
@@ -103,6 +107,13 @@ fun LoginScreen(
         if (isLoading || isStarting) {
             keyboardController?.hide()
             focusManager.clearFocus(force = true)
+        }
+    }
+    LaunchedEffect(isTv, isStarting, isLoading) {
+        if (isTv && !isStarting && !isLoading) {
+            withFrameNanos { }
+            hideKeyboard()
+            tvInitialFocusRequester.requestFocus()
         }
     }
 
@@ -172,6 +183,7 @@ fun LoginScreen(
                         onSubmit = submit,
                         onOpenWebsite = openWebsite,
                         onNonTextFocus = hideKeyboard,
+                        initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
                         modifier = Modifier.width(if (isTv) 450.dp else 430.dp),
                     )
 
@@ -228,6 +240,7 @@ fun LoginScreen(
                     onSubmit = submit,
                     onOpenWebsite = openWebsite,
                     onNonTextFocus = hideKeyboard,
+                    initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .widthIn(max = 474.dp),
@@ -295,6 +308,7 @@ private fun LoginPanel(
     onSubmit: () -> Unit,
     onOpenWebsite: () -> Unit,
     onNonTextFocus: () -> Unit,
+    initialFocusRequester: FocusRequester?,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -394,6 +408,13 @@ private fun LoginPanel(
             onClick = onSubmit,
             enabled = !isLoading,
             modifier = Modifier
+                .then(
+                    if (initialFocusRequester != null) {
+                        Modifier.focusRequester(initialFocusRequester)
+                    } else {
+                        Modifier
+                    },
+                )
                 .fillMaxWidth()
                 .heightIn(min = 52.dp),
             onFocused = onNonTextFocus,
