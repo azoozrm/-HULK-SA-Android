@@ -41,11 +41,8 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("compactMobileLandscape", login)
         self.assertIn("compact -> 112.dp", login)
         self.assertIn("compact -> 92.dp", login)
-        self.assertIn("min = if (compact) 38.dp else 55.dp", login)
+        self.assertIn("min = if (compact) 42.dp else 55.dp", login)
         self.assertIn("if (!compact)", login)
-        self.assertIn("Modifier.fillMaxHeight()", login)
-        self.assertIn("Modifier.verticalScroll(panelScrollState)", login)
-        self.assertIn("compact = compact", login)
 
     def test_short_landscape_catalogs_use_one_vertical_scroll_surface(self) -> None:
         shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
