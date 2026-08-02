@@ -132,7 +132,6 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun phoneWindowUsesTransparentEdgeToEdgeSystemBars() {
         assumeFalse("Phone window contract is not applicable to television UI mode", isTelevision())
-        var safeContentBounds = Rect()
         launchScenario().use { scenario ->
             assertTrue(
                 "Application package did not become visible",
@@ -141,6 +140,8 @@ class CompatibilityV2InstrumentationTest {
             instrumentation.waitForIdleSync()
             SystemClock.sleep(900L)
             instrumentation.waitForIdleSync()
+
+            var safeContentBounds = Rect()
             scenario.onActivity { activity ->
                 val insets = requireNotNull(
                     ViewCompat.getRootWindowInsets(activity.window.decorView),
@@ -168,22 +169,22 @@ class CompatibilityV2InstrumentationTest {
                 assertTrue("Navigation safe content width is invalid", safeContentBounds.width() > 0)
                 assertTrue("Navigation safe content height is invalid", safeContentBounds.height() > 0)
             }
-        }
 
-        val primaryAction = device.wait(Until.findObject(By.textContains("دخول")), 5_000L)
-        assertNotNull("Primary action was not exposed for safe-area verification", primaryAction)
-        val actionBounds = requireNotNull(primaryAction).visibleBounds
-        assertTrue(
-            "Primary action overlaps system navigation controls: action=$actionBounds safe=$safeContentBounds",
-            actionBounds.left >= safeContentBounds.left &&
-                actionBounds.top >= safeContentBounds.top &&
-                actionBounds.right <= safeContentBounds.right &&
-                actionBounds.bottom <= safeContentBounds.bottom,
-        )
-        assertFalse(
-            "Normal phone pages must not trigger Android's immersive-mode education overlay",
-            device.hasObject(By.res("android", "immersive_cling_title")),
-        )
+            val primaryAction = device.wait(Until.findObject(By.textContains("دخول")), 5_000L)
+            assertNotNull("Primary action was not exposed for safe-area verification", primaryAction)
+            val actionBounds = requireNotNull(primaryAction).visibleBounds
+            assertTrue(
+                "Primary action overlaps system navigation controls: action=$actionBounds safe=$safeContentBounds",
+                actionBounds.left >= safeContentBounds.left &&
+                    actionBounds.top >= safeContentBounds.top &&
+                    actionBounds.right <= safeContentBounds.right &&
+                    actionBounds.bottom <= safeContentBounds.bottom,
+            )
+            assertFalse(
+                "Normal phone pages must not trigger Android's immersive-mode education overlay",
+                device.hasObject(By.res("android", "immersive_cling_title")),
+            )
+        }
     }
 
     @Test
