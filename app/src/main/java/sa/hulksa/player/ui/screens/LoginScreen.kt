@@ -145,7 +145,8 @@ fun LoginScreen(
         }
 
         val wideThreshold = if (isTv) 900.dp else 760.dp
-        val wide = maxWidth >= wideThreshold
+        val compactHeight = !isTv && maxHeight < 600.dp
+        val wide = maxWidth >= wideThreshold && !compactHeight
         val compactWideTv = isTv && wide && maxWidth < 1180.dp
         if (wide) {
             val horizontalPadding = when {
@@ -235,15 +236,33 @@ fun LoginScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(
                         horizontal = if (isTv) 24.dp else 20.dp,
-                        vertical = if (isTv) 18.dp else 24.dp,
+                        vertical = when {
+                            isTv -> 18.dp
+                            compactHeight -> 12.dp
+                            else -> 24.dp
+                        },
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 LoginBrand(
                     isTv = false,
-                    modifier = Modifier.height(if (isTv) 176.dp else 200.dp),
+                    modifier = Modifier.height(
+                        when {
+                            isTv -> 176.dp
+                            compactHeight -> 112.dp
+                            else -> 200.dp
+                        },
+                    ),
                 )
-                Spacer(Modifier.height(if (isTv) 10.dp else 16.dp))
+                Spacer(
+                    Modifier.height(
+                        when {
+                            isTv -> 10.dp
+                            compactHeight -> 8.dp
+                            else -> 16.dp
+                        },
+                    ),
+                )
                 LoginPanel(
                     username = username,
                     onUsernameChange = { username = it },
