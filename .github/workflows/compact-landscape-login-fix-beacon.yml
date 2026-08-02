@@ -25,7 +25,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/actions/workflows/apply-compact-landscape-login-fix.yml/runs" \
             -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
             -f event='push' \
-            -f per_page='3' \
+            -f per_page='5' \
             --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
           test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Compact Login fix run locator\n\n$runs\n\nNo merge or release was performed."
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Compact Login fix run locator — refreshed\n\n$runs\n\nNo merge or release was performed."
