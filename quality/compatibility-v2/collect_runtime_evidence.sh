@@ -99,9 +99,12 @@ for required in \
   INSTRUMENTATION.xml \
   FOREGROUND-APP.txt \
   ACTIVITY-TOP.txt \
+  ACTIVITY-ACTIVITIES.txt \
+  WINDOW-WINDOWS.txt \
   logcat.txt \
   window.xml \
-  full-window.png; do
+  full-window.png \
+  MEMINFO.txt; do
   if [[ ! -s "$out/$required" ]]; then
     echo "Missing mandatory runtime evidence: $required" >&2
     status=1
