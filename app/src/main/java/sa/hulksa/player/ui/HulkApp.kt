@@ -2,8 +2,10 @@ package sa.hulksa.player.ui
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +27,7 @@ import sa.hulksa.player.ui.screens.MovieDetailsScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerScreen
 import sa.hulksa.player.ui.screens.SeriesScreen
+import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
 fun HulkApp(
@@ -35,6 +38,9 @@ fun HulkApp(
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
+    val colors = LocalHulkColors.current
+    val applyNavigationSafeArea =
+        !isTv && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
@@ -53,156 +59,169 @@ fun HulkApp(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(colors.background)
                 .trackAdaptiveInput(adaptiveInputController),
         ) {
-            when (state.screen) {
-                HulkScreen.LOGIN -> LoginScreen(
-                    isTv = isTv,
-                    isStarting = state.isStarting,
-                    isLoading = state.isLoading,
-                    errorMessage = state.errorMessage,
-                    onLogin = viewModel::login,
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (applyNavigationSafeArea) {
+                            Modifier.navigationBarsPadding()
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                when (state.screen) {
+                    HulkScreen.LOGIN -> LoginScreen(
+                        isTv = isTv,
+                        isStarting = state.isStarting,
+                        isLoading = state.isLoading,
+                        errorMessage = state.errorMessage,
+                        onLogin = viewModel::login,
+                    )
 
-                HulkScreen.MAIN -> MainShellScreen(
-                    state = state,
-                    isTv = isTv,
-                    navigationMemory = navigationMemory,
-                    isFavorite = viewModel::isFavorite,
-                    onSelectDestination = viewModel::selectDestination,
-                    onSelectCategory = viewModel::selectCategory,
-                    onSearch = viewModel::updateSearch,
-                    onOpen = viewModel::open,
-                    onOpenHistory = viewModel::openHistory,
-                    onToggleFavorite = viewModel::toggleFavorite,
-                    onRefresh = viewModel::refresh,
-                    onClearHistory = viewModel::clearHistory,
-                    onPlayDownload = viewModel::playDownload,
-                    onDeleteDownload = { item ->
-                        viewModel.deleteDownload(item)
-                        notify("تم حذف التحميل.")
-                    },
-                    onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
-                    onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
-                    onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
-                    onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
-                    onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
-                    onRunDiagnostics = viewModel::runDiagnostics,
-                    onLogout = viewModel::logout,
-                )
+                    HulkScreen.MAIN -> MainShellScreen(
+                        state = state,
+                        isTv = isTv,
+                        navigationMemory = navigationMemory,
+                        isFavorite = viewModel::isFavorite,
+                        onSelectDestination = viewModel::selectDestination,
+                        onSelectCategory = viewModel::selectCategory,
+                        onSearch = viewModel::updateSearch,
+                        onOpen = viewModel::open,
+                        onOpenHistory = viewModel::openHistory,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        onRefresh = viewModel::refresh,
+                        onClearHistory = viewModel::clearHistory,
+                        onPlayDownload = viewModel::playDownload,
+                        onDeleteDownload = { item ->
+                            viewModel.deleteDownload(item)
+                            notify("تم حذف التحميل.")
+                        },
+                        onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
+                        onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
+                        onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
+                        onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
+                        onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
+                        onRunDiagnostics = viewModel::runDiagnostics,
+                        onLogout = viewModel::logout,
+                    )
 
-                HulkScreen.MOVIE_DETAILS -> {
-                    val item = state.selectedItem
-                    if (item != null) {
-                        val relatedMovies = state.catalogs[ContentType.MOVIE]
-                            ?.items
-                            .orEmpty()
-                            .asSequence()
-                            .filter { it.id != item.id && it.categoryId == item.categoryId }
-                            .take(10)
-                            .toList()
-                        val movieDownload = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
-                        MovieDetailsScreen(
-                            item = item,
-                            details = state.selectedDetails,
-                            isLoading = state.isLoading,
-                            errorMessage = state.errorMessage,
-                            isTv = isTv,
-                            isFavorite = viewModel.isFavorite(item),
-                            download = movieDownload,
-                            historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
-                            relatedItems = relatedMovies,
-                            isRelatedFavorite = viewModel::isFavorite,
-                            onBack = viewModel::back,
-                            onPlay = viewModel::playSelectedMovie,
-                            onDownload = {
-                                notify(if (movieDownload == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(movieDownload))
-                            },
-                            onCancelDownload = {
-                                movieDownload?.let {
-                                    viewModel.deleteDownload(it)
-                                    notify("تم الغاء التحميل.")
-                                }
-                            },
-                            onToggleFavorite = { viewModel.toggleFavorite(item) },
-                            onToggleRelatedFavorite = { related ->
-                                val wasFavorite = viewModel.isFavorite(related)
-                                viewModel.toggleFavorite(related)
-                                notify(if (wasFavorite) "تمت ازالة ${related.name} من المفضلة" else "تمت اضافة ${related.name} الى المفضلة")
-                            },
-                            onOpenRelated = viewModel::open,
-                        )
-                    } else {
-                        LaunchedEffect(state.screen) { viewModel.back() }
+                    HulkScreen.MOVIE_DETAILS -> {
+                        val item = state.selectedItem
+                        if (item != null) {
+                            val relatedMovies = state.catalogs[ContentType.MOVIE]
+                                ?.items
+                                .orEmpty()
+                                .asSequence()
+                                .filter { it.id != item.id && it.categoryId == item.categoryId }
+                                .take(10)
+                                .toList()
+                            val movieDownload = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
+                            MovieDetailsScreen(
+                                item = item,
+                                details = state.selectedDetails,
+                                isLoading = state.isLoading,
+                                errorMessage = state.errorMessage,
+                                isTv = isTv,
+                                isFavorite = viewModel.isFavorite(item),
+                                download = movieDownload,
+                                historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
+                                relatedItems = relatedMovies,
+                                isRelatedFavorite = viewModel::isFavorite,
+                                onBack = viewModel::back,
+                                onPlay = viewModel::playSelectedMovie,
+                                onDownload = {
+                                    notify(if (movieDownload == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(movieDownload))
+                                },
+                                onCancelDownload = {
+                                    movieDownload?.let {
+                                        viewModel.deleteDownload(it)
+                                        notify("تم الغاء التحميل.")
+                                    }
+                                },
+                                onToggleFavorite = { viewModel.toggleFavorite(item) },
+                                onToggleRelatedFavorite = { related ->
+                                    val wasFavorite = viewModel.isFavorite(related)
+                                    viewModel.toggleFavorite(related)
+                                    notify(if (wasFavorite) "تمت ازالة ${related.name} من المفضلة" else "تمت اضافة ${related.name} الى المفضلة")
+                                },
+                                onOpenRelated = viewModel::open,
+                            )
+                        } else {
+                            LaunchedEffect(state.screen) { viewModel.back() }
+                        }
                     }
-                }
 
-                HulkScreen.SERIES -> {
-                    val series = state.selectedSeries
-                    if (series != null) {
-                        val relatedSeries = state.catalogs[ContentType.SERIES]
-                            ?.items
-                            .orEmpty()
-                            .asSequence()
-                            .filter { it.id != series.id && it.categoryId == series.categoryId }
-                            .take(10)
-                            .toList()
-                        SeriesScreen(
-                            series = series,
-                            details = state.selectedDetails,
-                            episodes = state.episodes,
-                            isLoading = state.isLoading,
-                            errorMessage = state.errorMessage,
-                            isTv = isTv,
-                            isFavorite = viewModel.isFavorite(series),
-                            downloads = state.downloads,
-                            history = state.history,
-                            relatedItems = relatedSeries,
-                            isRelatedFavorite = viewModel::isFavorite,
-                            onBack = viewModel::back,
-                            onPlay = viewModel::playEpisode,
-                            onDownload = { episode ->
-                                val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                notify(if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing))
-                            },
-                            onCancelDownload = { episode ->
-                                state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }?.let {
-                                    viewModel.deleteDownload(it)
-                                    notify("تم الغاء التحميل.")
-                                }
-                            },
-                            onToggleFavorite = { viewModel.toggleFavorite(series) },
-                            onToggleRelatedFavorite = { related ->
-                                val wasFavorite = viewModel.isFavorite(related)
-                                viewModel.toggleFavorite(related)
-                                notify(if (wasFavorite) "تمت ازالة ${related.name} من المفضلة" else "تمت اضافة ${related.name} الى المفضلة")
-                            },
-                            onOpenRelated = viewModel::open,
-                        )
-                    } else {
-                        LaunchedEffect(state.screen) { viewModel.back() }
+                    HulkScreen.SERIES -> {
+                        val series = state.selectedSeries
+                        if (series != null) {
+                            val relatedSeries = state.catalogs[ContentType.SERIES]
+                                ?.items
+                                .orEmpty()
+                                .asSequence()
+                                .filter { it.id != series.id && it.categoryId == series.categoryId }
+                                .take(10)
+                                .toList()
+                            SeriesScreen(
+                                series = series,
+                                details = state.selectedDetails,
+                                episodes = state.episodes,
+                                isLoading = state.isLoading,
+                                errorMessage = state.errorMessage,
+                                isTv = isTv,
+                                isFavorite = viewModel.isFavorite(series),
+                                downloads = state.downloads,
+                                history = state.history,
+                                relatedItems = relatedSeries,
+                                isRelatedFavorite = viewModel::isFavorite,
+                                onBack = viewModel::back,
+                                onPlay = viewModel::playEpisode,
+                                onDownload = { episode ->
+                                    val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+                                    notify(if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing))
+                                },
+                                onCancelDownload = { episode ->
+                                    state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }?.let {
+                                        viewModel.deleteDownload(it)
+                                        notify("تم الغاء التحميل.")
+                                    }
+                                },
+                                onToggleFavorite = { viewModel.toggleFavorite(series) },
+                                onToggleRelatedFavorite = { related ->
+                                    val wasFavorite = viewModel.isFavorite(related)
+                                    viewModel.toggleFavorite(related)
+                                    notify(if (wasFavorite) "تمت ازالة ${related.name} من المفضلة" else "تمت اضافة ${related.name} الى المفضلة")
+                                },
+                                onOpenRelated = viewModel::open,
+                            )
+                        } else {
+                            LaunchedEffect(state.screen) { viewModel.back() }
+                        }
                     }
-                }
 
-                HulkScreen.PLAYER -> {
-                    val playback = state.playback
-                    if (playback != null) {
-                        val orderedEpisodes = state.episodes.sortedWith(compareBy(sa.hulksa.player.model.Episode::season, sa.hulksa.player.model.Episode::episodeNumber))
-                        val currentEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == playback.streamId }
-                        val nextEpisode = if (playback.streamKind == "series") orderedEpisodes.getOrNull(currentEpisodeIndex + 1) else null
-                        PlayerScreen(
-                            request = playback,
-                            liveCatalog = state.catalogs[ContentType.LIVE],
-                            isFavorite = viewModel::isFavorite,
-                            onSelectLiveChannel = viewModel::switchLiveChannel,
-                            onToggleFavorite = viewModel::toggleFavorite,
-                            onBack = viewModel::back,
-                            onProgress = viewModel::onPlaybackProgress,
-                            nextEpisodeTitle = nextEpisode?.let { "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}" },
-                            onPlayNextEpisode = nextEpisode?.let { { viewModel.playNextEpisode() } },
-                        )
-                    } else {
-                        LaunchedEffect(state.screen) { viewModel.back() }
+                    HulkScreen.PLAYER -> {
+                        val playback = state.playback
+                        if (playback != null) {
+                            val orderedEpisodes = state.episodes.sortedWith(compareBy(sa.hulksa.player.model.Episode::season, sa.hulksa.player.model.Episode::episodeNumber))
+                            val currentEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == playback.streamId }
+                            val nextEpisode = if (playback.streamKind == "series") orderedEpisodes.getOrNull(currentEpisodeIndex + 1) else null
+                            PlayerScreen(
+                                request = playback,
+                                liveCatalog = state.catalogs[ContentType.LIVE],
+                                isFavorite = viewModel::isFavorite,
+                                onSelectLiveChannel = viewModel::switchLiveChannel,
+                                onToggleFavorite = viewModel::toggleFavorite,
+                                onBack = viewModel::back,
+                                onProgress = viewModel::onPlaybackProgress,
+                                nextEpisodeTitle = nextEpisode?.let { "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}" },
+                                onPlayNextEpisode = nextEpisode?.let { { viewModel.playNextEpisode() } },
+                            )
+                        } else {
+                            LaunchedEffect(state.screen) { viewModel.back() }
+                        }
                     }
                 }
             }
