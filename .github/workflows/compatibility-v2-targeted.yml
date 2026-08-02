@@ -149,8 +149,8 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none
-          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' '${{ needs.resolve-profile.outputs.locale }}' '${{ needs.resolve-profile.outputs.test_class }}'
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
+          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' '${{ needs.resolve-profile.outputs.locale }}' '${{ needs.resolve-profile.outputs.test_class }}' 'build/compatibility-v2/targeted/${{ needs.resolve-profile.outputs.profile_id }}'
       - name: Enforce targeted evidence
         if: always()
         run: |
