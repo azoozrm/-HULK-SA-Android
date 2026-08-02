@@ -124,6 +124,11 @@ def runtime_semantic_checks(evidence_root: Path) -> list[EvidenceCheck]:
             "runtime-foreground-launch",
         ),
         check_text_contains(
+            evidence_root / "IME-STATE.txt",
+            ["result=PASS", "ime_hidden=true"],
+            "runtime-ime-hidden",
+        ),
+        check_text_contains(
             evidence_root / "ACTIVITY-TOP.txt",
             [APP_PACKAGE],
             "runtime-foreground-activity",
