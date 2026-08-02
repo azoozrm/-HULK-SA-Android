@@ -1,4 +1,4 @@
-requested_for_head=145ca88bd3b045356bd425dd6b9b8fe793e8b01b
-reason=retest-after-framework-service-readiness-fix
-request_sequence=6
-requested_at=2026-08-02T00:42:00Z
+requested_for_head=cdfd5355b0907d77960b2a9b6fff9ca71857ebd9
+reason=retest-with-separate-boot-and-framework-readiness
+request_sequence=7
+requested_at=2026-08-02T00:50:00Z
