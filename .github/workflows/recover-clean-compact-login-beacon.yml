@@ -1,0 +1,31 @@
+name: Recover Clean Compact Login Beacon
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/recover-clean-compact-login-beacon.yml'
+
+permissions:
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  expose-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish latest recovery run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          runs="$(gh api -X GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/recover-clean-compact-login.yml/runs" \
+            -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
+            -f event='push' \
+            -f per_page='5' \
+            --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
+          test -n "$runs"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Clean recovery run locator\n\n$runs\n\nNo merge, release, or force-push was performed."
