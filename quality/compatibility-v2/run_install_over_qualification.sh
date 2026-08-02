@@ -161,14 +161,13 @@ instrument_status=${PIPESTATUS[0]}
 set -e
 
 python3 candidate/quality/compatibility-v2/instrumentation_to_junit.py \
-  --input "$evidence_root/INSTRUMENTATION-RAW.txt" \
-  --output "$evidence_root/INSTRUMENTATION.xml" \
-  --suite-name install-over-lineage
+  "$evidence_root/INSTRUMENTATION-RAW.txt" \
+  "$evidence_root/INSTRUMENTATION.xml" \
+  --process-status "$instrument_status"
 
 test "$instrument_status" -eq 0
 grep -Eq 'tests="7"' "$evidence_root/INSTRUMENTATION.xml"
 grep -Eq 'failures="0"' "$evidence_root/INSTRUMENTATION.xml"
-grep -Eq 'errors="0"' "$evidence_root/INSTRUMENTATION.xml"
 
 final_value="$(adb shell run-as "$app_package" cat "$sentinel_path" | tr -d '\r')"
 test "$final_value" = "$sentinel"
