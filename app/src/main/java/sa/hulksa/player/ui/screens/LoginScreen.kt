@@ -360,6 +360,13 @@ private fun LoginPanel(
             onValueChange = onUsernameChange,
             label = "اسم المستخدم",
             modifier = Modifier
+                .then(
+                    if (initialFocusRequester != null) {
+                        Modifier.focusRequester(initialFocusRequester)
+                    } else {
+                        Modifier
+                    },
+                )
                 .fillMaxWidth()
                 .heightIn(min = 55.dp),
             keyboardOptions = KeyboardOptions(
@@ -408,13 +415,6 @@ private fun LoginPanel(
             onClick = onSubmit,
             enabled = !isLoading,
             modifier = Modifier
-                .then(
-                    if (initialFocusRequester != null) {
-                        Modifier.focusRequester(initialFocusRequester)
-                    } else {
-                        Modifier
-                    },
-                )
                 .fillMaxWidth()
                 .heightIn(min = 52.dp),
             onFocused = onNonTextFocus,
