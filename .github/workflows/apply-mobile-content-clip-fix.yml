@@ -47,40 +47,43 @@ jobs:
                   raise SystemExit('Unexpected clip import anchor count')
               shell = shell.replace(import_anchor, import_anchor + clip_import, 1)
 
-          old = '''        } else {
-              Column(Modifier.fillMaxSize()) {
-                  MobileNavigation(state.destination, rememberingSelectDestination)
-                  Box(Modifier.weight(1f)) {
-          '''
-          new = '''        } else {
-              Column(Modifier.fillMaxSize()) {
-                  MobileNavigation(state.destination, rememberingSelectDestination)
-                  Box(Modifier.weight(1f).clipToBounds()) {
-          '''
-          if new not in shell:
-              if shell.count(old) != 1:
-                  raise SystemExit(f'Unexpected mobile destination container count: {shell.count(old)}')
-              shell = shell.replace(old, new, 1)
+          nav_anchor = 'MobileNavigation(state.destination, rememberingSelectDestination)'
+          nav_pos = shell.find(nav_anchor)
+          if nav_pos < 0:
+              raise SystemExit('Mobile navigation anchor not found')
+          mobile_end = shell.find('\n@Composable\nprivate fun CinematicNavigationRail', nav_pos)
+          if mobile_end < 0:
+              raise SystemExit('Mobile branch boundary not found')
+          old_box = 'Box(Modifier.weight(1f)) {'
+          new_box = 'Box(Modifier.weight(1f).clipToBounds()) {'
+          box_pos = shell.find(old_box, nav_pos, mobile_end)
+          already_pos = shell.find(new_box, nav_pos, mobile_end)
+          if already_pos < 0:
+              if box_pos < 0:
+                  raise SystemExit('Mobile destination Box not found in bounded branch')
+              if shell.find(old_box, box_pos + 1, mobile_end) >= 0:
+                  raise SystemExit('Multiple candidate mobile destination Boxes found')
+              shell = shell[:box_pos] + new_box + shell[box_pos + len(old_box):]
           shell_path.write_text(shell, encoding='utf-8')
 
           test_path = Path('quality/compatibility-v2/tests/test_mobile_window_contract.py')
           test = test_path.read_text(encoding='utf-8')
+          method_name = '    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:\n'
           method = '''    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:
               shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
-              mobile_branch = shell.split("} else {\\n            Column(Modifier.fillMaxSize())", 1)[1].split("@Composable\\nprivate fun CinematicNavigationRail", 1)[0]
-              self.assertIn("Box(Modifier.weight(1f).clipToBounds())", mobile_branch)
+              self.assertEqual(shell.count("Box(Modifier.weight(1f).clipToBounds())"), 1)
               self.assertIn("import androidx.compose.ui.draw.clipToBounds", shell)
 
           '''
           anchor = '    def test_mobile_player_restores_real_pre_player_orientation(self) -> None:\n'
-          if method not in test:
+          if method_name not in test:
               if test.count(anchor) != 1:
                   raise SystemExit('Unexpected mobile player contract anchor count')
               test = test.replace(anchor, method + anchor, 1)
           test_path.write_text(test, encoding='utf-8')
           PY
           git diff --check
-          python3 -m unittest quality.compatibility-v2.tests.test_mobile_window_contract -v
+          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_mobile_window_contract.py' -v
           python3 quality/compatibility-v2/static_validate.py --repo-root . --out build/compatibility-v2/mobile-clip-static
 
       - name: Compile app and instrumentation
