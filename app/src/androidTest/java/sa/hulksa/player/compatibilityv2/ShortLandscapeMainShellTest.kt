@@ -78,7 +78,7 @@ class ShortLandscapeMainShellTest {
         composeRule.onNodeWithText("$itemCount عنصر").assertIsDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsDisplayed()
 
-        swipeMainContentUp(times = 5)
+        swipeMainContentUp(times = 12)
 
         composeRule.onNodeWithText("$itemCount عنصر").assertIsNotDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsNotDisplayed()
@@ -106,7 +106,7 @@ class ShortLandscapeMainShellTest {
         composeRule.onNodeWithText("$itemCount عنصر").assertIsDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsDisplayed()
 
-        swipeMainContentUp(times = 4)
+        swipeMainContentUp(times = 6)
 
         composeRule.onNodeWithText("$itemCount عنصر").assertIsNotDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsNotDisplayed()
