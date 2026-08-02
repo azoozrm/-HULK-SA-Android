@@ -1,0 +1,49 @@
+name: Add mobile window runtime contract
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/mobile-window-instrumentation-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+
+      - name: Add exact runtime assertion
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt')
+          source = path.read_text(encoding='utf-8')
+          anchor = '''    @Test\n    fun televisionLoginStartsWithImeHidden() {'''
+          block = '''    @Test\n    fun phoneWindowKeepsStatusBarAndHidesNavigationBar() {\n        assumeFalse("Phone window contract is not applicable to television UI mode", isTelevision())\n        launchScenario().use { scenario ->\n            assertTrue(\n                "Application package did not become visible",\n                device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L),\n            )\n            instrumentation.waitForIdleSync()\n            SystemClock.sleep(900L)\n            instrumentation.waitForIdleSync()\n            scenario.onActivity { activity ->\n                val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)\n                assertTrue(\n                    "Phone status bar must remain visible outside playback",\n                    insets?.isVisible(WindowInsetsCompat.Type.statusBars()) == true,\n                )\n                assertFalse(\n                    "Phone navigation bar must be hidden so the shell does not reserve a false bottom inset",\n                    insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) == true,\n                )\n            }\n        }\n    }\n\n    @Test\n    fun televisionLoginStartsWithImeHidden() {'''
+          if 'fun phoneWindowKeepsStatusBarAndHidesNavigationBar()' not in source:
+              if source.count(anchor) != 1:
+                  raise SystemExit('Instrumentation insertion anchor missing or duplicated')
+              source = source.replace(anchor, block, 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+
+      - name: Remove one-time workflow and commit
+        run: |
+          set -euo pipefail
+          rm .github/workflows/mobile-window-instrumentation-hotfix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt \
+                  .github/workflows/mobile-window-instrumentation-hotfix.yml
+          git diff --cached --check
+          git commit -m 'test(mobile): verify runtime system bar contract'
+          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
