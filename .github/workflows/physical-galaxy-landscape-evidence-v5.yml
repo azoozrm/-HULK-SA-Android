@@ -52,7 +52,7 @@ jobs:
           sha256sum "$APP_APK" "$TEST_APK" > "$EVIDENCE_ROOT/APK-SOURCE-SHA256.txt"
           printf 'workflow_head=%s\nproduction_application_source=%s\ntest_harness_source=%s\nprofile=landscape\napi=35\ngeometry=2340x1080\ndensity=420\nfont_scale=1.5\nlocale=ar-SA\ncutout=com.android.internal.display.cutout.emulation.corner\n' \
             "$GITHUB_SHA" \
-            '2b4b9704bd6ee367a320968bb425be74ffa32ef9' \
+            '617985f459f38a58346bbc8c33f85b786a9eaa90' \
             '1f02be48b0785a364402ce6da92f11d93ab9a167' \
             > "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
 
@@ -225,11 +225,18 @@ jobs:
           for section,text in required.items():
               nodes=[n for n in ET.parse(root/f'{section}-window.xml').getroot().iter('node') if n.attrib.get('package')=='sa.hulksa.player.dev']
               if text not in {n.attrib.get('text','') for n in nodes}: raise SystemExit(f'{section}: bottom item absent')
-              if sum(n.attrib.get('scrollable')=='true' for n in nodes) != 1: raise SystemExit(f'{section}: vertical scroll surface count invalid')
+              scroll_nodes=[n for n in nodes if n.attrib.get('scrollable')=='true']
+              if len(scroll_nodes) != 1: raise SystemExit(f'{section}: vertical scroll surface count invalid: {len(scroll_nodes)}')
+              scroll_bounds=parse_bounds(scroll_nodes[0].attrib.get('bounds',''))
+              if not scroll_bounds: raise SystemExit(f'{section}: missing scroll bounds')
+              scroll_top=scroll_bounds[1]
               for n in nodes:
-                  if n.attrib.get('class') not in {'android.widget.Button','android.widget.TextView'}: continue
                   b=parse_bounds(n.attrib.get('bounds',''))
-                  if b and (b[1] < 132 or b[3] > 1017): raise SystemExit(f'{section}: unsafe interactive node {n.attrib.get("text")!r} {n.attrib.get("bounds")}')
+                  if not b: continue
+                  if n.attrib.get('class') in {'android.widget.Button','android.widget.TextView'} and (b[1] < 132 or b[3] > 1017):
+                      raise SystemExit(f'{section}: unsafe interactive node {n.attrib.get("text")!r} {n.attrib.get("bounds")}')
+                  if n.attrib.get('clickable')=='true' and b[3] > scroll_top and b[1] < scroll_top:
+                      raise SystemExit(f'{section}: content crosses top navigation boundary {n.attrib.get("text")!r} {n.attrib.get("bounds")} scroll_top={scroll_top}')
           PY
           (cd "$EVIDENCE_ROOT" && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
 
