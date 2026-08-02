@@ -45,6 +45,19 @@ class MobileWindowContractTest(unittest.TestCase):
         self.assertIn("controller.hide(WindowInsets.Type.systemBars())", policy)
         self.assertIn("controller.hide(WindowInsets.Type.navigationBars())", policy)
 
+    def test_runtime_suite_checks_real_phone_system_bar_visibility(self) -> None:
+        instrumentation = (
+            REPO_ROOT
+            / "app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "fun phoneWindowKeepsStatusBarAndHidesNavigationBar()",
+            instrumentation,
+        )
+        self.assertIn("WindowInsetsCompat.Type.statusBars()", instrumentation)
+        self.assertIn("WindowInsetsCompat.Type.navigationBars()", instrumentation)
+
 
 if __name__ == "__main__":
     unittest.main()
