@@ -1,3 +1,4 @@
+# Final rerun after clean compact-landscape Login qualification V3 passed.
 name: HULK SA Physical Galaxy Final Qualification V2
 
 on:
@@ -76,8 +77,8 @@ jobs:
           set -euo pipefail
           mkdir -p build/galaxy-v2 "$EVIDENCE_ROOT"
           sha256sum "$APP_APK" "$TEST_APK" > "$EVIDENCE_ROOT/APK-SOURCE-SHA256.txt"
-          printf 'workflow_head=%s\nprofile=%s\ngeometry=%sx%s\nfont_scale=%s\n' \
-            "$GITHUB_SHA" "$PROFILE" "$WIDTH" "$HEIGHT" "$FONT_SCALE" \
+          printf 'workflow_head=%s\napplication_source_head=%s\nprofile=%s\ngeometry=%sx%s\nfont_scale=%s\n' \
+            "$GITHUB_SHA" '2b4b9704bd6ee367a320968bb425be74ffa32ef9' "$PROFILE" "$WIDTH" "$HEIGHT" "$FONT_SCALE" \
             > "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
           cat > build/galaxy-v2/run.sh <<'SCRIPT'
           #!/usr/bin/env bash
@@ -268,8 +269,8 @@ jobs:
           python3 tools/verify-android-architectures.py "$aab" --require-native-libs --report build/galaxy-v2-signed/AAB-ARCHITECTURES.md
           cp "$apk" build/galaxy-v2-signed/HULK-SA-v0.9.3.20-SIGNED.apk
           cp "$aab" build/galaxy-v2-signed/HULK-SA-v0.9.3.20-SIGNED.aab
-          printf 'Application ID: sa.hulksa.player\nVersion code: 64\nVersion name: 0.9.3.20\nWorkflow head: %s\n' \
-            "$GITHUB_SHA" > build/galaxy-v2-signed/PACKAGE-IDENTITY.txt
+          printf 'Application ID: sa.hulksa.player\nVersion code: 64\nVersion name: 0.9.3.20\nWorkflow head: %s\nApplication source head: %s\n' \
+            "$GITHUB_SHA" '2b4b9704bd6ee367a320968bb425be74ffa32ef9' > build/galaxy-v2-signed/PACKAGE-IDENTITY.txt
           (
             cd build/galaxy-v2-signed
             find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
