@@ -10,6 +10,17 @@ package="sa.hulksa.player.dev"
 test_package="sa.hulksa.player.dev.test"
 runner="androidx.test.runner.AndroidJUnitRunner"
 status=0
+sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+
+is_tv=false
+category="android.intent.category.LAUNCHER"
+activity_class="sa.hulksa.player.MainActivity"
+if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then
+  is_tv=true
+  category="android.intent.category.LEANBACK_LAUNCHER"
+  activity_class="sa.hulksa.player.TvMainActivity"
+fi
+resolved_activity="${package}/${activity_class}"
 
 capture_window_windows() {
   adb shell dumpsys window windows > "$1" 2>&1 || true
@@ -29,12 +40,8 @@ ime_is_actually_visible() {
   local block
   block="$(ime_window_block "$dump")"
   [[ -n "$block" ]] || return 1
-
-  # Insets animation leashes may survive after the IME window is fully hidden.
-  # Treat the IME as visible only when the window itself is VISIBLE and has a
-  # surface or is reported on-screen/visible by WindowManager.
-  printf '%s\n' "$block" | grep -q 'mViewVisibility=0x0' || return 1
-  printf '%s\n' "$block" | grep -Eq 'mHasSurface=true|isOnScreen=true|isVisible=true'
+  [[ "$block" == *"mViewVisibility=0x0"* ]] || return 1
+  [[ "$block" == *"mHasSurface=true"* || "$block" == *"isOnScreen=true"* || "$block" == *"isVisible=true"* ]]
 }
 
 wait_for_foreground() {
@@ -43,8 +50,12 @@ wait_for_foreground() {
   for _ in $(seq 1 "$attempts"); do
     adb shell dumpsys activity activities > "$out/ACTIVITY-ACTIVITIES.txt" 2>&1 || true
     capture_window_windows "$out/WINDOW-WINDOWS.txt"
-    if grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' "$out/ACTIVITY-ACTIVITIES.txt" | grep -q "$package" || \
-       grep -E 'mCurrentFocus|mFocusedApp' "$out/WINDOW-WINDOWS.txt" | grep -q "$package"; then
+    grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' \
+      "$out/ACTIVITY-ACTIVITIES.txt" > "$out/FOREGROUND-ACTIVITY-LINES.txt" 2>/dev/null || true
+    grep -E 'mCurrentFocus|mFocusedApp' \
+      "$out/WINDOW-WINDOWS.txt" > "$out/FOREGROUND-WINDOW-LINES.txt" 2>/dev/null || true
+    if grep -Fq "$package" "$out/FOREGROUND-ACTIVITY-LINES.txt" || \
+       grep -Fq "$package" "$out/FOREGROUND-WINDOW-LINES.txt"; then
       foreground_ready=true
       return 0
     fi
@@ -53,11 +64,51 @@ wait_for_foreground() {
   return 1
 }
 
+# API 33+ phones show the POST_NOTIFICATIONS system permission dialog during
+# MainActivity.onCreate. The general layout/lifecycle matrix grants this one
+# documented precondition so the system overlay does not own the foreground.
+# The permission decision policy remains covered by its dedicated unit tests.
+permission_required=false
+permission_granted=false
+permission_grant_status=0
+permission_grant_output="not-required"
+if [[ "$is_tv" != true && "$sdk" =~ ^[0-9]+$ && "$sdk" -ge 33 ]]; then
+  permission_required=true
+  set +e
+  permission_grant_output="$(adb shell pm grant "$package" android.permission.POST_NOTIFICATIONS 2>&1)"
+  permission_grant_status=$?
+  set -e
+fi
+adb shell dumpsys package "$package" > "$out/RUNTIME-PERMISSIONS-DUMP.txt" 2>&1 || true
+if [[ "$permission_required" != true ]] || \
+   grep -Fq 'android.permission.POST_NOTIFICATIONS: granted=true' "$out/RUNTIME-PERMISSIONS-DUMP.txt"; then
+  permission_granted=true
+fi
+{
+  echo "sdk=$sdk"
+  echo "is_tv=$is_tv"
+  echo "permission=android.permission.POST_NOTIFICATIONS"
+  echo "permission_required=$permission_required"
+  echo "grant_status=$permission_grant_status"
+  echo "grant_output=${permission_grant_output//$'\n'/ | }"
+  echo "permission_granted=$permission_granted"
+  echo "precondition_scope=general-layout-lifecycle-matrix"
+  if [[ "$permission_granted" == true ]]; then
+    echo "result=PASS"
+  else
+    echo "result=BLOCKED"
+    echo "failure_reason=notification permission precondition could not be established"
+  fi
+} > "$out/RUNTIME-PERMISSIONS.txt"
+if [[ "$permission_granted" != true ]]; then
+  status=1
+fi
+
 {
   echo "profile=$profile"
   echo "test_class=$test_class"
   echo "serial=${ANDROID_SERIAL:-$(adb get-serialno)}"
-  echo "sdk=$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+  echo "sdk=$sdk"
   echo "model=$(adb shell getprop ro.product.model | tr -d '\r')"
   echo "device=$(adb shell getprop ro.product.device | tr -d '\r')"
   echo "abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
@@ -77,27 +128,21 @@ set +e
 adb shell am instrument -w -r \
   -e class "$test_class" \
   "$test_package/$runner" > "$out/INSTRUMENTATION.txt" 2>&1
-status=$?
+instrumentation_status=$?
 python3 quality/compatibility-v2/instrumentation_to_junit.py \
-  "$out/INSTRUMENTATION.txt" "$out/INSTRUMENTATION.xml" --process-status "$status"
+  "$out/INSTRUMENTATION.txt" "$out/INSTRUMENTATION.xml" --process-status "$instrumentation_status"
 parser_status=$?
 set -e
+if [[ "$instrumentation_status" -ne 0 ]]; then status="$instrumentation_status"; fi
 if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
 
-is_tv=false
-category="android.intent.category.LAUNCHER"
-activity_class="sa.hulksa.player.MainActivity"
-if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then
-  is_tv=true
-  category="android.intent.category.LEANBACK_LAUNCHER"
-  activity_class="sa.hulksa.player.TvMainActivity"
-fi
-resolved_activity="${package}/${activity_class}"
+adb shell dumpsys package "$package" > "$out/INSTALLED-PACKAGE-COLLECTOR-DUMP.txt" 2>&1 || true
 component_declared=false
-if adb shell dumpsys package "$package" 2>/dev/null | tr -d '\r' | grep -Fq "$activity_class"; then
+if grep -Fq "$activity_class" "$out/INSTALLED-PACKAGE-COLLECTOR-DUMP.txt"; then
   component_declared=true
 fi
 
+set +e
 {
   echo "package=$package"
   echo "is_tv=$is_tv"
@@ -106,13 +151,18 @@ fi
   echo "activity_class=$activity_class"
   echo "resolved_activity=$resolved_activity"
   echo "component_declared=$component_declared"
-  if [[ "$component_declared" != true ]]; then
+  if [[ "$component_declared" == true ]]; then
+    adb shell am force-stop "$package"
+    adb shell am start -W -n "$resolved_activity"
+  else
     echo "Canonical launcher component is not declared in the installed package"
-    exit 1
   fi
-  adb shell am force-stop "$package"
-  adb shell am start -W -n "$resolved_activity"
-} > "$out/FOREGROUND-APP.txt" 2>&1 || status=1
+} > "$out/FOREGROUND-APP.txt" 2>&1
+launch_status=$?
+set -e
+if [[ "$component_declared" != true || "$launch_status" -ne 0 ]]; then
+  status=1
+fi
 
 wait_for_foreground 30 || true
 
@@ -147,9 +197,6 @@ if [[ "$ime_hidden" != true ]]; then
   done
 fi
 
-# A BACK used to dismiss a genuinely visible IME must never leave the launcher
-# as the captured foreground. Relaunch the canonical component once if the
-# platform consumed BACK as activity navigation instead of IME dismissal.
 if ! wait_for_foreground 3; then
   foreground_relaunch_after_ime=true
   adb shell am start -W -n "$resolved_activity" >> "$out/FOREGROUND-APP.txt" 2>&1 || status=1
@@ -185,9 +232,9 @@ if [[ "$foreground_ready" != true ]]; then
   echo "HULK SA did not become the foreground application" >> "$out/FOREGROUND-APP.txt"
   status=1
 fi
-if ! grep -q "$package" "$out/ACTIVITY-TOP.txt" && \
-   ! grep -q "$package" "$out/ACTIVITY-ACTIVITIES.txt" && \
-   ! grep -q "$package" "$out/WINDOW-WINDOWS.txt"; then
+if ! grep -Fq "$package" "$out/ACTIVITY-TOP.txt" && \
+   ! grep -Fq "$package" "$out/ACTIVITY-ACTIVITIES.txt" && \
+   ! grep -Fq "$package" "$out/WINDOW-WINDOWS.txt"; then
   echo "Foreground dumps do not identify the HULK SA package" >> "$out/FOREGROUND-APP.txt"
   status=1
 fi
@@ -198,14 +245,19 @@ adb pull /sdcard/compatibility-v2-window.xml "$out/window.xml" > /dev/null 2>&1 
 adb exec-out screencap -p > "$out/full-window.png" || true
 adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1 || true
 
-if [[ -s "$out/window.xml" ]] && ! grep -q "package=\"$package\"" "$out/window.xml"; then
+if [[ -s "$out/window.xml" ]] && ! grep -Fq "package=\"$package\"" "$out/window.xml"; then
   echo "Window hierarchy does not contain the HULK SA package" >> "$out/FOREGROUND-APP.txt"
   status=1
 fi
 
 for required in \
   PROFILE-CONFIG.txt \
+  INSTALL-READINESS.txt \
+  INSTALLATION.txt \
+  PACKAGE-REGISTRATION.txt \
+  INSTALLED-PACKAGE-DUMP.txt \
   APPLICATION-LOCALE.txt \
+  RUNTIME-PERMISSIONS.txt \
   DEVICE-PROFILE.txt \
   WINDOW-METRICS.txt \
   INSTRUMENTATION.txt \
