@@ -6,6 +6,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
 class MobileWindowContractTest(unittest.TestCase):
+    """Permanent contracts derived from the physical Galaxy landscape evidence."""
+
     def test_mobile_navigation_uses_central_safe_drawing_insets(self) -> None:
         shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
         mobile_navigation = shell.split("private fun MobileNavigation", 1)[1].split("private fun DestinationContent", 1)[0]
