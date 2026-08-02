@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 65
     env:
       EVIDENCE_ROOT: build/compatibility-v2/mobile-fix-phone-api35
+      APP_APK: app/build/outputs/apk/debug/app-debug.apk
+      TEST_APK: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
     steps:
       - uses: actions/checkout@v7
 
@@ -46,12 +48,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p app/build/outputs/apk/debug app/build/outputs/apk/androidTest/debug build/mobile-fix
-          cp build/fast-source/apks/app-debug.apk app/build/outputs/apk/debug/app-debug.apk
-          cp build/fast-source/apks/app-debug-androidTest.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-          sha256sum app/build/outputs/apk/debug/app-debug.apk \
-                    app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          cp build/fast-source/apks/app-debug.apk "$APP_APK"
+          cp build/fast-source/apks/app-debug-androidTest.apk "$TEST_APK"
+          test -s "$APP_APK"
+          test -s "$TEST_APK"
+          sha256sum "$APP_APK" "$TEST_APK"
           cat > build/mobile-fix/run-after-services-ready.sh <<'SCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
