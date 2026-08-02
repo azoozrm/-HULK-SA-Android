@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Verify that mandatory Compatibility V2 evidence exists and is non-empty."""
+"""Verify mandatory Compatibility V2 evidence and its runtime meaning."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import struct
 import sys
+import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+APP_PACKAGE = "sa.hulksa.player.dev"
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,107 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def check_text_contains(path: Path, required: list[str], check_id: str) -> EvidenceCheck:
+    if not path.is_file() or path.stat().st_size == 0:
+        return EvidenceCheck(check_id, "FAIL", "Semantic source file is missing or empty", [str(path)])
+    text = path.read_text(encoding="utf-8", errors="replace")
+    missing = [value for value in required if value not in text]
+    if missing:
+        return EvidenceCheck(check_id, "FAIL", f"Missing required content: {', '.join(missing)}", [str(path)])
+    return EvidenceCheck(check_id, "PASS", "Required semantic content is present", [str(path)])
+
+
+def check_instrumentation_junit(path: Path) -> EvidenceCheck:
+    try:
+        root = ET.parse(path).getroot()
+        tests = int(root.attrib.get("tests", "0"))
+        failures = int(root.attrib.get("failures", "0"))
+        errors = int(root.attrib.get("errors", "0"))
+        skipped = int(root.attrib.get("skipped", "0"))
+    except (OSError, ET.ParseError, ValueError) as exc:
+        return EvidenceCheck("runtime-junit", "FAIL", f"Invalid instrumentation JUnit XML: {exc}", [str(path)])
+    if tests <= 0 or failures != 0 or errors != 0:
+        return EvidenceCheck(
+            "runtime-junit",
+            "FAIL",
+            f"Instrumentation results are not clean: tests={tests}, failures={failures}, errors={errors}, skipped={skipped}",
+            [str(path)],
+        )
+    return EvidenceCheck(
+        "runtime-junit",
+        "PASS",
+        f"Instrumentation results are clean: tests={tests}, failures=0, errors=0, skipped={skipped}",
+        [str(path)],
+    )
+
+
+def check_png(path: Path) -> EvidenceCheck:
+    try:
+        header = path.read_bytes()[:24]
+        if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+            raise ValueError("invalid PNG signature or IHDR")
+        width, height = struct.unpack(">II", header[16:24])
+    except (OSError, ValueError, struct.error) as exc:
+        return EvidenceCheck("runtime-full-window-png", "FAIL", f"Invalid full-window PNG: {exc}", [str(path)])
+    if width <= 0 or height <= 0:
+        return EvidenceCheck("runtime-full-window-png", "FAIL", "PNG dimensions are zero", [str(path)])
+    return EvidenceCheck("runtime-full-window-png", "PASS", f"Valid full-window PNG: {width}x{height}", [str(path)])
+
+
+def check_checksums(root: Path, manifest: Path) -> EvidenceCheck:
+    if not manifest.is_file() or manifest.stat().st_size == 0:
+        return EvidenceCheck("runtime-checksums", "FAIL", "Checksum manifest is missing or empty", [str(manifest)])
+    failures: list[str] = []
+    checked = 0
+    for line in manifest.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        digest, separator, relative = line.partition("  ")
+        if not separator or len(digest) != 64:
+            failures.append(f"malformed line: {line[:120]}")
+            continue
+        path = root / relative.lstrip("./")
+        if not path.is_file():
+            failures.append(f"missing: {relative}")
+            continue
+        checked += 1
+        if file_sha256(path) != digest:
+            failures.append(f"digest mismatch: {relative}")
+    if checked == 0 or failures:
+        detail = "; ".join(failures[:10]) if failures else "no files were checksummed"
+        return EvidenceCheck("runtime-checksums", "FAIL", detail, [str(manifest)])
+    return EvidenceCheck("runtime-checksums", "PASS", f"Verified {checked} evidence checksums", [str(manifest)])
+
+
+def runtime_semantic_checks(evidence_root: Path) -> list[EvidenceCheck]:
+    checks = [
+        check_text_contains(
+            evidence_root / "PROFILE-CONFIG.txt",
+            ["result=PASS", "profile_verified=true"],
+            "runtime-profile-contract",
+        ),
+        check_instrumentation_junit(evidence_root / "INSTRUMENTATION.xml"),
+        check_text_contains(
+            evidence_root / "FOREGROUND-APP.txt",
+            [f"package={APP_PACKAGE}", "Status: ok"],
+            "runtime-foreground-launch",
+        ),
+        check_text_contains(
+            evidence_root / "ACTIVITY-TOP.txt",
+            [APP_PACKAGE],
+            "runtime-foreground-activity",
+        ),
+        check_text_contains(
+            evidence_root / "window.xml",
+            [f'package="{APP_PACKAGE}"'],
+            "runtime-window-package",
+        ),
+        check_png(evidence_root / "full-window.png"),
+        check_checksums(evidence_root, evidence_root / "SHA256SUMS.txt"),
+    ]
+    return checks
+
+
 def gate_evidence(spec_file: Path, scope: str, evidence_root: Path) -> list[EvidenceCheck]:
     spec = json.loads(spec_file.read_text(encoding="utf-8"))
     scopes = spec.get("scopes", {})
@@ -43,6 +149,8 @@ def gate_evidence(spec_file: Path, scope: str, evidence_root: Path) -> list[Evid
             checks.append(EvidenceCheck(relative, "FAIL", "Mandatory evidence file is empty", [str(path)]))
         else:
             checks.append(EvidenceCheck(relative, "PASS", f"Evidence present ({path.stat().st_size} bytes)", [str(path)]))
+    if scope == "runtime":
+        checks.extend(runtime_semantic_checks(evidence_root))
     return checks
 
 
