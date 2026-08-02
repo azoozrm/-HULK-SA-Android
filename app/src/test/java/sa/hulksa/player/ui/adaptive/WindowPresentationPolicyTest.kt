@@ -1,5 +1,7 @@
 package sa.hulksa.player.ui.adaptive
 
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -24,6 +26,30 @@ class WindowPresentationPolicyTest {
 
         assertEquals(HulkSystemBarsMode.IMMERSIVE, policy.systemBarsMode)
         assertEquals(HulkOrientationRequest.SENSOR_LANDSCAPE, policy.orientationRequest)
+    }
+
+    @Test
+    fun `portrait shell is restored after leaving player`() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT,
+            restoreOrientationRequest(Configuration.ORIENTATION_PORTRAIT),
+        )
+    }
+
+    @Test
+    fun `landscape shell is restored when player was opened from landscape`() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
+            restoreOrientationRequest(Configuration.ORIENTATION_LANDSCAPE),
+        )
+    }
+
+    @Test
+    fun `undefined pre-player orientation falls back to portrait`() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT,
+            restoreOrientationRequest(Configuration.ORIENTATION_UNDEFINED),
+        )
     }
 
     @Test
