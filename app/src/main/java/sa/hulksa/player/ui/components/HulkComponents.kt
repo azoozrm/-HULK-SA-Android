@@ -232,10 +232,11 @@ fun HulkTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
+    compact: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(if (compact) 10.dp else 12.dp)
 
     BasicTextField(
         value = value,
@@ -250,16 +251,16 @@ fun HulkTextField(
                 color = if (focused) colors.gold else colors.line,
                 shape = shape,
             )
-            .padding(horizontal = 15.dp, vertical = 13.dp),
+            .padding(horizontal = if (compact) 12.dp else 15.dp, vertical = if (compact) 8.dp else 13.dp),
         singleLine = true,
-        textStyle = TextStyle(color = colors.text, fontSize = 15.sp, textAlign = TextAlign.Start),
+        textStyle = TextStyle(color = colors.text, fontSize = if (compact) 13.sp else 15.sp, textAlign = TextAlign.Start),
         cursorBrush = Brush.verticalGradient(listOf(colors.gold, colors.gold)),
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         decorationBox = { innerField ->
             Box(contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) Text(label, color = colors.textMuted, fontSize = 14.sp)
+                if (value.isEmpty()) Text(label, color = colors.textMuted, fontSize = if (compact) 12.sp else 14.sp)
                 innerField()
             }
         },
