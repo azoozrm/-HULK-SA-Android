@@ -89,13 +89,16 @@ jobs:
           PY
           git commit -m 'fix: keep compact landscape login actions reachable cleanly'
           rm -rf app/build
+          git reset --hard HEAD
           tracked_build_files="$(git ls-files 'app/build/**')"
           if [ -n "$tracked_build_files" ]; then
             echo 'Generated app/build files are still tracked' >&2
             printf '%s\n' "$tracked_build_files" | sed -n '1,20p' >&2
             exit 82
           fi
-          test -z "$(git status --porcelain --untracked-files=no)"
+          tracked_dirty="$(git status --porcelain --untracked-files=no)"
+          printf '%s\n' "$tracked_dirty"
+          test -z "$tracked_dirty"
 
       - name: Rebase and push recovery
         run: |
@@ -116,7 +119,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build contamination removed safely\n\nThe contaminated commit was reverted without force-push. The compact landscape Login correction was reapplied and committed using exactly three intended source/test files. Static tests and Debug/androidTest compilation passed. `app/build/**` is no longer tracked. Physical Galaxy qualification must be rerun; no merge or release was performed.'
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build contamination removed safely\n\nThe contaminated commit was reverted without force-push. The compact landscape Login correction was reapplied and committed using exactly three intended source/test files. Static tests and Debug/androidTest compilation passed. Transient tracked build mutations were discarded after the clean commit, and `app/build/**` is no longer tracked. Physical Galaxy qualification must be rerun; no merge or release was performed.'
 
       - name: Report failure
         if: failure()
