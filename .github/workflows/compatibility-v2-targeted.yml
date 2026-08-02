@@ -1,11 +1,6 @@
 name: HULK SA Compatibility V2 - Targeted Retest
 
 on:
-  pull_request:
-    branches:
-      - phase-3-v0.9.3.0-adaptive-foundation
-    paths:
-      - 'quality/compatibility-v2/run-targeted.request'
   workflow_dispatch:
     inputs:
       profile_id:
@@ -54,18 +49,9 @@ jobs:
           import os
           from pathlib import Path
 
-          request = {}
-          request_file = Path('quality/compatibility-v2/run-targeted.request')
-          if request_file.is_file():
-              for raw in request_file.read_text(encoding='utf-8').splitlines():
-                  if '=' in raw:
-                      key, value = raw.split('=', 1)
-                      request[key.strip()] = value.strip()
-
-          profile_id = os.environ.get('DISPATCH_PROFILE', '').strip() or request.get('profile_id', '')
+          profile_id = os.environ.get('DISPATCH_PROFILE', '').strip()
           test_class = (
               os.environ.get('DISPATCH_TEST_CLASS', '').strip()
-              or request.get('test_class', '')
               or 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest'
           )
           if not profile_id:
