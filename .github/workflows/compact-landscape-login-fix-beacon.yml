@@ -1,4 +1,4 @@
-# Refresh locator after the 38dp contract correction.
+# Locate the compact Login run that rebases before pushing.
 name: Compact Landscape Login Fix Beacon
 
 on:
@@ -26,7 +26,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/actions/workflows/apply-compact-landscape-login-fix.yml/runs" \
             -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
             -f event='push' \
-            -f per_page='8' \
+            -f per_page='10' \
             --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
           test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Compact Login 38dp rerun locator\n\n$runs\n\nNo merge or release was performed."
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Compact Login rebased-run locator\n\n$runs\n\nNo merge or release was performed."
