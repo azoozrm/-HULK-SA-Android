@@ -1,9 +1,9 @@
 name: HULK SA Compatibility V2 - API35 Smoke Once
 
 on:
-  push:
+  pull_request:
     branches:
-      - rebuild/adaptive-ui-compatibility-lab-v2
+      - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - .github/workflows/compatibility-v2-api35-smoke-once.yml
 
