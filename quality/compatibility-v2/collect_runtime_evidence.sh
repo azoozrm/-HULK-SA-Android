@@ -19,7 +19,8 @@ status=0
   echo "model=$(adb shell getprop ro.product.model | tr -d '\r')"
   echo "device=$(adb shell getprop ro.product.device | tr -d '\r')"
   echo "abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
-  echo "locale=$(adb shell getprop persist.sys.locale | tr -d '\r')"
+  echo "system_locale=$(adb shell getprop persist.sys.locale | tr -d '\r')"
+  echo "app_locales=$(adb shell cmd locale get-app-locales "$package" --user 0 2>/dev/null | tr -d '\r' || true)"
 } > "$out/DEVICE-PROFILE.txt"
 
 {
@@ -42,19 +43,22 @@ set -e
 if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
 
 is_tv=false
+category="android.intent.category.LAUNCHER"
 if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then
   is_tv=true
-  component="$package/sa.hulksa.player.TvMainActivity"
-else
-  component="$package/sa.hulksa.player.MainActivity"
+  category="android.intent.category.LEANBACK_LAUNCHER"
 fi
 
 {
   echo "package=$package"
   echo "is_tv=$is_tv"
-  echo "component=$component"
+  echo "category=$category"
+  echo "resolved_activity=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c "$category" "$package" 2>&1 | tr -d '\r')"
   adb shell am force-stop "$package"
-  adb shell am start -W -n "$component"
+  adb shell am start -W \
+    -a android.intent.action.MAIN \
+    -c "$category" \
+    -p "$package"
 } > "$out/FOREGROUND-APP.txt" 2>&1 || status=1
 
 foreground_ready=false
@@ -93,6 +97,8 @@ if [[ -s "$out/window.xml" ]] && ! grep -q "package=\"$package\"" "$out/window.x
 fi
 
 for required in \
+  PROFILE-CONFIG.txt \
+  APPLICATION-LOCALE.txt \
   DEVICE-PROFILE.txt \
   WINDOW-METRICS.txt \
   INSTRUMENTATION.txt \
