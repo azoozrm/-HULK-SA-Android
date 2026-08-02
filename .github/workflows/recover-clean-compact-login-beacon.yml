@@ -1,4 +1,4 @@
-# Refresh after robust staged-file validation.
+# Refresh after removing pipefail/SIGPIPE from generated-file validation.
 name: Recover Clean Compact Login Beacon
 
 on:
