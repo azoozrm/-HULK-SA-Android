@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -19,6 +20,7 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -126,8 +128,9 @@ class CompatibilityV2InstrumentationTest {
         assertTrue("Subscribe or renew action is outside the display", Rect.intersects(display, subscribeBounds))
     }
 
+    @Suppress("DEPRECATION")
     @Test
-    fun phoneWindowKeepsStatusBarAndHidesNavigationBar() {
+    fun phoneWindowUsesTransparentEdgeToEdgeSystemBars() {
         assumeFalse("Phone window contract is not applicable to television UI mode", isTelevision())
         launchScenario().use { scenario ->
             assertTrue(
@@ -143,12 +146,21 @@ class CompatibilityV2InstrumentationTest {
                     "Phone status bar must remain visible outside playback",
                     insets?.isVisible(WindowInsetsCompat.Type.statusBars()) == true,
                 )
-                assertFalse(
-                    "Phone navigation bar must be hidden so the shell does not reserve a false bottom inset",
+                assertTrue(
+                    "Phone navigation controls must remain accessible outside playback",
                     insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) == true,
+                )
+                assertEquals(
+                    "Phone navigation bar must be transparent so app content reaches the display edge",
+                    Color.TRANSPARENT,
+                    activity.window.navigationBarColor,
                 )
             }
         }
+        assertFalse(
+            "Normal phone pages must not trigger Android's immersive-mode education overlay",
+            device.hasObject(By.res("android", "immersive_cling_title")),
+        )
     }
 
     @Test
