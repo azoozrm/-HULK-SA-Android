@@ -1,0 +1,140 @@
+name: Apply Mobile Content Clip Fix
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/apply-mobile-content-clip-fix.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  HULK_PORTAL_URL: http://3162356.xyz:8080
+  HULK_CONFIG_URL: ''
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
+
+      - name: Apply exact mobile clipping correction and contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          shell_path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          shell = shell_path.read_text(encoding='utf-8')
+          import_anchor = 'import androidx.compose.ui.draw.clip\n'
+          clip_import = 'import androidx.compose.ui.draw.clipToBounds\n'
+          if clip_import not in shell:
+              if shell.count(import_anchor) != 1:
+                  raise SystemExit('Unexpected clip import anchor count')
+              shell = shell.replace(import_anchor, import_anchor + clip_import, 1)
+
+          old = '''        } else {
+              Column(Modifier.fillMaxSize()) {
+                  MobileNavigation(state.destination, rememberingSelectDestination)
+                  Box(Modifier.weight(1f)) {
+          '''
+          new = '''        } else {
+              Column(Modifier.fillMaxSize()) {
+                  MobileNavigation(state.destination, rememberingSelectDestination)
+                  Box(Modifier.weight(1f).clipToBounds()) {
+          '''
+          if new not in shell:
+              if shell.count(old) != 1:
+                  raise SystemExit(f'Unexpected mobile destination container count: {shell.count(old)}')
+              shell = shell.replace(old, new, 1)
+          shell_path.write_text(shell, encoding='utf-8')
+
+          test_path = Path('quality/compatibility-v2/tests/test_mobile_window_contract.py')
+          test = test_path.read_text(encoding='utf-8')
+          method = '''    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:
+              shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
+              mobile_branch = shell.split("} else {\\n            Column(Modifier.fillMaxSize())", 1)[1].split("@Composable\\nprivate fun CinematicNavigationRail", 1)[0]
+              self.assertIn("Box(Modifier.weight(1f).clipToBounds())", mobile_branch)
+              self.assertIn("import androidx.compose.ui.draw.clipToBounds", shell)
+
+          '''
+          anchor = '    def test_mobile_player_restores_real_pre_player_orientation(self) -> None:\n'
+          if method not in test:
+              if test.count(anchor) != 1:
+                  raise SystemExit('Unexpected mobile player contract anchor count')
+              test = test.replace(anchor, method + anchor, 1)
+          test_path.write_text(test, encoding='utf-8')
+          PY
+          git diff --check
+          python3 -m unittest quality.compatibility-v2.tests.test_mobile_window_contract -v
+          python3 quality/compatibility-v2/static_validate.py --repo-root . --out build/compatibility-v2/mobile-clip-static
+
+      - name: Compile app and instrumentation
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleDebugAndroidTest \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+
+      - name: Commit only the production fix and contract
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+            quality/compatibility-v2/tests/test_mobile_window_contract.py
+          python3 - <<'PY'
+          import subprocess
+          expected = sorted([
+              'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt',
+              'quality/compatibility-v2/tests/test_mobile_window_contract.py',
+          ])
+          actual = subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines()
+          if sorted(actual) != expected:
+              raise SystemExit(f'Unexpected staged paths: {actual!r}')
+          PY
+          git diff --cached --check
+          git commit -m 'fix: clip mobile content below top navigation'
+          rm -rf app/build build/compatibility-v2/mobile-clip-static
+          git reset --hard HEAD
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+      - name: Rebase and push without force
+        run: |
+          set -euo pipefail
+          branch='rebuild/adaptive-ui-compatibility-lab-v2'
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          git push origin HEAD:"$branch"
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Mobile top-navigation clipping fix committed\n\nThe short-landscape destination container now clips drawing to the area below `MobileNavigation`, preventing scrolled Live/Movies/Series content from rendering behind the header. Exactly one production file and one static contract changed. Debug and androidTest APK compilation passed. No TV, branding, package, version, endpoint, signing, release, merge, or force-push operation was performed.'
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Mobile top-navigation clipping fix stopped safely\n\nThe guarded patch, static contract, compilation, exact staging check, rebase, or push failed. No successful application fix is claimed.'
