@@ -48,7 +48,7 @@ jobs:
             ls -l /dev/kvm
           fi
 
-      - name: Run API35 phone smoke with stable PackageManager gate
+      - name: Run API35 phone smoke after post-install registration gate
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
