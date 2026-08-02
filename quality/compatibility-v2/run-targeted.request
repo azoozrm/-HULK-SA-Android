@@ -1,5 +1,5 @@
 profile_id=phone-small-api29
 test_class=sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest
-reason=validate-command-surfaces-after-rooted-locale-restart
-request_sequence=4
-requested_at=2026-08-02T01:34:00Z
+reason=validate-hulk-foreground-screenshot-hierarchy-and-skipped-junit
+request_sequence=5
+requested_at=2026-08-02T01:42:00Z
