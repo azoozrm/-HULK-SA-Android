@@ -45,6 +45,9 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
           python3 quality/compatibility-v2/static_validate.py --repo-root . --out build/compatibility-v2/static
+          bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/collect_runtime_evidence.sh
+          bash -n quality/compatibility-v2/run_runtime_profile.sh
           ./gradlew --no-daemon --console=plain \
             clean :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
@@ -183,17 +186,7 @@ jobs:
           disk-size: 4096M
           ram-size: 2048M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none
-          script: |
-            set -eu
-            out='build/compatibility-v2/runtime/${{ matrix.id }}'
-            bash quality/compatibility-v2/configure_emulator_profile.sh \
-              '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' \
-              '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' \
-              '${{ matrix.locale }}' "$out/PROFILE-CONFIG.txt"
-            adb install -r build/compatibility-v2/binaries/app-debug.apk
-            adb install -r build/compatibility-v2/binaries/app-debug-androidTest.apk
-            adb logcat -c
-            bash quality/compatibility-v2/collect_runtime_evidence.sh '${{ matrix.id }}' "$out"
+          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' '${{ matrix.locale }}'
 
       - name: Enforce runtime evidence
         if: always()
