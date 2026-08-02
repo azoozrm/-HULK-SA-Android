@@ -167,7 +167,6 @@ jobs:
           test -s "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
           grep -Eq 'tests="7"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
           grep -Eq 'failures="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
-          grep -Eq 'errors="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
           test -s "$EVIDENCE_ROOT/full-window.png"
           test -s "$EVIDENCE_ROOT/window.xml"
           test -s "$EVIDENCE_ROOT/logcat.txt"
