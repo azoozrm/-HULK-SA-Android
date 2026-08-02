@@ -22,6 +22,31 @@ jobs:
           ref: rebuild/adaptive-ui-compatibility-lab-v2
           fetch-depth: 0
 
+      - name: Harden duplicate-safe guarded replacements
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_physical_phone_landscape_fix.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '''def replace_between(rel: str, start: str, end: str, replacement: str) -> None:\n'''
+          helper = '''def replace_first(rel: str, old: str, new: str) -> None:\n    text = read(rel)\n    if old not in text:\n        raise RuntimeError(f"{rel}: match not found: {old[:120]!r}")\n    write(rel, text.replace(old, new, 1))\n\n\n'''
+          if helper not in text:
+              text = text.replace(marker, helper + marker, 1)
+          replacements = {
+              'replace_once(login, "fontSize = 13.sp,",': 'replace_first(login, "fontSize = 13.sp,",',
+              'replace_once(login, ".heightIn(min = 55.dp),",': 'replace_first(login, ".heightIn(min = 55.dp),",',
+              'replace_once(login, "Spacer(Modifier.height(10.dp))",': 'replace_first(login, "Spacer(Modifier.height(10.dp))",',
+              'replace_once(login, ".heightIn(min = 52.dp),",': 'replace_first(login, ".heightIn(min = 52.dp),",',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise RuntimeError(f'missing patch-script token: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          python3 -m py_compile tools/apply_physical_phone_landscape_fix.py
+
       - name: Apply guarded source patch
         run: |
           set -euo pipefail
