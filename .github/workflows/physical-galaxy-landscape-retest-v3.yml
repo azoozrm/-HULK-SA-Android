@@ -1,0 +1,258 @@
+name: HULK SA Galaxy Landscape Retest V3
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/physical-galaxy-landscape-retest-v3.yml'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  HULK_PORTAL_URL: http://3162356.xyz:8080
+  HULK_CONFIG_URL: ''
+  APP_APK: app/build/outputs/apk/debug/app-debug.apk
+  TEST_APK: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+  EVIDENCE_ROOT: build/compatibility-v2/galaxy-landscape-retest-v3
+
+jobs:
+  galaxy-landscape-cutout:
+    name: galaxy-landscape-cutout-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+
+      - name: Publish landscape-only run identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Galaxy landscape-only retest started\n\n- Run: `'$GITHUB_RUN_ID'`\n- Workflow head: `'$GITHUB_SHA'`\n- Profile: API 35, 2340×1080, density 420, font scale 1.5, ar-SA, corner cutout\n- Portrait and production signing are not part of this run.\n\nPR remains Draft; no merge, release, or force-push.'
+
+      - name: Build current debug and instrumentation APKs
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/collect_runtime_evidence.sh
+          bash -n quality/compatibility-v2/run_runtime_profile.sh
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleDebugAndroidTest \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+          test -s "$APP_APK"
+          test -s "$TEST_APK"
+          mkdir -p "$EVIDENCE_ROOT"
+          sha256sum "$APP_APK" "$TEST_APK" > "$EVIDENCE_ROOT/APK-SOURCE-SHA256.txt"
+          printf 'workflow_head=%s\napplication_source_head=%s\nprofile=landscape\napi=35\ngeometry=2340x1080\ndensity=420\nfont_scale=1.5\nlocale=ar-SA\ncutout=com.android.internal.display.cutout.emulation.corner\n' \
+            "$GITHUB_SHA" '2b4b9704bd6ee367a320968bb425be74ffa32ef9' \
+            > "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
+
+      - name: Prepare independent runtime and shell-test wrapper
+        run: |
+          set -euo pipefail
+          mkdir -p build/galaxy-landscape-v3 "$EVIDENCE_ROOT"
+          cat > build/galaxy-landscape-v3/run.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -u
+          mkdir -p "$EVIDENCE_ROOT"
+
+          stable=0
+          for attempt in $(seq 1 120); do
+            boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+            activity="$(adb shell service check activity 2>/dev/null || true)"
+            package="$(adb shell service check package 2>/dev/null || true)"
+            settings="$(adb shell service check settings 2>/dev/null || true)"
+            if [[ "$boot" == '1' && "$activity" == *found* && "$package" == *found* && "$settings" == *found* ]]; then
+              stable=$((stable + 1))
+              [[ "$stable" -ge 3 ]] && break
+            else
+              stable=0
+            fi
+            sleep 2
+          done
+          if [[ "$stable" -lt 3 ]]; then
+            printf 'infrastructure_status=70\nreason=android_services_not_stable\n' > "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+            exit 70
+          fi
+          adb shell am wait-for-broadcast-idle || true
+
+          cutout_package='com.android.internal.display.cutout.emulation.corner'
+          adb shell cmd overlay list --user 0 > "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-BEFORE.txt" 2>&1 || true
+          if ! grep -F "$cutout_package" "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-BEFORE.txt" >/dev/null; then
+            printf 'infrastructure_status=71\nreason=required_corner_cutout_overlay_missing\n' > "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+            exit 71
+          fi
+          adb shell cmd overlay enable-exclusive --category --user 0 "$cutout_package" || \
+            adb shell cmd overlay enable --user 0 "$cutout_package"
+          sleep 4
+          adb shell cmd overlay list --user 0 > "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt" 2>&1 || true
+          grep -F "$cutout_package" "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt" >/dev/null || exit 72
+          printf 'enabled_cutout_overlay=%s\n' "$cutout_package" > "$EVIDENCE_ROOT/CUTOUT-OVERLAY.txt"
+
+          set +e
+          bash quality/compatibility-v2/run_runtime_profile.sh \
+            'physical-galaxy-landscape-retest-v3-api35' '2340' '1080' '420' '1.5' '0' 'ar-SA' \
+            'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' \
+            "$EVIDENCE_ROOT"
+          runtime_status=$?
+
+          adb shell am force-stop sa.hulksa.player >/dev/null 2>&1 || true
+          adb shell am start -W -n sa.hulksa.player/.MainActivity > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-LAUNCH.txt" 2>&1
+          adb shell pm grant sa.hulksa.player android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+          adb shell settings put system font_scale 1.5 >/dev/null 2>&1 || true
+          adb shell wm size 2340x1080 >/dev/null 2>&1 || true
+          adb shell wm density 420 >/dev/null 2>&1 || true
+          adb shell am force-stop sa.hulksa.player >/dev/null 2>&1 || true
+
+          adb shell am instrument -w -r \
+            -e class 'sa.hulksa.player.compatibilityv2.ShortLandscapeMainShellTest' \
+            'sa.hulksa.player.dev.test/androidx.test.runner.AndroidJUnitRunner' \
+            > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.txt" 2>&1
+          shell_status=$?
+          set -e
+
+          set +e
+          python3 quality/compatibility-v2/instrumentation_to_junit.py \
+            "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.txt" \
+            "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.xml" \
+            --process-status "$shell_status"
+          converter_status=$?
+          adb shell uiautomator dump /sdcard/short-landscape-window.xml > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-UIAUTOMATOR.txt" 2>&1
+          adb pull /sdcard/short-landscape-window.xml "$EVIDENCE_ROOT/SHORT-LANDSCAPE-window.xml" >/dev/null 2>&1
+          adb exec-out screencap -p > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-full-window.png"
+          adb shell dumpsys window windows > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-WINDOW-WINDOWS.txt" 2>&1
+          adb shell dumpsys activity top > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-ACTIVITY-TOP.txt" 2>&1
+          adb logcat -d -v threadtime > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-logcat.txt" 2>&1
+          set -e
+
+          printf 'runtime_status=%s\nshell_status=%s\nconverter_status=%s\n' \
+            "$runtime_status" "$shell_status" "$converter_status" \
+            > "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+          exit 0
+          SCRIPT
+          chmod +x build/galaxy-landscape-v3/run.sh
+
+      - name: Configure Linux KVM
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then sudo chmod a+rw /dev/kvm; fi
+          test -r /dev/kvm -a -w /dev/kvm
+
+      - name: Execute Galaxy landscape profile only
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 3072M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 2340x1080
+          script: bash build/galaxy-landscape-v3/run.sh
+
+      - name: Enforce independent runtime, shell test, geometry and evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+          test -s "$EVIDENCE_ROOT/CUTOUT-OVERLAY.txt"
+          test -s "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt"
+          test -s "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
+          test -s "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.txt"
+          test -s "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.xml"
+          test -s "$EVIDENCE_ROOT/SHORT-LANDSCAPE-full-window.png"
+          test -s "$EVIDENCE_ROOT/SHORT-LANDSCAPE-window.xml"
+
+          grep -Fx 'runtime_status=0' "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+          grep -Fx 'shell_status=0' "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+          grep -Fx 'converter_status=0' "$EVIDENCE_ROOT/EXECUTION-STATUS.txt"
+          grep -F 'enabled_cutout_overlay=com.android.internal.display.cutout.emulation.corner' "$EVIDENCE_ROOT/CUTOUT-OVERLAY.txt"
+
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime --evidence-root "$EVIDENCE_ROOT" --out "$EVIDENCE_ROOT/gate"
+
+          python3 - "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.xml" "$EVIDENCE_ROOT/full-window.png" "$EVIDENCE_ROOT/window.xml" "$EVIDENCE_ROOT/SHORT-LANDSCAPE-full-window.png" "$EVIDENCE_ROOT/SHORT-LANDSCAPE-window.xml" <<'PY'
+          import struct
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          junit_path, runtime_png, runtime_xml, shell_png, shell_xml = map(Path, sys.argv[1:])
+          root = ET.parse(junit_path).getroot()
+          tests = int(root.attrib.get('tests', '0'))
+          failures = int(root.attrib.get('failures', '0'))
+          errors = int(root.attrib.get('errors', '0'))
+          if (tests, failures, errors) != (3, 0, 0):
+              raise SystemExit(f'Unexpected short-landscape result: tests={tests} failures={failures} errors={errors}')
+
+          def png_size(path: Path) -> tuple[int, int]:
+              data = path.read_bytes()
+              if data[:8] != b'\x89PNG\r\n\x1a\n' or data[12:16] != b'IHDR':
+                  raise SystemExit(f'Invalid PNG: {path}')
+              return struct.unpack('>II', data[16:24])
+
+          def hierarchy_bounds(path: Path) -> tuple[int, int]:
+              xml_root = ET.parse(path).getroot()
+              max_right = 0
+              max_bottom = 0
+              for node in xml_root.iter('node'):
+                  bounds = node.attrib.get('bounds', '')
+                  try:
+                      right_bottom = bounds.rsplit('][', 1)[1].rstrip(']')
+                      right, bottom = map(int, right_bottom.split(','))
+                  except (IndexError, ValueError):
+                      continue
+                  max_right = max(max_right, right)
+                  max_bottom = max(max_bottom, bottom)
+              return max_right, max_bottom
+
+          expected = (2340, 1080)
+          for png in (runtime_png, shell_png):
+              actual = png_size(png)
+              if actual != expected:
+                  raise SystemExit(f'PNG geometry mismatch for {png}: expected={expected} actual={actual}')
+          for xml in (runtime_xml, shell_xml):
+              actual = hierarchy_bounds(xml)
+              if actual != expected:
+                  raise SystemExit(f'XML geometry mismatch for {xml}: expected={expected} actual={actual}')
+          PY
+
+          (
+            cd "$EVIDENCE_ROOT"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-GALAXY-LANDSCAPE-V3-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_ROOT }}/
+          if-no-files-found: error
+          retention-days: 21
+
+      - name: Publish landscape-only completion
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Galaxy landscape-only retest completed\n\n- Run: `'$GITHUB_RUN_ID'`\n- Workflow head: `'$GITHUB_SHA'`\n- Job status: **'$JOB_STATUS'**\n- Artifact: `HULK-SA-GALAXY-LANDSCAPE-V3-'$GITHUB_RUN_ID'`\n\nRuntime, ShortLandscapeMainShellTest and Evidence Gate were collected independently. No Portrait or production-signing job ran. Physical Galaxy remains pending.'
