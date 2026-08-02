@@ -123,8 +123,8 @@ jobs:
             font_scale: '1.0'
             rotation: 1
             locale: en-US
-          - id: tv-logical-960x540-api35
-            api: 35
+          - id: tv-logical-960x540-api36
+            api: 36
             target: android-tv
             profile: tv_1080p
             width: 960
@@ -133,8 +133,8 @@ jobs:
             font_scale: '1.0'
             rotation: 0
             locale: ar-SA
-          - id: tv-720p-api35
-            api: 35
+          - id: tv-720p-api36
+            api: 36
             target: android-tv
             profile: tv_1080p
             width: 1280
@@ -160,6 +160,18 @@ jobs:
         with:
           name: HULK-SA-COMPATIBILITY-V2-BINARIES-${{ github.run_id }}
           path: build/compatibility-v2/binaries
+
+      - name: Enable Linux KVM acceleration
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+          ls -l /dev/kvm
 
       - name: Run real application instrumentation
         uses: reactivecircus/android-emulator-runner@v2
