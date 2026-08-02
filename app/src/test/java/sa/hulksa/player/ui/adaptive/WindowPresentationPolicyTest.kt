@@ -5,13 +5,13 @@ import org.junit.Test
 
 class WindowPresentationPolicyTest {
     @Test
-    fun `mobile shell keeps status bar and removes navigation bar inset`() {
+    fun `mobile shell uses edge to edge without immersive mode`() {
         val policy = resolveWindowPresentationPolicy(
             isTelevisionDevice = false,
             isPlayer = false,
         )
 
-        assertEquals(HulkSystemBarsMode.STATUS_ONLY, policy.systemBarsMode)
+        assertEquals(HulkSystemBarsMode.EDGE_TO_EDGE, policy.systemBarsMode)
         assertEquals(HulkOrientationRequest.KEEP_CURRENT, policy.orientationRequest)
     }
 
