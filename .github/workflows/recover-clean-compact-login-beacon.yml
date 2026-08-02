@@ -1,4 +1,4 @@
-# Refresh after removing pipefail/SIGPIPE from generated-file validation.
+# Refresh after closed-allowlist recovery correction.
 name: Recover Clean Compact Login Beacon
 
 on:
