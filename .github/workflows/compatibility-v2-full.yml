@@ -2,6 +2,11 @@ name: HULK SA Compatibility V2 - Full Matrix
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - quality/compatibility-v2/run-full.request
   schedule:
     - cron: '20 1 * * 2'
 
