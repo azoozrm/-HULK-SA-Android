@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Rect
+import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -94,10 +95,12 @@ class CompatibilityV2InstrumentationTest {
         launchScenario().use { scenario ->
             assertTrue("Application package did not become visible", device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L))
             instrumentation.waitForIdleSync()
+            SystemClock.sleep(2_500L)
+            instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
                 assertFalse(
-                    "TV login opened the software keyboard before text entry",
+                    "TV login opened the software keyboard after the window settled",
                     insets?.isVisible(WindowInsetsCompat.Type.ime()) == true,
                 )
             }
