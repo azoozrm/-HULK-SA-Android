@@ -69,12 +69,13 @@ jobs:
           test_path = Path('quality/compatibility-v2/tests/test_mobile_window_contract.py')
           test = test_path.read_text(encoding='utf-8')
           method_name = '    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:\n'
-          method = '''    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:
-              shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")
-              self.assertEqual(shell.count("Box(Modifier.weight(1f).clipToBounds())"), 1)
-              self.assertIn("import androidx.compose.ui.draw.clipToBounds", shell)
-
-          '''
+          method = (
+              '    def test_mobile_destination_content_is_clipped_below_top_navigation(self) -> None:\n'
+              '        shell = (REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt").read_text(encoding="utf-8")\n'
+              '        self.assertEqual(shell.count("Box(Modifier.weight(1f).clipToBounds())"), 1)\n'
+              '        self.assertIn("import androidx.compose.ui.draw.clipToBounds", shell)\n'
+              '\n'
+          )
           anchor = '    def test_mobile_player_restores_real_pre_player_orientation(self) -> None:\n'
           if method_name not in test:
               if test.count(anchor) != 1:
