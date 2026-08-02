@@ -23,7 +23,7 @@ wait_for_package_installer_ready() {
   while (( SECONDS < deadline )); do
     attempt=$((attempt + 1))
     local boot activity_service package_service settings_service window_service
-    local framework_path package_list package_dump data_ready settings_ready
+    local framework_path package_list data_ready settings_ready
 
     boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
     activity_service="$(adb shell service check activity 2>/dev/null | tr -d '\r' || true)"
@@ -32,7 +32,6 @@ wait_for_package_installer_ready() {
     window_service="$(adb shell service check window 2>/dev/null | tr -d '\r' || true)"
     framework_path="$(adb shell pm path android 2>/dev/null | tr -d '\r' || true)"
     package_list="$(adb shell cmd package list packages --user 0 android 2>/dev/null | tr -d '\r' || true)"
-    package_dump="$(adb shell dumpsys package android 2>/dev/null | tr -d '\r' | head -80 || true)"
     data_ready=false
     settings_ready=false
     adb shell df /data >/dev/null 2>&1 && data_ready=true
@@ -58,7 +57,6 @@ wait_for_package_installer_ready() {
        [[ "$window_service" == *"found"* ]] &&
        [[ "$framework_path" == package:* ]] &&
        [[ "$package_list" == *"package:android"* ]] &&
-       [[ "$package_dump" == *"Package [android]"* ]] &&
        [[ "$data_ready" == true ]] &&
        [[ "$settings_ready" == true ]]; then
       stable=$((stable + 1))
