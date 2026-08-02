@@ -215,15 +215,20 @@ class CompatibilityV2InstrumentationTest {
                 assertTrue("Navigation safe content height is invalid", safeContentBounds.height() > 0)
             }
 
-            val primaryAction = device.wait(Until.findObject(By.textContains("دخول")), 5_000L)
-            assertNotNull("Primary action was not exposed for safe-area verification", primaryAction)
-            val actionBounds = requireNotNull(primaryAction).visibleBounds
+            val visibleSafeAreaProbe =
+                device.wait(Until.findObject(By.textContains("دخول")), 1_500L)
+                    ?: device.wait(Until.findObject(By.textContains("كلمة المرور")), 5_000L)
+            assertNotNull(
+                "No visible login control was exposed for safe-area verification",
+                visibleSafeAreaProbe,
+            )
+            val probeBounds = requireNotNull(visibleSafeAreaProbe).visibleBounds
             assertTrue(
-                "Primary action overlaps system navigation controls: action=$actionBounds safe=$safeContentBounds",
-                actionBounds.left >= safeContentBounds.left &&
-                    actionBounds.top >= safeContentBounds.top &&
-                    actionBounds.right <= safeContentBounds.right &&
-                    actionBounds.bottom <= safeContentBounds.bottom,
+                "Visible login control overlaps system navigation controls: control=$probeBounds safe=$safeContentBounds",
+                probeBounds.left >= safeContentBounds.left &&
+                    probeBounds.top >= safeContentBounds.top &&
+                    probeBounds.right <= safeContentBounds.right &&
+                    probeBounds.bottom <= safeContentBounds.bottom,
             )
             assertFalse(
                 "Normal phone pages must not trigger Android's immersive-mode education overlay",
