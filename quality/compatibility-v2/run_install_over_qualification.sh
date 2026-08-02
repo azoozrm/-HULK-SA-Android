@@ -176,3 +176,32 @@ printf 'expected=%s\nactual=%s\nresult=PASS\n' \
 
 adb shell dumpsys package "$app_package" > "$evidence_root/CANDIDATE-PACKAGE.txt"
 adb shell dumpsys activity activities > "$evidence_root/ACTIVITY-AFTER-UPDATE.txt"
+
+adb shell am force-stop "$app_package"
+adb shell am start -W -n "$app_package/$main_activity" | tee "$evidence_root/FINAL-LAUNCH.txt"
+grep -Fq "Status: ok" "$evidence_root/FINAL-LAUNCH.txt"
+foreground_stable=0
+for attempt in $(seq 1 30); do
+  adb shell dumpsys activity activities > "$evidence_root/FINAL-FOREGROUND-PROBE.txt"
+  if grep -Eq "mResumedActivity:.*${app_package//./\.}/$main_activity|topResumedActivity=.*${app_package//./\.}/$main_activity" \
+      "$evidence_root/FINAL-FOREGROUND-PROBE.txt"; then
+    foreground_stable=$((foreground_stable + 1))
+    if [[ "$foreground_stable" -ge 3 ]]; then
+      break
+    fi
+  else
+    foreground_stable=0
+  fi
+  sleep 1
+done
+if [[ "$foreground_stable" -lt 3 ]]; then
+  echo "Candidate application did not remain foreground after instrumentation" >&2
+  exit 74
+fi
+sleep 2
+{
+  echo "package=$app_package"
+  echo "activity=$main_activity"
+  echo "stable_probes=$foreground_stable"
+  echo "result=PASS"
+} > "$evidence_root/FINAL-FOREGROUND.txt"
