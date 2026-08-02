@@ -1,0 +1,31 @@
+name: HULK SA Physical Galaxy V2 Beacon
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/physical-galaxy-v2-beacon.yml'
+
+permissions:
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  expose-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish latest physical qualification run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          runs="$(gh api -X GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/physical-galaxy-final-qualification-v2.yml/runs" \
+            -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
+            -f event='push' \
+            -f per_page='3' \
+            --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
+          test -n "$runs"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Physical Galaxy V2 run locator\n\n$runs\n\nOnly the run whose head contains the current application correction is eligible for inspection. No merge or release was performed."
