@@ -11,6 +11,28 @@ test_package="sa.hulksa.player.dev.test"
 runner="androidx.test.runner.AndroidJUnitRunner"
 status=0
 
+capture_window_windows() {
+  adb shell dumpsys window windows > "$1" 2>&1 || true
+}
+
+ime_window_block() {
+  local dump="$1"
+  awk '
+    /^  Window #[0-9]+ Window\{.* InputMethod\}:/ { in_ime=1 }
+    in_ime && /^  Window #[0-9]+ Window\{/ && $0 !~ / InputMethod\}:/ { exit }
+    in_ime { print }
+  ' "$dump"
+}
+
+ime_is_visible_or_transitioning() {
+  local dump="$1"
+  local block
+  block="$(ime_window_block "$dump")"
+  [[ -n "$block" ]] || return 1
+  printf '%s\n' "$block" | grep -Eq \
+    'mViewVisibility=0x0|mHasSurface=true|isOnScreen=true|isVisible=true|animation-leash of insets_animation'
+}
+
 {
   echo "profile=$profile"
   echo "test_class=$test_class"
@@ -72,7 +94,7 @@ resolved_activity="$(printf '%s\n' "$resolve_output" | awk '/^[^[:space:]]+\/[^[
 foreground_ready=false
 for _ in $(seq 1 30); do
   adb shell dumpsys activity activities > "$out/ACTIVITY-ACTIVITIES.txt" 2>&1 || true
-  adb shell dumpsys window windows > "$out/WINDOW-WINDOWS.txt" 2>&1 || true
+  capture_window_windows "$out/WINDOW-WINDOWS.txt"
   if grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' "$out/ACTIVITY-ACTIVITIES.txt" | grep -q "$package" || \
      grep -E 'mCurrentFocus|mFocusedApp' "$out/WINDOW-WINDOWS.txt" | grep -q "$package"; then
     foreground_ready=true
@@ -81,6 +103,58 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
+ime_initial_active=false
+ime_back_sent=false
+capture_window_windows "$out/IME-WINDOW-BEFORE.txt"
+if ime_is_visible_or_transitioning "$out/IME-WINDOW-BEFORE.txt"; then
+  ime_initial_active=true
+fi
+
+ime_hidden=false
+for _ in $(seq 1 20); do
+  capture_window_windows "$out/IME-WINDOW-POLL.txt"
+  if ! ime_is_visible_or_transitioning "$out/IME-WINDOW-POLL.txt"; then
+    ime_hidden=true
+    break
+  fi
+  sleep 0.5
+done
+
+if [[ "$ime_hidden" != true ]]; then
+  ime_back_sent=true
+  adb shell input keyevent KEYCODE_BACK || true
+  for _ in $(seq 1 20); do
+    capture_window_windows "$out/IME-WINDOW-POLL.txt"
+    if ! ime_is_visible_or_transitioning "$out/IME-WINDOW-POLL.txt"; then
+      ime_hidden=true
+      break
+    fi
+    sleep 0.5
+  done
+fi
+
+sleep 1
+capture_window_windows "$out/WINDOW-WINDOWS.txt"
+if ime_is_visible_or_transitioning "$out/WINDOW-WINDOWS.txt"; then
+  ime_hidden=false
+fi
+{
+  echo "ime_initial_active=$ime_initial_active"
+  echo "ime_back_sent=$ime_back_sent"
+  echo "ime_hidden=$ime_hidden"
+  if [[ "$ime_hidden" == true ]]; then
+    echo "result=PASS"
+  else
+    echo "result=FAIL"
+    echo "failure_reason=input method remained visible or in an active compositor transition"
+  fi
+} > "$out/IME-STATE.txt"
+if [[ "$ime_hidden" != true ]]; then
+  status=1
+fi
+
+adb shell dumpsys activity activities > "$out/ACTIVITY-ACTIVITIES.txt" 2>&1 || true
+capture_window_windows "$out/WINDOW-WINDOWS.txt"
 adb shell dumpsys activity top > "$out/ACTIVITY-TOP.txt" 2>&1 || true
 if [[ "$foreground_ready" != true ]]; then
   echo "HULK SA did not become the foreground application" >> "$out/FOREGROUND-APP.txt"
@@ -112,6 +186,7 @@ for required in \
   INSTRUMENTATION.txt \
   INSTRUMENTATION.xml \
   FOREGROUND-APP.txt \
+  IME-STATE.txt \
   ACTIVITY-TOP.txt \
   ACTIVITY-ACTIVITIES.txt \
   WINDOW-WINDOWS.txt \
