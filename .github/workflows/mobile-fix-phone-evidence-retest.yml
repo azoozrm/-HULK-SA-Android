@@ -32,13 +32,13 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools'
 
-      - name: Download APKs from verified Fast run
+      - name: Download APKs from current verified Fast run
         uses: actions/download-artifact@v7
         with:
-          name: HULK-SA-COMPATIBILITY-V2-FAST-30756443540
+          name: HULK-SA-COMPATIBILITY-V2-FAST-30757399364
           path: build/fast-source
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 30756443540
+          run-id: 30757399364
 
       - name: Prepare exact APK paths and stable-service wrapper
         run: |
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: HULK-SA-MOBILE-FIX-PHONE-API35-FINAL-${{ github.run_id }}
+          name: HULK-SA-MOBILE-FIX-PHONE-API35-CURRENT-${{ github.run_id }}
           path: ${{ env.EVIDENCE_ROOT }}/
           if-no-files-found: error
           retention-days: 21
@@ -126,4 +126,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JOB_STATUS: ${{ job.status }}
         run: |
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Mobile fix phone evidence retest\n\n- Run: \`${{ github.run_id }}\`\n- Head: \`${{ github.sha }}\`\n- Phone API35 runtime and evidence: **$JOB_STATUS**\n\nThe final physical Galaxy visual result remains pending installation of the newly signed APK."
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Current-head mobile fix phone retest\n\n- Run: \`${{ github.run_id }}\`\n- Head: \`${{ github.sha }}\`\n- Phone API35 runtime and evidence: **$JOB_STATUS**\n\nThis run uses the Edge-to-edge shell APK and current AndroidTest APK from Fast run 30757399364. Physical Galaxy closure still requires installing the newly signed current-head APK."
