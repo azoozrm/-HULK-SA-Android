@@ -1,3 +1,4 @@
-requested_for_head=7f6c26392fe4391f48e8c636a499c99bce5e9ace
-reason=post-fast-and-build-qualification
-requested_at=2026-08-02T00:03:00Z
+requested_for_head=a8b1269814a3303206b039adee2e2d5f257506bf
+reason=auditable-pr-full-matrix-after-fast-and-build-success
+request_sequence=2
+requested_at=2026-08-02T00:08:00Z
