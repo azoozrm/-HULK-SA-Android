@@ -144,20 +144,32 @@ fun LoginScreen(
             return@BoxWithConstraints
         }
 
-        val wideThreshold = if (isTv) 1180.dp else 760.dp
+        val wideThreshold = if (isTv) 900.dp else 760.dp
         val wide = maxWidth >= wideThreshold
+        val compactWideTv = isTv && wide && maxWidth < 1180.dp
         if (wide) {
             val horizontalPadding = when {
                 isTv && maxWidth >= 1440.dp -> 58.dp
+                compactWideTv -> 20.dp
                 isTv -> 30.dp
                 else -> 36.dp
+            }
+            val verticalPadding = when {
+                compactWideTv -> 8.dp
+                isTv -> 24.dp
+                else -> 20.dp
+            }
+            val itemSpacing = when {
+                compactWideTv -> 20.dp
+                isTv -> 36.dp
+                else -> 30.dp
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(
                         horizontal = horizontalPadding,
-                        vertical = if (isTv) 24.dp else 20.dp,
+                        vertical = verticalPadding,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -167,7 +179,7 @@ fun LoginScreen(
                         .fillMaxWidth()
                         .heightIn(max = 680.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 36.dp else 30.dp),
+                    horizontalArrangement = Arrangement.spacedBy(itemSpacing),
                 ) {
                     LoginPanel(
                         username = username,
@@ -184,13 +196,19 @@ fun LoginScreen(
                         onOpenWebsite = openWebsite,
                         onNonTextFocus = hideKeyboard,
                         initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                        modifier = Modifier.width(if (isTv) 450.dp else 430.dp),
+                        modifier = Modifier.width(
+                            when {
+                                compactWideTv -> 440.dp
+                                isTv -> 450.dp
+                                else -> 430.dp
+                            },
+                        ),
                     )
 
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(330.dp)
+                            .height(if (compactWideTv) 280.dp else 330.dp)
                             .background(
                                 Brush.verticalGradient(
                                     listOf(
