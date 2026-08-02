@@ -1,3 +1,4 @@
+# Rerun after aligning the static contract with the compact 38dp field size.
 name: Apply Compact Landscape Login Fix
 
 on:
