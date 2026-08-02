@@ -1,0 +1,32 @@
+name: Mobile Content Clip Fix Beacon
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/apply-mobile-content-clip-fix-beacon.yml'
+
+permissions:
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  expose-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish apply-fix run locator
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sleep 10
+          runs="$(gh api -X GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/apply-mobile-content-clip-fix.yml/runs" \
+            -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
+            -f event='push' \
+            -f per_page='5' \
+            --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
+          test -n "$runs"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Mobile content clip fix run locator\n\n$runs"
