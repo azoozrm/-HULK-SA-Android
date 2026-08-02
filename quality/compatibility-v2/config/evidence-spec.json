@@ -14,9 +14,14 @@
       "WINDOW-METRICS.txt",
       "INSTRUMENTATION.txt",
       "INSTRUMENTATION.xml",
+      "FOREGROUND-APP.txt",
+      "ACTIVITY-TOP.txt",
+      "ACTIVITY-ACTIVITIES.txt",
+      "WINDOW-WINDOWS.txt",
       "logcat.txt",
       "window.xml",
       "full-window.png",
+      "MEMINFO.txt",
       "SHA256SUMS.txt"
     ],
     "visual": [
