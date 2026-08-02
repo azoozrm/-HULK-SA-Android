@@ -1,0 +1,103 @@
+name: Recover Clean Compact Login Commit
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/recover-clean-compact-login.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
+
+      - name: Revert contaminated generated-output commit
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git revert --no-edit 1b6b6613c7a8e969eddc9c71e60096c09a056ca8
+          if git ls-files 'app/build/**' | grep -q .; then
+            echo 'Tracked app/build files remain after revert' >&2
+            exit 81
+          fi
+
+      - name: Reapply guarded compact Login source correction
+        run: |
+          set -euo pipefail
+          python3 tools/apply_compact_landscape_login_fix.py
+          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
+          python3 quality/compatibility-v2/static_validate.py --repo-root . --out build/compatibility-v2/login-recovery-static
+          git diff --check
+
+      - name: Compile app and instrumentation
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleDebugAndroidTest \
+            -PHULK_PORTAL_URL='http://3162356.xyz:8080' \
+            -PHULK_CONFIG_URL=''
+
+      - name: Commit only intended source files
+        run: |
+          set -euo pipefail
+          git add -- \
+            app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt \
+            app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt \
+            quality/compatibility-v2/tests/test_mobile_window_contract.py
+          staged="$(git diff --cached --name-only)"
+          printf '%s\n' "$staged"
+          expected=$'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt\napp/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt\nquality/compatibility-v2/tests/test_mobile_window_contract.py'
+          test "$staged" = "$expected"
+          git commit -m 'fix: keep compact landscape login actions reachable cleanly'
+          rm -rf app/build
+          if git ls-files 'app/build/**' | grep -q .; then
+            echo 'Generated app/build files are still tracked' >&2
+            exit 82
+          fi
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+      - name: Rebase and push recovery
+        run: |
+          set -euo pipefail
+          branch='rebuild/adaptive-ui-compatibility-lab-v2'
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          if git ls-files 'app/build/**' | grep -q .; then
+            echo 'Generated app/build files returned after rebase' >&2
+            exit 83
+          fi
+          git push origin HEAD:"$branch"
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build contamination removed safely\n\nThe contaminated commit was reverted without force-push. The compact landscape Login correction was reapplied and committed using exactly three intended source/test files. Static tests and Debug/androidTest compilation passed. `app/build/**` is no longer tracked. Physical Galaxy qualification must be rerun; no merge or release was performed.'
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Generated build recovery stopped safely\n\nThe revert, guarded source patch, exact staging check, compile gate, rebase, or push failed. No clean pass was claimed. Inspect the latest Recover Clean Compact Login Commit run.'
