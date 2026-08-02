@@ -76,7 +76,10 @@ wait_for_services() {
 stage="initial-boot"
 wait_for_boot
 wait_for_services
-record "initial_locale=$(adb shell getprop persist.sys.locale | tr -d '\r')"
+sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+initial_locale="$(adb shell getprop persist.sys.locale | tr -d '\r')"
+record "sdk=$sdk"
+record "initial_locale=$initial_locale"
 record "initial_wm_size=$(adb shell wm size | tr -d '\r')"
 
 stage="request-adb-root"
@@ -90,22 +93,31 @@ adb wait-for-device
 wait_for_services
 shell_uid="$(adb shell id -u | tr -d '\r')"
 record "shell_uid_after_adb_root=$shell_uid"
-if [[ "$root_status" -ne 0 || "$shell_uid" != "0" ]]; then
-  record "result=BLOCKED"
-  record "failure_reason=emulator image does not permit root required for deterministic locale qualification"
-  capture_device_state
-  exit 3
-fi
 
 actual_locale="$(adb shell getprop persist.sys.locale | tr -d '\r')"
+locale_mode="system-existing"
 if [[ "$actual_locale" != "$locale" ]]; then
-  stage="apply-locale-framework-restart"
-  record "locale_restart_required=true"
-  adb shell "setprop persist.sys.locale '$locale'; stop; sleep 5; start"
-  wait_for_services
+  if [[ "$root_status" -eq 0 && "$shell_uid" == "0" ]]; then
+    stage="apply-system-locale"
+    locale_mode="system-root"
+    record "locale_restart_required=true"
+    adb shell "setprop persist.sys.locale '$locale'; stop; sleep 5; start"
+    wait_for_services
+  elif [[ "$sdk" =~ ^[0-9]+$ && "$sdk" -ge 33 ]]; then
+    locale_mode="application-deferred"
+    record "locale_restart_required=false"
+    record "locale_deferred_reason=system image is non-root; app locale will be applied after APK installation"
+  else
+    record "locale_mode=unsupported"
+    record "result=BLOCKED"
+    record "failure_reason=system locale differs and this pre-Android-13 image does not permit root"
+    capture_device_state
+    exit 3
+  fi
 else
   record "locale_restart_required=false"
 fi
+record "locale_mode=$locale_mode"
 
 stage="apply-window-profile"
 adb shell wm size "${width}x${height}"
@@ -129,9 +141,9 @@ record "actual_font_scale=$actual_font"
 record "actual_rotation=$actual_rotation"
 record "ui_mode=$(adb shell dumpsys uimode | tr -d '\r')"
 
-if [[ "$actual_locale" != "$locale" ]]; then
+if [[ "$locale_mode" != "application-deferred" && "$actual_locale" != "$locale" ]]; then
   record "result=BLOCKED"
-  record "failure_reason=locale mismatch after rooted framework restart"
+  record "failure_reason=system locale mismatch after profile configuration"
   capture_device_state
   exit 3
 fi
