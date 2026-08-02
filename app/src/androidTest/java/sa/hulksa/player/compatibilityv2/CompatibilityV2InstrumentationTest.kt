@@ -132,6 +132,7 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun phoneWindowUsesTransparentEdgeToEdgeSystemBars() {
         assumeFalse("Phone window contract is not applicable to television UI mode", isTelevision())
+        var safeContentBounds = Rect()
         launchScenario().use { scenario ->
             assertTrue(
                 "Application package did not become visible",
@@ -141,22 +142,44 @@ class CompatibilityV2InstrumentationTest {
             SystemClock.sleep(900L)
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
-                val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                val insets = requireNotNull(
+                    ViewCompat.getRootWindowInsets(activity.window.decorView),
+                ) { "Root window insets were not available" }
                 assertTrue(
                     "Phone status bar must remain visible outside playback",
-                    insets?.isVisible(WindowInsetsCompat.Type.statusBars()) == true,
+                    insets.isVisible(WindowInsetsCompat.Type.statusBars()),
                 )
                 assertTrue(
                     "Phone navigation controls must remain accessible outside playback",
-                    insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) == true,
+                    insets.isVisible(WindowInsetsCompat.Type.navigationBars()),
                 )
                 assertEquals(
-                    "Phone navigation bar must be transparent so app content reaches the display edge",
+                    "Phone navigation bar must be transparent so app background reaches the display edge",
                     Color.TRANSPARENT,
                     activity.window.navigationBarColor,
                 )
+                val navigationInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+                safeContentBounds = Rect(
+                    navigationInsets.left,
+                    0,
+                    activity.window.decorView.width - navigationInsets.right,
+                    activity.window.decorView.height - navigationInsets.bottom,
+                )
+                assertTrue("Navigation safe content width is invalid", safeContentBounds.width() > 0)
+                assertTrue("Navigation safe content height is invalid", safeContentBounds.height() > 0)
             }
         }
+
+        val primaryAction = device.wait(Until.findObject(By.textContains("دخول")), 5_000L)
+        assertNotNull("Primary action was not exposed for safe-area verification", primaryAction)
+        val actionBounds = requireNotNull(primaryAction).visibleBounds
+        assertTrue(
+            "Primary action overlaps system navigation controls: action=$actionBounds safe=$safeContentBounds",
+            actionBounds.left >= safeContentBounds.left &&
+                actionBounds.top >= safeContentBounds.top &&
+                actionBounds.right <= safeContentBounds.right &&
+                actionBounds.bottom <= safeContentBounds.bottom,
+        )
         assertFalse(
             "Normal phone pages must not trigger Android's immersive-mode education overlay",
             device.hasObject(By.res("android", "immersive_cling_title")),
