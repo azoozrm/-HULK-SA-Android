@@ -27,8 +27,14 @@ wait_for_services() {
 wait_for_boot
 wait_for_services
 
-# Locale is injected before boot through the emulator command line. Restarting the
-# Android framework here races with android-emulator-runner's own health commands.
+actual_locale="$(adb shell getprop persist.sys.locale | tr -d '\r')"
+if [[ "$actual_locale" != "$locale" ]]; then
+  adb shell setprop persist.sys.locale "$locale"
+  adb reboot
+  wait_for_boot
+  wait_for_services
+fi
+
 adb shell wm size "${width}x${height}"
 adb shell wm density "$density"
 adb shell settings put system font_scale "$font_scale"
@@ -58,7 +64,7 @@ actual_rotation="$(adb shell settings get system user_rotation | tr -d '\r')"
 } > "$out"
 
 [[ "$actual_locale" == "$locale" ]] || {
-  echo "BLOCKED: emulator boot locale is '$actual_locale', expected '$locale'" >&2
+  echo "BLOCKED: emulator locale is '$actual_locale', expected '$locale' after full reboot" >&2
   exit 3
 }
 [[ "$size_output" == *"${width}x${height}"* ]] || {
