@@ -1,0 +1,113 @@
+name: Cleanup Physical Phone Qualification Tooling
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/cleanup-physical-phone-qualification.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+
+      - name: Remove only temporary qualification files
+        run: |
+          set -euo pipefail
+          before_app="$(git rev-parse HEAD:app)"
+          git rm --ignore-unmatch -- \
+            .github/workflows/apply-compact-landscape-login-fix.yml \
+            .github/workflows/compact-landscape-login-fix-beacon.yml \
+            .github/workflows/recover-clean-compact-login.yml \
+            .github/workflows/recover-clean-compact-login-beacon.yml \
+            .github/workflows/physical-galaxy-final-qualification.yml \
+            .github/workflows/physical-galaxy-final-qualification-v2.yml \
+            .github/workflows/physical-galaxy-v2-beacon.yml \
+            .github/workflows/physical-galaxy-v2-report.yml \
+            .github/workflows/physical-galaxy-landscape-retest-v3.yml \
+            .github/workflows/physical-galaxy-landscape-retest-v3-beacon.yml \
+            .github/workflows/cleanup-physical-phone-qualification.yml \
+            tools/apply_compact_landscape_login_fix.py \
+            quality/compatibility-v2/__pycache__/evidence_gate.cpython-312.pyc \
+            quality/compatibility-v2/__pycache__/instrumentation_to_junit.cpython-312.pyc \
+            quality/compatibility-v2/__pycache__/static_validate.cpython-312.pyc \
+            quality/compatibility-v2/tests/__pycache__/test_evidence_gate.cpython-312.pyc \
+            quality/compatibility-v2/tests/__pycache__/test_instrumentation_to_junit.cpython-312.pyc \
+            quality/compatibility-v2/tests/__pycache__/test_mobile_window_contract.cpython-312.pyc \
+            quality/compatibility-v2/tests/__pycache__/test_static_validate.cpython-312.pyc
+
+          python3 - <<'PY'
+          import subprocess
+
+          allowed = {
+              '.github/workflows/apply-compact-landscape-login-fix.yml',
+              '.github/workflows/compact-landscape-login-fix-beacon.yml',
+              '.github/workflows/recover-clean-compact-login.yml',
+              '.github/workflows/recover-clean-compact-login-beacon.yml',
+              '.github/workflows/physical-galaxy-final-qualification.yml',
+              '.github/workflows/physical-galaxy-final-qualification-v2.yml',
+              '.github/workflows/physical-galaxy-v2-beacon.yml',
+              '.github/workflows/physical-galaxy-v2-report.yml',
+              '.github/workflows/physical-galaxy-landscape-retest-v3.yml',
+              '.github/workflows/physical-galaxy-landscape-retest-v3-beacon.yml',
+              '.github/workflows/cleanup-physical-phone-qualification.yml',
+              'tools/apply_compact_landscape_login_fix.py',
+              'quality/compatibility-v2/__pycache__/evidence_gate.cpython-312.pyc',
+              'quality/compatibility-v2/__pycache__/instrumentation_to_junit.cpython-312.pyc',
+              'quality/compatibility-v2/__pycache__/static_validate.cpython-312.pyc',
+              'quality/compatibility-v2/tests/__pycache__/test_evidence_gate.cpython-312.pyc',
+              'quality/compatibility-v2/tests/__pycache__/test_instrumentation_to_junit.cpython-312.pyc',
+              'quality/compatibility-v2/tests/__pycache__/test_mobile_window_contract.cpython-312.pyc',
+              'quality/compatibility-v2/tests/__pycache__/test_static_validate.cpython-312.pyc',
+          }
+          required = {
+              '.github/workflows/physical-galaxy-final-qualification-v2.yml',
+              '.github/workflows/physical-galaxy-landscape-retest-v3.yml',
+              '.github/workflows/cleanup-physical-phone-qualification.yml',
+              'tools/apply_compact_landscape_login_fix.py',
+          }
+          actual = set(subprocess.check_output(
+              ['git', 'diff', '--cached', '--name-only'], text=True
+          ).splitlines())
+          unexpected = sorted(actual - allowed)
+          missing = sorted(required - actual)
+          if unexpected or missing:
+              raise SystemExit(
+                  f'Cleanup allowlist violation: unexpected={unexpected!r} missing={missing!r}'
+              )
+          if any(path.startswith('app/') for path in actual):
+              raise SystemExit(f'Cleanup attempted to change application files: {sorted(actual)!r}')
+          PY
+
+          after_app="$(git rev-parse HEAD:app)"
+          test "$before_app" = "$after_app"
+          git diff --cached --check
+
+      - name: Commit, rebase and push cleanup
+        run: |
+          set -euo pipefail
+          branch='rebuild/adaptive-ui-compatibility-lab-v2'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: remove temporary physical phone qualification tooling'
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          git push origin HEAD:"$branch"
+
+      - name: Report completion
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Temporary physical-phone tooling removed\n\nAll one-time patch, recovery, locator and Galaxy qualification workflows were removed after successful evidence collection. Generated Python cache files were removed. The application tree was not changed. PR remains Draft and unmerged.'
