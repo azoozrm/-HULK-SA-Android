@@ -142,6 +142,7 @@ jobs:
       - name: Create runtime qualification script
         run: |
           set -euo pipefail
+          mkdir -p candidate/build
           cat > candidate/build/run-production-install-over.sh <<'BASH'
           #!/usr/bin/env bash
           set -euo pipefail
