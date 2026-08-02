@@ -26,6 +26,8 @@ import org.junit.Assume.assumeFalse
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import sa.hulksa.player.MainActivity
+import sa.hulksa.player.TvMainActivity
 
 @RunWith(AndroidJUnit4::class)
 class CompatibilityV2InstrumentationTest {
@@ -38,39 +40,33 @@ class CompatibilityV2InstrumentationTest {
         return mode == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
-    private fun launcherCategory(): String =
-        if (isTelevision()) Intent.CATEGORY_LEANBACK_LAUNCHER else Intent.CATEGORY_LAUNCHER
+    private fun explicitLauncherIntent(): Intent {
+        val activityClass: Class<out Activity> =
+            if (isTelevision()) TvMainActivity::class.java else MainActivity::class.java
+        val launcherCategory =
+            if (isTelevision()) Intent.CATEGORY_LEANBACK_LAUNCHER else Intent.CATEGORY_LAUNCHER
 
-    private fun resolvedLauncherIntent(): Intent {
-        val queryIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(launcherCategory())
-            setPackage(targetContext.packageName)
-        }
-        val resolved = requireNotNull(targetContext.packageManager.resolveActivity(queryIntent, 0)) {
-            "No ${launcherCategory()} activity resolves for ${targetContext.packageName}"
-        }
-        val activityInfo = requireNotNull(resolved.activityInfo) {
-            "Resolved launcher has no ActivityInfo for ${targetContext.packageName}"
-        }
-        return Intent(queryIntent).apply {
-            component = ComponentName(activityInfo.packageName, activityInfo.name)
+        return Intent(Intent.ACTION_MAIN).apply {
+            component = ComponentName(targetContext.packageName, activityClass.name)
+            addCategory(launcherCategory)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
     }
 
     private fun launchMainPackage(): Boolean {
-        targetContext.startActivity(resolvedLauncherIntent())
+        targetContext.startActivity(explicitLauncherIntent())
         return device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L)
     }
 
     private fun launchScenario(): ActivityScenario<Activity> =
-        ActivityScenario.launch(resolvedLauncherIntent())
+        ActivityScenario.launch(explicitLauncherIntent())
 
     @Test
     fun phoneLauncherStartsRealApplicationAndSurvivesRecreation() {
         assumeFalse("Phone lifecycle test is not applicable to television UI mode", isTelevision())
         launchScenario().use { scenario ->
             scenario.onActivity { activity ->
+                assertTrue(activity is MainActivity)
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
             }
@@ -78,6 +74,7 @@ class CompatibilityV2InstrumentationTest {
             scenario.moveToState(Lifecycle.State.RESUMED)
             scenario.recreate()
             scenario.onActivity { activity ->
+                assertTrue(activity is MainActivity)
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
             }
@@ -85,7 +82,7 @@ class CompatibilityV2InstrumentationTest {
     }
 
     @Test
-    fun explicitLauncherIntentResolvesToInstalledDebugPackage() {
+    fun explicitManifestComponentStartsInstalledDebugPackage() {
         assertTrue("Application package did not become visible", launchMainPackage())
     }
 
@@ -93,11 +90,15 @@ class CompatibilityV2InstrumentationTest {
     fun televisionLoginStartsWithImeHidden() {
         assumeTrue("Initial IME visibility contract requires television UI mode", isTelevision())
         launchScenario().use { scenario ->
-            assertTrue("Application package did not become visible", device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L))
+            assertTrue(
+                "Application package did not become visible",
+                device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L),
+            )
             instrumentation.waitForIdleSync()
             SystemClock.sleep(2_500L)
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
+                assertTrue(activity is TvMainActivity)
                 val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
                 assertFalse(
                     "TV login opened the software keyboard after the window settled",
@@ -122,12 +123,16 @@ class CompatibilityV2InstrumentationTest {
             }
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER)
             scenario.onActivity { activity ->
+                assertTrue(activity is TvMainActivity)
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
             }
             val focused = device.wait(Until.findObject(By.focused(true)), 5_000L)
             assertNotNull("No visible focused accessibility node after D-pad input", focused)
-            assertTrue("Focused node is outside the display", focused.visibleBounds.width() > 0 && focused.visibleBounds.height() > 0)
+            assertTrue(
+                "Focused node is outside the display",
+                focused.visibleBounds.width() > 0 && focused.visibleBounds.height() > 0,
+            )
         }
     }
 
