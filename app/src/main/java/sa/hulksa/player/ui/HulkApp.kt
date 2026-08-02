@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.model.ContentType
+import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
@@ -34,6 +35,10 @@ fun HulkApp(
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
+    ApplyAdaptiveWindowPresentation(
+        isTelevisionDevice = isTv,
+        isPlayer = state.screen == HulkScreen.PLAYER,
+    )
     val navigationMemory = remember { NavigationMemoryStore() }
     val notify: (String) -> Unit = { message ->
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()

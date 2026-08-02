@@ -589,8 +589,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF090A07))
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .statusBarsPadding(),
         state = navigationState,
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1097,8 +1096,8 @@ private fun PosterCatalogScreen(
         if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
         Spacer(Modifier.height(11.dp))
         ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory, isTv)
-        CatalogInteractionHints(isTv)
-        Spacer(Modifier.height(9.dp))
+        if (isTv) CatalogInteractionHints(true)
+        Spacer(Modifier.height(if (isTv) 9.dp else 4.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (showingContinue && continueWatching.isNotEmpty()) {
                 HistoryGrid(continueWatching, isTv, destination, navigationMemory, onOpenHistory)
@@ -1172,8 +1171,8 @@ private fun LiveCatalogScreen(
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
         Spacer(Modifier.height(10.dp))
         ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory)
-        LiveInteractionHints(isTv)
-        Spacer(Modifier.height(8.dp))
+        if (isTv) LiveInteractionHints(true)
+        Spacer(Modifier.height(if (isTv) 8.dp else 4.dp))
         if (catalog == null && ContentType.LIVE in state.loadingTypes) {
             LoadingRing(label = "جاري تحميل القنوات…", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp))
         } else if (visible.isEmpty()) {
