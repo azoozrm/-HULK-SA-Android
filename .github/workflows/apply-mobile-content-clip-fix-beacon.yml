@@ -1,4 +1,4 @@
-# Locate the whitespace-robust mobile clipping fix run.
+# Locate the indentation-safe mobile clipping fix run.
 name: Mobile Content Clip Fix Beacon
 
 on:
