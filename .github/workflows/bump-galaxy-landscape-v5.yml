@@ -1,0 +1,32 @@
+name: Refresh Galaxy Landscape V5 Harness Identity
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/bump-galaxy-landscape-v5.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+      - name: Bind V5 to current harness source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          file='.github/workflows/physical-galaxy-landscape-evidence-v5.yml'
+          sed -i 's/b9a1d0cdf05e3bec7d3a3a9b1cbf850f521f1785/7ab190bf2967d1cccdcf09925865b93d595a8c02/g' "$file"
+          grep -F '7ab190bf2967d1cccdcf09925865b93d595a8c02' "$file"
+          git add -- "$file"
+          test "$(git diff --cached --name-only)" = "$file"
+          git commit -m 'ci: bind Landscape V5 to deterministic scroll harness'
+          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
