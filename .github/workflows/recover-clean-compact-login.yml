@@ -64,10 +64,27 @@ jobs:
             app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt \
             app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt \
             quality/compatibility-v2/tests/test_mobile_window_contract.py
-          staged="$(git diff --cached --name-only)"
-          printf '%s\n' "$staged"
-          expected=$'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt\napp/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt\nquality/compatibility-v2/tests/test_mobile_window_contract.py'
-          test "$staged" = "$expected"
+          git diff --cached --name-only
+          python3 - <<'PY'
+          import subprocess
+
+          expected = sorted([
+              'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt',
+              'app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt',
+              'quality/compatibility-v2/tests/test_mobile_window_contract.py',
+          ])
+          actual = subprocess.check_output(
+              ['git', 'diff', '--cached', '--name-only'],
+              text=True,
+          ).splitlines()
+          if len(actual) != len(set(actual)):
+              raise SystemExit(f'Duplicate staged paths detected: {actual!r}')
+          if sorted(actual) != expected:
+              raise SystemExit(
+                  'Unexpected staged paths. '
+                  f'expected={expected!r} actual={actual!r}'
+              )
+          PY
           git commit -m 'fix: keep compact landscape login actions reachable cleanly'
           rm -rf app/build
           if git ls-files 'app/build/**' | grep -q .; then
