@@ -6,6 +6,7 @@ on:
       - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - .github/workflows/compatibility-v2-install-over.yml
+      - quality/compatibility-v2/run_install_over_qualification.sh
   workflow_dispatch:
     inputs:
       baseline_ref:
