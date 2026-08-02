@@ -1,4 +1,4 @@
-requested_for_head=a8b1269814a3303206b039adee2e2d5f257506bf
-reason=auditable-pr-full-matrix-after-fast-and-build-success
-request_sequence=2
-requested_at=2026-08-02T00:08:00Z
+requested_for_head=618d0b442301bf06aad4cd0d05574e9b311c35cb
+reason=retest-with-kvm-and-api36-tv-image
+request_sequence=3
+requested_at=2026-08-02T00:15:00Z
