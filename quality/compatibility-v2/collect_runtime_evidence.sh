@@ -24,13 +24,33 @@ ime_window_block() {
   ' "$dump"
 }
 
-ime_is_visible_or_transitioning() {
+ime_is_actually_visible() {
   local dump="$1"
   local block
   block="$(ime_window_block "$dump")"
   [[ -n "$block" ]] || return 1
-  printf '%s\n' "$block" | grep -Eq \
-    'mViewVisibility=0x0|mHasSurface=true|isOnScreen=true|isVisible=true|animation-leash of insets_animation'
+
+  # Insets animation leashes may survive after the IME window is fully hidden.
+  # Treat the IME as visible only when the window itself is VISIBLE and has a
+  # surface or is reported on-screen/visible by WindowManager.
+  printf '%s\n' "$block" | grep -q 'mViewVisibility=0x0' || return 1
+  printf '%s\n' "$block" | grep -Eq 'mHasSurface=true|isOnScreen=true|isVisible=true'
+}
+
+wait_for_foreground() {
+  local attempts="${1:-30}"
+  foreground_ready=false
+  for _ in $(seq 1 "$attempts"); do
+    adb shell dumpsys activity activities > "$out/ACTIVITY-ACTIVITIES.txt" 2>&1 || true
+    capture_window_windows "$out/WINDOW-WINDOWS.txt"
+    if grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' "$out/ACTIVITY-ACTIVITIES.txt" | grep -q "$package" || \
+       grep -E 'mCurrentFocus|mFocusedApp' "$out/WINDOW-WINDOWS.txt" | grep -q "$package"; then
+      foreground_ready=true
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 {
@@ -91,29 +111,20 @@ resolved_activity="$(printf '%s\n' "$resolve_output" | awk '/^[^[:space:]]+\/[^[
   adb shell am start -W -n "$resolved_activity"
 } > "$out/FOREGROUND-APP.txt" 2>&1 || status=1
 
-foreground_ready=false
-for _ in $(seq 1 30); do
-  adb shell dumpsys activity activities > "$out/ACTIVITY-ACTIVITIES.txt" 2>&1 || true
-  capture_window_windows "$out/WINDOW-WINDOWS.txt"
-  if grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' "$out/ACTIVITY-ACTIVITIES.txt" | grep -q "$package" || \
-     grep -E 'mCurrentFocus|mFocusedApp' "$out/WINDOW-WINDOWS.txt" | grep -q "$package"; then
-    foreground_ready=true
-    break
-  fi
-  sleep 1
-done
+wait_for_foreground 30 || true
 
 ime_initial_active=false
 ime_back_sent=false
+foreground_relaunch_after_ime=false
 capture_window_windows "$out/IME-WINDOW-BEFORE.txt"
-if ime_is_visible_or_transitioning "$out/IME-WINDOW-BEFORE.txt"; then
+if ime_is_actually_visible "$out/IME-WINDOW-BEFORE.txt"; then
   ime_initial_active=true
 fi
 
 ime_hidden=false
 for _ in $(seq 1 20); do
   capture_window_windows "$out/IME-WINDOW-POLL.txt"
-  if ! ime_is_visible_or_transitioning "$out/IME-WINDOW-POLL.txt"; then
+  if ! ime_is_actually_visible "$out/IME-WINDOW-POLL.txt"; then
     ime_hidden=true
     break
   fi
@@ -125,7 +136,7 @@ if [[ "$ime_hidden" != true ]]; then
   adb shell input keyevent KEYCODE_BACK || true
   for _ in $(seq 1 20); do
     capture_window_windows "$out/IME-WINDOW-POLL.txt"
-    if ! ime_is_visible_or_transitioning "$out/IME-WINDOW-POLL.txt"; then
+    if ! ime_is_actually_visible "$out/IME-WINDOW-POLL.txt"; then
       ime_hidden=true
       break
     fi
@@ -133,20 +144,31 @@ if [[ "$ime_hidden" != true ]]; then
   done
 fi
 
+# A BACK used to dismiss a genuinely visible IME must never leave the launcher
+# as the captured foreground. Re-resolve and relaunch the application once if
+# the platform consumed BACK as activity navigation instead of IME dismissal.
+if ! wait_for_foreground 3; then
+  foreground_relaunch_after_ime=true
+  adb shell am start -W -n "$resolved_activity" >> "$out/FOREGROUND-APP.txt" 2>&1 || status=1
+  wait_for_foreground 30 || true
+fi
+
 sleep 1
 capture_window_windows "$out/WINDOW-WINDOWS.txt"
-if ime_is_visible_or_transitioning "$out/WINDOW-WINDOWS.txt"; then
+if ime_is_actually_visible "$out/WINDOW-WINDOWS.txt"; then
   ime_hidden=false
 fi
 {
+  echo "ime_detection=window-visibility-and-surface"
   echo "ime_initial_active=$ime_initial_active"
   echo "ime_back_sent=$ime_back_sent"
+  echo "foreground_relaunch_after_ime=$foreground_relaunch_after_ime"
   echo "ime_hidden=$ime_hidden"
   if [[ "$ime_hidden" == true ]]; then
     echo "result=PASS"
   else
     echo "result=FAIL"
-    echo "failure_reason=input method remained visible or in an active compositor transition"
+    echo "failure_reason=input method window remained actually visible"
   fi
 } > "$out/IME-STATE.txt"
 if [[ "$ime_hidden" != true ]]; then
