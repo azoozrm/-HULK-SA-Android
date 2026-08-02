@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.view.KeyEvent
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -84,6 +86,22 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun explicitLauncherIntentResolvesToInstalledDebugPackage() {
         assertTrue("Application package did not become visible", launchMainPackage())
+    }
+
+    @Test
+    fun televisionLoginStartsWithImeHidden() {
+        assumeTrue("Initial IME visibility contract requires television UI mode", isTelevision())
+        launchScenario().use { scenario ->
+            assertTrue("Application package did not become visible", device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L))
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                assertFalse(
+                    "TV login opened the software keyboard before text entry",
+                    insets?.isVisible(WindowInsetsCompat.Type.ime()) == true,
+                )
+            }
+        }
     }
 
     @Test
