@@ -1,4 +1,4 @@
-requested_for_head=cdfd5355b0907d77960b2a9b6fff9ca71857ebd9
-reason=retest-with-separate-boot-and-framework-readiness
-request_sequence=7
-requested_at=2026-08-02T00:50:00Z
+requested_for_head=043a8ad923c7bdf749a9d4e92afdb7c54737ff22
+reason=retest-with-locale-injected-before-emulator-boot
+request_sequence=8
+requested_at=2026-08-02T00:58:00Z
