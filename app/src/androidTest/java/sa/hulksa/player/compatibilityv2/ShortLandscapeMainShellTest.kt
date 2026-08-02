@@ -8,13 +8,17 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodes
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
 import java.io.File
@@ -44,6 +48,9 @@ class ShortLandscapeMainShellTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    private val verticalScrollSurface =
+        SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange)
+
     @Test
     fun movieHeaderAndCategoriesScrollWithPosterGrid() {
         verifyCatalogScroll(
@@ -72,6 +79,7 @@ class ShortLandscapeMainShellTest {
     fun liveHeaderAndCategoriesScrollWithChannelList() {
         val categoryName = "فئة قنوات الاختبار"
         val itemCount = 42
+        val finalItem = "قناة اختبار $itemCount"
         val catalog = fakeCatalog(
             type = ContentType.LIVE,
             categoryName = categoryName,
@@ -91,11 +99,11 @@ class ShortLandscapeMainShellTest {
         composeRule.onNodeWithText("$itemCount عنصر").assertIsDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsDisplayed()
 
-        swipeMainContentUp(times = 12)
+        scrollMainContentTo(finalItem)
 
         composeRule.onNodeWithText("$itemCount عنصر").assertIsNotDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsNotDisplayed()
-        composeRule.onNodeWithText("قناة اختبار $itemCount").assertIsDisplayed()
+        composeRule.onNodeWithText(finalItem).assertIsDisplayed()
         captureFullWindowEvidence("live")
     }
 
@@ -107,6 +115,7 @@ class ShortLandscapeMainShellTest {
         itemCount: Int,
         evidenceName: String,
     ) {
+        val finalItem = "$itemPrefix $itemCount"
         val catalog = fakeCatalog(type, categoryName, itemPrefix, itemCount)
         setMainShell(
             state = HulkUiState(
@@ -121,11 +130,11 @@ class ShortLandscapeMainShellTest {
         composeRule.onNodeWithText("$itemCount عنصر").assertIsDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsDisplayed()
 
-        swipeMainContentUp(times = 6)
+        scrollMainContentTo(finalItem)
 
         composeRule.onNodeWithText("$itemCount عنصر").assertIsNotDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsNotDisplayed()
-        composeRule.onNodeWithText("$itemPrefix $itemCount").assertIsDisplayed()
+        composeRule.onNodeWithText(finalItem).assertIsDisplayed()
         captureFullWindowEvidence(evidenceName)
     }
 
@@ -175,11 +184,10 @@ class ShortLandscapeMainShellTest {
         composeRule.waitForIdle()
     }
 
-    private fun swipeMainContentUp(times: Int) {
-        repeat(times) {
-            composeRule.onRoot().performTouchInput { swipeUp(durationMillis = 350) }
-            composeRule.waitForIdle()
-        }
+    private fun scrollMainContentTo(targetText: String) {
+        composeRule.onAllNodes(verticalScrollSurface).assertCountEquals(1)
+        composeRule.onNode(verticalScrollSurface).performScrollToNode(hasText(targetText))
+        composeRule.waitForIdle()
     }
 
     private fun captureFullWindowEvidence(name: String) {
