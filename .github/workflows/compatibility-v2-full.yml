@@ -1,9 +1,9 @@
 name: HULK SA Compatibility V2 - Full Matrix
 
 on:
-  push:
+  pull_request:
     branches:
-      - rebuild/adaptive-ui-compatibility-lab-v2
+      - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - 'quality/compatibility-v2/run-full.request'
   workflow_dispatch:
@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: compatibility-v2-full-${{ github.ref }}
-  cancel-in-progress: false
+  group: compatibility-v2-full-refs/heads/rebuild/adaptive-ui-compatibility-lab-v2
+  cancel-in-progress: true
 
 jobs:
   build-test-binaries:
