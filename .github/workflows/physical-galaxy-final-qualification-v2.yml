@@ -9,19 +9,16 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 env:
   HULK_PORTAL_URL: http://3162356.xyz:8080
   HULK_CONFIG_URL: ''
-  APP_SOURCE_SHA: 121ebca09c3a47c2c094922e4caf78df1e5a6869
-  FAST_RUN_ID: '30764653212'
 
 jobs:
   galaxy-runtime:
     name: galaxy-${{ matrix.profile }}-cutout
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 85
     strategy:
       fail-fast: false
       matrix:
@@ -30,52 +27,62 @@ jobs:
             width: '1080'
             height: '2340'
             skin: '1080x2340'
+            font_scale: '1.0'
             evidence: build/compatibility-v2/galaxy-v2-portrait-cutout
           - profile: landscape
             width: '2340'
             height: '1080'
             skin: '2340x1080'
+            font_scale: '1.5'
             evidence: build/compatibility-v2/galaxy-v2-landscape-cutout
     env:
       APP_APK: app/build/outputs/apk/debug/app-debug.apk
       TEST_APK: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
     steps:
       - uses: actions/checkout@v7
-
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
       - uses: android-actions/setup-android@v4
 
-      - name: Install Android runtime tools
+      - name: Build current debug and instrumentation APKs
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools'
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/collect_runtime_evidence.sh
+          bash -n quality/compatibility-v2/run_runtime_profile.sh
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleDebugAndroidTest \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+          test -s "$APP_APK"
+          test -s "$TEST_APK"
 
-      - name: Download exact Fast APKs
-        uses: actions/download-artifact@v7
-        with:
-          name: HULK-SA-COMPATIBILITY-V2-FAST-30764653212
-          path: build/fast-source
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 30764653212
-
-      - name: Prepare exact APKs and runtime wrapper
+      - name: Prepare runtime wrapper
         env:
           PROFILE: ${{ matrix.profile }}
           WIDTH: ${{ matrix.width }}
           HEIGHT: ${{ matrix.height }}
+          FONT_SCALE: ${{ matrix.font_scale }}
           EVIDENCE_ROOT: ${{ matrix.evidence }}
         run: |
           set -euo pipefail
-          mkdir -p "$(dirname "$APP_APK")" "$(dirname "$TEST_APK")" build/galaxy-v2 "$EVIDENCE_ROOT"
-          cp build/fast-source/apks/app-debug.apk "$APP_APK"
-          cp build/fast-source/apks/app-debug-androidTest.apk "$TEST_APK"
-          test -s "$APP_APK"
-          test -s "$TEST_APK"
-          sha256sum "$APP_APK" "$TEST_APK" > build/galaxy-v2/APK-SOURCE-SHA256.txt
+          mkdir -p build/galaxy-v2 "$EVIDENCE_ROOT"
+          sha256sum "$APP_APK" "$TEST_APK" > "$EVIDENCE_ROOT/APK-SOURCE-SHA256.txt"
+          printf 'workflow_head=%s\nprofile=%s\ngeometry=%sx%s\nfont_scale=%s\n' \
+            "$GITHUB_SHA" "$PROFILE" "$WIDTH" "$HEIGHT" "$FONT_SCALE" \
+            > "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
           cat > build/galaxy-v2/run.sh <<'SCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
-          mkdir -p "$EVIDENCE_ROOT" "$(dirname "$EVIDENCE_ROOT")"
+          mkdir -p "$EVIDENCE_ROOT"
           stable=0
           for attempt in $(seq 1 120); do
             boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
@@ -94,19 +101,35 @@ jobs:
           adb shell am wait-for-broadcast-idle || true
 
           overlay_list="$(adb shell cmd overlay list --user 0 2>/dev/null | tr -d '\r' || true)"
-          printf '%s\n' "$overlay_list" > "$EVIDENCE_ROOT-cutout-overlays-before.txt"
+          printf '%s\n' "$overlay_list" > "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-BEFORE.txt"
           cutout_package="$(printf '%s\n' "$overlay_list" | grep -Eo 'com\.android\.internal\.display\.cutout\.emulation\.[A-Za-z0-9_.-]+' | grep -E '(tall|double|corner|waterfall)' | head -n 1 || true)"
           [[ -n "$cutout_package" ]] || { echo 'No display-cutout overlay available' >&2; exit 71; }
-          adb shell cmd overlay enable-exclusive --category --user 0 "$cutout_package" || adb shell cmd overlay enable --user 0 "$cutout_package"
+          adb shell cmd overlay enable-exclusive --category --user 0 "$cutout_package" || \
+            adb shell cmd overlay enable --user 0 "$cutout_package"
           sleep 4
-          adb shell cmd overlay list --user 0 > "$EVIDENCE_ROOT-cutout-overlays-after.txt"
-          grep -F "$cutout_package" "$EVIDENCE_ROOT-cutout-overlays-after.txt"
-          printf 'enabled_cutout_overlay=%s\n' "$cutout_package" > "$EVIDENCE_ROOT-cutout-overlay.txt"
+          adb shell cmd overlay list --user 0 > "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt"
+          grep -F "$cutout_package" "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt"
+          printf 'enabled_cutout_overlay=%s\n' "$cutout_package" > "$EVIDENCE_ROOT/CUTOUT-OVERLAY.txt"
 
           bash quality/compatibility-v2/run_runtime_profile.sh \
-            "physical-galaxy-v2-${PROFILE}-cutout-api35" "$WIDTH" "$HEIGHT" '420' '1.0' '0' 'ar-SA' \
+            "physical-galaxy-v2-${PROFILE}-cutout-api35" "$WIDTH" "$HEIGHT" '420' "$FONT_SCALE" '0' 'ar-SA' \
             'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' \
             "$EVIDENCE_ROOT"
+
+          if [[ "$PROFILE" == 'landscape' ]]; then
+            set +e
+            adb shell am instrument -w -r \
+              -e class 'sa.hulksa.player.compatibilityv2.ShortLandscapeMainShellTest' \
+              'sa.hulksa.player.dev.test/androidx.test.runner.AndroidJUnitRunner' \
+              > "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.txt" 2>&1
+            shell_status=$?
+            set -e
+            python3 quality/compatibility-v2/instrumentation_to_junit.py \
+              "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.txt" \
+              "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.xml" \
+              --process-status "$shell_status"
+            test "$shell_status" -eq 0
+          fi
           SCRIPT
           chmod +x build/galaxy-v2/run.sh
 
@@ -122,6 +145,7 @@ jobs:
           PROFILE: ${{ matrix.profile }}
           WIDTH: ${{ matrix.width }}
           HEIGHT: ${{ matrix.height }}
+          FONT_SCALE: ${{ matrix.font_scale }}
           EVIDENCE_ROOT: ${{ matrix.evidence }}
         with:
           api-level: 35
@@ -130,22 +154,36 @@ jobs:
           profile: pixel_3a
           disable-animations: true
           disk-size: 4096M
-          ram-size: 2048M
+          ram-size: 3072M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin ${{ matrix.skin }}
           script: bash build/galaxy-v2/run.sh
 
       - name: Enforce Galaxy evidence
         if: always()
         env:
+          PROFILE: ${{ matrix.profile }}
           EVIDENCE_ROOT: ${{ matrix.evidence }}
         run: |
           set -euo pipefail
-          test -s "$EVIDENCE_ROOT-cutout-overlay.txt"
-          test -s "$EVIDENCE_ROOT-cutout-overlays-after.txt"
-          python3 quality/compatibility-v2/evidence_gate.py --scope runtime --evidence-root "$EVIDENCE_ROOT" --out "$EVIDENCE_ROOT/gate"
-          cp "$EVIDENCE_ROOT-cutout-overlay.txt" "$EVIDENCE_ROOT/CUTOUT-OVERLAY.txt"
-          cp "$EVIDENCE_ROOT-cutout-overlays-before.txt" "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-BEFORE.txt"
-          cp "$EVIDENCE_ROOT-cutout-overlays-after.txt" "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt"
+          test -s "$EVIDENCE_ROOT/CUTOUT-OVERLAY.txt"
+          test -s "$EVIDENCE_ROOT/CUTOUT-OVERLAYS-AFTER.txt"
+          test -s "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime --evidence-root "$EVIDENCE_ROOT" --out "$EVIDENCE_ROOT/gate"
+          if [[ "$PROFILE" == 'landscape' ]]; then
+            test -s "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.txt"
+            test -s "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.xml"
+            python3 - "$EVIDENCE_ROOT/SHORT-LANDSCAPE-MAIN-SHELL.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          tests = int(root.attrib.get('tests', '0'))
+          failures = int(root.attrib.get('failures', '0'))
+          errors = int(root.attrib.get('errors', '0'))
+          if tests != 3 or failures != 0 or errors != 0:
+              raise SystemExit(f'Unexpected short-landscape result: tests={tests} failures={failures} errors={errors}')
+          PY
+          fi
           (
             cd "$EVIDENCE_ROOT"
             find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
@@ -156,11 +194,7 @@ jobs:
         if: always()
         with:
           name: HULK-SA-GALAXY-V2-${{ matrix.profile }}-${{ github.run_id }}
-          path: |
-            ${{ matrix.evidence }}/
-            ${{ matrix.evidence }}-cutout-overlay.txt
-            ${{ matrix.evidence }}-cutout-overlays-before.txt
-            ${{ matrix.evidence }}-cutout-overlays-after.txt
+          path: ${{ matrix.evidence }}/
           if-no-files-found: error
           retention-days: 21
 
@@ -168,7 +202,7 @@ jobs:
     name: production-signing
     runs-on: ubuntu-latest
     environment: production-signing
-    timeout-minutes: 75
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
@@ -191,37 +225,36 @@ jobs:
       - name: Materialize production keystore
         env:
           HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
-          HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
-          HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
-          HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
           EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
         run: |
           set -euo pipefail
           test -n "$HULK_RELEASE_KEYSTORE_BASE64"
-          test -n "$HULK_RELEASE_KEY_ALIAS"
-          test -n "$HULK_RELEASE_STORE_PASSWORD"
-          test -n "$HULK_RELEASE_KEY_PASSWORD"
           test -n "$EXPECTED_CERT_SHA256"
           printf '%s' "$HULK_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hulk-release.jks"
           chmod 600 "$RUNNER_TEMP/hulk-release.jks"
           test -s "$RUNNER_TEMP/hulk-release.jks"
           echo "EXPECTED_CERT_SHA256=$EXPECTED_CERT_SHA256" >> "$GITHUB_ENV"
 
-      - name: Build production APK and AAB
+      - name: Build and verify production APK and AAB
         env:
           HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
           HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
           HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          test -n "$HULK_RELEASE_KEY_ALIAS"
+          test -n "$HULK_RELEASE_STORE_PASSWORD"
+          test -n "$HULK_RELEASE_KEY_PASSWORD"
           rm -rf build/galaxy-v2-signed
           mkdir -p build/galaxy-v2-signed
-          ./gradlew \
+          ./gradlew --no-daemon --console=plain \
             -PHULK_RELEASE_KEYSTORE_FILE="$RUNNER_TEMP/hulk-release.jks" \
             -PHULK_RELEASE_KEY_ALIAS="$HULK_RELEASE_KEY_ALIAS" \
             -PHULK_RELEASE_STORE_PASSWORD="$HULK_RELEASE_STORE_PASSWORD" \
             -PHULK_RELEASE_KEY_PASSWORD="$HULK_RELEASE_KEY_PASSWORD" \
-            clean :app:assembleRelease :app:bundleRelease --stacktrace
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL" \
+            clean :app:assembleRelease :app:bundleRelease
           apk='app/build/outputs/apk/release/app-release.apk'
           aab='app/build/outputs/bundle/release/app-release.aab'
           test -s "$apk"
@@ -232,17 +265,22 @@ jobs:
           bash tools/verify-apk-signing.sh "$apk" "$EXPECTED_CERT_SHA256" build/galaxy-v2-signed/APK-SIGNING.txt
           bash tools/verify-aab-signing.sh "$aab" "$EXPECTED_CERT_SHA256" build/galaxy-v2-signed/AAB-SIGNING.txt
           python3 tools/verify-android-architectures.py "$apk" --require-native-libs --report build/galaxy-v2-signed/APK-ARCHITECTURES.md
+          python3 tools/verify-android-architectures.py "$aab" --require-native-libs --report build/galaxy-v2-signed/AAB-ARCHITECTURES.md
           cp "$apk" build/galaxy-v2-signed/HULK-SA-v0.9.3.20-SIGNED.apk
           cp "$aab" build/galaxy-v2-signed/HULK-SA-v0.9.3.20-SIGNED.aab
-          printf 'Application ID: sa.hulksa.player\nVersion code: 64\nVersion name: 0.9.3.20\nApplication source: %s\nWorkflow head: %s\n' "$APP_SOURCE_SHA" "$GITHUB_SHA" > build/galaxy-v2-signed/PACKAGE-IDENTITY.txt
+          printf 'Application ID: sa.hulksa.player\nVersion code: 64\nVersion name: 0.9.3.20\nWorkflow head: %s\n' \
+            "$GITHUB_SHA" > build/galaxy-v2-signed/PACKAGE-IDENTITY.txt
           (
             cd build/galaxy-v2-signed
             find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
-          python3 quality/compatibility-v2/evidence_gate.py --scope release --evidence-root build/galaxy-v2-signed --out build/galaxy-v2-signed/gate
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope release --evidence-root build/galaxy-v2-signed \
+            --out build/galaxy-v2-signed/gate
 
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: HULK-SA-GALAXY-V2-SIGNED-${{ github.run_id }}
           path: build/galaxy-v2-signed/
