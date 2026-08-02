@@ -8,6 +8,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
+import java.io.File
 import org.junit.Rule
 import org.junit.Test
 import sa.hulksa.player.HulkScreen
@@ -41,6 +44,7 @@ class ShortLandscapeMainShellTest {
             categoryName = "فئة افلام الاختبار",
             itemPrefix = "فيلم اختبار",
             itemCount = 40,
+            evidenceName = "movies",
         )
     }
 
@@ -52,6 +56,7 @@ class ShortLandscapeMainShellTest {
             categoryName = "فئة مسلسلات الاختبار",
             itemPrefix = "مسلسل اختبار",
             itemCount = 41,
+            evidenceName = "series",
         )
     }
 
@@ -83,6 +88,7 @@ class ShortLandscapeMainShellTest {
         composeRule.onNodeWithText("$itemCount عنصر").assertIsNotDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsNotDisplayed()
         composeRule.onNodeWithText("قناة اختبار $itemCount").assertIsDisplayed()
+        captureFullWindowEvidence("live")
     }
 
     private fun verifyCatalogScroll(
@@ -91,6 +97,7 @@ class ShortLandscapeMainShellTest {
         categoryName: String,
         itemPrefix: String,
         itemCount: Int,
+        evidenceName: String,
     ) {
         val catalog = fakeCatalog(type, categoryName, itemPrefix, itemCount)
         setMainShell(
@@ -111,6 +118,7 @@ class ShortLandscapeMainShellTest {
         composeRule.onNodeWithText("$itemCount عنصر").assertIsNotDisplayed()
         composeRule.onNodeWithText(categoryName).assertIsNotDisplayed()
         composeRule.onNodeWithText("$itemPrefix $itemCount").assertIsDisplayed()
+        captureFullWindowEvidence(evidenceName)
     }
 
     private fun setMainShell(state: HulkUiState) {
@@ -150,6 +158,33 @@ class ShortLandscapeMainShellTest {
         repeat(times) {
             composeRule.onRoot().performTouchInput { swipeUp(durationMillis = 350) }
             composeRule.waitForIdle()
+        }
+    }
+
+    private fun captureFullWindowEvidence(name: String) {
+        composeRule.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val device = UiDevice.getInstance(instrumentation)
+        val evidenceRoot = File(
+            requireNotNull(instrumentation.targetContext.getExternalFilesDir(null)) {
+                "External evidence directory is unavailable"
+            },
+            "short-landscape-evidence",
+        )
+        check(evidenceRoot.mkdirs() || evidenceRoot.isDirectory) {
+            "Unable to create short-landscape evidence directory: $evidenceRoot"
+        }
+        val screenshot = File(evidenceRoot, "$name-full-window.png")
+        val hierarchy = File(evidenceRoot, "$name-window.xml")
+        check(device.takeScreenshot(screenshot)) {
+            "Unable to capture short-landscape screenshot: $screenshot"
+        }
+        device.dumpWindowHierarchy(hierarchy)
+        check(screenshot.isFile && screenshot.length() > 0L) {
+            "Short-landscape screenshot is empty: $screenshot"
+        }
+        check(hierarchy.isFile && hierarchy.length() > 0L) {
+            "Short-landscape hierarchy is empty: $hierarchy"
         }
     }
 
