@@ -1,0 +1,129 @@
+name: HULK SA Mobile Fix Phone Evidence Retest
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/mobile-fix-phone-evidence-retest.yml'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  phone-api35-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      EVIDENCE_ROOT: build/compatibility-v2/mobile-fix-phone-api35
+      APP_APK: app/build/outputs/apk/debug/app-debug.apk
+      TEST_APK: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android platform tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools'
+
+      - name: Download APKs from verified Fast run
+        uses: actions/download-artifact@v7
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-FAST-30756443540
+          path: build/fast-source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 30756443540
+
+      - name: Prepare exact APK paths and stable-service wrapper
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$APP_APK")" "$(dirname "$TEST_APK")" build/mobile-fix
+          cp build/fast-source/apks/app-debug.apk "$APP_APK"
+          cp build/fast-source/apks/app-debug-androidTest.apk "$TEST_APK"
+          test -s "$APP_APK"
+          test -s "$TEST_APK"
+          sha256sum "$APP_APK" "$TEST_APK"
+          cat > build/mobile-fix/run-after-services-ready.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          stable=0
+          for attempt in $(seq 1 120); do
+            boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+            activity="$(adb shell service check activity 2>/dev/null || true)"
+            package="$(adb shell service check package 2>/dev/null || true)"
+            settings="$(adb shell service check settings 2>/dev/null || true)"
+            if [[ "$boot" == "1" && "$activity" == *found* && "$package" == *found* && "$settings" == *found* ]]; then
+              stable=$((stable + 1))
+              if [[ "$stable" -ge 3 ]]; then break; fi
+            else
+              stable=0
+            fi
+            sleep 2
+          done
+          if [[ "$stable" -lt 3 ]]; then
+            echo 'Android services did not become stable in time' >&2
+            adb shell service list || true
+            exit 70
+          fi
+          adb shell am wait-for-broadcast-idle || true
+          bash quality/compatibility-v2/run_runtime_profile.sh \
+            'phone-medium-api35' '1080' '2340' '420' '1.0' '0' 'ar-SA' \
+            'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' \
+            'build/compatibility-v2/mobile-fix-phone-api35'
+          SCRIPT
+          chmod +x build/mobile-fix/run-after-services-ready.sh
+
+      - name: Configure Linux KVM when available
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then sudo chmod a+rw /dev/kvm; fi
+          test -r /dev/kvm -a -w /dev/kvm
+
+      - name: Execute phone API35 runtime
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 1080x2340
+          script: bash build/mobile-fix/run-after-services-ready.sh
+
+      - name: Enforce runtime evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime \
+            --evidence-root "$EVIDENCE_ROOT" \
+            --out "$EVIDENCE_ROOT/gate"
+          (
+            cd "$EVIDENCE_ROOT"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-MOBILE-FIX-PHONE-API35-FINAL-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_ROOT }}/
+          if-no-files-found: error
+          retention-days: 21
+
+      - name: Publish result to PR 78
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Mobile fix phone evidence retest\n\n- Run: \`${{ github.run_id }}\`\n- Head: \`${{ github.sha }}\`\n- Phone API35 runtime and evidence: **$JOB_STATUS**\n\nThe final physical Galaxy visual result remains pending installation of the newly signed APK."
