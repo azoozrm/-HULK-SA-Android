@@ -1,4 +1,4 @@
-name: Galaxy Landscape Evidence V5 Beacon
+name: Galaxy Landscape Helper Beacon
 
 on:
   push:
@@ -16,17 +16,16 @@ jobs:
   expose-run:
     runs-on: ubuntu-latest
     steps:
-      - name: Publish V5 run locator
+      - name: Publish helper run locator
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           sleep 10
           runs="$(gh api -X GET \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/physical-galaxy-landscape-evidence-v5.yml/runs" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/bump-galaxy-landscape-v5.yml/runs" \
             -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
             -f event='push' \
             -f per_page='5' \
-            --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
-          test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Galaxy landscape evidence V5 locator\n\n$runs"
+            --jq '[.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"] | if length == 0 then "- No helper run found" else join("\n") end')"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Galaxy helper run locator\n\n$runs"
