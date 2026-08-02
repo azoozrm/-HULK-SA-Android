@@ -41,14 +41,67 @@ parser_status=$?
 set -e
 if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
 
+is_tv=false
+if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then
+  is_tv=true
+  component="$package/sa.hulksa.player.TvMainActivity"
+else
+  component="$package/sa.hulksa.player.MainActivity"
+fi
+
+{
+  echo "package=$package"
+  echo "is_tv=$is_tv"
+  echo "component=$component"
+  adb shell am force-stop "$package"
+  adb shell am start -W -n "$component"
+} > "$out/FOREGROUND-APP.txt" 2>&1 || status=1
+
+foreground_ready=false
+for _ in $(seq 1 30); do
+  adb shell dumpsys activity activities > "$out/ACTIVITY-ACTIVITIES.txt" 2>&1 || true
+  adb shell dumpsys window windows > "$out/WINDOW-WINDOWS.txt" 2>&1 || true
+  if grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' "$out/ACTIVITY-ACTIVITIES.txt" | grep -q "$package" || \
+     grep -E 'mCurrentFocus|mFocusedApp' "$out/WINDOW-WINDOWS.txt" | grep -q "$package"; then
+    foreground_ready=true
+    break
+  fi
+  sleep 1
+done
+
+adb shell dumpsys activity top > "$out/ACTIVITY-TOP.txt" 2>&1 || true
+if [[ "$foreground_ready" != true ]]; then
+  echo "HULK SA did not become the foreground application" >> "$out/FOREGROUND-APP.txt"
+  status=1
+fi
+if ! grep -q "$package" "$out/ACTIVITY-TOP.txt" && \
+   ! grep -q "$package" "$out/ACTIVITY-ACTIVITIES.txt" && \
+   ! grep -q "$package" "$out/WINDOW-WINDOWS.txt"; then
+  echo "Foreground dumps do not identify the HULK SA package" >> "$out/FOREGROUND-APP.txt"
+  status=1
+fi
+
 adb logcat -d -v threadtime > "$out/logcat.txt" 2>&1 || true
 adb shell uiautomator dump /sdcard/compatibility-v2-window.xml > /dev/null 2>&1 || true
 adb pull /sdcard/compatibility-v2-window.xml "$out/window.xml" > /dev/null 2>&1 || true
 adb exec-out screencap -p > "$out/full-window.png" || true
-adb shell dumpsys activity top > "$out/ACTIVITY-TOP.txt" 2>&1 || true
 adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1 || true
 
-for required in DEVICE-PROFILE.txt WINDOW-METRICS.txt INSTRUMENTATION.txt INSTRUMENTATION.xml logcat.txt window.xml full-window.png; do
+if [[ -s "$out/window.xml" ]] && ! grep -q "package=\"$package\"" "$out/window.xml"; then
+  echo "Window hierarchy does not contain the HULK SA package" >> "$out/FOREGROUND-APP.txt"
+  status=1
+fi
+
+for required in \
+  DEVICE-PROFILE.txt \
+  WINDOW-METRICS.txt \
+  INSTRUMENTATION.txt \
+  INSTRUMENTATION.xml \
+  FOREGROUND-APP.txt \
+  ACTIVITY-TOP.txt \
+  logcat.txt \
+  window.xml \
+  full-window.png; do
   if [[ ! -s "$out/$required" ]]; then
     echo "Missing mandatory runtime evidence: $required" >&2
     status=1
