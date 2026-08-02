@@ -1,0 +1,60 @@
+name: Patch runtime immersive confirmation precondition
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/runtime-immersive-confirmation-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+
+      - name: Apply exact collector precondition
+        run: |
+          set -euo pipefail
+          git pull --ff-only origin rebuild/adaptive-ui-compatibility-lab-v2
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('quality/compatibility-v2/collect_runtime_evidence.sh')
+          source = path.read_text(encoding='utf-8')
+          anchor = '''resolved_activity="${package}/${activity_class}"\n\ncapture_window_windows() {'''
+          replacement = '''resolved_activity="${package}/${activity_class}"\n\n# Android may display its first-use immersive-mode confirmation above the app.\n# Confirm the platform education overlay before launching so final hierarchy and\n# screenshot evidence always belong to HULK SA rather than a system-owned cling.\nimmersive_confirmation_status=0\nimmersive_confirmation_output="not-required"\nif [[ "$is_tv" != true ]]; then\n  set +e\n  immersive_confirmation_output="$(adb shell settings put secure immersive_mode_confirmations confirmed 2>&1)"\n  immersive_confirmation_status=$?\n  set -e\nfi\n{\n  echo "is_tv=$is_tv"\n  echo "setting=secure/immersive_mode_confirmations"\n  echo "requested_value=confirmed"\n  echo "status=$immersive_confirmation_status"\n  echo "output=${immersive_confirmation_output//$'\\n'/ | }"\n  if [[ "$immersive_confirmation_status" -eq 0 ]]; then\n    echo "result=PASS"\n  else\n    echo "result=BLOCKED"\n    echo "failure_reason=unable to suppress the Android first-use immersive confirmation overlay"\n  fi\n} > "$out/SYSTEM-OVERLAY-PRECONDITION.txt"\nif [[ "$immersive_confirmation_status" -ne 0 ]]; then\n  status=1\nfi\n\ncapture_window_windows() {'''
+          if 'SYSTEM-OVERLAY-PRECONDITION.txt' not in source:
+              count = source.count(anchor)
+              if count != 1:
+                  raise SystemExit(f'collector anchor expected once, found {count}')
+              source = source.replace(anchor, replacement, 1)
+
+          required_anchor = '''  RUNTIME-PERMISSIONS.txt \\\n  DEVICE-PROFILE.txt \\\n'''
+          required_replacement = '''  RUNTIME-PERMISSIONS.txt \\\n  SYSTEM-OVERLAY-PRECONDITION.txt \\\n  DEVICE-PROFILE.txt \\\n'''
+          if required_replacement not in source:
+              count = source.count(required_anchor)
+              if count != 1:
+                  raise SystemExit(f'required-list anchor expected once, found {count}')
+              source = source.replace(required_anchor, required_replacement, 1)
+
+          path.write_text(source, encoding='utf-8')
+          PY
+
+      - name: Remove one-time workflow and commit
+        run: |
+          set -euo pipefail
+          rm .github/workflows/runtime-immersive-confirmation-hotfix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add quality/compatibility-v2/collect_runtime_evidence.sh \
+                  .github/workflows/runtime-immersive-confirmation-hotfix.yml
+          git diff --cached --check
+          git commit -m 'fix(lab): suppress system immersive confirmation before evidence'
+          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
