@@ -1,6 +1,13 @@
 package sa.hulksa.player.compatibilityv2
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -31,6 +38,7 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.theme.HulkTheme
+import sa.hulksa.player.ui.theme.LocalHulkColors
 
 class ShortLandscapeMainShellTest {
     @get:Rule
@@ -124,30 +132,43 @@ class ShortLandscapeMainShellTest {
     private fun setMainShell(state: HulkUiState) {
         composeRule.setContent {
             HulkTheme {
-                CompositionLocalProvider(LocalAdaptiveUi provides shortLandscapeUi()) {
-                    MainShellScreen(
-                        state = state,
-                        isTv = false,
-                        navigationMemory = NavigationMemoryStore(),
-                        isFavorite = { false },
-                        onSelectDestination = {},
-                        onSelectCategory = {},
-                        onSearch = {},
-                        onOpen = {},
-                        onOpenHistory = {},
-                        onToggleFavorite = {},
-                        onRefresh = {},
-                        onClearHistory = {},
-                        onPlayDownload = {},
-                        onDeleteDownload = {},
-                        onRetryDownload = {},
-                        onToggleWifiOnly = {},
-                        onToggleDownloadSchedule = {},
-                        onCycleConcurrentDownloads = {},
-                        onCycleDownloadPriority = {},
-                        onRunDiagnostics = {},
-                        onLogout = {},
-                    )
+                val colors = LocalHulkColors.current
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.surface),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing),
+                    ) {
+                        CompositionLocalProvider(LocalAdaptiveUi provides shortLandscapeUi()) {
+                            MainShellScreen(
+                                state = state,
+                                isTv = false,
+                                navigationMemory = NavigationMemoryStore(),
+                                isFavorite = { false },
+                                onSelectDestination = {},
+                                onSelectCategory = {},
+                                onSearch = {},
+                                onOpen = {},
+                                onOpenHistory = {},
+                                onToggleFavorite = {},
+                                onRefresh = {},
+                                onClearHistory = {},
+                                onPlayDownload = {},
+                                onDeleteDownload = {},
+                                onRetryDownload = {},
+                                onToggleWifiOnly = {},
+                                onToggleDownloadSchedule = {},
+                                onCycleConcurrentDownloads = {},
+                                onCycleDownloadPriority = {},
+                                onRunDiagnostics = {},
+                                onLogout = {},
+                            )
+                        }
+                    }
                 }
             }
         }
