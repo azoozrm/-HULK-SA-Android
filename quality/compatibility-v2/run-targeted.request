@@ -1,5 +1,5 @@
 profile_id=phone-small-api29
 test_class=sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest
-reason=capture-persistent-profile-diagnostics
-request_sequence=2
-requested_at=2026-08-02T01:20:00Z
+reason=validate-rooted-official-locale-sequence
+request_sequence=3
+requested_at=2026-08-02T01:29:00Z
