@@ -1,0 +1,85 @@
+name: Apply mobile layout hotfix
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/mobile-layout-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+
+      - name: Apply exact mobile layout fixes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          shell_path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          shell = shell_path.read_text(encoding='utf-8')
+          shell_replacements = [
+              (
+                  '''            .statusBarsPadding()\n            .navigationBarsPadding(),''',
+                  '''            .statusBarsPadding(),''',
+              ),
+              (
+                  '''        CatalogInteractionHints(isTv)\n        Spacer(Modifier.height(9.dp))''',
+                  '''        if (isTv) CatalogInteractionHints(true)\n        Spacer(Modifier.height(if (isTv) 9.dp else 4.dp))''',
+              ),
+              (
+                  '''        LiveInteractionHints(isTv)\n        Spacer(Modifier.height(8.dp))''',
+                  '''        if (isTv) LiveInteractionHints(true)\n        Spacer(Modifier.height(if (isTv) 8.dp else 4.dp))''',
+              ),
+          ]
+          for old, new in shell_replacements:
+              count = shell.count(old)
+              if count != 1:
+                  raise SystemExit(f'MainShell replacement expected once, found {count}: {old[:80]!r}')
+              shell = shell.replace(old, new, 1)
+          shell_path.write_text(shell, encoding='utf-8')
+
+          app_path = Path('app/src/main/java/sa/hulksa/player/ui/HulkApp.kt')
+          app = app_path.read_text(encoding='utf-8')
+          import_anchor = 'import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi\n'
+          import_line = 'import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation\n'
+          if import_line not in app:
+              if app.count(import_anchor) != 1:
+                  raise SystemExit('HulkApp adaptive import anchor missing or duplicated')
+              app = app.replace(import_anchor, import_line + import_anchor, 1)
+
+          call_anchor = '    val context = LocalContext.current\n'
+          call_block = '''    val context = LocalContext.current\n    ApplyAdaptiveWindowPresentation(\n        isTelevisionDevice = isTv,\n        isPlayer = state.screen == HulkScreen.PLAYER,\n    )\n'''
+          if 'ApplyAdaptiveWindowPresentation(' not in app.split('fun HulkApp', 1)[1]:
+              if app.count(call_anchor) != 1:
+                  raise SystemExit('HulkApp context anchor missing or duplicated')
+              app = app.replace(call_anchor, call_block, 1)
+          app_path.write_text(app, encoding='utf-8')
+
+          assert '.navigationBarsPadding(),' not in shell
+          assert 'if (isTv) CatalogInteractionHints(true)' in shell
+          assert 'if (isTv) LiveInteractionHints(true)' in shell
+          assert 'isPlayer = state.screen == HulkScreen.PLAYER' in app
+          PY
+
+      - name: Remove one-time workflow and commit
+        run: |
+          set -euo pipefail
+          rm .github/workflows/mobile-layout-hotfix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/HulkApp.kt \
+                  app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+                  .github/workflows/mobile-layout-hotfix.yml
+          git diff --cached --check
+          git commit -m 'fix(mobile): remove false inset and enter immersive playback'
+          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
