@@ -21,19 +21,14 @@ wait_for_services() {
   timeout 300 bash -c 'until adb shell service check activity 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
   timeout 300 bash -c 'until adb shell service check window 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
   timeout 300 bash -c 'until adb shell service check package 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
+  timeout 300 bash -c 'until adb shell service check settings 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
 }
 
 wait_for_boot
 wait_for_services
-adb root >/dev/null
-wait_for_services
 
-adb shell setprop persist.sys.locale "$locale"
-adb shell stop
-sleep 3
-adb shell start
-wait_for_services
-
+# Locale is injected before boot through the emulator command line. Restarting the
+# Android framework here races with android-emulator-runner's own health commands.
 adb shell wm size "${width}x${height}"
 adb shell wm density "$density"
 adb shell settings put system font_scale "$font_scale"
@@ -63,7 +58,7 @@ actual_rotation="$(adb shell settings get system user_rotation | tr -d '\r')"
 } > "$out"
 
 [[ "$actual_locale" == "$locale" ]] || {
-  echo "BLOCKED: emulator locale did not become $locale" >&2
+  echo "BLOCKED: emulator boot locale is '$actual_locale', expected '$locale'" >&2
   exit 3
 }
 [[ "$size_output" == *"${width}x${height}"* ]] || {
