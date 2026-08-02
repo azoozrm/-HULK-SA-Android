@@ -43,11 +43,9 @@ class CompatibilityV2InstrumentationTest {
             addCategory(launcherCategory())
             setPackage(targetContext.packageName)
         }
-        val resolved = targetContext.packageManager.resolveActivity(queryIntent, 0)
-        assertNotNull(
-            "No ${launcherCategory()} activity resolves for ${targetContext.packageName}",
-            resolved,
-        )
+        val resolved = requireNotNull(targetContext.packageManager.resolveActivity(queryIntent, 0)) {
+            "No ${launcherCategory()} activity resolves for ${targetContext.packageName}"
+        }
         val activityInfo = requireNotNull(resolved.activityInfo) {
             "Resolved launcher has no ActivityInfo for ${targetContext.packageName}"
         }
