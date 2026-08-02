@@ -1,0 +1,5 @@
+profile_id=phone-small-api29
+test_class=sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest
+reason=validate-full-reboot-locale-before-full-matrix
+request_sequence=1
+requested_at=2026-08-02T01:08:00Z
