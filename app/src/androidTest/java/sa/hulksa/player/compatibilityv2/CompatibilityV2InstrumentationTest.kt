@@ -1,7 +1,7 @@
 package sa.hulksa.player.compatibilityv2
 
+import android.app.Activity
 import android.app.UiModeManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -22,8 +22,6 @@ import org.junit.Assume.assumeFalse
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import sa.hulksa.player.MainActivity
-import sa.hulksa.player.TvMainActivity
 
 @RunWith(AndroidJUnit4::class)
 class CompatibilityV2InstrumentationTest {
@@ -36,19 +34,35 @@ class CompatibilityV2InstrumentationTest {
         return mode == Configuration.UI_MODE_TYPE_TELEVISION
     }
 
-    private fun launchMainPackage(): Boolean {
-        val component = ComponentName(targetContext, MainActivity::class.java)
-        val intent = Intent.makeMainActivity(component).apply {
+    private fun launcherCategory(): String =
+        if (isTelevision()) Intent.CATEGORY_LEANBACK_LAUNCHER else Intent.CATEGORY_LAUNCHER
+
+    private fun resolvedLauncherIntent(): Intent {
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(launcherCategory())
+            setPackage(targetContext.packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
-        targetContext.startActivity(intent)
+        val resolved = targetContext.packageManager.resolveActivity(intent, 0)
+        assertNotNull(
+            "No ${launcherCategory()} activity resolves for ${targetContext.packageName}",
+            resolved,
+        )
+        return intent
+    }
+
+    private fun launchMainPackage(): Boolean {
+        targetContext.startActivity(resolvedLauncherIntent())
         return device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L)
     }
+
+    private fun launchScenario(): ActivityScenario<Activity> =
+        ActivityScenario.launch(resolvedLauncherIntent())
 
     @Test
     fun phoneLauncherStartsRealApplicationAndSurvivesRecreation() {
         assumeFalse("Phone lifecycle test is not applicable to television UI mode", isTelevision())
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        launchScenario().use { scenario ->
             scenario.onActivity { activity ->
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
@@ -71,7 +85,7 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun televisionActivityAcceptsRapidDirectionalInputAndRetainsVisibleFocus() {
         assumeTrue("D-pad ownership test requires television UI mode", isTelevision())
-        ActivityScenario.launch(TvMainActivity::class.java).use { scenario ->
+        launchScenario().use { scenario ->
             repeat(12) { index ->
                 val keyCode = when (index % 4) {
                     0 -> KeyEvent.KEYCODE_DPAD_RIGHT
