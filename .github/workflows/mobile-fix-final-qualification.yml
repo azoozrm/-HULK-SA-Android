@@ -39,10 +39,10 @@ jobs:
       - name: Download APKs from verified Fast run
         uses: actions/download-artifact@v7
         with:
-          name: HULK-SA-COMPATIBILITY-V2-FAST-30756443540
+          name: HULK-SA-COMPATIBILITY-V2-FAST-30757399364
           path: build/fast-source
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 30756443540
+          run-id: 30757399364
 
       - name: Prepare exact APK paths and stable-service wrapper
         run: |
