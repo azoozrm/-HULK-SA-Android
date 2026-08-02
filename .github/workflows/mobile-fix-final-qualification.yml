@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: hulk-mobile-fix-final-qualification
+  cancel-in-progress: true
 
 jobs:
   phone-api35-runtime:
@@ -97,3 +103,31 @@ jobs:
       expected_version_code: '64'
       expected_version_name: '0.9.3.20'
     secrets: inherit
+
+  checkpoint:
+    if: always()
+    needs:
+      - phone-api35-runtime
+      - signed-production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish traceable result to PR 78
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PHONE_RESULT: ${{ needs.phone-api35-runtime.result }}
+          SIGNED_RESULT: ${{ needs.signed-production.result }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOF
+          ## Mobile fix final qualification
+
+          - Run: \`$RUN_ID\`
+          - Head: \`$HEAD_SHA\`
+          - Phone API35 runtime: **$PHONE_RESULT**
+          - Production-signed qualification: **$SIGNED_RESULT**
+
+          Runtime and signed artifacts are attached to this run. This comment reports workflow conclusions only; physical Galaxy visual closure still requires installing the newly signed APK.
+          EOF
+          )"
