@@ -58,10 +58,19 @@ wait_for_boot() {
 
 wait_for_services() {
   adb wait-for-device
-  timeout 300 bash -c 'until adb shell service check activity 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
-  timeout 300 bash -c 'until adb shell service check window 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
-  timeout 300 bash -c 'until adb shell service check package 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
-  timeout 300 bash -c 'until adb shell service check settings 2>/dev/null | tr -d "\r" | grep -q "found"; do sleep 2; done'
+  timeout 300 bash -c '
+    until
+      adb shell service check activity 2>/dev/null | tr -d "\r" | grep -q "found" &&
+      adb shell service check window 2>/dev/null | tr -d "\r" | grep -q "found" &&
+      adb shell service check package 2>/dev/null | tr -d "\r" | grep -q "found" &&
+      adb shell service check settings 2>/dev/null | tr -d "\r" | grep -q "found" &&
+      adb shell wm size 2>/dev/null | tr -d "\r" | grep -q "size" &&
+      adb shell wm density 2>/dev/null | tr -d "\r" | grep -q "density" &&
+      adb shell settings get system font_scale >/dev/null 2>&1
+    do
+      sleep 2
+    done
+  '
 }
 
 stage="initial-boot"
