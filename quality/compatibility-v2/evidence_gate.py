@@ -106,16 +106,21 @@ def check_checksums(root: Path, manifest: Path) -> EvidenceCheck:
 
 
 def runtime_semantic_checks(evidence_root: Path) -> list[EvidenceCheck]:
-    checks = [
+    return [
         check_text_contains(
             evidence_root / "PROFILE-CONFIG.txt",
-            ["result=PASS", "profile_verified=true"],
+            ["result=PASS", "profile_verified=true", "locale_mode="],
             "runtime-profile-contract",
+        ),
+        check_text_contains(
+            evidence_root / "APPLICATION-LOCALE.txt",
+            ["result=PASS", "locale_verified=true", "requested_locale="],
+            "runtime-effective-locale",
         ),
         check_instrumentation_junit(evidence_root / "INSTRUMENTATION.xml"),
         check_text_contains(
             evidence_root / "FOREGROUND-APP.txt",
-            [f"package={APP_PACKAGE}", "Status: ok"],
+            [f"package={APP_PACKAGE}", "Status: ok", "resolved_activity="],
             "runtime-foreground-launch",
         ),
         check_text_contains(
@@ -131,7 +136,6 @@ def runtime_semantic_checks(evidence_root: Path) -> list[EvidenceCheck]:
         check_png(evidence_root / "full-window.png"),
         check_checksums(evidence_root, evidence_root / "SHA256SUMS.txt"),
     ]
-    return checks
 
 
 def gate_evidence(spec_file: Path, scope: str, evidence_root: Path) -> list[EvidenceCheck]:
