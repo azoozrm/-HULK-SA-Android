@@ -1,3 +1,4 @@
+# Refresh after robust staged-file validation.
 name: Recover Clean Compact Login Beacon
 
 on:
@@ -25,7 +26,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/actions/workflows/recover-clean-compact-login.yml/runs" \
             -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
             -f event='push' \
-            -f per_page='5' \
+            -f per_page='8' \
             --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
           test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Clean recovery run locator\n\n$runs\n\nNo merge, release, or force-push was performed."
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Clean recovery latest-run locator\n\n$runs\n\nNo merge, release, or force-push was performed."
