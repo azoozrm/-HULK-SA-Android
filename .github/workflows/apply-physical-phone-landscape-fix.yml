@@ -1,0 +1,47 @@
+name: Apply Physical Phone Landscape Fix
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/apply-physical-phone-landscape-fix.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: rebuild/adaptive-ui-compatibility-lab-v2
+          fetch-depth: 0
+
+      - name: Apply guarded source patch
+        run: |
+          set -euo pipefail
+          python3 tools/apply_physical_phone_landscape_fix.py
+          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
+          python3 quality/compatibility-v2/static_validate.py --repo-root . --out build/compatibility-v2/physical-phone-static
+          git diff --check
+
+      - name: Commit application and lab corrections
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app quality
+          test -n "$(git status --porcelain)"
+          git commit -m 'fix: adapt physical phone landscape and display cutouts'
+          git push origin HEAD:rebuild/adaptive-ui-compatibility-lab-v2
+
+      - name: Record patch result
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Physical Galaxy landscape correction applied\n\nThe guarded patch committed: complete safe-drawing insets including display cutout, transparent startup system bars, compact short-landscape Login, and single vertical scroll surfaces for Live/Movies/Series on short landscape phones. Regular Fast PR and Build Verification must pass before a signed APK is produced. No merge or release was performed."
