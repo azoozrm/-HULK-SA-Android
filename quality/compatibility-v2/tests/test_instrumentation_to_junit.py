@@ -35,6 +35,21 @@ INSTRUMENTATION_STATUS_CODE: -2
         self.assertEqual("PASS", statuses["passes"])
         self.assertEqual("FAIL", statuses["fails"])
 
+    def test_assumption_failure_is_reported_as_skipped(self) -> None:
+        raw = """
+INSTRUMENTATION_STATUS: class=sample.Tests
+INSTRUMENTATION_STATUS: test=tvOnly
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=sample.Tests
+INSTRUMENTATION_STATUS: test=tvOnly
+INSTRUMENTATION_STATUS: stack=org.junit.AssumptionViolatedException: requires television UI mode
+INSTRUMENTATION_STATUS_CODE: -4
+"""
+        cases = MODULE.parse_instrumentation(raw, 0)
+        self.assertEqual(1, len(cases))
+        self.assertEqual("SKIPPED", cases[0].status)
+        self.assertIn("AssumptionViolatedException", cases[0].detail)
+
     def test_zero_test_infrastructure_failure_is_failure(self) -> None:
         cases = MODULE.parse_instrumentation("INSTRUMENTATION_FAILED: process crashed", 1)
         self.assertEqual("FAIL", cases[0].status)
