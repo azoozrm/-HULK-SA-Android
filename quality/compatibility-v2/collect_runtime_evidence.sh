@@ -49,16 +49,24 @@ if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:andro
   category="android.intent.category.LEANBACK_LAUNCHER"
 fi
 
+resolve_output="$(adb shell cmd package resolve-activity --brief \
+  -a android.intent.action.MAIN \
+  -c "$category" \
+  "$package" 2>&1 | tr -d '\r')"
+resolved_activity="$(printf '%s\n' "$resolve_output" | awk '/^[^[:space:]]+\/[^[:space:]]+$/ { component=$0 } END { print component }')"
+
 {
   echo "package=$package"
   echo "is_tv=$is_tv"
   echo "category=$category"
-  echo "resolved_activity=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c "$category" "$package" 2>&1 | tr -d '\r')"
+  echo "resolve_output=${resolve_output//$'\n'/ | }"
+  echo "resolved_activity=$resolved_activity"
+  if [[ -z "$resolved_activity" ]]; then
+    echo "Unable to resolve an explicit launcher component"
+    exit 1
+  fi
   adb shell am force-stop "$package"
-  adb shell am start -W \
-    -a android.intent.action.MAIN \
-    -c "$category" \
-    -p "$package"
+  adb shell am start -W -n "$resolved_activity"
 } > "$out/FOREGROUND-APP.txt" 2>&1 || status=1
 
 foreground_ready=false
