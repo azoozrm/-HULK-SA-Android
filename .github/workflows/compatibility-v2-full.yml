@@ -97,7 +97,7 @@ jobs:
             height: 1080
             density: 420
             font_scale: '1.5'
-            rotation: 1
+            rotation: 0
             locale: ar-SA
           - id: tablet-600-portrait-api35
             api: 35
@@ -117,7 +117,7 @@ jobs:
             height: 1600
             density: 320
             font_scale: '1.0'
-            rotation: 1
+            rotation: 0
             locale: en-US
           - id: tv-logical-960x540-api36
             api: 36
