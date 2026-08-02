@@ -53,7 +53,7 @@ jobs:
           printf 'workflow_head=%s\nproduction_application_source=%s\ntest_harness_source=%s\nprofile=landscape\napi=35\ngeometry=2340x1080\ndensity=420\nfont_scale=1.5\nlocale=ar-SA\ncutout=com.android.internal.display.cutout.emulation.corner\n' \
             "$GITHUB_SHA" \
             '2b4b9704bd6ee367a320968bb425be74ffa32ef9' \
-            'b9a1d0cdf05e3bec7d3a3a9b1cbf850f521f1785' \
+            '7ab190bf2967d1cccdcf09925865b93d595a8c02' \
             > "$EVIDENCE_ROOT/SOURCE-IDENTITY.txt"
 
       - name: Prepare fail-closed runner
