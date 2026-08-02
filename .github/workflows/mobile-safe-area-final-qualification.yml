@@ -53,10 +53,10 @@ jobs:
       - name: Download exact Fast APKs from fixed app head
         uses: actions/download-artifact@v7
         with:
-          name: HULK-SA-COMPATIBILITY-V2-FAST-30759179566
+          name: HULK-SA-COMPATIBILITY-V2-FAST-30760420526
           path: build/fast-source
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 30759179566
+          run-id: 30760420526
 
       - name: Prepare APKs and stable runtime wrapper
         env:
@@ -211,6 +211,7 @@ jobs:
           bash tools/verify-apk-signing.sh "$apk" "$EXPECTED_CERT_SHA256" signed-mobile-safe-area/APK-SIGNING.txt
           bash tools/verify-aab-signing.sh "$aab" "$EXPECTED_CERT_SHA256" signed-mobile-safe-area/AAB-SIGNING.txt
           python3 tools/verify-android-architectures.py "$apk" --require-native-libs --report signed-mobile-safe-area/APK-ARCHITECTURES.md
+          python3 tools/verify-android-architectures.py "$aab" --require-native-libs --report signed-mobile-safe-area/AAB-ARCHITECTURES.md
           cp "$apk" signed-mobile-safe-area/HULK-SA-v0.9.3.20-mobile-safe-area-production-signed.apk
           cp "$aab" signed-mobile-safe-area/HULK-SA-v0.9.3.20-mobile-safe-area-production-signed.aab
           printf 'Application ID: sa.hulksa.player\nVersion code: 64\nVersion name: 0.9.3.20\nSource head: %s\n' "$GITHUB_SHA" > signed-mobile-safe-area/PACKAGE-IDENTITY.txt
