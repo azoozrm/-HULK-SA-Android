@@ -13,6 +13,16 @@ out="${9:-${EVIDENCE_ROOT:-build/compatibility-v2/runtime/$profile}}"
 package="sa.hulksa.player.dev"
 mkdir -p "$out"
 
+is_tv=false
+launcher_category="android.intent.category.LAUNCHER"
+launcher_activity="sa.hulksa.player.MainActivity"
+if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then
+  is_tv=true
+  launcher_category="android.intent.category.LEANBACK_LAUNCHER"
+  launcher_activity="sa.hulksa.player.TvMainActivity"
+fi
+launcher_component="${package}/${launcher_activity}"
+
 wait_for_package_installer_ready() {
   local evidence="$out/INSTALL-READINESS.txt"
   local deadline=$((SECONDS + 300))
@@ -114,6 +124,74 @@ install_apk_non_streaming() {
   fi
 }
 
+wait_for_installed_package_registration() {
+  local evidence="$out/PACKAGE-REGISTRATION.txt"
+  local dump="$out/INSTALLED-PACKAGE-DUMP.txt"
+  local deadline=$((SECONDS + 180))
+  local stable=0
+  local attempt=0
+  : > "$evidence"
+
+  while (( SECONDS < deadline )); do
+    attempt=$((attempt + 1))
+    local package_path user_packages resolve_output dump_has_activity
+    package_path="$(adb shell pm path "$package" 2>/dev/null | tr -d '\r' || true)"
+    user_packages="$(adb shell pm list packages --user 0 "$package" 2>/dev/null | tr -d '\r' || true)"
+    resolve_output="$(adb shell cmd package resolve-activity --brief \
+      -a android.intent.action.MAIN \
+      -c "$launcher_category" \
+      "$package" 2>/dev/null | tr -d '\r' || true)"
+    adb shell dumpsys package "$package" > "$dump" 2>&1 || true
+    dump_has_activity=false
+    grep -Fq "$launcher_activity" "$dump" && dump_has_activity=true
+
+    {
+      echo "attempt=$attempt"
+      echo "package_path=${package_path//$'\n'/ | }"
+      echo "user_packages=${user_packages//$'\n'/ | }"
+      echo "launcher_category=$launcher_category"
+      echo "launcher_activity=$launcher_activity"
+      echo "launcher_component=$launcher_component"
+      echo "resolve_output=${resolve_output//$'\n'/ | }"
+      echo "dump_has_activity=$dump_has_activity"
+    } >> "$evidence"
+
+    if [[ "$package_path" == package:* ]] &&
+       [[ "$user_packages" == *"package:$package"* ]] &&
+       [[ "$resolve_output" == *"$package"* ]] &&
+       [[ "$dump_has_activity" == true ]]; then
+      stable=$((stable + 1))
+      echo "stable_readings=$stable" >> "$evidence"
+      if (( stable >= 3 )); then
+        break
+      fi
+    else
+      stable=0
+      echo "stable_readings=0" >> "$evidence"
+    fi
+    sleep 2
+  done
+
+  if (( stable < 3 )); then
+    {
+      echo "result=BLOCKED"
+      echo "failure_reason=installed package did not expose its canonical launcher component after installation"
+    } >> "$evidence"
+    return 3
+  fi
+
+  set +e
+  broadcast_idle_output="$(timeout 90 adb shell am wait-for-broadcast-idle 2>&1)"
+  broadcast_idle_status=$?
+  set -e
+  {
+    echo "broadcast_idle_status=$broadcast_idle_status"
+    echo "broadcast_idle_output=${broadcast_idle_output//$'\n'/ | }"
+    echo "result=PASS"
+    echo "package_registered=true"
+  } >> "$evidence"
+}
+
 bash quality/compatibility-v2/configure_emulator_profile.sh \
   "$profile" "$width" "$height" "$density" "$font_scale" "$rotation" "$locale" \
   "$out/PROFILE-CONFIG.txt"
@@ -123,6 +201,7 @@ wait_for_package_installer_ready
 install_apk_non_streaming application "${APP_APK:-build/compatibility-v2/binaries/app-debug.apk}"
 install_apk_non_streaming instrumentation "${TEST_APK:-build/compatibility-v2/binaries/app-debug-androidTest.apk}"
 echo "result=PASS" >> "$out/INSTALLATION.txt"
+wait_for_installed_package_registration
 
 locale_mode="$(sed -n 's/^locale_mode=//p' "$out/PROFILE-CONFIG.txt" | tail -1)"
 actual_system_locale="$(adb shell getprop persist.sys.locale | tr -d '\r')"
