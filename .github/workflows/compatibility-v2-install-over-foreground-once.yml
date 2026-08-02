@@ -43,13 +43,14 @@ jobs:
           test "$(sha256sum "$SOURCE_ROOT/apks/candidate-debug.apk" | awk '{print $1}')" = '679501f7f85bc8364c75043bb1f5a9762578f1ce34d78f5668869ce6a9e7c0d8'
           test "$(sha256sum "$SOURCE_ROOT/apks/candidate-androidTest.apk" | awk '{print $1}')" = '3b9b2482275101632d55d875ba8b8c4dea62a6818133060812ff1d4c0d492061'
           bash -n quality/compatibility-v2/run_install_over_qualification.sh
-          mkdir -p "$EVIDENCE_ROOT/apks"
+          mkdir -p "$EVIDENCE_ROOT/apks" candidate/quality/compatibility-v2
           cp "$SOURCE_ROOT/apks/baseline-pr57-debug.apk" "$EVIDENCE_ROOT/apks/"
           cp "$SOURCE_ROOT/apks/candidate-debug.apk" "$EVIDENCE_ROOT/apks/"
           cp "$SOURCE_ROOT/apks/candidate-androidTest.apk" "$EVIDENCE_ROOT/apks/"
           cp "$SOURCE_ROOT/BASELINE-SIGNER.txt" "$EVIDENCE_ROOT/"
           cp "$SOURCE_ROOT/CANDIDATE-SIGNER.txt" "$EVIDENCE_ROOT/"
           cp "$SOURCE_ROOT/INSTALL-OVER-PLAN.txt" "$EVIDENCE_ROOT/"
+          cp quality/compatibility-v2/instrumentation_to_junit.py candidate/quality/compatibility-v2/
 
       - name: Configure Linux KVM when available
         run: |
