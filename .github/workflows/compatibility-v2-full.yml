@@ -161,17 +161,16 @@ jobs:
           name: HULK-SA-COMPATIBILITY-V2-BINARIES-${{ github.run_id }}
           path: build/compatibility-v2/binaries
 
-      - name: Enable Linux KVM acceleration
+      - name: Configure Linux KVM when available
         run: |
           set -euo pipefail
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          test -e /dev/kvm
-          test -r /dev/kvm
-          test -w /dev/kvm
-          ls -l /dev/kvm
+          if [[ -e /dev/kvm ]] && sudo chmod a+rw /dev/kvm && [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            echo 'KVM_AVAILABLE=true' >> "$GITHUB_ENV"
+            ls -l /dev/kvm
+          else
+            echo 'KVM_AVAILABLE=false' >> "$GITHUB_ENV"
+            echo 'KVM is unavailable on this hosted runner; emulator boot and evidence remain mandatory.'
+          fi
 
       - name: Run real application instrumentation
         uses: reactivecircus/android-emulator-runner@v2
@@ -183,9 +182,9 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none
           script: |
-            set -euo pipefail
+            set -eu
             out='build/compatibility-v2/runtime/${{ matrix.id }}'
             bash quality/compatibility-v2/configure_emulator_profile.sh \
               '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' \
