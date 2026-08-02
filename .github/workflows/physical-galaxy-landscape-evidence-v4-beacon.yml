@@ -1,4 +1,4 @@
-# Locate the V5 rerun for the clipped mobile destination content.
+# Locate the V5 rerun after correcting the UIAutomator semantics clipping contract.
 name: Galaxy Landscape Evidence V5 Beacon
 
 on:
@@ -30,4 +30,4 @@ jobs:
             -f per_page='5' \
             --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
           test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Galaxy clipped-content V5 run locator\n\n$runs"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Galaxy corrected-contract V5 run locator\n\n$runs"
