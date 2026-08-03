@@ -1,6 +1,6 @@
 name: PR79 Adaptive Core Completion
 
-# Retry after aligning generated Compose-test imports with the project test API.
+# Retry after matching generated Compose imports by actual source lines.
 on:
   push:
     branches:
