@@ -52,7 +52,7 @@ replace_once(
 """,
     """        pageHorizontalPaddingDp = when {
             orientation == HulkOrientation.PORTRAIT &&
-                windowWidthClass == HulkWindowWidthClass.COMPACT -> 8
+                windowWidthClass == HulkWindowWidthClass.COMPACT -> 0
             windowWidthClass == HulkWindowWidthClass.COMPACT -> 12
             else -> 16
         },
@@ -112,6 +112,13 @@ replace_once(
         val compactMobileLandscape = !isTv &&
             stableWindowWidthDp > stableWindowHeightDp &&
             stableWindowHeightDp < 520
+""",
+)
+replace_once(
+    login,
+    """            .then(if (compact) Modifier.verticalScroll(panelScrollState) else Modifier)
+""",
+    """            .then(if (landscapePhone) Modifier.verticalScroll(panelScrollState) else Modifier)
 """,
 )
 
@@ -329,6 +336,14 @@ replace_once(
                 device.takeScreenshot(File(output, "portrait-login-ime-stable.png")),
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
+
+            device.pressBack()
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(700L)
+            assertTrue(
+                "Application package left the foreground while dismissing the portrait keyboard",
+                device.hasObject(By.pkg(targetContext.packageName).depth(0)),
+            )
         }
     }
 
@@ -351,7 +366,7 @@ replace_once(
     }
 
     @Test
-    fun compactPortraitPolicyMatchesTheEightDpTopNavigationGutter() {
+    fun compactPortraitPolicyUsesTheFullAvailableWidth() {
         val policy = resolveAdaptiveLayoutPolicy(
             deviceClass = HulkDeviceClass.MOBILE,
             windowWidthClass = HulkWindowWidthClass.COMPACT,
@@ -360,7 +375,7 @@ replace_once(
             inputMode = HulkInputMode.TOUCH,
         )
 
-        assertEquals(8, policy.pageHorizontalPaddingDp)
+        assertEquals(0, policy.pageHorizontalPaddingDp)
     }
 
     @Test
@@ -372,3 +387,7 @@ shell_text = Path(shell).read_text(encoding="utf-8")
 for token in ("portraitEdgeInset", "BoxWithConstraints", "maxWidth + portraitEdgeInset"):
     if token in shell_text:
         raise SystemExit(f"MainShell regression token still present: {token}")
+
+login_text = Path(login).read_text(encoding="utf-8")
+if ".then(if (compact) Modifier.verticalScroll(panelScrollState) else Modifier)" in login_text:
+    raise SystemExit("Nested portrait Login scroll regression still present")
