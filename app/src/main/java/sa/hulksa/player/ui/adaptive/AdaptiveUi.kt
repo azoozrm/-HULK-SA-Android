@@ -49,6 +49,7 @@ enum class HulkInputMode {
 
 enum class HulkNavigationType {
     TOP_BAR,
+    BOTTOM_BAR,
     RAIL,
 }
 
@@ -91,6 +92,9 @@ data class AdaptiveUiState(
     val showFocusHighlights: Boolean
         get() = shouldShowFocusHighlights(deviceClass, inputMode)
 
+    val showKeyboardFocusIndicator: Boolean
+        get() = shouldShowKeyboardFocusIndicator(deviceClass, inputMode)
+
     val layoutPolicy: AdaptiveLayoutPolicy
         get() = resolveAdaptiveLayoutPolicy(
             deviceClass = deviceClass,
@@ -120,7 +124,7 @@ val LocalAdaptiveUi = staticCompositionLocalOf {
     AdaptiveUiState(
         deviceClass = HulkDeviceClass.MOBILE,
         windowWidthClass = HulkWindowWidthClass.COMPACT,
-        navigationType = HulkNavigationType.TOP_BAR,
+        navigationType = HulkNavigationType.BOTTOM_BAR,
         inputMode = HulkInputMode.TOUCH,
         screenWidthDp = 360,
         screenHeightDp = 640,
@@ -177,8 +181,10 @@ fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
     pointerInput(controller) {
         awaitPointerEventScope {
             while (true) {
-                awaitPointerEvent(PointerEventPass.Initial)
-                controller.recordTouchInput()
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.any { it.pressed || it.previousPressed }) {
+                    controller.recordTouchInput()
+                }
             }
         }
     }.onPreviewKeyEvent { event ->
@@ -188,6 +194,41 @@ fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
 
 internal fun stableWindowDimensionDp(configurationDp: Int, containerDp: Int): Int =
     configurationDp.takeIf { it > 0 } ?: containerDp.coerceAtLeast(1)
+
+@Immutable
+data class LogicalViewportDp(
+    val widthDp: Int,
+    val heightDp: Int,
+)
+
+fun logicalViewportDp(
+    physicalWidthPx: Int,
+    physicalHeightPx: Int,
+    densityDpi: Int,
+): LogicalViewportDp {
+    require(physicalWidthPx > 0 && physicalHeightPx > 0) { "Physical viewport must be positive" }
+    require(densityDpi > 0) { "Density must be positive" }
+    return LogicalViewportDp(
+        widthDp = ((physicalWidthPx * 160.0) / densityDpi).roundToInt().coerceAtLeast(1),
+        heightDp = ((physicalHeightPx * 160.0) / densityDpi).roundToInt().coerceAtLeast(1),
+    )
+}
+
+fun calculateAdaptiveGridColumns(
+    availableWidthDp: Int,
+    minimumItemWidthDp: Int,
+    horizontalSpacingDp: Int,
+    minimumColumns: Int = 1,
+    maximumColumns: Int = 12,
+): Int {
+    require(availableWidthDp > 0)
+    require(minimumItemWidthDp > 0)
+    require(horizontalSpacingDp >= 0)
+    require(minimumColumns > 0 && maximumColumns >= minimumColumns)
+    val columns = (availableWidthDp + horizontalSpacingDp) /
+        (minimumItemWidthDp + horizontalSpacingDp)
+    return columns.coerceIn(minimumColumns, maximumColumns)
+}
 
 fun classifyInputSource(source: Int): HulkInputMode {
     val isRemote =
@@ -228,7 +269,7 @@ fun selectNavigationType(
 ): HulkNavigationType = when {
     deviceClass == HulkDeviceClass.TELEVISION -> HulkNavigationType.RAIL
     deviceClass == HulkDeviceClass.TABLET && windowWidthClass != HulkWindowWidthClass.COMPACT -> HulkNavigationType.RAIL
-    else -> HulkNavigationType.TOP_BAR
+    else -> HulkNavigationType.BOTTOM_BAR
 }
 
 fun resolveAdaptiveLayoutPolicy(
@@ -274,7 +315,7 @@ fun resolveAdaptiveLayoutPolicy(
         )
 
     else -> AdaptiveLayoutPolicy(
-        navigationType = HulkNavigationType.TOP_BAR,
+        navigationType = HulkNavigationType.BOTTOM_BAR,
         contentDensity = if (windowHeightClass == HulkWindowHeightClass.COMPACT) {
             HulkContentDensity.COMPACT
         } else {
@@ -299,4 +340,9 @@ fun resolveAdaptiveLayoutPolicy(
 fun shouldShowFocusHighlights(
     deviceClass: HulkDeviceClass,
     inputMode: HulkInputMode,
-): Boolean = deviceClass == HulkDeviceClass.TELEVISION || inputMode != HulkInputMode.TOUCH
+): Boolean = deviceClass == HulkDeviceClass.TELEVISION
+
+fun shouldShowKeyboardFocusIndicator(
+    deviceClass: HulkDeviceClass,
+    inputMode: HulkInputMode,
+): Boolean = deviceClass != HulkDeviceClass.TELEVISION && inputMode != HulkInputMode.TOUCH

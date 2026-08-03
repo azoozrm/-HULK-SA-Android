@@ -97,6 +97,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -127,6 +128,8 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.ServerDiagnosticsReport
 import sa.hulksa.player.ui.adaptive.HulkNavigationType
+import sa.hulksa.player.ui.adaptive.HulkOrientation
+import sa.hulksa.player.ui.adaptive.HulkWindowHeightClass
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.BrandBadge
@@ -144,7 +147,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
-import androidx.compose.foundation.layout.navigationBarsPadding
 
 private const val WEBSITE_URL = "https://hulksa.com/"
 private const val ACCOUNT_URL = "https://hulksa.com/account/login.php"
@@ -453,8 +455,13 @@ fun MainShellScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                MobileNavigation(state.destination, rememberingSelectDestination)
-                Box(Modifier.weight(1f).clipToBounds()) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clipToBounds()
+                        .testTag("main-shell-content"),
+                ) {
                     DestinationContent(
                         state = state,
                         isTv = false,
@@ -466,7 +473,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
-                        onSelectDestination = onSelectDestination,
+                        onSelectDestination = rememberingSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
                         onDeleteDownload = onDeleteDownload,
@@ -479,6 +486,7 @@ fun MainShellScreen(
                         onLogout = onLogout,
                     )
                 }
+                MobileBottomNavigation(state.destination, rememberingSelectDestination)
             }
         }
     }
@@ -497,6 +505,7 @@ private fun CinematicNavigationRail(
 
     Column(
         modifier = Modifier
+            .testTag("adaptive-navigation-rail")
             .width(railWidth)
             .fillMaxHeight()
             .focusGroup()
@@ -543,8 +552,9 @@ private fun NavigationItem(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val active = selected || showFocused
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+    val active = selected || televisionFocused
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -552,10 +562,15 @@ private fun NavigationItem(
             .clip(RoundedCornerShape(12.dp))
             .background(
                 when {
-                    showFocused -> colors.gold
+                    televisionFocused -> colors.gold
                     selected -> colors.gold.copy(alpha = .13f)
                     else -> Color.Transparent
                 },
+            )
+            .border(
+                if (televisionFocused || keyboardFocused) 2.dp else 0.dp,
+                colors.goldBright,
+                RoundedCornerShape(12.dp),
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
@@ -566,14 +581,14 @@ private fun NavigationItem(
         Icon(
             imageVector = entry.icon,
             contentDescription = entry.label,
-            tint = if (showFocused) Color.Black else if (active) colors.goldBright else colors.textMuted,
+            tint = if (televisionFocused) Color.Black else if (active) colors.goldBright else colors.textMuted,
             modifier = Modifier.size(23.dp),
         )
         if (expanded) {
             Spacer(Modifier.width(11.dp))
             Text(
                 entry.label,
-                color = if (showFocused) Color.Black else if (active) colors.text else colors.textMuted,
+                color = if (televisionFocused) Color.Black else if (active) colors.text else colors.textMuted,
                 fontSize = 14.sp,
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
@@ -583,37 +598,68 @@ private fun NavigationItem(
 }
 
 @Composable
-private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+private fun MobileBottomNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val compactLandscape =
-        adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
+        adaptiveUi.orientation == HulkOrientation.LANDSCAPE &&
+            adaptiveUi.windowHeightClass == HulkWindowHeightClass.COMPACT
     val navigationState = rememberLazyListState()
     LaunchedEffect(selected) {
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
-        navigationState.animateScrollToItem(selectedIndex + 1)
+        navigationState.animateScrollToItem(selectedIndex)
     }
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface),
+            .heightIn(min = if (compactLandscape) 52.dp else 64.dp)
+            .background(Color(0xFF090A07))
+            .testTag("mobile-bottom-navigation"),
         state = navigationState,
-        contentPadding = PaddingValues(
-            horizontal = 8.dp,
-            vertical = if (compactLandscape) 4.dp else 8.dp,
-        ),
-        horizontalArrangement = Arrangement.spacedBy(if (compactLandscape) 4.dp else 6.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        item { BrandBadge(Modifier.size(if (compactLandscape) 34.dp else 40.dp)) }
         items(destinations, key = { it.destination.name }) { entry ->
-            FocusButton(
-                text = entry.label,
-                onClick = { onSelect(entry.destination) },
-                primary = selected == entry.destination,
-                compact = true,
-                modifier = Modifier.heightIn(min = if (compactLandscape) 42.dp else 48.dp),
-            )
+            val active = selected == entry.destination
+            var focused by remember { mutableStateOf(false) }
+            val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+            Column(
+                modifier = Modifier
+                    .width(if (compactLandscape) 56.dp else 66.dp)
+                    .heightIn(min = 48.dp)
+                    .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (active) colors.gold.copy(alpha = .16f) else Color.Transparent)
+                    .border(
+                        if (keyboardFocused) 2.dp else 0.dp,
+                        colors.goldBright,
+                        RoundedCornerShape(12.dp),
+                    )
+                    .onFocusChanged { focused = it.isFocused }
+                    .clickable(role = Role.Button) { onSelect(entry.destination) }
+                    .padding(horizontal = 4.dp, vertical = if (compactLandscape) 7.dp else 5.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    imageVector = entry.icon,
+                    contentDescription = entry.label,
+                    tint = if (active) colors.goldBright else colors.textMuted,
+                    modifier = Modifier.size(if (compactLandscape) 23.dp else 22.dp),
+                )
+                if (!compactLandscape) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = entry.label,
+                        color = if (active) colors.text else colors.textMuted,
+                        fontSize = 9.sp,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }

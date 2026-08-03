@@ -18,7 +18,7 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.MOBILE, device)
         assertEquals(HulkWindowWidthClass.COMPACT, window)
-        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+        assertEquals(HulkNavigationType.BOTTOM_BAR, selectNavigationType(device, window))
     }
 
     @Test
@@ -32,7 +32,7 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.TABLET, device)
         assertEquals(HulkWindowWidthClass.COMPACT, window)
-        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+        assertEquals(HulkNavigationType.BOTTOM_BAR, selectNavigationType(device, window))
     }
 
     @Test
@@ -82,7 +82,7 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.MOBILE, device)
         assertEquals(HulkWindowWidthClass.EXPANDED, window)
-        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+        assertEquals(HulkNavigationType.BOTTOM_BAR, selectNavigationType(device, window))
         assertEquals(HulkOrientation.LANDSCAPE, classifyOrientation(891, 411))
     }
 
@@ -177,9 +177,27 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
-    fun touchSuppressesFocusChromeButKeyboardRestoresIt() {
+    fun televisionFocusChromeIsSeparatedFromPhoneAndTabletKeyboardFocus() {
         assertFalse(shouldShowFocusHighlights(HulkDeviceClass.TABLET, HulkInputMode.TOUCH))
-        assertTrue(shouldShowFocusHighlights(HulkDeviceClass.TABLET, HulkInputMode.KEYBOARD))
-        assertTrue(shouldShowFocusHighlights(HulkDeviceClass.MOBILE, HulkInputMode.REMOTE))
+        assertFalse(shouldShowFocusHighlights(HulkDeviceClass.TABLET, HulkInputMode.KEYBOARD))
+        assertFalse(shouldShowFocusHighlights(HulkDeviceClass.MOBILE, HulkInputMode.REMOTE))
+        assertTrue(shouldShowKeyboardFocusIndicator(HulkDeviceClass.TABLET, HulkInputMode.KEYBOARD))
+        assertTrue(shouldShowKeyboardFocusIndicator(HulkDeviceClass.MOBILE, HulkInputMode.KEYBOARD))
+        assertTrue(shouldShowKeyboardFocusIndicator(HulkDeviceClass.MOBILE, HulkInputMode.REMOTE))
+        assertFalse(shouldShowKeyboardFocusIndicator(HulkDeviceClass.TELEVISION, HulkInputMode.REMOTE))
+    }
+
+    @Test
+    fun physical4kTelevisionResolvesToNormalLogicalViewport() {
+        assertEquals(LogicalViewportDp(960, 540), logicalViewportDp(3840, 2160, 640))
+        assertEquals(HulkWindowWidthClass.EXPANDED, classifyWindowWidth(960))
+        assertEquals(HulkWindowHeightClass.MEDIUM, classifyWindowHeight(540))
+    }
+
+    @Test
+    fun adaptiveGridColumnsRespectMinimumCardWidthAndBounds() {
+        assertEquals(3, calculateAdaptiveGridColumns(360, 112, 12, maximumColumns = 6))
+        assertEquals(4, calculateAdaptiveGridColumns(800, 148, 16, maximumColumns = 8))
+        assertEquals(6, calculateAdaptiveGridColumns(1280, 168, 20, maximumColumns = 6))
     }
 }

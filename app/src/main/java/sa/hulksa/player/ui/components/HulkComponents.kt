@@ -117,14 +117,15 @@ fun FocusButton(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "buttonScale")
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+    val scale by animateFloatAsState(if (televisionFocused) 1.035f else 1f, label = "buttonScale")
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
-        primary && showFocused -> colors.goldBright
+        primary && televisionFocused -> colors.goldBright
         primary -> colors.gold
-        showFocused -> Color(0xFF2A281B)
+        televisionFocused -> Color(0xFF2A281B)
         outlined -> Color(0xFF151711)
         else -> Color(0xFF181914)
     }
@@ -141,12 +142,12 @@ fun FocusButton(
             .background(background)
             .border(
                 width = when {
-                    showFocused -> 2.dp
+                    televisionFocused || keyboardFocused -> 2.dp
                     outlined -> 1.dp
                     else -> 0.dp
                 },
                 color = when {
-                    showFocused -> colors.goldBright
+                    televisionFocused || keyboardFocused -> colors.goldBright
                     outlined -> colors.gold.copy(alpha = .42f)
                     else -> Color.Transparent
                 },
@@ -184,17 +185,18 @@ fun NavRailButton(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
     val shape = RoundedCornerShape(13.dp)
-    val active = showFocused || selected
+    val active = televisionFocused || selected
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (active) colors.gold.copy(alpha = if (showFocused) .25f else .13f) else Color.Transparent)
+            .background(if (active) colors.gold.copy(alpha = if (televisionFocused) .25f else .13f) else Color.Transparent)
             .border(
-                if (showFocused) 2.dp else 0.dp,
-                if (showFocused) colors.goldBright else Color.Transparent,
+                if (televisionFocused || keyboardFocused) 2.dp else 0.dp,
+                if (televisionFocused || keyboardFocused) colors.goldBright else Color.Transparent,
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -329,22 +331,27 @@ fun CompactPosterCard(
     var focused by remember { mutableStateOf(false) }
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.04f else 1f, label = "posterScale")
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+    val scale by animateFloatAsState(if (televisionFocused) 1.04f else 1f, label = "posterScale")
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier = modifier
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+                shadowElevation = if (televisionFocused) 14.dp.toPx() else 0f
             }
             .aspectRatio(2f / 3f)
             .clip(shape)
             .background(Color(0xFF15160F))
             .border(
-                if (showFocused) 3.dp else 0.dp,
-                if (focused) colors.goldBright else Color.Transparent,
+                when {
+                    televisionFocused -> 3.dp
+                    keyboardFocused -> 2.dp
+                    else -> 0.dp
+                },
+                if (televisionFocused || keyboardFocused) colors.goldBright else Color.Transparent,
                 shape,
             )
             .onFocusChanged {
@@ -456,8 +463,9 @@ fun HistoryCard(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+    val scale by animateFloatAsState(if (televisionFocused) 1.035f else 1f, label = "historyScale")
     val shape = RoundedCornerShape(12.dp)
     val progress = if (entry.durationMs > 0L) {
         (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f)
@@ -470,7 +478,15 @@ fun HistoryCard(
             .aspectRatio(16f / 9f)
             .clip(shape)
             .background(Color(0xFF15160F))
-            .border(if (showFocused) 3.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+            .border(
+                when {
+                    televisionFocused -> 3.dp
+                    keyboardFocused -> 2.dp
+                    else -> 0.dp
+                },
+                if (televisionFocused || keyboardFocused) colors.goldBright else Color.Transparent,
+                shape,
+            )
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
@@ -516,8 +532,9 @@ fun ChannelListItem(
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val active = showFocused || selected
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+    val active = televisionFocused || selected
     val shape = RoundedCornerShape(11.dp)
     Row(
         modifier = modifier
@@ -525,7 +542,11 @@ fun ChannelListItem(
             .height(64.dp)
             .clip(shape)
             .background(if (active) colors.gold.copy(alpha = .14f) else Color.Transparent)
-            .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+            .border(
+                if (televisionFocused || keyboardFocused) 2.dp else 0.dp,
+                if (televisionFocused || keyboardFocused) colors.goldBright else Color.Transparent,
+                shape,
+            )
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()

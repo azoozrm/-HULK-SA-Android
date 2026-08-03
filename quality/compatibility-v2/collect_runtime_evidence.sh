@@ -161,6 +161,27 @@ if [[ "$test_class" == *"#phonePortraitLoginFieldsAcceptTypingWithoutCrash" ]]; 
   done
 fi
 
+adaptive_evidence_required=false
+if [[ "$test_class" == *"AdaptiveMainShellComposeTest"* ]]; then
+  adaptive_evidence_required=true
+  app_evidence_dir="/sdcard/Android/data/$package/files/adaptive-main-shell-evidence"
+  : > "$out/ADAPTIVE-EVIDENCE-PULL.txt"
+  for evidence_name in     phone-portrait-bottom-navigation.png     phone-portrait-bottom-navigation.xml     phone-short-landscape-bottom-navigation.png     phone-short-landscape-bottom-navigation.xml     tablet-navigation-rail.png     tablet-navigation-rail.xml; do
+    set +e
+    pull_output="$(adb pull "$app_evidence_dir/$evidence_name" "$out/$evidence_name" 2>&1)"
+    pull_status=$?
+    set -e
+    {
+      echo "file=$evidence_name"
+      echo "status=$pull_status"
+      echo "output=${pull_output//$'\n'/ | }"
+    } >> "$out/ADAPTIVE-EVIDENCE-PULL.txt"
+    if [[ "$pull_status" -ne 0 ]]; then
+      status=1
+    fi
+  done
+fi
+
 adb shell dumpsys package "$package" > "$out/INSTALLED-PACKAGE-COLLECTOR-DUMP.txt" 2>&1 || true
 component_declared=false
 if grep -Fq "$activity_class" "$out/INSTALLED-PACKAGE-COLLECTOR-DUMP.txt"; then
@@ -326,6 +347,15 @@ if [[ "$portrait_evidence_required" == true ]]; then
     portrait-login-ime-actions-reachable.xml; do
     if [[ ! -s "$out/$portrait_required" ]]; then
       echo "Missing mandatory portrait runtime evidence: $portrait_required" >&2
+      status=1
+    fi
+  done
+fi
+
+if [[ "$adaptive_evidence_required" == true ]]; then
+  for adaptive_required in     ADAPTIVE-EVIDENCE-PULL.txt     phone-portrait-bottom-navigation.png     phone-portrait-bottom-navigation.xml     phone-short-landscape-bottom-navigation.png     phone-short-landscape-bottom-navigation.xml     tablet-navigation-rail.png     tablet-navigation-rail.xml; do
+    if [[ ! -s "$out/$adaptive_required" ]]; then
+      echo "Missing mandatory adaptive runtime evidence: $adaptive_required" >&2
       status=1
     fi
   done
