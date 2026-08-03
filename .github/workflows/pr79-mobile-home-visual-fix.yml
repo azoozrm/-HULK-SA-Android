@@ -1,0 +1,368 @@
+name: PR79 Mobile Home Visual Fix
+
+on:
+  push:
+    branches:
+      - fix/v09320-galaxy-landscape-clean
+    paths:
+      - .github/workflows/pr79-mobile-home-visual-fix.yml
+
+permissions:
+  contents: write
+  statuses: write
+
+concurrency:
+  group: pr79-mobile-home-visual-fix
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Publish run locator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='ui/mobile-home-visual-fix' \
+            -f description='Mobile home visual fixes are being verified' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/v09320-galaxy-landscape-clean
+          fetch-depth: 0
+
+      - name: Apply exact visual fixes without deleting content
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main_path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          main = main_path.read_text(encoding='utf-8')
+
+          old_nav = '''@Composable
+          private fun MobileBottomNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+              val colors = LocalHulkColors.current
+              val adaptiveUi = LocalAdaptiveUi.current
+              val compactLandscape =
+                  adaptiveUi.orientation == HulkOrientation.LANDSCAPE &&
+                      adaptiveUi.windowHeightClass == HulkWindowHeightClass.COMPACT
+              val navigationState = rememberLazyListState()
+              LaunchedEffect(selected) {
+                  val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
+                  navigationState.animateScrollToItem(selectedIndex)
+              }
+              LazyRow(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .heightIn(min = if (compactLandscape) 52.dp else 64.dp)
+                      .background(Color(0xFF090A07))
+                      .testTag("mobile-bottom-navigation"),
+                  state = navigationState,
+                  contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                  horizontalArrangement = Arrangement.spacedBy(2.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+              ) {
+                  items(destinations, key = { it.destination.name }) { entry ->
+                      val active = selected == entry.destination
+                      var focused by remember { mutableStateOf(false) }
+                      val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+                      Column(
+                          modifier = Modifier
+                              .width(if (compactLandscape) 56.dp else 66.dp)
+                              .heightIn(min = 48.dp)
+                              .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
+                              .clip(RoundedCornerShape(12.dp))
+                              .background(if (active) colors.gold.copy(alpha = .16f) else Color.Transparent)
+                              .border(
+                                  if (keyboardFocused) 2.dp else 0.dp,
+                                  colors.goldBright,
+                                  RoundedCornerShape(12.dp),
+                              )
+                              .onFocusChanged { focused = it.isFocused }
+                              .clickable(role = Role.Button) { onSelect(entry.destination) }
+                              .padding(horizontal = 4.dp, vertical = if (compactLandscape) 7.dp else 5.dp),
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.Center,
+                      ) {
+                          Icon(
+                              imageVector = entry.icon,
+                              contentDescription = entry.label,
+                              tint = if (active) colors.goldBright else colors.textMuted,
+                              modifier = Modifier.size(if (compactLandscape) 23.dp else 22.dp),
+                          )
+                          if (!compactLandscape) {
+                              Spacer(Modifier.height(2.dp))
+                              Text(
+                                  text = entry.label,
+                                  color = if (active) colors.text else colors.textMuted,
+                                  fontSize = 9.sp,
+                                  fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                  maxLines = 1,
+                                  overflow = TextOverflow.Ellipsis,
+                              )
+                          }
+                      }
+                  }
+              }
+          }
+          '''
+
+          new_nav = '''@Composable
+          private fun MobileBottomNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+              val colors = LocalHulkColors.current
+              val adaptiveUi = LocalAdaptiveUi.current
+              val compactLandscape =
+                  adaptiveUi.orientation == HulkOrientation.LANDSCAPE &&
+                      adaptiveUi.windowHeightClass == HulkWindowHeightClass.COMPACT
+              val navigationState = rememberLazyListState()
+              LaunchedEffect(selected) {
+                  val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
+                  navigationState.animateScrollToItem(selectedIndex)
+              }
+              val containerShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+              Box(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .background(
+                          Brush.verticalGradient(
+                              listOf(Color(0xFF161710), Color(0xFF090A07)),
+                          ),
+                      )
+                      .border(1.dp, colors.line.copy(alpha = .38f), containerShape)
+                      .padding(vertical = if (compactLandscape) 4.dp else 6.dp)
+                      .testTag("mobile-bottom-navigation"),
+              ) {
+                  LazyRow(
+                      modifier = Modifier
+                          .fillMaxWidth()
+                          .heightIn(min = if (compactLandscape) 50.dp else 60.dp),
+                      state = navigationState,
+                      contentPadding = PaddingValues(horizontal = 8.dp),
+                      horizontalArrangement = Arrangement.spacedBy(6.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                  ) {
+                      items(destinations, key = { it.destination.name }) { entry ->
+                          val active = selected == entry.destination
+                          var focused by remember { mutableStateOf(false) }
+                          val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+                          val itemShape = RoundedCornerShape(15.dp)
+                          Column(
+                              modifier = Modifier
+                                  .width(if (compactLandscape) 58.dp else 64.dp)
+                                  .height(if (compactLandscape) 48.dp else 60.dp)
+                                  .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
+                                  .clip(itemShape)
+                                  .background(
+                                      if (active) colors.gold.copy(alpha = .18f) else Color(0xFF181914),
+                                  )
+                                  .border(
+                                      width = when {
+                                          keyboardFocused -> 2.dp
+                                          active -> 1.5.dp
+                                          else -> 1.dp
+                                      },
+                                      color = when {
+                                          keyboardFocused || active -> colors.goldBright
+                                          else -> colors.line.copy(alpha = .42f)
+                                      },
+                                      shape = itemShape,
+                                  )
+                                  .onFocusChanged { focused = it.isFocused }
+                                  .clickable(role = Role.Button) { onSelect(entry.destination) }
+                                  .padding(horizontal = 4.dp, vertical = if (compactLandscape) 6.dp else 5.dp),
+                              horizontalAlignment = Alignment.CenterHorizontally,
+                              verticalArrangement = Arrangement.Center,
+                          ) {
+                              Box(
+                                  modifier = Modifier
+                                      .size(if (compactLandscape) 29.dp else 30.dp)
+                                      .clip(CircleShape)
+                                      .background(if (active) colors.gold else Color(0xFF24251D)),
+                                  contentAlignment = Alignment.Center,
+                              ) {
+                                  Icon(
+                                      imageVector = entry.icon,
+                                      contentDescription = entry.label,
+                                      tint = if (active) Color.Black else colors.textMuted,
+                                      modifier = Modifier.size(if (compactLandscape) 20.dp else 19.dp),
+                                  )
+                              }
+                              if (!compactLandscape) {
+                                  Spacer(Modifier.height(3.dp))
+                                  Text(
+                                      text = entry.label,
+                                      color = if (active) colors.text else colors.textMuted,
+                                      fontSize = 9.sp,
+                                      lineHeight = 10.sp,
+                                      fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                      maxLines = 1,
+                                      overflow = TextOverflow.Ellipsis,
+                                  )
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          '''
+
+          replacements = [
+              (old_nav, new_nav, 'mobile bottom navigation'),
+              (
+                  '        Row(verticalAlignment = Alignment.CenterVertically) {\n',
+                  '        Row(\n            modifier = Modifier.padding(horizontal = if (isTv) 0.dp else 10.dp),\n            verticalAlignment = Alignment.CenterVertically,\n        ) {\n',
+                  'active downloads section title inset',
+              ),
+              (
+                  '        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)\n',
+                  '        Text(\n            text = title,\n            color = colors.text,\n            fontSize = if (isTv) 20.sp else 17.sp,\n            fontWeight = FontWeight.Bold,\n            modifier = Modifier\n                .fillMaxWidth()\n                .padding(horizontal = if (isTv) 0.dp else 10.dp),\n        )\n',
+                  'first home section title inset',
+              ),
+          ]
+
+          for old, new, label in replacements:
+              if old not in main:
+                  raise SystemExit(f'Missing expected block: {label}')
+              main = main.replace(old, new, 1)
+
+          second_title_old = '        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)\n'
+          second_title_new = '''        Text(
+              text = title,
+              color = colors.text,
+              fontSize = if (isTv) 20.sp else 17.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = if (isTv) 0.dp else 10.dp),
+          )
+          '''
+          if second_title_old not in main:
+              raise SystemExit('Missing expected block: second home section title inset')
+          main = main.replace(second_title_old, second_title_new, 1)
+
+          main_path.write_text(main, encoding='utf-8')
+
+          components_path = Path('app/src/main/java/sa/hulksa/player/ui/components/Components.kt')
+          components = components_path.read_text(encoding='utf-8')
+          old_title = '''            Text(
+                          text = item.name,
+                          color = Color.White,
+                          fontWeight = FontWeight.Bold,
+                          fontSize = 12.sp,
+                          maxLines = 2,
+                          overflow = TextOverflow.Ellipsis,
+                          lineHeight = 15.sp,
+                      )
+          '''
+          new_title = '''            Box(
+                          modifier = Modifier
+                              .fillMaxWidth()
+                              .height(38.dp),
+                          contentAlignment = Alignment.BottomStart,
+                      ) {
+                          Text(
+                              text = item.name,
+                              color = Color.White,
+                              fontWeight = FontWeight.Bold,
+                              fontSize = 12.sp,
+                              maxLines = 2,
+                              overflow = TextOverflow.Ellipsis,
+                              lineHeight = 17.sp,
+                              modifier = Modifier.fillMaxWidth(),
+                          )
+                      }
+          '''
+          if old_title not in components:
+              raise SystemExit('Missing expected CompactPosterCard title block')
+          components = components.replace(old_title, new_title, 1)
+          components_path.write_text(components, encoding='utf-8')
+
+          # Guardrails: requested text and every destination must remain present.
+          required = [
+              'Text("احدث اضافات HULK"',
+              'PosterSection("لانك شاهدت"',
+              'PosterSection("مقترح لك"',
+              'PosterSection("احدث اضافات HULK — افلام"',
+              'PosterSection("احدث اضافات HULK — مسلسلات"',
+              'DestinationEntry(MainDestination.HOME',
+              'DestinationEntry(MainDestination.SETTINGS',
+          ]
+          for token in required:
+              if token not in main:
+                  raise SystemExit(f'Content preservation guard failed: {token}')
+          PY
+
+          git diff --check
+          git diff -- app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+            app/src/main/java/sa/hulksa/player/ui/components/Components.kt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Compile test and lint visual changes
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Commit verified source changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+            app/src/main/java/sa/hulksa/player/ui/components/Components.kt
+          git diff --cached --quiet && { echo 'No source changes to commit'; exit 1; }
+          git commit -m 'fix: refine mobile home spacing and navigation cards'
+          git push origin HEAD:fix/v09320-galaxy-landscape-clean
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-MOBILE-HOME-VISUAL-FIX-${{ github.run_id }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish final status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [[ "$JOB_STATUS" == 'success' ]]; then
+            state=success
+            description='Mobile home visual fixes compiled and verified'
+          else
+            state=failure
+            description='Mobile home visual fix verification failed'
+          fi
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='ui/mobile-home-visual-fix' \
+            -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
