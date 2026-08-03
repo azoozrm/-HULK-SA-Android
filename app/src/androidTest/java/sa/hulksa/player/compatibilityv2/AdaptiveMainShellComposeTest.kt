@@ -1,16 +1,23 @@
 package sa.hulksa.player.compatibilityv2
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
 import java.io.File
+import java.io.FileOutputStream
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -134,7 +141,28 @@ class AdaptiveMainShellComposeTest {
         check(root.mkdirs() || root.isDirectory) { "Unable to create adaptive evidence directory" }
         val screenshot = File(root, "$name.png")
         val hierarchy = File(root, "$name.xml")
-        check(device.takeScreenshot(screenshot)) { "Unable to capture $name screenshot" }
+        val image = composeRule.onRoot(useUnmergedTree = true).captureToImage()
+        val pixels = image.toPixelMap()
+        val sampledColors = mutableSetOf<Int>()
+        val xStep = maxOf(1, pixels.width / 24)
+        val yStep = maxOf(1, pixels.height / 24)
+        var y = 0
+        while (y < pixels.height) {
+            var x = 0
+            while (x < pixels.width) {
+                sampledColors += pixels[x, y].toArgb()
+                x += xStep
+            }
+            y += yStep
+        }
+        check(sampledColors.size >= 4) {
+            "Adaptive screenshot is visually uniform: $name (${sampledColors.size} sampled colors)"
+        }
+        FileOutputStream(screenshot).use { stream ->
+            check(image.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream)) {
+                "Unable to encode $name screenshot"
+            }
+        }
         device.dumpWindowHierarchy(hierarchy)
         check(screenshot.isFile && screenshot.length() > 0L) { "Empty adaptive screenshot: $screenshot" }
         check(hierarchy.isFile && hierarchy.length() > 0L) { "Empty adaptive hierarchy: $hierarchy" }
