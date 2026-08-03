@@ -49,6 +49,19 @@ class AvdProfilePreparationTest(unittest.TestCase):
         self.assertIn('bash -n quality/compatibility-v2/prepare_avd_profile.sh', full)
         self.assertEqual(1, full.count(marker))
 
+    def test_targeted_retest_prepares_exact_avd_before_launch(self) -> None:
+        targeted = Path('.github/workflows/compatibility-v2-targeted.yml').read_text(encoding='utf-8')
+        marker = 'pre-emulator-launch-script: bash quality/compatibility-v2/prepare_avd_profile.sh'
+        self.assertIn(marker, targeted)
+        self.assertIn(
+            "'${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' "
+            "'${{ needs.resolve-profile.outputs.density }}'",
+            targeted,
+        )
+        self.assertIn('bash -n quality/compatibility-v2/prepare_avd_profile.sh', targeted)
+        self.assertIn('-no-snapshot-save', targeted)
+        self.assertEqual(1, targeted.count(marker))
+
 
 if __name__ == '__main__':
     unittest.main()
