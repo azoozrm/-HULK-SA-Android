@@ -1,4 +1,4 @@
-name: PR79 Targeted TV 4K Fallback Verification
+name: PR79 Targeted TV 4K Qualification
 
 on:
   push:
@@ -8,15 +8,15 @@ on:
       - .github/workflows/pr79-targeted-tv4k-fallback.yml
 
 permissions:
-  contents: write
+  contents: read
   statuses: write
 
 concurrency:
-  group: pr79-targeted-tv4k-fallback
+  group: pr79-targeted-tv4k-qualification
   cancel-in-progress: false
 
 jobs:
-  verify-and-commit:
+  targeted-tv4k:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -27,11 +27,8 @@ jobs:
       TEST_APK: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: fix/v09320-galaxy-landscape-clean
-          fetch-depth: 0
 
-      - name: Publish targeted verification status
+      - name: Publish run locator
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -39,8 +36,8 @@ jobs:
           gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
             -f state=pending \
-            -f context='compatibility-v2/targeted-tv4k-fallback' \
-            -f description="Targeted TV 4K fallback verification is running" \
+            -f context='compatibility-v2/targeted-tv4k' \
+            -f description='Targeted TV 4K qualification is running' \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
       - uses: actions/setup-java@v5
@@ -53,45 +50,16 @@ jobs:
           cache-cleanup: on-success
       - uses: android-actions/setup-android@v4
 
-      - name: Apply fallback and validate source
+      - name: Build target APKs and validate tools
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('quality/compatibility-v2/configure_emulator_profile.sh')
-          source = path.read_text(encoding='utf-8')
-          old = '''if [[ "$physical_size" == "${width}x${height}" ]]; then
-            record "wm_size_mode=physical"
-          else
-            adb shell wm size "${width}x${height}"
-            record "wm_size_mode=override"
-          fi
-          '''
-          new = '''if [[ "$physical_size" == "${width}x${height}" ]]; then
-            reset_effective_size="$(effective_size_from_output "$reset_size_output")"
-            if [[ "$reset_effective_size" != "${width}x${height}" ]]; then
-              adb shell wm size "${width}x${height}"
-              record "wm_size_mode=override-repair"
-              record "stale_override_size=$reset_effective_size"
-            else
-              record "wm_size_mode=physical"
-            fi
-          else
-            adb shell wm size "${width}x${height}"
-            record "wm_size_mode=override"
-          fi
-          '''
-          if old not in source:
-              raise SystemExit('Window-size decision marker is missing')
-          source = source.replace(old, new, 1)
-          path.write_text(source, encoding='utf-8')
-          PY
-          bash -n quality/compatibility-v2/configure_emulator_profile.sh
-          grep -Fq 'wm_size_mode=override-repair' quality/compatibility-v2/configure_emulator_profile.sh
-          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/prepare_avd_profile.sh
+          bash -n quality/compatibility-v2/collect_runtime_evidence.sh
+          bash -n quality/compatibility-v2/run_runtime_profile.sh
+          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
           ./gradlew --no-daemon --console=plain \
             :app:assembleDebug :app:assembleDebugAndroidTest \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
@@ -103,7 +71,7 @@ jobs:
           test -r /dev/kvm
           test -w /dev/kvm
 
-      - name: Execute targeted TV 4K profile without pre-launch helper
+      - name: Execute targeted TV 4K profile
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -113,10 +81,12 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 3840x2160
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin 3840x2160
+          pre-emulator-launch-script: bash quality/compatibility-v2/prepare_avd_profile.sh '3840' '2160' '640' 'test'
           script: bash quality/compatibility-v2/run_runtime_profile.sh 'tv-4k-api36' '3840' '2160' '640' '1.0' '0' 'ar-SA' 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' 'build/compatibility-v2/targeted/tv-4k-api36' 'none' 'default' 'TELEVISION' 'REMOTE' 'EXPANDED' 'MEDIUM' 'LANDSCAPE'
 
       - name: Enforce targeted evidence
+        if: always()
         run: |
           set -euo pipefail
           python3 quality/compatibility-v2/evidence_gate.py \
@@ -125,18 +95,29 @@ jobs:
             --out "$EVIDENCE_ROOT/gate"
 
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: HULK-SA-COMPATIBILITY-V2-TARGETED-TV4K-FALLBACK-${{ github.run_id }}
+          name: HULK-SA-COMPATIBILITY-V2-TARGETED-TV4K-${{ github.run_id }}
           path: ${{ env.EVIDENCE_ROOT }}/
           if-no-files-found: error
           retention-days: 21
 
-      - name: Commit verified fallback
+      - name: Publish final targeted status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add quality/compatibility-v2/configure_emulator_profile.sh
-          git commit -m 'fix: repair stale Android TV size override after boot' \
-            -m 'When wm size reset reports the requested physical panel but retains a stale override, explicitly replace the override and record the repair. Verified with the targeted TV 4K profile, full runtime evidence gate, and the Compatibility V2 Python suite.'
-          git push origin HEAD:fix/v09320-galaxy-landscape-clean
+          state=failure
+          description='Targeted TV 4K qualification failed'
+          if [[ "$JOB_STATUS" == 'success' ]]; then
+            state=success
+            description='Targeted TV 4K qualification passed'
+          fi
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='compatibility-v2/targeted-tv4k' \
+            -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
