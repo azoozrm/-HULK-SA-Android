@@ -1,4 +1,4 @@
-name: Final Galaxy Source Signing Beacon
+name: Final Galaxy Source Signing V2 Beacon
 
 on:
   push:
@@ -16,17 +16,17 @@ jobs:
   expose-run:
     runs-on: ubuntu-latest
     steps:
-      - name: Publish signing run locator
+      - name: Publish direct signing V2 run locator
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           sleep 10
           runs="$(gh api -X GET \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/physical-galaxy-final-signing.yml/runs" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/physical-galaxy-final-signing-v2.yml/runs" \
             -f branch='rebuild/adaptive-ui-compatibility-lab-v2' \
             -f event='push' \
             -f per_page='5' \
             --jq '.workflow_runs[] | "- Run: `\(.id)` | head: `\(.head_sha)` | status: **\(.status)** | conclusion: **\(.conclusion // "pending")**"')"
           test -n "$runs"
-          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Final Galaxy source-signing run locator\n\n$runs"
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body "## Final direct production-signing V2 run locator\n\n$runs"
