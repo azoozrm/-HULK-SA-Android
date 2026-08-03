@@ -109,6 +109,7 @@ jobs:
           python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
           python3 quality/compatibility-v2/static_validate.py --repo-root . --out build/compatibility-v2/static
           bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/prepare_avd_profile.sh
           bash -n quality/compatibility-v2/collect_runtime_evidence.sh
           bash -n quality/compatibility-v2/run_runtime_profile.sh
           ./gradlew --no-daemon --console=plain \
@@ -167,6 +168,7 @@ jobs:
           disk-size: 4096M
           ram-size: 2048M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin ${{ matrix.width }}x${{ matrix.height }}
+          pre-emulator-launch-script: bash quality/compatibility-v2/prepare_avd_profile.sh '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' 'test'
           script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' '${{ matrix.locale }}' '${{ matrix.test_class }}' 'build/compatibility-v2/runtime/${{ matrix.id }}' '${{ matrix.cutout_mode }}' '${{ matrix.navigation_mode }}' '${{ matrix.expected_device_class }}' '${{ matrix.expected_input_mode }}' '${{ matrix.expected_width_class }}' '${{ matrix.expected_height_class }}' '${{ matrix.expected_orientation }}'
 
       - name: Enforce runtime evidence

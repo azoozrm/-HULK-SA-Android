@@ -1,4 +1,4 @@
-requested_for_parent=acd03c9fdc9830fcc4b83aefa1fa4a0c77892325
-reason=publish-and-verify-repaired-full-matrix-run-status
-request_sequence=12
-requested_at=2026-08-03T19:25:00Z
+requested_for_parent=1dc2669e33ed39ac42a1f521af9584649c9dd1c2
+reason=verify-tv-4k-avd-config-before-emulator-launch
+request_sequence=14
+requested_at=2026-08-03T20:18:00Z
