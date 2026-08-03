@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/pr79_portrait_recovery.py
-          python3 tools/pr79_portrait_ime_cleanup.py
+          python3 tools/pr79_portrait_evidence_followup.py
           git diff --check
 
       - name: Run static and JVM validation
@@ -138,11 +138,13 @@ jobs:
             app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt \
             app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
             app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt \
-            app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
+            app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt \
+            quality/compatibility-v2/collect_runtime_evidence.sh
           git rm \
             .github/workflows/pr79-portrait-recovery.yml \
-            tools/pr79_portrait_recovery.py \
-            tools/pr79_portrait_ime_cleanup.py
+            tools/pr79_portrait_evidence_followup.py \
+            tools/pr79_portrait_ime_cleanup.py \
+            tools/pr79_portrait_recovery.py
           actual=$(git diff --cached --name-only | sort)
           expected=$(printf '%s\n' \
             '.github/workflows/pr79-portrait-recovery.yml' \
@@ -151,6 +153,8 @@ jobs:
             'app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt' \
             'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
+            'quality/compatibility-v2/collect_runtime_evidence.sh' \
+            'tools/pr79_portrait_evidence_followup.py' \
             'tools/pr79_portrait_ime_cleanup.py' \
             'tools/pr79_portrait_recovery.py')
           test "$actual" = "$expected"
