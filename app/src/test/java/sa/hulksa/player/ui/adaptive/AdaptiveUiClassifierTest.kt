@@ -36,6 +36,26 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
+    fun configurationDimensionsRemainStableWhenImeShrinksTheComposeContainer() {
+        assertEquals(411, stableWindowDimensionDp(configurationDp = 411, containerDp = 411))
+        assertEquals(891, stableWindowDimensionDp(configurationDp = 891, containerDp = 430))
+        assertEquals(430, stableWindowDimensionDp(configurationDp = 0, containerDp = 430))
+    }
+
+    @Test
+    fun compactPortraitPolicyUsesTheFullAvailableWidth() {
+        val policy = resolveAdaptiveLayoutPolicy(
+            deviceClass = HulkDeviceClass.MOBILE,
+            windowWidthClass = HulkWindowWidthClass.COMPACT,
+            windowHeightClass = HulkWindowHeightClass.MEDIUM,
+            orientation = HulkOrientation.PORTRAIT,
+            inputMode = HulkInputMode.TOUCH,
+        )
+
+        assertEquals(0, policy.pageHorizontalPaddingDp)
+    }
+
+    @Test
     fun windowWidthBreakpointsUseContainerDimensions() {
         assertEquals(HulkWindowWidthClass.COMPACT, classifyWindowWidth(599))
         assertEquals(HulkWindowWidthClass.MEDIUM, classifyWindowWidth(600))

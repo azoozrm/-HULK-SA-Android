@@ -136,6 +136,31 @@ set -e
 if [[ "$instrumentation_status" -ne 0 ]]; then status="$instrumentation_status"; fi
 if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
 
+portrait_evidence_required=false
+if [[ "$test_class" == *"#phonePortraitLoginFieldsAcceptTypingWithoutCrash" ]]; then
+  portrait_evidence_required=true
+  app_evidence_dir="/sdcard/Android/data/$package/files/compatibility-v2"
+  : > "$out/PORTRAIT-EVIDENCE-PULL.txt"
+  for evidence_name in \
+    portrait-login-ime-stable.png \
+    portrait-login-ime-stable.xml \
+    portrait-login-ime-actions-reachable.png \
+    portrait-login-ime-actions-reachable.xml; do
+    set +e
+    pull_output="$(adb pull "$app_evidence_dir/$evidence_name" "$out/$evidence_name" 2>&1)"
+    pull_status=$?
+    set -e
+    {
+      echo "file=$evidence_name"
+      echo "status=$pull_status"
+      echo "output=${pull_output//$'\n'/ | }"
+    } >> "$out/PORTRAIT-EVIDENCE-PULL.txt"
+    if [[ "$pull_status" -ne 0 ]]; then
+      status=1
+    fi
+  done
+fi
+
 adb shell dumpsys package "$package" > "$out/INSTALLED-PACKAGE-COLLECTOR-DUMP.txt" 2>&1 || true
 component_declared=false
 if grep -Fq "$activity_class" "$out/INSTALLED-PACKAGE-COLLECTOR-DUMP.txt"; then
@@ -174,36 +199,51 @@ if ime_is_actually_visible "$out/IME-WINDOW-BEFORE.txt"; then
   ime_initial_active=true
 fi
 
-ime_hidden=false
-for _ in $(seq 1 20); do
-  capture_window_windows "$out/IME-WINDOW-POLL.txt"
-  if ! ime_is_actually_visible "$out/IME-WINDOW-POLL.txt"; then
-    ime_hidden=true
-    break
-  fi
-  sleep 0.5
-done
-
-if [[ "$ime_hidden" != true ]]; then
-  ime_back_sent=true
-  adb shell input keyevent KEYCODE_BACK || true
-  for _ in $(seq 1 20); do
+stabilize_ime_hidden() {
+  local hidden_streak=0
+  local back_budget=2
+  for _ in $(seq 1 60); do
     capture_window_windows "$out/IME-WINDOW-POLL.txt"
-    if ! ime_is_actually_visible "$out/IME-WINDOW-POLL.txt"; then
-      ime_hidden=true
-      break
+    if ime_is_actually_visible "$out/IME-WINDOW-POLL.txt"; then
+      hidden_streak=0
+      if [[ "$back_budget" -gt 0 ]]; then
+        ime_back_sent=true
+        adb shell input keyevent KEYCODE_BACK || true
+        back_budget=$((back_budget - 1))
+        sleep 1
+      fi
+    else
+      hidden_streak=$((hidden_streak + 1))
+      if [[ "$hidden_streak" -ge 8 ]]; then
+        return 0
+      fi
     fi
     sleep 0.5
   done
+  return 1
+}
+
+# A freshly relaunched login activity can request the IME after the first
+# foreground frame. Require four seconds of consecutive hidden samples instead
+# of accepting one transient hidden window dump.
+sleep 2
+ime_hidden=false
+if stabilize_ime_hidden; then
+  ime_hidden=true
 fi
 
 if ! wait_for_foreground 3; then
   foreground_relaunch_after_ime=true
   adb shell am start -W -n "$resolved_activity" >> "$out/FOREGROUND-APP.txt" 2>&1 || status=1
   wait_for_foreground 30 || true
+  sleep 2
+  if stabilize_ime_hidden; then
+    ime_hidden=true
+  else
+    ime_hidden=false
+  fi
 fi
 
-sleep 1
 capture_window_windows "$out/WINDOW-WINDOWS.txt"
 if ime_is_actually_visible "$out/WINDOW-WINDOWS.txt"; then
   ime_hidden=false
@@ -276,6 +316,20 @@ for required in \
     status=1
   fi
 done
+
+if [[ "$portrait_evidence_required" == true ]]; then
+  for portrait_required in \
+    PORTRAIT-EVIDENCE-PULL.txt \
+    portrait-login-ime-stable.png \
+    portrait-login-ime-stable.xml \
+    portrait-login-ime-actions-reachable.png \
+    portrait-login-ime-actions-reachable.xml; do
+    if [[ ! -s "$out/$portrait_required" ]]; then
+      echo "Missing mandatory portrait runtime evidence: $portrait_required" >&2
+      status=1
+    fi
+  done
+fi
 
 (
   cd "$out"

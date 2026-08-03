@@ -134,8 +134,14 @@ fun rememberAdaptiveUiState(
     val windowSize = LocalWindowInfo.current.containerDpSize
     val configuration = LocalConfiguration.current
     val localDensity = LocalDensity.current
-    val widthDp = windowSize.width.value.roundToInt().coerceAtLeast(1)
-    val heightDp = windowSize.height.value.roundToInt().coerceAtLeast(1)
+    val widthDp = stableWindowDimensionDp(
+        configurationDp = configuration.screenWidthDp,
+        containerDp = windowSize.width.value.roundToInt(),
+    )
+    val heightDp = stableWindowDimensionDp(
+        configurationDp = configuration.screenHeightDp,
+        containerDp = windowSize.height.value.roundToInt(),
+    )
     val deviceSmallestWidthDp = configuration.smallestScreenWidthDp
         .takeIf { it > 0 }
         ?: minOf(widthDp, heightDp)
@@ -179,6 +185,9 @@ fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
         controller.recordKeyInput(event.nativeKeyEvent.source)
         false
     }
+
+internal fun stableWindowDimensionDp(configurationDp: Int, containerDp: Int): Int =
+    configurationDp.takeIf { it > 0 } ?: containerDp.coerceAtLeast(1)
 
 fun classifyInputSource(source: Int): HulkInputMode {
     val isRemote =
@@ -271,7 +280,12 @@ fun resolveAdaptiveLayoutPolicy(
         } else {
             HulkContentDensity.COMFORTABLE
         },
-        pageHorizontalPaddingDp = if (windowWidthClass == HulkWindowWidthClass.COMPACT) 12 else 16,
+        pageHorizontalPaddingDp = when {
+            orientation == HulkOrientation.PORTRAIT &&
+                windowWidthClass == HulkWindowWidthClass.COMPACT -> 0
+            windowWidthClass == HulkWindowWidthClass.COMPACT -> 12
+            else -> 16
+        },
         pageVerticalPaddingDp = if (windowHeightClass == HulkWindowHeightClass.COMPACT) 8 else 12,
         contentSpacingDp = if (windowHeightClass == HulkWindowHeightClass.COMPACT) 10 else 14,
         minimumPosterWidthDp = if (windowWidthClass == HulkWindowWidthClass.COMPACT) 112 else 132,

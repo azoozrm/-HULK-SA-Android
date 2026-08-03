@@ -13,7 +13,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -29,7 +28,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -156,6 +154,10 @@ private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
+
+@Composable
+private fun resolvedPageHorizontalGutter(isTv: Boolean) =
+    if (isTv) TV_PAGE_GUTTER else LocalAdaptiveUi.current.layoutPolicy.pageHorizontalPaddingDp.dp
 
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
@@ -364,25 +366,6 @@ fun MainShellScreen(
     val context = LocalContext.current
     val adaptiveUi = LocalAdaptiveUi.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
-    val portraitEdgeInset = if (
-        !isTv &&
-        !useNavigationRail &&
-        adaptiveUi.screenHeightDp > adaptiveUi.screenWidthDp
-    ) {
-        when (state.destination) {
-            MainDestination.HOME -> 25.dp
-            MainDestination.LIVE -> 12.dp
-            MainDestination.MOVIES,
-            MainDestination.SERIES,
-            MainDestination.FAVORITES,
-            MainDestination.SEARCH,
-            MainDestination.DOWNLOADS,
-            -> 13.dp
-            MainDestination.SETTINGS -> 15.dp
-        }
-    } else {
-        0.dp
-    }
     val queryMemory = remember { mutableStateMapOf<MainDestination, String>() }
     val categoryMemory = remember { mutableStateMapOf<MainDestination, String?>() }
     var previousDestination by remember { mutableStateOf(state.destination) }
@@ -471,37 +454,30 @@ fun MainShellScreen(
         } else {
             Column(Modifier.fillMaxSize()) {
                 MobileNavigation(state.destination, rememberingSelectDestination)
-                BoxWithConstraints(Modifier.weight(1f).clipToBounds()) {
-                    Box(
-                        Modifier
-                            .width(maxWidth + portraitEdgeInset + portraitEdgeInset)
-                            .fillMaxHeight()
-                            .offset(x = -portraitEdgeInset),
-                    ) {
-                        DestinationContent(
-                            state = state,
-                            isTv = false,
-                            navigationMemory = navigationMemory,
-                            isFavorite = resolvedIsFavorite,
-                            onSelectCategory = onSelectCategory,
-                            onSearch = onSearch,
-                            onOpen = onOpen,
-                            onOpenHistory = onOpenHistory,
-                            onToggleFavorite = toggleFavoriteWithFeedback,
-                            onRefresh = onRefresh,
-                            onSelectDestination = onSelectDestination,
-                            onClearHistory = onClearHistory,
-                            onPlayDownload = onPlayDownload,
-                            onDeleteDownload = onDeleteDownload,
-                            onRetryDownload = onRetryDownload,
-                            onToggleWifiOnly = onToggleWifiOnly,
-                            onToggleDownloadSchedule = onToggleDownloadSchedule,
-                            onCycleConcurrentDownloads = onCycleConcurrentDownloads,
-                            onCycleDownloadPriority = onCycleDownloadPriority,
-                            onRunDiagnostics = onRunDiagnostics,
-                            onLogout = onLogout,
-                        )
-                    }
+                Box(Modifier.weight(1f).clipToBounds()) {
+                    DestinationContent(
+                        state = state,
+                        isTv = false,
+                        navigationMemory = navigationMemory,
+                        isFavorite = resolvedIsFavorite,
+                        onSelectCategory = onSelectCategory,
+                        onSearch = onSearch,
+                        onOpen = onOpen,
+                        onOpenHistory = onOpenHistory,
+                        onToggleFavorite = toggleFavoriteWithFeedback,
+                        onRefresh = onRefresh,
+                        onSelectDestination = onSelectDestination,
+                        onClearHistory = onClearHistory,
+                        onPlayDownload = onPlayDownload,
+                        onDeleteDownload = onDeleteDownload,
+                        onRetryDownload = onRetryDownload,
+                        onToggleWifiOnly = onToggleWifiOnly,
+                        onToggleDownloadSchedule = onToggleDownloadSchedule,
+                        onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+                        onCycleDownloadPriority = onCycleDownloadPriority,
+                        onRunDiagnostics = onRunDiagnostics,
+                        onLogout = onLogout,
+                    )
                 }
             }
         }
@@ -786,7 +762,7 @@ private fun CinemaHomeScreen(
             } else HomePlaceholder(loading, onRefresh, isTv)
         }
         if (state.errorMessage != null) {
-            item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
+            item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = resolvedPageHorizontalGutter(isTv))) }
         }
         if (continueWatching.isNotEmpty()) {
             item { HomeSectionPadding(isTv) { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
@@ -873,7 +849,7 @@ private fun ActiveDownloadsSection(
 
 @Composable
 private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 25.dp)) { content() }
+    Box(Modifier.fillMaxWidth().padding(horizontal = resolvedPageHorizontalGutter(isTv))) { content() }
 }
 
 @Composable
@@ -1151,7 +1127,7 @@ private fun PosterCatalogScreen(
         Modifier
             .fillMaxSize()
             .padding(
-                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,
+                horizontal = resolvedPageHorizontalGutter(isTv),
                 vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
             ),
     ) {
@@ -1340,7 +1316,7 @@ private fun LiveCatalogScreen(
         Modifier
             .fillMaxSize()
             .padding(
-                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
+                horizontal = resolvedPageHorizontalGutter(isTv),
                 vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
             ),
     ) {
@@ -1550,7 +1526,7 @@ private fun FavoritesScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .padding(resolvedPageHorizontalGutter(isTv)),
     ) {
         PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
         Spacer(Modifier.height(18.dp))
@@ -1584,7 +1560,7 @@ private fun UnifiedSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .padding(resolvedPageHorizontalGutter(isTv)),
     ) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
         Spacer(Modifier.height(14.dp))
@@ -1746,7 +1722,7 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .padding(resolvedPageHorizontalGutter(isTv)),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
@@ -2253,7 +2229,7 @@ private fun SettingsScreen(
         contentPadding = if (isTv) {
             PaddingValues(bottom = 24.dp)
         } else {
-            PaddingValues(15.dp)
+            PaddingValues(horizontal = resolvedPageHorizontalGutter(false), vertical = 15.dp)
         },
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -2797,7 +2773,7 @@ private fun ReorderableCatalogCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 3.dp, vertical = 8.dp),
     ) {
         item { FocusButton("الكل", { onSelect(null) }, primary = selectedId == null, compact = true) }
         item { FocusButton("★ المفضلة", { onSelect(FAVORITES_CATEGORY_ID) }, primary = selectedId == FAVORITES_CATEGORY_ID, compact = true) }
