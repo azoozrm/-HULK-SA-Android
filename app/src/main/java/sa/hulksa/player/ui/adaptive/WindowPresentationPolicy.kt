@@ -18,7 +18,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 
@@ -57,12 +59,22 @@ internal fun resolveWindowPresentationPolicy(
     )
 }
 
-internal fun restoreOrientationRequest(prePlayerOrientation: Int): Int =
+internal fun restoredConfigurationOrientation(prePlayerOrientation: Int): Int =
     if (prePlayerOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+        Configuration.ORIENTATION_LANDSCAPE
+    } else {
+        Configuration.ORIENTATION_PORTRAIT
+    }
+
+internal fun restoreOrientationRequest(prePlayerOrientation: Int): Int =
+    if (restoredConfigurationOrientation(prePlayerOrientation) == Configuration.ORIENTATION_LANDSCAPE) {
         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     } else {
         ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
     }
+
+internal fun releaseOrientationRequest(prePlayerRequestedOrientation: Int): Int =
+    prePlayerRequestedOrientation
 
 @Composable
 fun ApplyAdaptiveWindowPresentation(
@@ -70,11 +82,18 @@ fun ApplyAdaptiveWindowPresentation(
     isPlayer: Boolean,
 ) {
     val context = LocalContext.current
+    val currentOrientation = LocalConfiguration.current.orientation
     val activity = remember(context) { context.findActivity() }
     val policy = resolveWindowPresentationPolicy(isTelevisionDevice, isPlayer)
-    var wasPlayer by remember(activity) { mutableStateOf(false) }
-    var prePlayerOrientation by remember(activity) {
+    var wasPlayer by rememberSaveable { mutableStateOf(false) }
+    var prePlayerOrientation by rememberSaveable {
         mutableIntStateOf(Configuration.ORIENTATION_UNDEFINED)
+    }
+    var prePlayerRequestedOrientation by rememberSaveable {
+        mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+    }
+    var pendingRestoreRequest by rememberSaveable {
+        mutableStateOf<Int?>(null)
     }
 
     DisposableEffect(activity, policy, isTelevisionDevice) {
@@ -93,25 +112,45 @@ fun ApplyAdaptiveWindowPresentation(
         }
     }
 
-    LaunchedEffect(activity, isTelevisionDevice, isPlayer) {
+    LaunchedEffect(activity, isTelevisionDevice, isPlayer, currentOrientation) {
         if (activity == null) return@LaunchedEffect
 
         if (isTelevisionDevice) {
+            pendingRestoreRequest = null
             wasPlayer = isPlayer
             return@LaunchedEffect
         }
 
         when {
             isPlayer && !wasPlayer -> {
-                prePlayerOrientation = activity.resources.configuration.orientation
+                prePlayerOrientation = currentOrientation
+                prePlayerRequestedOrientation = activity.requestedOrientation
+                pendingRestoreRequest = null
                 activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             }
 
             !isPlayer && wasPlayer -> {
+                pendingRestoreRequest = prePlayerRequestedOrientation
                 activity.requestedOrientation = restoreOrientationRequest(prePlayerOrientation)
             }
         }
         wasPlayer = isPlayer
+    }
+
+    LaunchedEffect(
+        activity,
+        isTelevisionDevice,
+        isPlayer,
+        currentOrientation,
+        prePlayerOrientation,
+        pendingRestoreRequest,
+    ) {
+        if (activity == null || isTelevisionDevice || isPlayer) return@LaunchedEffect
+        val pendingRequest = pendingRestoreRequest ?: return@LaunchedEffect
+        if (currentOrientation == restoredConfigurationOrientation(prePlayerOrientation)) {
+            activity.requestedOrientation = releaseOrientationRequest(pendingRequest)
+            pendingRestoreRequest = null
+        }
     }
 }
 

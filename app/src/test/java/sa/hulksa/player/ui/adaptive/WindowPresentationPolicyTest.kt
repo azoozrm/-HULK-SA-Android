@@ -31,6 +31,10 @@ class WindowPresentationPolicyTest {
     @Test
     fun `portrait shell is restored after leaving player`() {
         assertEquals(
+            Configuration.ORIENTATION_PORTRAIT,
+            restoredConfigurationOrientation(Configuration.ORIENTATION_PORTRAIT),
+        )
+        assertEquals(
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT,
             restoreOrientationRequest(Configuration.ORIENTATION_PORTRAIT),
         )
@@ -38,6 +42,10 @@ class WindowPresentationPolicyTest {
 
     @Test
     fun `landscape shell is restored when player was opened from landscape`() {
+        assertEquals(
+            Configuration.ORIENTATION_LANDSCAPE,
+            restoredConfigurationOrientation(Configuration.ORIENTATION_LANDSCAPE),
+        )
         assertEquals(
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
             restoreOrientationRequest(Configuration.ORIENTATION_LANDSCAPE),
@@ -47,8 +55,24 @@ class WindowPresentationPolicyTest {
     @Test
     fun `undefined pre-player orientation falls back to portrait`() {
         assertEquals(
+            Configuration.ORIENTATION_PORTRAIT,
+            restoredConfigurationOrientation(Configuration.ORIENTATION_UNDEFINED),
+        )
+        assertEquals(
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT,
             restoreOrientationRequest(Configuration.ORIENTATION_UNDEFINED),
+        )
+    }
+
+    @Test
+    fun `normal automatic rotation is released after shell orientation is restored`() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+            releaseOrientationRequest(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED),
+        )
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR,
+            releaseOrientationRequest(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR),
         )
     }
 

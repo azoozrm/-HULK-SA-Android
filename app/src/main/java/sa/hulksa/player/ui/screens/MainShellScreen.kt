@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -363,6 +364,25 @@ fun MainShellScreen(
     val context = LocalContext.current
     val adaptiveUi = LocalAdaptiveUi.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
+    val portraitEdgeInset = if (
+        !isTv &&
+        !useNavigationRail &&
+        adaptiveUi.screenHeightDp > adaptiveUi.screenWidthDp
+    ) {
+        when (state.destination) {
+            MainDestination.HOME -> 25.dp
+            MainDestination.LIVE -> 12.dp
+            MainDestination.MOVIES,
+            MainDestination.SERIES,
+            MainDestination.FAVORITES,
+            MainDestination.SEARCH,
+            MainDestination.DOWNLOADS,
+            -> 13.dp
+            MainDestination.SETTINGS -> 15.dp
+        }
+    } else {
+        0.dp
+    }
     val queryMemory = remember { mutableStateMapOf<MainDestination, String>() }
     val categoryMemory = remember { mutableStateMapOf<MainDestination, String?>() }
     var previousDestination by remember { mutableStateOf(state.destination) }
@@ -451,30 +471,37 @@ fun MainShellScreen(
         } else {
             Column(Modifier.fillMaxSize()) {
                 MobileNavigation(state.destination, rememberingSelectDestination)
-                Box(Modifier.weight(1f).clipToBounds()) {
-                    DestinationContent(
-                        state = state,
-                        isTv = false,
-                        navigationMemory = navigationMemory,
-                        isFavorite = resolvedIsFavorite,
-                        onSelectCategory = onSelectCategory,
-                        onSearch = onSearch,
-                        onOpen = onOpen,
-                        onOpenHistory = onOpenHistory,
-                        onToggleFavorite = toggleFavoriteWithFeedback,
-                        onRefresh = onRefresh,
-                        onSelectDestination = onSelectDestination,
-                        onClearHistory = onClearHistory,
-                        onPlayDownload = onPlayDownload,
-                        onDeleteDownload = onDeleteDownload,
-                        onRetryDownload = onRetryDownload,
-                        onToggleWifiOnly = onToggleWifiOnly,
-                        onToggleDownloadSchedule = onToggleDownloadSchedule,
-                        onCycleConcurrentDownloads = onCycleConcurrentDownloads,
-                        onCycleDownloadPriority = onCycleDownloadPriority,
-                        onRunDiagnostics = onRunDiagnostics,
-                        onLogout = onLogout,
-                    )
+                BoxWithConstraints(Modifier.weight(1f).clipToBounds()) {
+                    Box(
+                        Modifier
+                            .width(maxWidth + portraitEdgeInset + portraitEdgeInset)
+                            .fillMaxHeight()
+                            .offset(x = -portraitEdgeInset),
+                    ) {
+                        DestinationContent(
+                            state = state,
+                            isTv = false,
+                            navigationMemory = navigationMemory,
+                            isFavorite = resolvedIsFavorite,
+                            onSelectCategory = onSelectCategory,
+                            onSearch = onSearch,
+                            onOpen = onOpen,
+                            onOpenHistory = onOpenHistory,
+                            onToggleFavorite = toggleFavoriteWithFeedback,
+                            onRefresh = onRefresh,
+                            onSelectDestination = onSelectDestination,
+                            onClearHistory = onClearHistory,
+                            onPlayDownload = onPlayDownload,
+                            onDeleteDownload = onDeleteDownload,
+                            onRetryDownload = onRetryDownload,
+                            onToggleWifiOnly = onToggleWifiOnly,
+                            onToggleDownloadSchedule = onToggleDownloadSchedule,
+                            onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+                            onCycleDownloadPriority = onCycleDownloadPriority,
+                            onRunDiagnostics = onRunDiagnostics,
+                            onLogout = onLogout,
+                        )
+                    }
                 }
             }
         }
