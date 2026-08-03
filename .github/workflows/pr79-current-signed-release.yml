@@ -1,0 +1,36 @@
+name: PR79 Current Production Signed Release
+
+on:
+  push:
+    branches:
+      - fix/v09320-galaxy-landscape-clean
+    paths:
+      - .github/workflows/pr79-current-signed-release.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  publish-run-locator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish signed release run locator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='release/current-production-signed' \
+            -f description='Production-signed APK build is running' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+  signed-release:
+    needs: publish-run-locator
+    uses: ./.github/workflows/signed-release-qualification.yml
+    with:
+      expected_version_code: '64'
+      expected_version_name: '0.9.3.20'
+    secrets: inherit
