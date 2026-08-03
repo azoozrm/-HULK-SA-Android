@@ -249,7 +249,7 @@ jobs:
 
           main_path.write_text(main, encoding='utf-8')
 
-          components_path = Path('app/src/main/java/sa/hulksa/player/ui/components/Components.kt')
+          components_path = Path('app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt')
           components = components_path.read_text(encoding='utf-8')
           old_title = '''            Text(
                           text = item.name,
@@ -301,7 +301,7 @@ jobs:
 
           git diff --check
           git diff -- app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
-            app/src/main/java/sa/hulksa/player/ui/components/Components.kt
+            app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
 
       - uses: actions/setup-java@v5
         with:
@@ -334,7 +334,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
-            app/src/main/java/sa/hulksa/player/ui/components/Components.kt
+            app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
           git diff --cached --quiet && { echo 'No source changes to commit'; exit 1; }
           git commit -m 'fix: refine mobile home spacing and navigation cards'
           git push origin HEAD:fix/v09320-galaxy-landscape-clean
