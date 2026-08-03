@@ -3,14 +3,21 @@ from pathlib import Path
 
 path = Path("tools/pr79_adaptive_core.py")
 text = path.read_text(encoding="utf-8")
-for unsupported_import in (
-    "import androidx.compose.ui.test.assertDoesNotExist\\n",
-    "import androidx.compose.ui.test.fetchSemanticsNode\\n",
-):
-    count = text.count(unsupported_import)
-    if count != 1:
-        raise SystemExit(
-            f"Expected one generated unsupported import, found {count}: {unsupported_import!r}",
-        )
-    text = text.replace(unsupported_import, "", 1)
-path.write_text(text, encoding="utf-8")
+targets = {
+    "import androidx.compose.ui.test.assertDoesNotExist",
+    "import androidx.compose.ui.test.fetchSemanticsNode",
+}
+counts = {target: 0 for target in targets}
+kept: list[str] = []
+for line in text.splitlines(keepends=True):
+    normalized = line.rstrip("\r\n")
+    if normalized in targets:
+        counts[normalized] += 1
+    else:
+        kept.append(line)
+
+unexpected = {target: count for target, count in counts.items() if count != 1}
+if unexpected:
+    raise SystemExit(f"Unexpected generated Compose import counts: {unexpected}")
+
+path.write_text("".join(kept), encoding="utf-8")
