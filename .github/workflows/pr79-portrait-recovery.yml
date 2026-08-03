@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: pr79-portrait-repair
@@ -22,8 +24,14 @@ jobs:
       HULK_PORTAL_URL: http://3162356.xyz:8080
       HULK_CONFIG_URL: ''
       EVIDENCE_ROOT: build/compatibility-v2/targeted/phone-medium-api35
+      GH_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Publish run locator
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
+            -f body="Portrait repair validation started: run ${GITHUB_RUN_ID}, head ${GITHUB_SHA}."
+
       - uses: actions/checkout@v7
         with:
           ref: fix/v09320-galaxy-landscape-clean
@@ -122,18 +130,18 @@ jobs:
             app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
           git rm .github/workflows/pr79-portrait-recovery.yml tools/pr79_portrait_recovery.py
 
-          expected=$(cat <<'EOF'
-.github/workflows/pr79-portrait-recovery.yml
-app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt
-app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt
-app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt
-app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
-app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
-tools/pr79_portrait_recovery.py
-EOF
-          )
           actual=$(git diff --cached --name-only | sort)
+          expected=$(printf '%s\n' \
+            '.github/workflows/pr79-portrait-recovery.yml' \
+            'app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt' \
+            'app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt' \
+            'app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt' \
+            'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
+            'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
+            'tools/pr79_portrait_recovery.py')
           test "$actual" = "$expected"
 
+          gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
+            -f body="Portrait repair validation passed: run ${GITHUB_RUN_ID}. Committing the verified source repair now."
           git commit -m 'fix: stabilize portrait login and full-width phone pages'
           git push origin HEAD:fix/v09320-galaxy-landscape-clean
