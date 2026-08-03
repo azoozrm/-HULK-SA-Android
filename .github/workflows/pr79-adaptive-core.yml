@@ -55,33 +55,40 @@ jobs:
           python3 tools/pr79_adaptive_core.py
           python3 tools/pr79_adaptive_core_followup.py
           python3 tools/pr79_adaptive_core_test_fix.py
+          python3 tools/pr79_adaptive_evidence_followup.py
           git diff --check
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt \
+            app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt \
             app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
             app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt \
-            app/src/androidTest/java/sa/hulksa/player/compatibilityv2/AdaptiveMainShellComposeTest.kt
+            app/src/androidTest/java/sa/hulksa/player/compatibilityv2/AdaptiveMainShellComposeTest.kt \
+            quality/compatibility-v2/collect_runtime_evidence.sh
           git rm \
             .github/workflows/pr79-adaptive-core.yml \
             tools/pr79_adaptive_core.py \
             tools/pr79_adaptive_core_bootstrap.py \
             tools/pr79_adaptive_core_followup.py \
-            tools/pr79_adaptive_core_test_fix.py
+            tools/pr79_adaptive_core_test_fix.py \
+            tools/pr79_adaptive_evidence_followup.py
 
           actual=$(git diff --cached --name-only | sort)
           expected=$(printf '%s\n' \
             '.github/workflows/pr79-adaptive-core.yml' \
             'app/src/androidTest/java/sa/hulksa/player/compatibilityv2/AdaptiveMainShellComposeTest.kt' \
             'app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt' \
+            'app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt' \
             'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
+            'quality/compatibility-v2/collect_runtime_evidence.sh' \
             'tools/pr79_adaptive_core.py' \
             'tools/pr79_adaptive_core_bootstrap.py' \
             'tools/pr79_adaptive_core_followup.py' \
-            'tools/pr79_adaptive_core_test_fix.py')
+            'tools/pr79_adaptive_core_test_fix.py' \
+            'tools/pr79_adaptive_evidence_followup.py')
           test "$actual" = "$expected"
 
           git commit -m 'fix: add adaptive bottom navigation and input focus policy'
@@ -170,7 +177,7 @@ jobs:
           echo "tested_sha=${TESTED_SHA:-missing}"
           echo "runtime_outcome=${{ steps.runtime.outcome }}"
           echo "gate_outcome=${{ steps.evidence_gate.outcome }}"
-          for f in INSTRUMENTATION.txt INSTRUMENTATION.xml PROFILE-CONFIG.txt IME-STATE.txt FOREGROUND-APP.txt WINDOW-GEOMETRY.txt; do
+          for f in INSTRUMENTATION.txt INSTRUMENTATION.xml PROFILE-CONFIG.txt IME-STATE.txt FOREGROUND-APP.txt WINDOW-GEOMETRY.txt ADAPTIVE-EVIDENCE-PULL.txt; do
             echo "===== $f ====="
             test -f "$EVIDENCE_ROOT/$f" && cat "$EVIDENCE_ROOT/$f" || echo MISSING
           done
@@ -194,6 +201,13 @@ jobs:
           grep -q 'result=PASS' "$EVIDENCE_ROOT/IME-STATE.txt"
           test -s "$EVIDENCE_ROOT/full-window.png"
           test -s "$EVIDENCE_ROOT/window.xml"
+          test -s "$EVIDENCE_ROOT/ADAPTIVE-EVIDENCE-PULL.txt"
+          test -s "$EVIDENCE_ROOT/phone-portrait-bottom-navigation.png"
+          test -s "$EVIDENCE_ROOT/phone-portrait-bottom-navigation.xml"
+          test -s "$EVIDENCE_ROOT/phone-short-landscape-bottom-navigation.png"
+          test -s "$EVIDENCE_ROOT/phone-short-landscape-bottom-navigation.xml"
+          test -s "$EVIDENCE_ROOT/tablet-navigation-rail.png"
+          test -s "$EVIDENCE_ROOT/tablet-navigation-rail.xml"
           ! grep -qE 'FATAL EXCEPTION|Process: sa\.hulksa\.player' "$EVIDENCE_ROOT/logcat.txt"
           test "$(git rev-parse HEAD)" = "$TESTED_SHA"
 
