@@ -8,7 +8,7 @@ on:
       - .github/workflows/pr79-matrix-expansion.yml
 
 permissions:
-  contents: write
+  contents: read
   issues: write
   pull-requests: write
 
@@ -17,212 +17,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify-and-commit:
+  diagnose-generation:
     runs-on: ubuntu-latest
-    timeout-minutes: 110
+    timeout-minutes: 20
     env:
-      HULK_PORTAL_URL: http://3162356.xyz:8080
-      HULK_CONFIG_URL: ''
-      EVIDENCE_ROOT: build/compatibility-v2/matrix-expansion/phone-360x800-api35
+      DIAGNOSTIC_ROOT: build/compatibility-v2/matrix-expansion/diagnostic
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Publish run locator
+      - name: Publish diagnostic locator
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="Compatibility matrix expansion started: run ${GITHUB_RUN_ID}, source head ${GITHUB_SHA}."
+            -f body="Compatibility matrix generation diagnostic started: run ${GITHUB_RUN_ID}, source head ${GITHUB_SHA}."
 
       - uses: actions/checkout@v7
         with:
           ref: fix/v09320-galaxy-landscape-clean
           fetch-depth: 0
 
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: gradle/actions/wrapper-validation@v4
-      - uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-cleanup: on-success
-      - uses: android-actions/setup-android@v4
-
-      - name: Apply guarded matrix expansion and create tested commit
+      - name: Run guarded generators with preserved logs
+        id: generators
+        continue-on-error: true
         run: |
-          set -euo pipefail
-          python3 tools/pr79_matrix_expansion_bootstrap.py
-          python3 tools/pr79_matrix_expansion.py
-          python3 tools/pr79_matrix_expansion_followup.py
+          set -uo pipefail
+          mkdir -p "$DIAGNOSTIC_ROOT"
+
+          run_generator() {
+            local name="$1"
+            local script="$2"
+            echo "script=$script" > "$DIAGNOSTIC_ROOT/$name.status"
+            set +e
+            python3 "$script" > >(tee "$DIAGNOSTIC_ROOT/$name.stdout.log") \
+              2> >(tee "$DIAGNOSTIC_ROOT/$name.stderr.log" >&2)
+            local status=$?
+            set -e
+            echo "status=$status" >> "$DIAGNOSTIC_ROOT/$name.status"
+            git status --short > "$DIAGNOSTIC_ROOT/$name.git-status.txt" || true
+            git diff --check > "$DIAGNOSTIC_ROOT/$name.diff-check.txt" 2>&1 || true
+            if [[ "$status" -ne 0 ]]; then
+              return "$status"
+            fi
+          }
+
+          set -e
+          run_generator 01-bootstrap tools/pr79_matrix_expansion_bootstrap.py
+          run_generator 02-expansion tools/pr79_matrix_expansion.py
+          run_generator 03-followup tools/pr79_matrix_expansion_followup.py
           git diff --check
 
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            .github/workflows/compatibility-v2-full.yml \
-            .github/workflows/compatibility-v2-targeted.yml \
-            quality/compatibility-v2/config/device-matrix.json \
-            quality/compatibility-v2/config/evidence-spec.json \
-            quality/compatibility-v2/configure_emulator_profile.sh \
-            quality/compatibility-v2/run_runtime_profile.sh \
-            quality/compatibility-v2/collect_runtime_evidence.sh \
-            quality/compatibility-v2/evidence_gate.py \
-            quality/compatibility-v2/tests/test_device_matrix_expansion.py
-          git rm -f \
-            .github/workflows/pr79-matrix-expansion.yml \
-            tools/pr79_matrix_expansion.py \
-            tools/pr79_matrix_expansion_bootstrap.py \
-            tools/pr79_matrix_expansion_followup.py
-
-          actual=$(git diff --cached --name-only | sort)
-          expected=$(printf '%s\n' \
-            '.github/workflows/compatibility-v2-full.yml' \
-            '.github/workflows/compatibility-v2-targeted.yml' \
-            '.github/workflows/pr79-matrix-expansion.yml' \
-            'quality/compatibility-v2/collect_runtime_evidence.sh' \
-            'quality/compatibility-v2/config/device-matrix.json' \
-            'quality/compatibility-v2/config/evidence-spec.json' \
-            'quality/compatibility-v2/configure_emulator_profile.sh' \
-            'quality/compatibility-v2/evidence_gate.py' \
-            'quality/compatibility-v2/run_runtime_profile.sh' \
-            'quality/compatibility-v2/tests/test_device_matrix_expansion.py' \
-            'tools/pr79_matrix_expansion.py' \
-            'tools/pr79_matrix_expansion_bootstrap.py' \
-            'tools/pr79_matrix_expansion_followup.py')
-          test "$actual" = "$expected"
-
-          git commit -m 'test: expand Compatibility V2 device matrix'
-          echo "TESTED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          mkdir -p build/compatibility-v2/matrix-expansion/source
-          git rev-parse HEAD > build/compatibility-v2/matrix-expansion/source/TESTED-COMMIT.txt
-          git show --stat --oneline HEAD > build/compatibility-v2/matrix-expansion/source/COMMIT-STAT.txt
-          git diff HEAD^ HEAD --binary > build/compatibility-v2/matrix-expansion/source/TESTED-DIFF.patch
-
-      - name: Validate matrix tools workflows identity and APKs
-        run: |
-          set -euo pipefail
-          python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
-          python3 -m py_compile \
-            quality/compatibility-v2/static_validate.py \
-            quality/compatibility-v2/evidence_gate.py \
-            quality/compatibility-v2/instrumentation_to_junit.py \
-            quality/compatibility-v2/tests/test_device_matrix_expansion.py
-          bash -n quality/compatibility-v2/configure_emulator_profile.sh
-          bash -n quality/compatibility-v2/run_runtime_profile.sh
-          bash -n quality/compatibility-v2/collect_runtime_evidence.sh
-          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/compatibility-v2-full.yml'); YAML.load_file('.github/workflows/compatibility-v2-targeted.yml')"
-
-          mkdir -p build/compatibility-v2/matrix-expansion/static
-          python3 quality/compatibility-v2/static_validate.py \
-            --repo-root . \
-            --out build/compatibility-v2/matrix-expansion/static/STATIC-VALIDATION.md
-
-          logo_hash=$(sha256sum app/src/main/res/drawable-nodpi/hulk_sa_logo.webp | awk '{print $1}')
-          test "$logo_hash" = '2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e'
-          {
-            echo "logo_sha256=$logo_hash"
-            grep -F 'applicationId = "sa.hulksa.player"' app/build.gradle.kts
-            grep -F 'versionCode = 64' app/build.gradle.kts
-            grep -F 'versionName = "0.9.3.20"' app/build.gradle.kts
-            grep -F 'val productionPortalUrl = "http://3162356.xyz:8080"' app/build.gradle.kts
-          } > build/compatibility-v2/matrix-expansion/source/IDENTITY-VERIFICATION.txt
-
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
-            'platform-tools' \
-            'platforms;android-36' \
-            'build-tools;36.0.0' \
-            'system-images;android-35;google_apis;x86_64'
-          ./gradlew --no-daemon --console=plain \
-            :app:testDebugUnitTest \
-            :app:lintDebug \
-            :app:assembleDebug \
-            :app:assembleDebugAndroidTest \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
-            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
-
-          mkdir -p build/compatibility-v2/binaries
-          cp app/build/outputs/apk/debug/app-debug.apk build/compatibility-v2/binaries/app-debug.apk
-          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk build/compatibility-v2/binaries/app-debug-androidTest.apk
-          sha256sum build/compatibility-v2/binaries/*.apk \
-            > build/compatibility-v2/matrix-expansion/source/APK-SHA256SUMS.txt
-
-      - name: Configure KVM
-        run: |
-          if [[ -e /dev/kvm ]]; then sudo chmod a+rw /dev/kvm || true; fi
-
-      - name: Run measured 360x800 profile
-        id: runtime
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          disable-animations: true
-          disk-size: 4096M
-          ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 1080x2400
-          script: bash quality/compatibility-v2/run_runtime_profile.sh 'phone-360x800-api35' '1080' '2400' '480' '1.0' '0' 'ar-SA' 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' 'build/compatibility-v2/matrix-expansion/phone-360x800-api35' 'none' 'default' 'MOBILE' 'TOUCH' 'COMPACT' 'MEDIUM' 'PORTRAIT'
-
-      - name: Enforce measured runtime evidence
-        id: evidence_gate
-        if: always()
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          python3 quality/compatibility-v2/evidence_gate.py \
-            --scope runtime \
-            --evidence-root "$EVIDENCE_ROOT" \
-            --out "$EVIDENCE_ROOT/gate"
-
-      - name: Print focused matrix evidence
+      - name: Print diagnostic logs
         if: always()
         run: |
           set +e
-          echo "tested_sha=${TESTED_SHA:-missing}"
-          echo "runtime_outcome=${{ steps.runtime.outcome }}"
-          echo "gate_outcome=${{ steps.evidence_gate.outcome }}"
-          for f in PROFILE-CONFIG.txt WINDOW-CLASSIFICATION.txt WINDOW-METRICS.txt INSTRUMENTATION.txt INSTRUMENTATION.xml IME-STATE.txt FOREGROUND-APP.txt; do
-            echo "===== $f ====="
-            test -f "$EVIDENCE_ROOT/$f" && cat "$EVIDENCE_ROOT/$f" || echo MISSING
-          done
+          echo "generator_outcome=${{ steps.generators.outcome }}"
+          find "$DIAGNOSTIC_ROOT" -maxdepth 1 -type f -print -exec sh -c 'echo "===== $1 ====="; cat "$1"' _ {} \;
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: HULK-SA-PR79-MATRIX-EXPANSION-${{ github.run_id }}
-          path: build/compatibility-v2/matrix-expansion/
+          name: HULK-SA-PR79-MATRIX-GENERATION-DIAGNOSTIC-${{ github.run_id }}
+          path: ${{ env.DIAGNOSTIC_ROOT }}/
           if-no-files-found: error
-          retention-days: 21
+          retention-days: 7
 
-      - name: Require exact measured proof
+      - name: Require generator success
         if: always()
         run: |
-          set -euo pipefail
-          test '${{ steps.runtime.outcome }}' = 'success'
-          test '${{ steps.evidence_gate.outcome }}' = 'success'
-          grep -q '^result=PASS$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^requested_physical_size=1080x2400$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^effective_physical_size=1080x2400$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^requested_density_dpi=480$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^effective_density_dpi=480$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^effective_logical_width_dp=360$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^effective_logical_height_dp=800$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^actual_device_class=MOBILE$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^actual_input_mode=TOUCH$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^window_width_class=COMPACT$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^window_height_class=MEDIUM$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          grep -q '^orientation=PORTRAIT$' "$EVIDENCE_ROOT/WINDOW-CLASSIFICATION.txt"
-          test -s "$EVIDENCE_ROOT/full-window.png"
-          test -s "$EVIDENCE_ROOT/window.xml"
-          ! grep -qE 'FATAL EXCEPTION|Process: sa\.hulksa\.player' "$EVIDENCE_ROOT/logcat.txt"
-          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
-
-      - name: Push verified matrix expansion
-        run: |
-          set -euo pipefail
-          git fetch origin fix/v09320-galaxy-landscape-clean
-          test "$(git rev-parse HEAD^)" = "$(git rev-parse origin/fix/v09320-galaxy-landscape-clean)"
-          git push origin HEAD:fix/v09320-galaxy-landscape-clean
+          test '${{ steps.generators.outcome }}' = 'success'
