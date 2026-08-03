@@ -65,13 +65,14 @@ class DeviceMatrixExpansionTest(unittest.TestCase):
         self.assertIn('effective_size_from_output', source)
         self.assertIn('effective emulator size does not match requested profile', source)
 
-    def test_full_matrix_retries_one_failed_emulator_attempt_cleanly(self):
+    def test_full_matrix_remains_fail_closed_and_uses_fresh_emulator_state(self):
         source = Path(".github/workflows/compatibility-v2-full.yml").read_text(encoding="utf-8")
-        self.assertEqual(2, source.count("uses: reactivecircus/android-emulator-runner@v2"))
-        self.assertIn("id: runtime-attempt-1", source)
-        self.assertIn("continue-on-error: true", source)
-        self.assertIn("Clear evidence from failed emulator attempt", source)
-        self.assertIn("steps.runtime-attempt-1.outcome == 'failure'", source)
+        self.assertEqual(1, source.count("uses: reactivecircus/android-emulator-runner@v2"))
+        self.assertNotIn("continue-on-error:", source)
+        self.assertNotIn("update-baseline", source)
+        self.assertNotIn("update_baseline", source)
+        self.assertIn("-no-snapshot-save", source)
+        self.assertIn("timeout-minutes: 90", source)
 
     def test_full_matrix_uses_profile_specific_test_selectors_for_legacy_and_short_windows(self):
         source = Path(".github/workflows/compatibility-v2-full.yml").read_text(encoding="utf-8")
@@ -84,7 +85,7 @@ class DeviceMatrixExpansionTest(unittest.TestCase):
         self.assertIn("'phone-short-landscape-api35': ','.join([", source)
         self.assertIn("#shortLandscapePhoneCanScrollToPrimaryLoginActions", source)
         self.assertIn("'test_class': selectors.get(profile['id'], compatibility_class)", source)
-        self.assertEqual(2, source.count("'${{ matrix.test_class }}'"))
+        self.assertEqual(1, source.count("'${{ matrix.test_class }}'"))
 
 
 if __name__ == "__main__":

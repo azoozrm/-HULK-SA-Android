@@ -139,27 +139,7 @@ jobs:
             echo 'KVM is unavailable on this hosted runner; emulator boot and evidence remain mandatory.'
           fi
 
-      - name: Run real application instrumentation (attempt 1)
-        id: runtime-attempt-1
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ matrix.api }}
-          target: ${{ matrix.target }}
-          arch: x86_64
-          profile: ${{ matrix.profile }}
-          disable-animations: true
-          disk-size: 4096M
-          ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin ${{ matrix.width }}x${{ matrix.height }}
-          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' '${{ matrix.locale }}' '${{ matrix.test_class }}' 'build/compatibility-v2/runtime/${{ matrix.id }}' '${{ matrix.cutout_mode }}' '${{ matrix.navigation_mode }}' '${{ matrix.expected_device_class }}' '${{ matrix.expected_input_mode }}' '${{ matrix.expected_width_class }}' '${{ matrix.expected_height_class }}' '${{ matrix.expected_orientation }}'
-
-      - name: Clear evidence from failed emulator attempt
-        if: steps.runtime-attempt-1.outcome == 'failure'
-        run: rm -rf 'build/compatibility-v2/runtime/${{ matrix.id }}'
-
-      - name: Run real application instrumentation (retry)
-        if: steps.runtime-attempt-1.outcome == 'failure'
+      - name: Run real application instrumentation
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
