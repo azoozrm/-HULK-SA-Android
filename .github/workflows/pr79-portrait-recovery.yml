@@ -59,7 +59,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
-          python3 quality/compatibility-v2/static_validate.py
+          mkdir -p build/compatibility-v2/portrait-repair-static
+          python3 quality/compatibility-v2/static_validate.py \
+            --out build/compatibility-v2/portrait-repair-static/STATIC-VALIDATION.md
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager \
             'platform-tools' \
