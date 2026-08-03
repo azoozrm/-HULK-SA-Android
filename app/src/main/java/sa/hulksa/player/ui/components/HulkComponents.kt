@@ -426,15 +426,23 @@ fun CompactPosterCard(
                 .fillMaxWidth()
                 .padding(9.dp),
         ) {
-            Text(
-                text = item.name,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 15.sp,
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp),
+                contentAlignment = Alignment.BottomStart,
+            ) {
+                Text(
+                    text = item.name,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             val meta = listOfNotNull(item.year, item.rating?.let { "★ $it" }).joinToString(" · ")
             if (meta.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))

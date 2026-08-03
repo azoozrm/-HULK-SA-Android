@@ -609,55 +609,86 @@ private fun MobileBottomNavigation(selected: MainDestination, onSelect: (MainDes
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
         navigationState.animateScrollToItem(selectedIndex)
     }
-    LazyRow(
+    val containerShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = if (compactLandscape) 52.dp else 64.dp)
-            .background(Color(0xFF090A07))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF161710), Color(0xFF090A07)),
+                ),
+            )
+            .border(1.dp, colors.line.copy(alpha = .38f), containerShape)
+            .padding(vertical = if (compactLandscape) 4.dp else 6.dp)
             .testTag("mobile-bottom-navigation"),
-        state = navigationState,
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(destinations, key = { it.destination.name }) { entry ->
-            val active = selected == entry.destination
-            var focused by remember { mutableStateOf(false) }
-            val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
-            Column(
-                modifier = Modifier
-                    .width(if (compactLandscape) 56.dp else 66.dp)
-                    .heightIn(min = 48.dp)
-                    .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (active) colors.gold.copy(alpha = .16f) else Color.Transparent)
-                    .border(
-                        if (keyboardFocused) 2.dp else 0.dp,
-                        colors.goldBright,
-                        RoundedCornerShape(12.dp),
-                    )
-                    .onFocusChanged { focused = it.isFocused }
-                    .clickable(role = Role.Button) { onSelect(entry.destination) }
-                    .padding(horizontal = 4.dp, vertical = if (compactLandscape) 7.dp else 5.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(
-                    imageVector = entry.icon,
-                    contentDescription = entry.label,
-                    tint = if (active) colors.goldBright else colors.textMuted,
-                    modifier = Modifier.size(if (compactLandscape) 23.dp else 22.dp),
-                )
-                if (!compactLandscape) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = entry.label,
-                        color = if (active) colors.text else colors.textMuted,
-                        fontSize = 9.sp,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = if (compactLandscape) 50.dp else 60.dp),
+            state = navigationState,
+            contentPadding = PaddingValues(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items(destinations, key = { it.destination.name }) { entry ->
+                val active = selected == entry.destination
+                var focused by remember { mutableStateOf(false) }
+                val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+                val itemShape = RoundedCornerShape(15.dp)
+                Column(
+                    modifier = Modifier
+                        .width(if (compactLandscape) 58.dp else 64.dp)
+                        .height(if (compactLandscape) 48.dp else 60.dp)
+                        .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
+                        .clip(itemShape)
+                        .background(
+                            if (active) colors.gold.copy(alpha = .18f) else Color(0xFF181914),
+                        )
+                        .border(
+                            width = when {
+                                keyboardFocused -> 2.dp
+                                active -> 1.5.dp
+                                else -> 1.dp
+                            },
+                            color = when {
+                                keyboardFocused || active -> colors.goldBright
+                                else -> colors.line.copy(alpha = .42f)
+                            },
+                            shape = itemShape,
+                        )
+                        .onFocusChanged { focused = it.isFocused }
+                        .clickable(role = Role.Button) { onSelect(entry.destination) }
+                        .padding(horizontal = 4.dp, vertical = if (compactLandscape) 6.dp else 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (compactLandscape) 29.dp else 30.dp)
+                            .clip(CircleShape)
+                            .background(if (active) colors.gold else Color(0xFF24251D)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = entry.label,
+                            tint = if (active) Color.Black else colors.textMuted,
+                            modifier = Modifier.size(if (compactLandscape) 20.dp else 19.dp),
+                        )
+                    }
+                    if (!compactLandscape) {
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = entry.label,
+                            color = if (active) colors.text else colors.textMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 10.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -848,7 +879,10 @@ private fun ActiveDownloadsSection(
 ) {
     val colors = LocalHulkColors.current
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.padding(horizontal = if (isTv) 0.dp else 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(21.dp))
             Spacer(Modifier.width(8.dp))
             Text("التنزيلات الجارية", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
@@ -1040,7 +1074,15 @@ private fun PosterSection(
         }
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = title,
+            color = colors.text,
+            fontSize = if (isTv) 20.sp else 17.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (isTv) 0.dp else 10.dp),
+        )
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
@@ -1086,7 +1128,15 @@ private fun HistorySection(
         }
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+        Text(
+    text = title,
+    color = colors.text,
+    fontSize = if (isTv) 20.sp else 17.sp,
+    fontWeight = FontWeight.Bold,
+    modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = if (isTv) 0.dp else 10.dp),
+)
         Spacer(Modifier.height(10.dp))
         LazyRow(
             state = rowState,
