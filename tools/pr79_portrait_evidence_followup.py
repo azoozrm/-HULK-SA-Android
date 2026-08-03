@@ -78,18 +78,34 @@ replace_once(
                     activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 inputMethodManager.hideSoftInputFromWindow(focusedToken, 0)
             }
-            device.pressBack()
             instrumentation.waitForIdleSync()
 
-            var imeVisible = true
-            var imeProbe = 0
-            while (imeVisible && imeProbe < 20) {
+            fun readImeVisibility(): Boolean {
+                var visible = true
                 scenario.onActivity { activity ->
-                    imeVisible = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    visible = ViewCompat.getRootWindowInsets(activity.window.decorView)
                         ?.isVisible(WindowInsetsCompat.Type.ime()) == true
                 }
-                if (imeVisible) SystemClock.sleep(250L)
+                return visible
+            }
+
+            var imeVisible = readImeVisibility()
+            var imeProbe = 0
+            while (imeVisible && imeProbe < 20) {
+                SystemClock.sleep(250L)
+                imeVisible = readImeVisibility()
                 imeProbe += 1
+            }
+
+            if (imeVisible) {
+                device.pressBack()
+                instrumentation.waitForIdleSync()
+                imeProbe = 0
+                while (imeVisible && imeProbe < 20) {
+                    SystemClock.sleep(250L)
+                    imeVisible = readImeVisibility()
+                    imeProbe += 1
+                }
             }
 
             assertFalse("Portrait keyboard remained visible after dismissal", imeVisible)
@@ -219,6 +235,7 @@ for marker in (
     "portrait-login-ime-actions-reachable.png",
     "Login action remained outside the visible resized window",
     "Portrait keyboard remained visible after dismissal",
+    "if (imeVisible)",
 ):
     if marker not in instrumentation_text:
         raise SystemExit(f"Missing portrait reachability regression marker: {marker}")
