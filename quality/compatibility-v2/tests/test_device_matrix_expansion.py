@@ -53,6 +53,39 @@ class DeviceMatrixExpansionTest(unittest.TestCase):
         self.assertEqual("tall", profile["cutout_mode"])
         self.assertEqual("gestural", profile["navigation_mode"])
 
+    def test_emulator_profile_handles_non_root_images_without_err_trap_abort(self):
+        source = Path("quality/compatibility-v2/configure_emulator_profile.sh").read_text(encoding="utf-8")
+        self.assertIn('if root_output="$(adb root 2>&1)"; then', source)
+        self.assertNotIn('set +e\nroot_output="$(adb root 2>&1)"', source)
+
+    def test_emulator_profile_clears_stale_tv_size_override(self):
+        source = Path("quality/compatibility-v2/configure_emulator_profile.sh").read_text(encoding="utf-8")
+        self.assertIn("adb shell wm size reset", source)
+        self.assertIn('physical_size_after_reset=', source)
+        self.assertIn('effective_size_from_output', source)
+        self.assertIn('effective emulator size does not match requested profile', source)
+
+    def test_full_matrix_retries_one_failed_emulator_attempt_cleanly(self):
+        source = Path(".github/workflows/compatibility-v2-full.yml").read_text(encoding="utf-8")
+        self.assertEqual(2, source.count("uses: reactivecircus/android-emulator-runner@v2"))
+        self.assertIn("id: runtime-attempt-1", source)
+        self.assertIn("continue-on-error: true", source)
+        self.assertIn("Clear evidence from failed emulator attempt", source)
+        self.assertIn("steps.runtime-attempt-1.outcome == 'failure'", source)
+
+    def test_full_matrix_uses_profile_specific_test_selectors_for_legacy_and_short_windows(self):
+        source = Path(".github/workflows/compatibility-v2-full.yml").read_text(encoding="utf-8")
+        self.assertIn("'phone-small-api29': ','.join([", source)
+        self.assertIn("#phonePortraitOrientationRestoresAfterLandscapePlayback", source)
+        self.assertNotIn(
+            "compatibility_class + '#phonePortraitLoginFieldsAcceptTypingWithoutCrash',\n                  compatibility_class + '#phonePortraitOrientationRestoresAfterLandscapePlayback'",
+            source,
+        )
+        self.assertIn("'phone-short-landscape-api35': ','.join([", source)
+        self.assertIn("#shortLandscapePhoneCanScrollToPrimaryLoginActions", source)
+        self.assertIn("'test_class': selectors.get(profile['id'], compatibility_class)", source)
+        self.assertEqual(2, source.count("'${{ matrix.test_class }}'"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,6 +88,28 @@ wait_for_services() {
   '
 }
 
+effective_size_from_output() {
+  local value
+  value="$(printf '%s\n' "$1" | sed -n 's/^Override size: //p' | tail -1)"
+  if [[ -z "$value" ]]; then
+    value="$(printf '%s\n' "$1" | sed -n 's/^Physical size: //p' | tail -1)"
+  fi
+  printf '%s' "$value"
+}
+
+physical_size_from_output() {
+  printf '%s\n' "$1" | sed -n 's/^Physical size: //p' | tail -1
+}
+
+effective_density_from_output() {
+  local value
+  value="$(printf '%s\n' "$1" | sed -n 's/^Override density: //p' | tail -1)"
+  if [[ -z "$value" ]]; then
+    value="$(printf '%s\n' "$1" | sed -n 's/^Physical density: //p' | tail -1)"
+  fi
+  printf '%s' "$value"
+}
+
 stage="initial-boot"
 wait_for_boot
 wait_for_services
@@ -98,10 +120,11 @@ record "initial_locale=$initial_locale"
 record "initial_wm_size=$(adb shell wm size | tr -d '\r')"
 
 stage="request-adb-root"
-set +e
-root_output="$(adb root 2>&1)"
-root_status=$?
-set -e
+if root_output="$(adb root 2>&1)"; then
+  root_status=0
+else
+  root_status=$?
+fi
 record "adb_root_status=$root_status"
 record "adb_root_output=${root_output//$'\n'/ | }"
 adb wait-for-device
@@ -135,7 +158,21 @@ fi
 record "locale_mode=$locale_mode"
 
 stage="apply-window-profile"
-adb shell wm size "${width}x${height}"
+pre_reset_size_output="$(adb shell wm size | tr -d '\r')"
+record "pre_reset_wm_size=${pre_reset_size_output//$'\n'/ | }"
+adb shell wm size reset
+wait_for_services
+reset_size_output="$(adb shell wm size | tr -d '\r')"
+physical_size="$(physical_size_from_output "$reset_size_output")"
+record "post_reset_wm_size=${reset_size_output//$'\n'/ | }"
+record "physical_size_after_reset=$physical_size"
+if [[ "$physical_size" == "${width}x${height}" ]]; then
+  record "wm_size_mode=physical"
+else
+  adb shell wm size "${width}x${height}"
+  record "wm_size_mode=override"
+fi
+adb shell wm density reset
 adb shell wm density "$density"
 adb shell settings put system font_scale "$font_scale"
 adb shell settings put system accelerometer_rotation 0
@@ -153,10 +190,11 @@ apply_overlay() {
     capture_device_state
     exit 3
   fi
-  set +e
-  enable_output="$(adb shell cmd overlay enable --user 0 "$package_name" 2>&1)"
-  enable_status=$?
-  set -e
+  if enable_output="$(adb shell cmd overlay enable --user 0 "$package_name" 2>&1)"; then
+    enable_status=0
+  else
+    enable_status=$?
+  fi
   record "${label}_overlay=$package_name"
   record "${label}_overlay_enable_status=$enable_status"
   record "${label}_overlay_enable_output=${enable_output//$'\n'/ | }"
@@ -189,10 +227,14 @@ size_output="$(adb shell wm size | tr -d '\r')"
 density_output="$(adb shell wm density | tr -d '\r')"
 actual_font="$(adb shell settings get system font_scale | tr -d '\r')"
 actual_rotation="$(adb shell settings get system user_rotation | tr -d '\r')"
+effective_size="$(effective_size_from_output "$size_output")"
+effective_density="$(effective_density_from_output "$density_output")"
 
 record "actual_locale=$actual_locale"
 record "wm_size=$size_output"
 record "wm_density=$density_output"
+record "effective_size=$effective_size"
+record "effective_density=$effective_density"
 record "actual_font_scale=$actual_font"
 record "actual_rotation=$actual_rotation"
 record "ui_mode=$(adb shell dumpsys uimode | tr -d '\r')"
@@ -203,15 +245,15 @@ if [[ "$locale_mode" != "application-deferred" && "$actual_locale" != "$locale" 
   capture_device_state
   exit 3
 fi
-if [[ "$size_output" != *"${width}x${height}"* ]]; then
+if [[ "$effective_size" != "${width}x${height}" ]]; then
   record "result=BLOCKED"
-  record "failure_reason=emulator size override was not applied"
+  record "failure_reason=effective emulator size does not match requested profile"
   capture_device_state
   exit 3
 fi
-if [[ "$density_output" != *"$density"* ]]; then
+if [[ "$effective_density" != "$density" ]]; then
   record "result=BLOCKED"
-  record "failure_reason=emulator density override was not applied"
+  record "failure_reason=effective emulator density does not match requested profile"
   capture_device_state
   exit 3
 fi
@@ -228,8 +270,6 @@ if [[ "$actual_rotation" != "$rotation" ]]; then
   exit 3
 fi
 
-effective_size="$(printf '%s\n' "$size_output" | grep -Eo '[0-9]+x[0-9]+' | tail -1)"
-effective_density="$(printf '%s\n' "$density_output" | grep -Eo '[0-9]+' | tail -1)"
 actual_device_class=MOBILE
 actual_input_mode=TOUCH
 if adb shell pm list features 2>/dev/null | tr -d '\r' | grep -q '^feature:android.software.leanback$'; then

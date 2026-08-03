@@ -55,6 +55,7 @@ class EvidenceGateTest(unittest.TestCase):
         ime_hidden: bool = True,
         requested_size: tuple[int, int] = (360, 640),
         png_size: tuple[int, int] | None = None,
+        app_window_size: tuple[int, int] | None = None,
         xml_size: tuple[int, int] | None = None,
     ) -> Path:
         package = "sa.hulksa.player.dev"
@@ -62,7 +63,8 @@ class EvidenceGateTest(unittest.TestCase):
         locale_result = "result=PASS\nlocale_verified=true\n" if locale_verified else "result=BLOCKED\n"
         ime_result = "result=PASS\nime_hidden=true\n" if ime_hidden else "result=FAIL\nime_hidden=false\n"
         png_size = png_size or requested_size
-        xml_size = xml_size or requested_size
+        app_window_size = app_window_size or requested_size
+        xml_size = xml_size or app_window_size
         orientation = "LANDSCAPE" if requested_size[0] > requested_size[1] else "PORTRAIT"
         files = {
             "PROFILE-CONFIG.txt": (
@@ -84,6 +86,12 @@ class EvidenceGateTest(unittest.TestCase):
                 "actual_input_mode=TOUCH\n"
                 "expected_device_class=MOBILE\n"
                 "expected_input_mode=TOUCH\n"
+            ),
+            "WINDOW-METRICS.txt": (
+                f"Display: init={requested_size[0]}x{requested_size[1]} "
+                f"base={requested_size[0]}x{requested_size[1]} "
+                f"cur={requested_size[0]}x{requested_size[1]} "
+                f"app={app_window_size[0]}x{app_window_size[1]}\n"
             ),
             "INSTRUMENTATION.xml": '<testsuite tests="6" failures="0" errors="0" skipped="1"/>\n',
             "FOREGROUND-APP.txt": f"package={package}\nresolved_activity={package}/.MainActivity\nStatus: ok\n",
@@ -116,6 +124,7 @@ class EvidenceGateTest(unittest.TestCase):
                             "PROFILE-CONFIG.txt",
                             "APPLICATION-LOCALE.txt",
                             "WINDOW-CLASSIFICATION.txt",
+                            "WINDOW-METRICS.txt",
                             "INSTRUMENTATION.xml",
                             "FOREGROUND-APP.txt",
                             "IME-STATE.txt",
@@ -181,12 +190,14 @@ class EvidenceGateTest(unittest.TestCase):
                 app_foreground=True,
                 requested_size=(2340, 1080),
                 png_size=(1080, 2340),
+                app_window_size=(2340, 1080),
                 xml_size=(1080, 2340),
             )
             checks = MODULE.gate_evidence(spec, "runtime", root)
             geometry = next(check for check in checks if check.id == "runtime-window-geometry")
             self.assertEqual("FAIL", geometry.status)
-            self.assertIn("Requested 2340x1080", geometry.message)
+            self.assertIn("full-window PNG=1080x2340", geometry.message)
+            self.assertIn("XML=1080x2340", geometry.message)
 
     def test_matching_landscape_geometry_passes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -199,6 +210,36 @@ class EvidenceGateTest(unittest.TestCase):
             checks = MODULE.gate_evidence(spec, "runtime", root)
             geometry = next(check for check in checks if check.id == "runtime-window-geometry")
             self.assertEqual("PASS", geometry.status)
+
+    def test_system_bar_reduced_application_window_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = self.write_runtime_fixture(
+                root,
+                app_foreground=True,
+                requested_size=(360, 640),
+                app_window_size=(360, 592),
+                xml_size=(360, 592),
+            )
+            checks = MODULE.gate_evidence(spec, "runtime", root)
+            geometry = next(check for check in checks if check.id == "runtime-window-geometry")
+            self.assertEqual("PASS", geometry.status)
+            self.assertIn("app window 360x592", geometry.message)
+
+    def test_hierarchy_must_match_window_manager_application_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = self.write_runtime_fixture(
+                root,
+                app_foreground=True,
+                requested_size=(360, 640),
+                app_window_size=(360, 592),
+                xml_size=(360, 560),
+            )
+            checks = MODULE.gate_evidence(spec, "runtime", root)
+            geometry = next(check for check in checks if check.id == "runtime-window-geometry")
+            self.assertEqual("FAIL", geometry.status)
+            self.assertIn("expected app window=360x592", geometry.message)
 
 
 if __name__ == "__main__":

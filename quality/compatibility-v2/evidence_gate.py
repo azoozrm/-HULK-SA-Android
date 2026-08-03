@@ -17,7 +17,8 @@ from pathlib import Path
 
 APP_PACKAGE = "sa.hulksa.player.dev"
 SIZE_PATTERN = re.compile(r"^requested_size=(\d+)x(\d+)$", re.MULTILINE)
-BOUNDS_PATTERN = re.compile(r"^\[0,0\]\[(\d+),(\d+)\]$")
+APP_SIZE_PATTERN = re.compile(r"\bapp=(\d+)x(\d+)\b")
+BOUNDS_PATTERN = re.compile(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$")
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,17 @@ def requested_dimensions(path: Path) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def window_manager_application_dimensions(path: Path) -> tuple[int, int]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    match = APP_SIZE_PATTERN.search(text)
+    if match is None:
+        raise ValueError("WINDOW-METRICS.txt does not expose app=WIDTHxHEIGHT")
+    width, height = int(match.group(1)), int(match.group(2))
+    if width <= 0 or height <= 0:
+        raise ValueError("WindowManager application dimensions are zero")
+    return width, height
+
+
 def application_bounds(path: Path) -> tuple[int, int]:
     root = ET.parse(path).getroot()
     for node in root.iter("node"):
@@ -104,38 +116,54 @@ def application_bounds(path: Path) -> tuple[int, int]:
         bounds = node.attrib.get("bounds", "")
         match = BOUNDS_PATTERN.match(bounds)
         if match is not None:
-            return int(match.group(1)), int(match.group(2))
-    raise ValueError(f"window.xml has no full application bounds for {APP_PACKAGE}")
+            left, top, right, bottom = map(int, match.groups())
+            width, height = right - left, bottom - top
+            if width > 0 and height > 0:
+                return width, height
+    raise ValueError(f"window.xml has no non-empty application bounds for {APP_PACKAGE}")
 
 
 def check_runtime_window_geometry(evidence_root: Path) -> EvidenceCheck:
     profile = evidence_root / "PROFILE-CONFIG.txt"
+    metrics = evidence_root / "WINDOW-METRICS.txt"
     screenshot = evidence_root / "full-window.png"
     hierarchy = evidence_root / "window.xml"
-    evidence = [str(profile), str(screenshot), str(hierarchy)]
+    evidence = [str(profile), str(metrics), str(screenshot), str(hierarchy)]
     try:
-        expected = requested_dimensions(profile)
+        display_size = requested_dimensions(profile)
+        app_size = window_manager_application_dimensions(metrics)
         png_size = png_dimensions(screenshot)
         xml_size = application_bounds(hierarchy)
     except (OSError, ValueError, struct.error, ET.ParseError) as exc:
         return EvidenceCheck("runtime-window-geometry", "FAIL", f"Unable to verify runtime geometry: {exc}", evidence)
 
     mismatches: list[str] = []
-    if png_size != expected:
-        mismatches.append(f"PNG={png_size[0]}x{png_size[1]}")
-    if xml_size != expected:
-        mismatches.append(f"XML={xml_size[0]}x{xml_size[1]}")
+    if png_size != display_size:
+        mismatches.append(
+            f"full-window PNG={png_size[0]}x{png_size[1]} expected display={display_size[0]}x{display_size[1]}"
+        )
+    if app_size[0] > display_size[0] or app_size[1] > display_size[1]:
+        mismatches.append(
+            f"WindowManager app={app_size[0]}x{app_size[1]} exceeds display={display_size[0]}x{display_size[1]}"
+        )
+    if xml_size != app_size:
+        mismatches.append(
+            f"XML={xml_size[0]}x{xml_size[1]} expected app window={app_size[0]}x{app_size[1]}"
+        )
     if mismatches:
         return EvidenceCheck(
             "runtime-window-geometry",
             "FAIL",
-            f"Requested {expected[0]}x{expected[1]} but " + ", ".join(mismatches),
+            "; ".join(mismatches),
             evidence,
         )
     return EvidenceCheck(
         "runtime-window-geometry",
         "PASS",
-        f"PNG and application hierarchy match requested geometry {expected[0]}x{expected[1]}",
+        (
+            f"Full-window PNG matches display {display_size[0]}x{display_size[1]} and application hierarchy "
+            f"matches WindowManager app window {app_size[0]}x{app_size[1]}"
+        ),
         evidence,
     )
 

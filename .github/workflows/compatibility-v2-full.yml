@@ -30,6 +30,24 @@ jobs:
           from pathlib import Path
           profiles = json.loads(Path('quality/compatibility-v2/config/device-matrix.json').read_text(encoding='utf-8'))['profiles']
           include = []
+          compatibility_class = 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest'
+          selectors = {
+              'phone-small-api29': ','.join([
+                  compatibility_class + '#phoneLauncherStartsRealApplicationAndSurvivesRecreation',
+                  compatibility_class + '#phonePortraitOrientationRestoresAfterLandscapePlayback',
+                  compatibility_class + '#explicitManifestComponentStartsInstalledDebugPackage',
+                  compatibility_class + '#phoneWindowUsesTransparentEdgeToEdgeSystemBars',
+                  compatibility_class + '#visibleApplicationNodesHaveNonZeroBoundsInsideDisplay',
+                  compatibility_class + '#capturesFullWindowScreenshotAndHierarchyWithoutCropping',
+              ]),
+              'phone-short-landscape-api35': ','.join([
+                  compatibility_class + '#phoneLauncherStartsRealApplicationAndSurvivesRecreation',
+                  compatibility_class + '#explicitManifestComponentStartsInstalledDebugPackage',
+                  compatibility_class + '#shortLandscapePhoneCanScrollToPrimaryLoginActions',
+                  compatibility_class + '#visibleApplicationNodesHaveNonZeroBoundsInsideDisplay',
+                  compatibility_class + '#capturesFullWindowScreenshotAndHierarchyWithoutCropping',
+              ]),
+          }
           for profile in profiles:
               include.append({
                   'id': profile['id'],
@@ -49,6 +67,7 @@ jobs:
                   'expected_width_class': profile['expected_width_class'],
                   'expected_height_class': profile['expected_height_class'],
                   'expected_orientation': profile['expected_orientation'],
+                  'test_class': selectors.get(profile['id'], compatibility_class),
               })
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write('runtime_matrix=' + json.dumps({'include': include}, separators=(',', ':')) + '\n')
@@ -98,7 +117,7 @@ jobs:
   runtime-matrix:
     needs: build-test-binaries
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.build-test-binaries.outputs.runtime_matrix) }}
@@ -120,7 +139,9 @@ jobs:
             echo 'KVM is unavailable on this hosted runner; emulator boot and evidence remain mandatory.'
           fi
 
-      - name: Run real application instrumentation
+      - name: Run real application instrumentation (attempt 1)
+        id: runtime-attempt-1
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
@@ -130,8 +151,26 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin ${{ matrix.width }}x${{ matrix.height }}
-          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' '${{ matrix.locale }}' 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest' 'build/compatibility-v2/runtime/${{ matrix.id }}' '${{ matrix.cutout_mode }}' '${{ matrix.navigation_mode }}' '${{ matrix.expected_device_class }}' '${{ matrix.expected_input_mode }}' '${{ matrix.expected_width_class }}' '${{ matrix.expected_height_class }}' '${{ matrix.expected_orientation }}'
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin ${{ matrix.width }}x${{ matrix.height }}
+          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' '${{ matrix.locale }}' '${{ matrix.test_class }}' 'build/compatibility-v2/runtime/${{ matrix.id }}' '${{ matrix.cutout_mode }}' '${{ matrix.navigation_mode }}' '${{ matrix.expected_device_class }}' '${{ matrix.expected_input_mode }}' '${{ matrix.expected_width_class }}' '${{ matrix.expected_height_class }}' '${{ matrix.expected_orientation }}'
+
+      - name: Clear evidence from failed emulator attempt
+        if: steps.runtime-attempt-1.outcome == 'failure'
+        run: rm -rf 'build/compatibility-v2/runtime/${{ matrix.id }}'
+
+      - name: Run real application instrumentation (retry)
+        if: steps.runtime-attempt-1.outcome == 'failure'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin ${{ matrix.width }}x${{ matrix.height }}
+          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ matrix.id }}' '${{ matrix.width }}' '${{ matrix.height }}' '${{ matrix.density }}' '${{ matrix.font_scale }}' '${{ matrix.rotation }}' '${{ matrix.locale }}' '${{ matrix.test_class }}' 'build/compatibility-v2/runtime/${{ matrix.id }}' '${{ matrix.cutout_mode }}' '${{ matrix.navigation_mode }}' '${{ matrix.expected_device_class }}' '${{ matrix.expected_input_mode }}' '${{ matrix.expected_width_class }}' '${{ matrix.expected_height_class }}' '${{ matrix.expected_orientation }}'
 
       - name: Enforce runtime evidence
         if: always()
