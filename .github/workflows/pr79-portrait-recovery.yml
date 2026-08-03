@@ -97,10 +97,10 @@ jobs:
           grep -q 'OK (1 test)' "$EVIDENCE_ROOT/INSTRUMENTATION.txt"
           grep -q 'tests="1" failures="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
           grep -q 'result=PASS' "$EVIDENCE_ROOT/IME-STATE.txt"
-          grep -q 'sa.hulksa.player.dev/sa.hulksa.player.MainActivity' "$EVIDENCE_ROOT/FOREGROUND-APP.txt"
+          grep -q 'resolved_activity=sa.hulksa.player.dev/sa.hulksa.player.MainActivity' "$EVIDENCE_ROOT/FOREGROUND-APP.txt"
           ! grep -qE 'FATAL EXCEPTION|Process: sa\.hulksa\.player' "$EVIDENCE_ROOT/logcat.txt"
-          test -s "$EVIDENCE_ROOT/portrait-login-ime-stable.png"
-          test -s "$EVIDENCE_ROOT/portrait-login-ime-stable.xml"
+          test -s "$EVIDENCE_ROOT/full-window.png"
+          test -s "$EVIDENCE_ROOT/window.xml"
 
       - uses: actions/upload-artifact@v7
         with:
