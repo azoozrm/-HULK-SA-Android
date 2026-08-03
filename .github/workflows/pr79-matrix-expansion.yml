@@ -61,8 +61,9 @@ jobs:
 
           set -e
           run_generator 01-bootstrap tools/pr79_matrix_expansion_bootstrap.py
-          run_generator 02-expansion tools/pr79_matrix_expansion.py
-          run_generator 03-followup tools/pr79_matrix_expansion_followup.py
+          run_generator 02-compat-fix tools/pr79_matrix_expansion_compat_fix.py
+          run_generator 03-expansion tools/pr79_matrix_expansion.py
+          run_generator 04-followup tools/pr79_matrix_expansion_followup.py
           git diff --check
 
       - name: Print diagnostic logs
