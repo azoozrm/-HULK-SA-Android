@@ -1,6 +1,6 @@
 name: PR79 Adaptive Core Completion
 
-# Retry after allowing deletion of intentionally rewritten temporary repair tools.
+# Retry after aligning generated Compose-test imports with the project test API.
 on:
   push:
     branches:
@@ -53,6 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/pr79_adaptive_core_bootstrap.py
+          python3 tools/pr79_adaptive_compile_fix.py
           python3 tools/pr79_adaptive_core.py
           python3 tools/pr79_adaptive_core_followup.py
           python3 tools/pr79_adaptive_core_test_fix.py
@@ -70,6 +71,7 @@ jobs:
             quality/compatibility-v2/collect_runtime_evidence.sh
           git rm -f \
             .github/workflows/pr79-adaptive-core.yml \
+            tools/pr79_adaptive_compile_fix.py \
             tools/pr79_adaptive_core.py \
             tools/pr79_adaptive_core_bootstrap.py \
             tools/pr79_adaptive_core_followup.py \
@@ -85,6 +87,7 @@ jobs:
             'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
             'quality/compatibility-v2/collect_runtime_evidence.sh' \
+            'tools/pr79_adaptive_compile_fix.py' \
             'tools/pr79_adaptive_core.py' \
             'tools/pr79_adaptive_core_bootstrap.py' \
             'tools/pr79_adaptive_core_followup.py' \
