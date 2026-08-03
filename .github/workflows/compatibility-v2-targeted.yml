@@ -126,6 +126,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
           bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/prepare_avd_profile.sh
           bash -n quality/compatibility-v2/collect_runtime_evidence.sh
           bash -n quality/compatibility-v2/run_runtime_profile.sh
           ./gradlew --no-daemon --console=plain \
@@ -151,7 +152,8 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
+          pre-emulator-launch-script: bash quality/compatibility-v2/prepare_avd_profile.sh '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' 'test'
           script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' '${{ needs.resolve-profile.outputs.locale }}' '${{ needs.resolve-profile.outputs.test_class }}' 'build/compatibility-v2/targeted/${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.cutout_mode }}' '${{ needs.resolve-profile.outputs.navigation_mode }}' '${{ needs.resolve-profile.outputs.expected_device_class }}' '${{ needs.resolve-profile.outputs.expected_input_mode }}' '${{ needs.resolve-profile.outputs.expected_width_class }}' '${{ needs.resolve-profile.outputs.expected_height_class }}' '${{ needs.resolve-profile.outputs.expected_orientation }}'
       - name: Enforce targeted evidence
         if: always()
