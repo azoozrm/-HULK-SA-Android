@@ -1,0 +1,171 @@
+name: PR79 Signed Mobile UI Update
+
+on:
+  push:
+    branches:
+      - fix/v09320-galaxy-landscape-clean
+    paths:
+      - .github/workflows/pr79-signed-ui-update.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: pr79-signed-mobile-ui-update
+  cancel-in-progress: false
+
+jobs:
+  sign-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production-signing
+    steps:
+      - name: Publish signing status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state=pending \
+            -f context='release/production-signing' \
+            -f description='Production-signed APK is being built and verified' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/v09320-galaxy-landscape-clean
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'cmdline-tools;latest'
+
+      - name: Verify source identity
+        run: |
+          set -euo pipefail
+          grep -F 'applicationId = "sa.hulksa.player"' app/build.gradle.kts
+          grep -F 'versionCode = 64' app/build.gradle.kts
+          grep -F 'versionName = "0.9.3.20"' app/build.gradle.kts
+          grep -F 'val productionPortalUrl = "http://3162356.xyz:8080"' app/build.gradle.kts
+          test "$(git branch --show-current)" = 'fix/v09320-galaxy-landscape-clean'
+
+      - name: Verify production signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          PROD_CERT_SHA256: ${{ secrets.PROD_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          for key in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD PROD_CERT_SHA256; do
+            test -n "${!key:-}" || { echo "Missing required production secret: $key" >&2; exit 1; }
+          done
+
+      - name: Materialize and inspect production keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          KEYSTORE_PATH="$RUNNER_TEMP/hulk-sa-production.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          test -s "$KEYSTORE_PATH"
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+
+      - name: Build signed production release
+        env:
+          ORG_GRADLE_PROJECT_HULK_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/hulk-sa-production.jks
+          ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain clean :app:assembleRelease :app:bundleRelease
+          test -f app/build/outputs/apk/release/app-release.apk
+          test -f app/build/outputs/bundle/release/app-release.aab
+
+      - name: Verify signed APK identity, ABI and certificate
+        env:
+          PROD_CERT_SHA256: ${{ secrets.PROD_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          APK='app/build/outputs/apk/release/app-release.apk'
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          mkdir -p signed-apk/evidence
+
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | tee signed-apk/evidence/APK-BADGING.txt
+          grep -F "package: name='sa.hulksa.player' versionCode='64' versionName='0.9.3.20'" signed-apk/evidence/APK-BADGING.txt
+
+          "$BUILD_TOOLS/apkanalyzer" files list "$APK" | tee signed-apk/evidence/APK-FILES.txt
+          grep -q '^/lib/arm64-v8a/' signed-apk/evidence/APK-FILES.txt
+          grep -q '^/lib/armeabi-v7a/' signed-apk/evidence/APK-FILES.txt
+          grep -q '^/lib/x86_64/' signed-apk/evidence/APK-FILES.txt
+          if grep -q '^/lib/x86/' signed-apk/evidence/APK-FILES.txt; then
+            echo 'Legacy x86 ABI must not be present' >&2
+            exit 1
+          fi
+
+          "$BUILD_TOOLS/zipalign" -c -v 4 "$APK" | tee signed-apk/evidence/APK-ZIPALIGN.txt
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee signed-apk/evidence/APK-SIGNATURE.txt
+          grep -F 'Verified using v1 scheme (JAR signing): true' signed-apk/evidence/APK-SIGNATURE.txt
+          grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' signed-apk/evidence/APK-SIGNATURE.txt
+
+          ACTUAL_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signed-apk/evidence/APK-SIGNATURE.txt | head -n1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_CERT="$(printf '%s' "$PROD_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          test -n "$ACTUAL_CERT"
+          test "$ACTUAL_CERT" = "$EXPECTED_CERT" || {
+            echo "Production certificate mismatch" >&2
+            echo "Actual: $ACTUAL_CERT" >&2
+            exit 1
+          }
+
+          cp "$APK" signed-apk/HULK-SA-v0.9.3.20-SIGNED-UI-UPDATE.apk
+          sha256sum signed-apk/HULK-SA-v0.9.3.20-SIGNED-UI-UPDATE.apk | tee signed-apk/evidence/APK-SHA256SUMS.txt
+          printf 'source_commit=%s\npackage=sa.hulksa.player\nversionName=0.9.3.20\nversionCode=64\ncertificate_sha256=%s\n' \
+            "$GITHUB_SHA" "$ACTUAL_CERT" > signed-apk/evidence/APK-METADATA.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HULK-SA-v0.9.3.20-SIGNED-UI-UPDATE-${{ github.run_id }}
+          path: signed-apk/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish final signing status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [[ "$JOB_STATUS" == 'success' ]]; then
+            state=success
+            description='Production-signed APK certificate and identity verified'
+          else
+            state=failure
+            description='Production signing or verification failed'
+          fi
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='release/production-signing' \
+            -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
