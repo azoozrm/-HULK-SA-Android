@@ -53,6 +53,7 @@ jobs:
           set -euo pipefail
           python3 tools/pr79_adaptive_core.py
           python3 tools/pr79_adaptive_core_followup.py
+          python3 tools/pr79_adaptive_core_test_fix.py
           git diff --check
 
           git config user.name 'github-actions[bot]'
@@ -65,7 +66,8 @@ jobs:
           git rm \
             .github/workflows/pr79-adaptive-core.yml \
             tools/pr79_adaptive_core.py \
-            tools/pr79_adaptive_core_followup.py
+            tools/pr79_adaptive_core_followup.py \
+            tools/pr79_adaptive_core_test_fix.py
 
           actual=$(git diff --cached --name-only | sort)
           expected=$(printf '%s\n' \
@@ -75,7 +77,8 @@ jobs:
             'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
             'tools/pr79_adaptive_core.py' \
-            'tools/pr79_adaptive_core_followup.py')
+            'tools/pr79_adaptive_core_followup.py' \
+            'tools/pr79_adaptive_core_test_fix.py')
           test "$actual" = "$expected"
 
           git commit -m 'fix: add adaptive bottom navigation and input focus policy'
