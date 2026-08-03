@@ -51,6 +51,7 @@ jobs:
       - name: Apply guarded adaptive repair and create tested commit
         run: |
           set -euo pipefail
+          python3 tools/pr79_adaptive_core_bootstrap.py
           python3 tools/pr79_adaptive_core.py
           python3 tools/pr79_adaptive_core_followup.py
           python3 tools/pr79_adaptive_core_test_fix.py
@@ -66,6 +67,7 @@ jobs:
           git rm \
             .github/workflows/pr79-adaptive-core.yml \
             tools/pr79_adaptive_core.py \
+            tools/pr79_adaptive_core_bootstrap.py \
             tools/pr79_adaptive_core_followup.py \
             tools/pr79_adaptive_core_test_fix.py
 
@@ -77,6 +79,7 @@ jobs:
             'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
             'tools/pr79_adaptive_core.py' \
+            'tools/pr79_adaptive_core_bootstrap.py' \
             'tools/pr79_adaptive_core_followup.py' \
             'tools/pr79_adaptive_core_test_fix.py')
           test "$actual" = "$expected"
