@@ -19,6 +19,11 @@ instrumentation = (
 )
 replace_once(
     instrumentation,
+    "import android.view.WindowManager\n",
+    "import android.view.WindowManager\nimport android.view.inputmethod.InputMethodManager\n",
+)
+replace_once(
+    instrumentation,
     '''            device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
             device.pressBack()
@@ -66,16 +71,36 @@ replace_once(
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-actions-reachable.xml"))
 
+            scenario.onActivity { activity ->
+                val focusedToken = activity.currentFocus?.windowToken ?: activity.window.decorView.windowToken
+                activity.currentFocus?.clearFocus()
+                val inputMethodManager =
+                    activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                inputMethodManager.hideSoftInputFromWindow(focusedToken, 0)
+            }
             device.pressBack()
             instrumentation.waitForIdleSync()
-            SystemClock.sleep(900L)
-            device.click(device.displayWidth / 2, device.displayHeight / 7)
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(500L)
+
+            var imeVisible = true
+            var imeProbe = 0
+            while (imeVisible && imeProbe < 20) {
+                scenario.onActivity { activity ->
+                    imeVisible = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                        ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                }
+                if (imeVisible) SystemClock.sleep(250L)
+                imeProbe += 1
+            }
+
+            assertFalse("Portrait keyboard remained visible after dismissal", imeVisible)
             assertTrue(
                 "Application package left the foreground while dismissing the portrait keyboard",
                 device.hasObject(By.pkg(targetContext.packageName).depth(0)),
             )
+            scenario.onActivity { activity ->
+                assertFalse("Application finished while dismissing the portrait keyboard", activity.isFinishing)
+                assertTrue("Application window disappeared while dismissing the portrait keyboard", activity.window.decorView.isShown)
+            }
 ''',
 )
 
@@ -161,9 +186,9 @@ stabilize_ime_hidden() {
   return 1
 }
 
-# A freshly relaunched login activity can request the IME a moment after the
-# first foreground frame. Require four seconds of consecutive hidden samples
-# instead of accepting one transient hidden window dump.
+# A freshly relaunched login activity can request the IME after the first
+# foreground frame. Require four seconds of consecutive hidden samples instead
+# of accepting one transient hidden window dump.
 sleep 2
 ime_hidden=false
 if stabilize_ime_hidden; then
@@ -193,6 +218,7 @@ instrumentation_text = Path(instrumentation).read_text(encoding="utf-8")
 for marker in (
     "portrait-login-ime-actions-reachable.png",
     "Login action remained outside the visible resized window",
+    "Portrait keyboard remained visible after dismissal",
 ):
     if marker not in instrumentation_text:
         raise SystemExit(f"Missing portrait reachability regression marker: {marker}")
