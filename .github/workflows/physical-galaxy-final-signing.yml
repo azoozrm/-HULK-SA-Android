@@ -1,0 +1,33 @@
+name: HULK SA Final Galaxy Source Signing
+
+on:
+  push:
+    branches:
+      - rebuild/adaptive-ui-compatibility-lab-v2
+    paths:
+      - '.github/workflows/physical-galaxy-final-signing.yml'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  qualify-signed-release:
+    uses: ./.github/workflows/signed-release-qualification.yml
+    with:
+      expected_version_code: '64'
+      expected_version_name: '0.9.3.20'
+    secrets: inherit
+
+  report:
+    if: always()
+    needs: qualify-signed-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish final signing result
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUALIFICATION_RESULT: ${{ needs.qualify-signed-release.result }}
+        run: |
+          gh pr comment 78 --repo "$GITHUB_REPOSITORY" --body $'## Final Galaxy application-source signing\n\n- Run: `'$GITHUB_RUN_ID'`\n- Workflow head: `'$GITHUB_SHA'`\n- Qualified application source: `617985f459f38a58346bbc8c33f85b786a9eaa90`\n- Result: **'$QUALIFICATION_RESULT'**\n\nNo release, merge, Drive upload, or publication was performed.'
