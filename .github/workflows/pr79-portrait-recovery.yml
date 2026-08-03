@@ -30,7 +30,7 @@ jobs:
       - name: Publish diagnostic locator
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="Portrait failure-evidence run started: run ${GITHUB_RUN_ID}, head ${GITHUB_SHA}."
+            -f body="Portrait targeted runtime started: run ${GITHUB_RUN_ID}, head ${GITHUB_SHA}."
 
       - uses: actions/checkout@v7
         with:
@@ -54,7 +54,7 @@ jobs:
           python3 tools/pr79_portrait_recovery.py
           git diff --check
 
-      - name: Compile unit lint and instrumentation APKs
+      - name: Compile and stage unit lint and instrumentation APKs
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
@@ -70,6 +70,13 @@ jobs:
             :app:assembleDebugAndroidTest \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
             -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+          mkdir -p build/compatibility-v2/binaries
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            build/compatibility-v2/binaries/app-debug.apk
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            build/compatibility-v2/binaries/app-debug-androidTest.apk
+          test -s build/compatibility-v2/binaries/app-debug.apk
+          test -s build/compatibility-v2/binaries/app-debug-androidTest.apk
 
       - name: Configure KVM
         run: |
@@ -90,7 +97,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 1080x2340
           script: bash quality/compatibility-v2/run_runtime_profile.sh 'phone-medium-api35' '1080' '2340' '420' '1.0' '0' 'ar-SA' 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest#phonePortraitLoginFieldsAcceptTypingWithoutCrash' 'build/compatibility-v2/targeted/phone-medium-api35'
 
-      - name: Print focused failure evidence
+      - name: Print focused runtime evidence
         if: always()
         run: |
           set +e
@@ -109,13 +116,13 @@ jobs:
           done
           if test -f "$EVIDENCE_ROOT/logcat.txt"; then
             echo '===== crash logcat ====='
-            grep -nE 'FATAL EXCEPTION|AndroidRuntime|Process: sa\.hulksa\.player|Caused by:|IllegalStateException|IndexOutOfBoundsException|NullPointerException' "$EVIDENCE_ROOT/logcat.txt" | tail -n 240 || true
+            grep -nE 'FATAL EXCEPTION|AndroidRuntime|Process: sa\.hulksa\.player|Caused by:|IllegalStateException|IndexOutOfBoundsException|NullPointerException|AssertionError' "$EVIDENCE_ROOT/logcat.txt" | tail -n 240 || true
           fi
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: HULK-SA-PR79-PORTRAIT-FAILURE-EVIDENCE-${{ github.run_id }}
+          name: HULK-SA-PR79-PORTRAIT-TARGETED-${{ github.run_id }}
           path: ${{ env.EVIDENCE_ROOT }}/
           if-no-files-found: warn
           retention-days: 21
