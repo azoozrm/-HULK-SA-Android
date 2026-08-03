@@ -66,7 +66,7 @@ jobs:
           for token in tokenize.generate_tokens(io.StringIO(source).readline):
               if token.type != tokenize.STRING:
                   continue
-              match = re.match(r'(?i)^([rubf]*)(\'\'\'|""")', token.string)
+              match = re.match(r"(?i)^([rubf]*)(?:'''|\"\"\")", token.string)
               if match is None or 'r' in match.group(1).lower():
                   continue
               start = offsets[token.start[0] - 1] + token.start[1]
