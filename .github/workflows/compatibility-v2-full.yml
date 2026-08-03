@@ -2,6 +2,11 @@ name: HULK SA Compatibility V2 - Full Matrix
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/v09320-galaxy-landscape-clean
+    paths:
+      - quality/compatibility-v2/run-full.request
 
 permissions:
   contents: read
