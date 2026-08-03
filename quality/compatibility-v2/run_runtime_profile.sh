@@ -10,6 +10,13 @@ rotation="${6:?rotation is required}"
 locale="${7:?BCP-47 locale is required}"
 test_class="${8:-sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest}"
 out="${9:-${EVIDENCE_ROOT:-build/compatibility-v2/runtime/$profile}}"
+cutout_mode="${10:-none}"
+navigation_mode="${11:-default}"
+expected_device_class="${12:-UNSPECIFIED}"
+expected_input_mode="${13:-UNSPECIFIED}"
+expected_width_class="${14:-UNSPECIFIED}"
+expected_height_class="${15:-UNSPECIFIED}"
+expected_orientation="${16:-UNSPECIFIED}"
 package="sa.hulksa.player.dev"
 mkdir -p "$out"
 
@@ -194,7 +201,9 @@ wait_for_installed_package_registration() {
 
 bash quality/compatibility-v2/configure_emulator_profile.sh \
   "$profile" "$width" "$height" "$density" "$font_scale" "$rotation" "$locale" \
-  "$out/PROFILE-CONFIG.txt"
+  "$out/PROFILE-CONFIG.txt" \
+  "$cutout_mode" "$navigation_mode" "$expected_device_class" "$expected_input_mode" \
+  "$expected_width_class" "$expected_height_class" "$expected_orientation"
 
 wait_for_package_installer_ready
 : > "$out/INSTALLATION.txt"

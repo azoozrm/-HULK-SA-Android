@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "scopes": {
     "fast": [
       "STATIC-RESULT.json",
@@ -12,6 +12,7 @@
       "PROFILE-CONFIG.txt",
       "APPLICATION-LOCALE.txt",
       "DEVICE-PROFILE.txt",
+      "WINDOW-CLASSIFICATION.txt",
       "WINDOW-METRICS.txt",
       "INSTRUMENTATION.txt",
       "INSTRUMENTATION.xml",

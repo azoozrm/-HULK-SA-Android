@@ -36,6 +36,13 @@ jobs:
       font_scale: ${{ steps.profile.outputs.font_scale }}
       rotation: ${{ steps.profile.outputs.rotation }}
       locale: ${{ steps.profile.outputs.locale }}
+      cutout_mode: ${{ steps.profile.outputs.cutout_mode }}
+      navigation_mode: ${{ steps.profile.outputs.navigation_mode }}
+      expected_device_class: ${{ steps.profile.outputs.expected_device_class }}
+      expected_input_mode: ${{ steps.profile.outputs.expected_input_mode }}
+      expected_width_class: ${{ steps.profile.outputs.expected_width_class }}
+      expected_height_class: ${{ steps.profile.outputs.expected_height_class }}
+      expected_orientation: ${{ steps.profile.outputs.expected_orientation }}
     steps:
       - uses: actions/checkout@v7
       - id: profile
@@ -79,6 +86,13 @@ jobs:
               # phone geometry back to portrait.
               'rotation': 0,
               'locale': profile['locale'],
+              'cutout_mode': profile.get('cutout_mode', 'none'),
+              'navigation_mode': profile.get('navigation_mode', 'default'),
+              'expected_device_class': profile['expected_device_class'],
+              'expected_input_mode': profile['expected_input_mode'],
+              'expected_width_class': profile['expected_width_class'],
+              'expected_height_class': profile['expected_height_class'],
+              'expected_orientation': profile['expected_orientation'],
           }
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               for key, value in values.items():
@@ -138,7 +152,7 @@ jobs:
           disk-size: 4096M
           ram-size: 2048M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
-          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' '${{ needs.resolve-profile.outputs.locale }}' '${{ needs.resolve-profile.outputs.test_class }}' 'build/compatibility-v2/targeted/${{ needs.resolve-profile.outputs.profile_id }}'
+          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' '${{ needs.resolve-profile.outputs.locale }}' '${{ needs.resolve-profile.outputs.test_class }}' 'build/compatibility-v2/targeted/${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.cutout_mode }}' '${{ needs.resolve-profile.outputs.navigation_mode }}' '${{ needs.resolve-profile.outputs.expected_device_class }}' '${{ needs.resolve-profile.outputs.expected_input_mode }}' '${{ needs.resolve-profile.outputs.expected_width_class }}' '${{ needs.resolve-profile.outputs.expected_height_class }}' '${{ needs.resolve-profile.outputs.expected_orientation }}'
       - name: Enforce targeted evidence
         if: always()
         run: |

@@ -63,12 +63,28 @@ class EvidenceGateTest(unittest.TestCase):
         ime_result = "result=PASS\nime_hidden=true\n" if ime_hidden else "result=FAIL\nime_hidden=false\n"
         png_size = png_size or requested_size
         xml_size = xml_size or requested_size
+        orientation = "LANDSCAPE" if requested_size[0] > requested_size[1] else "PORTRAIT"
         files = {
             "PROFILE-CONFIG.txt": (
                 f"requested_size={requested_size[0]}x{requested_size[1]}\n"
                 "result=PASS\nprofile_verified=true\nlocale_mode=system-root\n"
             ),
             "APPLICATION-LOCALE.txt": f"requested_locale=ar-SA\n{locale_result}",
+            "WINDOW-CLASSIFICATION.txt": (
+                "result=PASS\n"
+                f"requested_physical_size={requested_size[0]}x{requested_size[1]}\n"
+                f"effective_physical_size={requested_size[0]}x{requested_size[1]}\n"
+                "effective_density_dpi=160\n"
+                f"effective_logical_width_dp={requested_size[0]}\n"
+                f"effective_logical_height_dp={requested_size[1]}\n"
+                "window_width_class=COMPACT\n"
+                "window_height_class=MEDIUM\n"
+                f"orientation={orientation}\n"
+                "actual_device_class=MOBILE\n"
+                "actual_input_mode=TOUCH\n"
+                "expected_device_class=MOBILE\n"
+                "expected_input_mode=TOUCH\n"
+            ),
             "INSTRUMENTATION.xml": '<testsuite tests="6" failures="0" errors="0" skipped="1"/>\n',
             "FOREGROUND-APP.txt": f"package={package}\nresolved_activity={package}/.MainActivity\nStatus: ok\n",
             "IME-STATE.txt": ime_result,
@@ -99,6 +115,7 @@ class EvidenceGateTest(unittest.TestCase):
                         "runtime": [
                             "PROFILE-CONFIG.txt",
                             "APPLICATION-LOCALE.txt",
+                            "WINDOW-CLASSIFICATION.txt",
                             "INSTRUMENTATION.xml",
                             "FOREGROUND-APP.txt",
                             "IME-STATE.txt",
@@ -120,6 +137,16 @@ class EvidenceGateTest(unittest.TestCase):
             spec = self.write_runtime_fixture(root, app_foreground=True)
             checks = MODULE.gate_evidence(spec, "runtime", root)
             self.assertTrue(all(check.status == "PASS" for check in checks), checks)
+
+    def test_missing_window_classification_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            spec = self.write_runtime_fixture(root, app_foreground=True)
+            (root / "WINDOW-CLASSIFICATION.txt").unlink()
+            checks = MODULE.gate_evidence(spec, "runtime", root)
+            failures = {check.id for check in checks if check.status == "FAIL"}
+            self.assertIn("WINDOW-CLASSIFICATION.txt", failures)
+            self.assertIn("runtime-window-classification", failures)
 
     def test_home_screen_evidence_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
