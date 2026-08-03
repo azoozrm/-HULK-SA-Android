@@ -1,6 +1,6 @@
 name: PR79 Adaptive Core Completion
 
-# Retry after correcting guarded screenshot marker validation.
+# Retry after allowing deletion of intentionally rewritten temporary repair tools.
 on:
   push:
     branches:
@@ -68,7 +68,7 @@ jobs:
             app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt \
             app/src/androidTest/java/sa/hulksa/player/compatibilityv2/AdaptiveMainShellComposeTest.kt \
             quality/compatibility-v2/collect_runtime_evidence.sh
-          git rm \
+          git rm -f \
             .github/workflows/pr79-adaptive-core.yml \
             tools/pr79_adaptive_core.py \
             tools/pr79_adaptive_core_bootstrap.py \
