@@ -53,6 +53,7 @@ jobs:
           set -euo pipefail
           python3 tools/pr79_portrait_recovery.py
           python3 tools/pr79_portrait_evidence_followup.py
+          python3 tools/pr79_portrait_artifact_capture.py
           git diff --check
 
       - name: Run static and JVM validation
@@ -103,7 +104,7 @@ jobs:
         run: |
           set +e
           echo "runtime_outcome=${{ steps.runtime.outcome }}"
-          for f in INSTRUMENTATION.txt INSTRUMENTATION.xml IME-STATE.txt FOREGROUND-APP.txt; do
+          for f in INSTRUMENTATION.txt INSTRUMENTATION.xml IME-STATE.txt FOREGROUND-APP.txt PORTRAIT-EVIDENCE-PULL.txt; do
             echo "===== $f ====="
             test -f "$EVIDENCE_ROOT/$f" && cat "$EVIDENCE_ROOT/$f" || echo MISSING
           done
@@ -126,6 +127,11 @@ jobs:
           grep -q 'OK (1 test)' "$EVIDENCE_ROOT/INSTRUMENTATION.txt"
           grep -q 'tests="1" failures="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
           grep -q 'result=PASS' "$EVIDENCE_ROOT/IME-STATE.txt"
+          test -s "$EVIDENCE_ROOT/PORTRAIT-EVIDENCE-PULL.txt"
+          test -s "$EVIDENCE_ROOT/portrait-login-ime-stable.png"
+          test -s "$EVIDENCE_ROOT/portrait-login-ime-stable.xml"
+          test -s "$EVIDENCE_ROOT/portrait-login-ime-actions-reachable.png"
+          test -s "$EVIDENCE_ROOT/portrait-login-ime-actions-reachable.xml"
           ! grep -qE 'FATAL EXCEPTION|Process: sa\.hulksa\.player' "$EVIDENCE_ROOT/logcat.txt"
 
       - name: Commit only the verified permanent repair
@@ -138,9 +144,11 @@ jobs:
             app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt \
             app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
             app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt \
-            app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
+            app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt \
+            quality/compatibility-v2/collect_runtime_evidence.sh
           git rm \
             .github/workflows/pr79-portrait-recovery.yml \
+            tools/pr79_portrait_artifact_capture.py \
             tools/pr79_portrait_evidence_followup.py \
             tools/pr79_portrait_ime_cleanup.py \
             tools/pr79_portrait_no_back.py \
@@ -153,6 +161,8 @@ jobs:
             'app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt' \
             'app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt' \
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
+            'quality/compatibility-v2/collect_runtime_evidence.sh' \
+            'tools/pr79_portrait_artifact_capture.py' \
             'tools/pr79_portrait_evidence_followup.py' \
             'tools/pr79_portrait_ime_cleanup.py' \
             'tools/pr79_portrait_no_back.py' \
