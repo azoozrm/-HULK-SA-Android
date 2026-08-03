@@ -1,0 +1,202 @@
+name: HULK SA Compatibility V2 - Install Over
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Existing HULK SA source ref to install first
+        required: true
+        default: c291fa7df2f3ee3a04d020cd831f02073a44d514
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-v2-install-over-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-over-debug-lineage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      BASELINE_REF: ${{ inputs.baseline_ref || 'c291fa7df2f3ee3a04d020cd831f02073a44d514' }}
+      PACKAGE: sa.hulksa.player.dev
+      TEST_PACKAGE: sa.hulksa.player.dev.test
+      TEST_RUNNER: androidx.test.runner.AndroidJUnitRunner
+      HULK_PORTAL_URL: http://3162356.xyz:8080
+      HULK_CONFIG_URL: ''
+      EVIDENCE_ROOT: build/install-over-evidence
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+
+      - name: Checkout preserved PR57 baseline
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BASELINE_REF }}
+          path: baseline
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK and create one shared debug signer
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.android"
+          rm -f "$HOME/.android/debug.keystore"
+          keytool -genkeypair \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname 'CN=Android Debug,O=HULK SA Compatibility V2,C=SA' \
+            -keyalg RSA -keysize 2048 -validity 10000
+          chmod 600 "$HOME/.android/debug.keystore"
+
+      - name: Build baseline and candidate with the same signer
+        run: |
+          set -euo pipefail
+          bash -n candidate/quality/compatibility-v2/run_install_over_qualification.sh
+          (
+            cd baseline
+            ./gradlew --no-daemon --console=plain :app:assembleDebug \
+              -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+              -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+          )
+          (
+            cd candidate
+            ./gradlew --no-daemon --console=plain \
+              :app:assembleDebug :app:assembleDebugAndroidTest \
+              -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+              -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+          )
+          mkdir -p "$EVIDENCE_ROOT/apks"
+          cp baseline/app/build/outputs/apk/debug/app-debug.apk "$EVIDENCE_ROOT/apks/baseline-pr57-debug.apk"
+          cp candidate/app/build/outputs/apk/debug/app-debug.apk "$EVIDENCE_ROOT/apks/candidate-debug.apk"
+          cp candidate/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk "$EVIDENCE_ROOT/apks/candidate-androidTest.apk"
+
+      - name: Verify package identity and signer continuity before runtime
+        run: |
+          set -euo pipefail
+          baseline_apk="$EVIDENCE_ROOT/apks/baseline-pr57-debug.apk"
+          candidate_apk="$EVIDENCE_ROOT/apks/candidate-debug.apk"
+          test "$(apkanalyzer manifest application-id "$baseline_apk")" = "$PACKAGE"
+          test "$(apkanalyzer manifest application-id "$candidate_apk")" = "$PACKAGE"
+          test "$(apkanalyzer manifest version-code "$baseline_apk")" = '64'
+          test "$(apkanalyzer manifest version-code "$candidate_apk")" = '64'
+          apksigner verify --print-certs "$baseline_apk" > "$EVIDENCE_ROOT/BASELINE-SIGNER.txt"
+          apksigner verify --print-certs "$candidate_apk" > "$EVIDENCE_ROOT/CANDIDATE-SIGNER.txt"
+          baseline_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$EVIDENCE_ROOT/BASELINE-SIGNER.txt" | head -n1)"
+          candidate_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$EVIDENCE_ROOT/CANDIDATE-SIGNER.txt" | head -n1)"
+          test -n "$baseline_cert"
+          test "$baseline_cert" = "$candidate_cert"
+          candidate_sha="$(git -C candidate rev-parse HEAD)"
+          {
+            echo "baseline_ref=$BASELINE_REF"
+            echo "candidate_sha=$candidate_sha"
+            echo "package=$PACKAGE"
+            echo 'versionCode=64'
+            echo "debug_certificate_sha256=$candidate_cert"
+            echo 'result=PASS'
+          } > "$EVIDENCE_ROOT/INSTALL-OVER-PLAN.txt"
+
+      - name: Configure Linux KVM when available
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod a+rw /dev/kvm
+            ls -l /dev/kvm
+          fi
+
+      - name: Install baseline, preserve data, update candidate, and test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 1080x2340
+          script: >-
+            bash candidate/quality/compatibility-v2/run_install_over_qualification.sh
+            "$EVIDENCE_ROOT/apks/baseline-pr57-debug.apk"
+            "$EVIDENCE_ROOT/apks/candidate-debug.apk"
+            "$EVIDENCE_ROOT/apks/candidate-androidTest.apk"
+            "$PACKAGE"
+            "$TEST_PACKAGE"
+            "$TEST_RUNNER"
+            "$EVIDENCE_ROOT"
+
+      - name: Finalize install-over evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s "$EVIDENCE_ROOT/INSTALL-OVER-RESULT.txt"
+          grep -Fq 'result=PASS' "$EVIDENCE_ROOT/INSTALL-OVER-RESULT.txt"
+          test -s "$EVIDENCE_ROOT/DATA-PRESERVATION.txt"
+          grep -Fq 'result=PASS' "$EVIDENCE_ROOT/DATA-PRESERVATION.txt"
+          test -s "$EVIDENCE_ROOT/POST-INSTRUMENTATION-DATA.txt"
+          grep -Fq 'result=PASS' "$EVIDENCE_ROOT/POST-INSTRUMENTATION-DATA.txt"
+          test -s "$EVIDENCE_ROOT/FINAL-FOREGROUND.txt"
+          grep -Fq 'result=PASS' "$EVIDENCE_ROOT/FINAL-FOREGROUND.txt"
+          test -s "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
+          grep -Eq 'tests="7"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
+          grep -Eq 'failures="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
+          test -s "$EVIDENCE_ROOT/full-window.png"
+          test -s "$EVIDENCE_ROOT/window.xml"
+          test -s "$EVIDENCE_ROOT/logcat.txt"
+          python3 - "$EVIDENCE_ROOT" "$PACKAGE" <<'PY'
+          import struct
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          package = sys.argv[2]
+          png = root / 'full-window.png'
+          header = png.read_bytes()[:24]
+          if len(header) < 24 or header[:8] != b'\x89PNG\r\n\x1a\n' or header[12:16] != b'IHDR':
+              raise SystemExit('Invalid PNG evidence')
+          width, height = struct.unpack('>II', header[16:24])
+          if (width, height) != (1080, 2340):
+              raise SystemExit(f'Unexpected PNG geometry: {width}x{height}')
+          hierarchy = ET.parse(root / 'window.xml').getroot()
+          packages = {node.attrib.get('package') for node in hierarchy.iter() if node.attrib.get('package')}
+          if package not in packages:
+              raise SystemExit(f'Application package absent from hierarchy: {sorted(packages)}')
+          PY
+          (
+            cd "$EVIDENCE_ROOT"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            test -s SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-INSTALL-OVER-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_ROOT }}/
+          if-no-files-found: error
+          retention-days: 21

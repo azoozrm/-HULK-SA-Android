@@ -1,0 +1,75 @@
+name: HULK SA Compatibility V2 - Visual Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_run_id:
+        description: Full-matrix workflow run id that owns the runtime artifact
+        required: true
+        type: string
+      profile_id:
+        description: Exact device profile id
+        required: true
+        default: tv-logical-960x540-api35
+        type: string
+      screen_id:
+        description: Approved baseline screen id
+        required: true
+        default: launch
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  compare-full-window:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.runtime_run_id }}
+          name: HULK-SA-COMPATIBILITY-V2-RUNTIME-${{ inputs.profile_id }}-${{ inputs.runtime_run_id }}
+          path: build/compatibility-v2/downloaded
+
+      - name: Resolve approved baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          mkdir -p build/compatibility-v2/visual
+          expected='quality/compatibility-v2/baselines/${{ inputs.profile_id }}/${{ inputs.screen_id }}.png'
+          actual='build/compatibility-v2/downloaded/full-window.png'
+          if [[ ! -s "$expected" ]]; then
+            echo 'BLOCKED: HUMAN-APPROVED FULL-WINDOW BASELINE REQUIRED' | tee build/compatibility-v2/visual/VISUAL-STATUS.md
+            echo 'blocked=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test -s "$actual"
+          echo 'blocked=false' >> "$GITHUB_OUTPUT"
+          bash quality/compatibility-v2/visual_regression.sh "$actual" "$expected" build/compatibility-v2/visual
+
+      - name: Enforce complete visual evidence
+        if: steps.baseline.outputs.blocked == 'false'
+        run: |
+          set -euo pipefail
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope visual \
+            --evidence-root build/compatibility-v2/visual \
+            --out build/compatibility-v2/visual/gate
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-VISUAL-${{ inputs.profile_id }}-${{ github.run_id }}
+          path: build/compatibility-v2/visual/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail blocked visual qualification
+        if: steps.baseline.outputs.blocked == 'true'
+        run: |
+          echo 'Visual qualification is BLOCKED; it is not PASS.' >&2
+          exit 2

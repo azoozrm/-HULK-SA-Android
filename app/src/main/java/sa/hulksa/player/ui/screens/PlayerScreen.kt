@@ -53,6 +53,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -449,44 +450,27 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, activePanel, browserVisible, resumePromptVisible, unlockVisible, controlsLocked, nextCountdown) {
-        if (browserVisible || activePanel != null || resumePromptVisible || unlockVisible || nextCountdown >= 0) return@LaunchedEffect
-        delay(90L)
-        runCatching {
-            if (controlsLocked || !controlsVisible) playerFocus.requestFocus() else primaryFocus.requestFocus()
+    LaunchedEffect(
+        controlsVisible,
+        activePanel,
+        browserVisible,
+        resumePromptVisible,
+        unlockVisible,
+        controlsLocked,
+        nextCountdown,
+        request.historyKey,
+    ) {
+        val target = when {
+            browserVisible || activePanel != null -> null
+            resumePromptVisible -> resumeFocus
+            nextCountdown >= 0 -> nextEpisodePlayFocus
+            unlockVisible -> unlockFocus
+            controlsLocked || !controlsVisible -> playerFocus
+            else -> primaryFocus
         }
-    }
-
-    LaunchedEffect(nextCountdown, request.historyKey) {
-        if (nextCountdown >= 0) {
-            repeat(4) {
-                delay(if (it == 0) 70L else 130L)
-                runCatching { nextEpisodePlayFocus.requestFocus() }
-            }
-        }
-    }
-
-    LaunchedEffect(resumePromptVisible, request.historyKey) {
-        if (resumePromptVisible) {
-            // Some Android TV PlayerView implementations reclaim focus while the surface is attaching.
-            // Re-assert the primary resume action over several frames so the remote works immediately.
-            repeat(4) {
-                delay(if (it == 0) 80L else 140L)
-                runCatching { resumeFocus.requestFocus() }
-            }
-        }
-    }
-
-    LaunchedEffect(unlockVisible, controlsLocked) {
-        when {
-            unlockVisible -> {
-                delay(110L)
-                runCatching { unlockFocus.requestFocus() }
-            }
-            controlsLocked -> {
-                delay(90L)
-                runCatching { playerFocus.requestFocus() }
-            }
+        if (target != null) {
+            withFrameNanos { }
+            runCatching { target.requestFocus() }
         }
     }
 
@@ -580,10 +564,10 @@ fun PlayerScreen(
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-                        seekBy(SEEK_STEP_MS); true
+                        seekBy(-SEEK_STEP_MS); true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-                        seekBy(-SEEK_STEP_MS); true
+                        seekBy(SEEK_STEP_MS); true
                     } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> if (!request.isLive && surfaceFocused) {
                         seekBy(-SEEK_STEP_MS); true
@@ -1142,11 +1126,11 @@ private fun SeekableProgressBar(
                     if (event.type != KeyEventType.KeyDown || durationMs <= 0L) return@onPreviewKeyEvent false
                     when (event.nativeKeyEvent.keyCode) {
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-                            previewMs = (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            previewMs = (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            previewMs = (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            previewMs = (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_CENTER,
@@ -1510,7 +1494,7 @@ private fun LiveChannelBrowser(
     LaunchedEffect(visible, selectedCategory, normalizedQuery) {
         if (visible.isNotEmpty() && normalizedQuery.isBlank()) {
             listState.scrollToItem(focusIndex)
-            delay(110L)
+            withFrameNanos { }
             runCatching { channelFocus.requestFocus() }
         }
     }

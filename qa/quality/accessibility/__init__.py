@@ -1,2 +1,0 @@
-"""Accessibility evidence gates."""
-

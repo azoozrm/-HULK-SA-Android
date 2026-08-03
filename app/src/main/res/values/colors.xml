@@ -2,5 +2,6 @@
 <resources>
     <color name="ic_launcher_background">#000000</color>
     <color name="hulk_black">#050505</color>
+    <color name="hulk_surface">#111108</color>
     <color name="hulk_gold">#D4B351</color>
 </resources>

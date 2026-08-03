@@ -10,8 +10,33 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse("")
+val productionPortalUrl = "http://3162356.xyz:8080"
+val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse(productionPortalUrl)
 val configUrl = providers.gradleProperty("HULK_CONFIG_URL").orElse("")
+
+val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
+    group = "verification"
+    description = "Fails release builds unless the canonical HULK runtime endpoint is compiled."
+
+    doLast {
+        if (portalUrl.get().trim() != productionPortalUrl) {
+            throw GradleException(
+                "Release PORTAL_URL must match the canonical HULK service endpoint.",
+            )
+        }
+        if (configUrl.get().trim().isNotEmpty()) {
+            throw GradleException(
+                "Release CONFIG_URL must be empty so it cannot override the canonical endpoint.",
+            )
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        dependsOn(verifyProductionRuntimeConfig)
+    }
+}
 
 val releaseSigningProperties = linkedMapOf(
     "HULK_RELEASE_KEYSTORE_FILE" to providers.gradleProperty("HULK_RELEASE_KEYSTORE_FILE"),
@@ -48,17 +73,14 @@ android {
         applicationId = "sa.hulksa.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 62
-        versionName = "0.9.3.18"
+        versionCode = 64
+        versionName = "0.9.3.20"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        testInstrumentationRunnerArguments["clearPackageData"] = "true"
 
         buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
         buildConfigField("String", "CONFIG_URL", configUrl.get().asBuildConfigString())
         vectorDrawables.useSupportLibrary = true
 
-        // Phase 3.1: preserve qualified ABIs while polishing responsive mobile UI.
-        // x86 is intentionally excluded; x86_64 remains for emulators/tests.
         ndk {
             abiFilters += listOf(
                 "arm64-v8a",
@@ -123,10 +145,6 @@ android {
             "META-INF/DEPENDENCIES",
         )
     }
-
-    testOptions {
-        execution = "ANDROIDX_TEST_ORCHESTRATOR"
-    }
 }
 
 dependencies {
@@ -157,11 +175,11 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
-    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
-    androidTestUtil("androidx.test:orchestrator:1.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.4.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

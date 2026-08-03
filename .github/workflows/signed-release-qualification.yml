@@ -6,11 +6,11 @@ on:
       expected_version_code:
         required: false
         type: string
-        default: '62'
+        default: '64'
       expected_version_name:
         required: false
         type: string
-        default: '0.9.3.18'
+        default: '0.9.3.20'
     secrets:
       HULK_RELEASE_KEYSTORE_BASE64:
         required: true
@@ -27,12 +27,12 @@ on:
       expected_version_code:
         description: Expected Android versionCode
         required: true
-        default: '62'
+        default: '64'
         type: string
       expected_version_name:
         description: Expected Android versionName
         required: true
-        default: '0.9.3.18'
+        default: '0.9.3.20'
         type: string
 
 permissions:
@@ -44,24 +44,22 @@ concurrency:
 
 jobs:
   signing-preflight:
-    name: Unsigned fallback and signing fail-closed preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
+    env:
+      HULK_PORTAL_URL: http://3162356.xyz:8080
+      HULK_CONFIG_URL: ''
 
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/wrapper-validation@v4
-
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: on-success
-
       - uses: android-actions/setup-android@v4
 
       - name: Install Android build SDK
@@ -71,67 +69,54 @@ jobs:
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
 
-      - name: Validate verification scripts
+      - name: Validate signing scripts and static identity
         run: |
           set -euo pipefail
           bash -n tools/verify-apk-signing.sh
           bash -n tools/verify-aab-signing.sh
-          python3 -m py_compile tools/verify-runtime-config.py
-          PYTHONDONTWRITEBYTECODE=1 \
-            python3 -m unittest discover -s tools/tests -v
+          python3 quality/compatibility-v2/static_validate.py \
+            --repo-root . --out build/compatibility-v2/release-static
 
-      - name: Prove unsigned release fallback remains buildable
+      - name: Prove unsigned fallback remains buildable
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             clean :app:assembleRelease :app:bundleRelease \
-            -PHULK_PORTAL_URL=http://3162356.xyz:8080 \
-            -PHULK_CONFIG_URL=
-
-          unsigned_apk='app/build/outputs/apk/release/app-release-unsigned.apk'
-          test -f "$unsigned_apk"
-          if apksigner verify "$unsigned_apk" >/dev/null 2>&1; then
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
+            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+          apk='app/build/outputs/apk/release/app-release-unsigned.apk'
+          test -f "$apk"
+          if apksigner verify "$apk" >/dev/null 2>&1; then
             echo 'Unsigned fallback unexpectedly produced a signed APK' >&2
             exit 1
           fi
-          unsigned_aab='app/build/outputs/bundle/release/app-release.aab'
-          build_config="$(find app/build/generated/source/buildConfig/release -type f -name BuildConfig.java -print -quit)"
-          test -n "$build_config"
-          mkdir -p runtime-config-preflight
-          python3 tools/verify-runtime-config.py \
-            "$unsigned_apk" \
-            --build-config "$build_config" \
-            --report runtime-config-preflight/UNSIGNED-APK-RUNTIME-CONFIG.md
-          python3 tools/verify-runtime-config.py \
-            "$unsigned_aab" \
-            --build-config "$build_config" \
-            --report runtime-config-preflight/UNSIGNED-AAB-RUNTIME-CONFIG.md
-          echo 'PASS: no signing inputs produces an explicitly unsigned release APK'
 
-      - name: Prove incomplete signing configuration fails closed
+      - name: Prove partial signing input fails closed
         run: |
           set -euo pipefail
           set +e
           ./gradlew --no-daemon --console=plain :app:tasks \
-            -PHULK_RELEASE_KEY_ALIAS=preflight-only \
-            > signing-incomplete.log 2>&1
+            -PHULK_RELEASE_KEY_ALIAS=preflight-only > signing-incomplete.log 2>&1
           status=$?
           set -e
-
-          if [[ "$status" -eq 0 ]]; then
-            echo 'Incomplete signing configuration was accepted unexpectedly' >&2
-            cat signing-incomplete.log >&2
-            exit 1
-          fi
+          test "$status" -ne 0
           grep -Fq 'Incomplete release signing configuration' signing-incomplete.log
-          echo 'PASS: partial signing inputs fail before any release is produced'
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-SIGNING-PREFLIGHT-${{ github.run_id }}
+          path: |
+            build/compatibility-v2/release-static/
+            signing-incomplete.log
+          if-no-files-found: error
+          retention-days: 14
 
   signed-release:
-    name: Build and verify signed production artifacts
     needs: signing-preflight
     runs-on: ubuntu-latest
     environment: production-signing
-    timeout-minutes: 60
+    timeout-minutes: 70
     env:
       HULK_RELEASE_KEYSTORE_BASE64: ${{ secrets.HULK_RELEASE_KEYSTORE_BASE64 }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_RELEASE_KEY_ALIAS }}
@@ -143,18 +128,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/wrapper-validation@v4
-
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: on-success
-
       - uses: android-actions/setup-android@v4
 
       - name: Install Android build SDK
@@ -164,7 +145,7 @@ jobs:
           sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
 
-      - name: Validate required release secrets
+      - name: Validate required protected inputs
         run: |
           set -euo pipefail
           missing=()
@@ -174,13 +155,9 @@ jobs:
           [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD" ]] || missing+=(HULK_RELEASE_KEY_PASSWORD)
           [[ -n "$EXPECTED_CERT_SHA256" ]] || missing+=(HULK_RELEASE_CERT_SHA256)
           if [[ "${#missing[@]}" -ne 0 ]]; then
-            printf 'Missing required release signing inputs: %s\n' "${missing[*]}" >&2
+            printf 'Missing protected signing inputs: %s\n' "${missing[*]}" >&2
             exit 2
           fi
-          [[ "$HULK_PORTAL_URL" = 'http://3162356.xyz:8080' ]]
-          [[ -z "$HULK_CONFIG_URL" ]]
-          echo 'PASS: all required release signing inputs are present'
-          echo 'PASS: canonical runtime endpoint is explicit and CONFIG_URL is empty'
 
       - name: Materialize ephemeral keystore
         run: |
@@ -190,7 +167,6 @@ jobs:
           chmod 600 "$keystore"
           test -s "$keystore"
           echo "ORG_GRADLE_PROJECT_HULK_RELEASE_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
-          echo 'PASS: keystore materialized only in runner temporary storage'
 
       - name: Build signed APK and AAB
         run: |
@@ -199,86 +175,45 @@ jobs:
             clean :app:assembleRelease :app:bundleRelease \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
             -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
-
           test -f app/build/outputs/apk/release/app-release.apk
           test -f app/build/outputs/bundle/release/app-release.aab
           test ! -e app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Verify package identity and version
+      - name: Verify package version signer and architectures
         env:
-          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '62' }}
-          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.18' }}
+          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '64' }}
+          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.20' }}
         run: |
           set -euo pipefail
+          mkdir -p signed-release-artifacts
           apk='app/build/outputs/apk/release/app-release.apk'
+          aab='app/build/outputs/bundle/release/app-release.aab'
           package_id="$(apkanalyzer manifest application-id "$apk")"
           version_code="$(apkanalyzer manifest version-code "$apk")"
           version_name="$(apkanalyzer manifest version-name "$apk")"
-
           test "$package_id" = 'sa.hulksa.player'
           test "$version_code" = "$EXPECTED_VERSION_CODE"
           test "$version_name" = "$EXPECTED_VERSION_NAME"
-
-          mkdir -p signed-release-artifacts
-          {
-            echo "Application ID: $package_id"
-            echo "Version code: $version_code"
-            echo "Version name: $version_name"
-            echo 'Package identity: PASS'
-          } > signed-release-artifacts/PACKAGE-IDENTITY.txt
-
-      - name: Verify signer identity and signature schemes
-        run: |
-          set -euo pipefail
-          bash tools/verify-apk-signing.sh \
-            app/build/outputs/apk/release/app-release.apk \
-            "$EXPECTED_CERT_SHA256" \
-            signed-release-artifacts/APK-SIGNING.txt
-          bash tools/verify-aab-signing.sh \
-            app/build/outputs/bundle/release/app-release.aab \
-            "$EXPECTED_CERT_SHA256" \
-            signed-release-artifacts/AAB-SIGNING.txt
-
-      - name: Verify compiled production runtime configuration
-        run: |
-          set -euo pipefail
-          build_config="$(find app/build/generated/source/buildConfig/release -type f -name BuildConfig.java -print -quit)"
-          test -n "$build_config"
-          python3 tools/verify-runtime-config.py \
-            app/build/outputs/apk/release/app-release.apk \
-            --build-config "$build_config" \
-            --report signed-release-artifacts/APK-RUNTIME-CONFIG.md
-          python3 tools/verify-runtime-config.py \
-            app/build/outputs/bundle/release/app-release.aab \
-            --build-config "$build_config" \
-            --report signed-release-artifacts/AAB-RUNTIME-CONFIG.md
-
-      - name: Verify signed output architectures
-        run: |
-          set -euo pipefail
-          python3 tools/verify-android-architectures.py \
-            app/build/outputs/apk/release/app-release.apk \
-            --require-native-libs \
-            --report signed-release-artifacts/APK-ARCHITECTURES.md
-          python3 tools/verify-android-architectures.py \
-            app/build/outputs/bundle/release/app-release.aab \
-            --require-native-libs \
-            --report signed-release-artifacts/AAB-ARCHITECTURES.md
-
-      - name: Package signed release evidence
-        run: |
-          set -euo pipefail
-          cp app/build/outputs/apk/release/app-release.apk signed-release-artifacts/
-          cp app/build/outputs/bundle/release/app-release.aab signed-release-artifacts/
+          printf 'Application ID: %s\nVersion code: %s\nVersion name: %s\n' \
+            "$package_id" "$version_code" "$version_name" > signed-release-artifacts/PACKAGE-IDENTITY.txt
+          bash tools/verify-apk-signing.sh "$apk" "$EXPECTED_CERT_SHA256" signed-release-artifacts/APK-SIGNING.txt
+          bash tools/verify-aab-signing.sh "$aab" "$EXPECTED_CERT_SHA256" signed-release-artifacts/AAB-SIGNING.txt
+          python3 tools/verify-android-architectures.py "$apk" --require-native-libs --report signed-release-artifacts/APK-ARCHITECTURES.md
+          python3 tools/verify-android-architectures.py "$aab" --require-native-libs --report signed-release-artifacts/AAB-ARCHITECTURES.md
+          cp "$apk" "$aab" signed-release-artifacts/
           (
             cd signed-release-artifacts
-            sha256sum app-release.apk app-release.aab > SHA256SUMS.txt
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope release --evidence-root signed-release-artifacts \
+            --out signed-release-artifacts/gate
 
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: HULK-SA-SIGNED-RELEASE-QUALIFICATION
+          name: HULK-SA-SIGNED-RELEASE-QUALIFICATION-${{ github.run_id }}
           path: signed-release-artifacts/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 21

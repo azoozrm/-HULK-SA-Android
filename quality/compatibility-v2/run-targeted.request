@@ -1,0 +1,5 @@
+profile_id=tv-720p-api36
+test_class=sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest
+reason=validate-non-root-app-locale-and-resolved-leanback-launcher
+request_sequence=6
+requested_at=2026-08-02T02:05:00Z

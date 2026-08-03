@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.isImeVisible
@@ -40,6 +39,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -84,6 +84,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -93,6 +94,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -103,6 +105,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.BuildConfig
@@ -150,6 +153,11 @@ private const val APPS_URL = "https://hulksa.com/hulk-app/"
 private const val SUPPORT_URL = "https://wa.me/966506349935"
 private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
+private val TV_PAGE_GUTTER = 8.dp
+private val TV_LIVE_ACTION_INSET = 8.dp
+
+internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
+    (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
 
 data class NavigationPosition(
     val rowKey: String = "",
@@ -406,7 +414,7 @@ fun MainShellScreen(
             }
         }
     }
-    Box(Modifier.fillMaxSize().background(colors.background)) {
+    Box(Modifier.fillMaxSize().background(colors.surface)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
@@ -443,7 +451,7 @@ fun MainShellScreen(
         } else {
             Column(Modifier.fillMaxSize()) {
                 MobileNavigation(state.destination, rememberingSelectDestination)
-                Box(Modifier.weight(1f)) {
+                Box(Modifier.weight(1f).clipToBounds()) {
                     DestinationContent(
                         state = state,
                         isTv = false,
@@ -481,6 +489,8 @@ private fun CinematicNavigationRail(
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
     val railWidth by animateDpAsState(if (expanded) 202.dp else 90.dp, label = "railWidth")
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val railLogoSize = tvRailLogoSizeDp(screenWidthDp).dp
 
     Column(
         modifier = Modifier
@@ -496,11 +506,7 @@ private fun CinematicNavigationRail(
             .padding(start = 10.dp, end = 10.dp, top = 24.dp, bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BrandBadge(
-            Modifier
-                .size(if (expanded) 76.dp else 50.dp)
-                .offset(x = if (expanded) 0.dp else (-4).dp),
-        )
+        BrandLogo(Modifier.size(railLogoSize))
         Spacer(Modifier.height(10.dp))
         destinations.filterNot { it.destination == MainDestination.SETTINGS }.forEach { entry ->
             NavigationItem(
@@ -575,6 +581,10 @@ private fun NavigationItem(
 
 @Composable
 private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactLandscape =
+        adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
     val navigationState = rememberLazyListState()
     LaunchedEffect(selected) {
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
@@ -583,22 +593,23 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF090A07))
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .background(colors.surface),
         state = navigationState,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(
+            horizontal = 8.dp,
+            vertical = if (compactLandscape) 4.dp else 8.dp,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(if (compactLandscape) 4.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        item { BrandBadge(Modifier.size(40.dp)) }
+        item { BrandBadge(Modifier.size(if (compactLandscape) 34.dp else 40.dp)) }
         items(destinations, key = { it.destination.name }) { entry ->
             FocusButton(
                 text = entry.label,
                 onClick = { onSelect(entry.destination) },
                 primary = selected == entry.destination,
                 compact = true,
-                modifier = Modifier.heightIn(min = 48.dp),
+                modifier = Modifier.heightIn(min = if (compactLandscape) 42.dp else 48.dp),
             )
         }
     }
@@ -729,8 +740,8 @@ private fun CinemaHomeScreen(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(bottom = if (isTv) 32.dp else 0.dp), // compatibilityTvBottomPadding
-        contentPadding = PaddingValues(bottom = 48.dp),
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
+        contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
         item {
@@ -751,31 +762,31 @@ private fun CinemaHomeScreen(
             item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
         }
         if (continueWatching.isNotEmpty()) {
-            item { HomeSectionPadding { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
+            item { HomeSectionPadding(isTv) { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
         }
-        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
+        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (suggested.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (lastLive != null) {
-            item { HomeSectionPadding { HistorySection("اخر قناة شاهدتها", "last-live", liveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
+            item { HomeSectionPadding(isTv) { HistorySection("اخر قناة شاهدتها", "last-live", liveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
         } else if (live.isNotEmpty()) {
-            item { HomeSectionPadding { PosterSection("قنوات مقترحة لك", "popular-live", liveRow, personalizedLive.take(20), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", liveRow, personalizedLive.take(20), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
     }
 }
@@ -834,8 +845,8 @@ private fun ActiveDownloadsSection(
 }
 
 @Composable
-private fun HomeSectionPadding(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 25.dp)) { content() }
+private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 25.dp)) { content() }
 }
 
 @Composable
@@ -1080,13 +1091,49 @@ private fun PosterCatalogScreen(
     }
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
-    Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 24.dp else 13.dp, vertical = if (isTv) 19.dp else 12.dp)) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactLandscape =
+        !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
+
+    if (compactLandscape) {
+        CompactLandscapePosterCatalog(
+            title = title,
+            type = type,
+            destination = destination,
+            state = state,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onOpenHistory = onOpenHistory,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            categories = catalog?.categories.orEmpty(),
+            ordered = ordered,
+            visible = visible,
+            continueWatching = continueWatching,
+            showingContinue = showingContinue,
+            resultCount = resultCount,
+            catalogAvailable = catalog != null,
+        )
+        return
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(
+                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
+            ),
+    ) {
         CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
         Spacer(Modifier.height(11.dp))
-        ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory)
-        CatalogInteractionHints(isTv)
-        Spacer(Modifier.height(9.dp))
+        ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory, isTv)
+        if (isTv) CatalogInteractionHints(true)
+        Spacer(Modifier.height(if (isTv) 9.dp else 4.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (showingContinue && continueWatching.isNotEmpty()) {
                 HistoryGrid(continueWatching, isTv, destination, navigationMemory, onOpenHistory)
@@ -1101,6 +1148,98 @@ private fun PosterCatalogScreen(
                     visible, isTv, destination, navigationMemory, isFavorite, onOpen, onToggleFavorite,
                     restoreFocusedCard = state.searchQuery.isBlank(),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactLandscapePosterCatalog(
+    title: String,
+    type: ContentType,
+    destination: MainDestination,
+    state: HulkUiState,
+    navigationMemory: NavigationMemoryStore,
+    isFavorite: (ContentItem) -> Boolean,
+    onSelectCategory: (String?) -> Unit,
+    onSearch: (String) -> Unit,
+    onOpen: (ContentItem) -> Unit,
+    onOpenHistory: (HistoryEntry) -> Unit,
+    onToggleFavorite: (ContentItem) -> Unit,
+    onRefresh: () -> Unit,
+    categories: List<Category>,
+    ordered: List<ContentItem>,
+    visible: List<ContentItem>,
+    continueWatching: List<HistoryEntry>,
+    showingContinue: Boolean,
+    resultCount: Int,
+    catalogAvailable: Boolean,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(if (showingContinue) 180.dp else 105.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, top = 7.dp, end = 12.dp, bottom = 28.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        item(key = "catalog-header", span = { GridItemSpan(maxLineSpan) }) {
+            CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, false)
+        }
+        if (state.errorMessage != null) {
+            item(key = "catalog-error", span = { GridItemSpan(maxLineSpan) }) {
+                ErrorNotice(state.errorMessage)
+            }
+        }
+        item(key = "catalog-categories", span = { GridItemSpan(maxLineSpan) }) {
+            ReorderableCatalogCategoryBar(
+                type,
+                categories,
+                ordered,
+                state.selectedCategoryId,
+                onSelectCategory,
+                false,
+            )
+        }
+        when {
+            showingContinue && continueWatching.isNotEmpty() -> {
+                itemsIndexed(continueWatching, key = { _, entry -> entry.key }) { index, entry ->
+                    HistoryCard(
+                        entry = entry,
+                        onClick = { onOpenHistory(entry) },
+                        modifier = Modifier.fillMaxWidth(),
+                        onFocused = { navigationMemory.save(destination, entry.key, index) },
+                    )
+                }
+            }
+            showingContinue -> {
+                item(key = "catalog-empty-history", span = { GridItemSpan(maxLineSpan) }) {
+                    EmptyState("لا توجد مشاهدة غير مكتملة في $title")
+                }
+            }
+            !catalogAvailable && type in state.loadingTypes -> {
+                item(key = "catalog-loading", span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                        LoadingRing(label = "جاري تحميل $title…")
+                    }
+                }
+            }
+            visible.isEmpty() -> {
+                item(key = "catalog-empty", span = { GridItemSpan(maxLineSpan) }) {
+                    EmptyState("لا توجد نتائج مطابقة")
+                }
+            }
+            else -> {
+                itemsIndexed(visible, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
+                    val key = "${item.type}:${item.id}"
+                    CompactPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = Modifier.fillMaxWidth(),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = { navigationMemory.save(destination, key, index) },
+                    )
+                }
             }
         }
     }
@@ -1125,6 +1264,28 @@ private fun LiveCatalogScreen(
                 item.matchesSearch(state.searchQuery)
         }
     }
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactLandscape =
+        !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp && adaptiveUi.screenHeightDp < 520
+
+    if (compactLandscape) {
+        CompactLandscapeLiveCatalog(
+            state = state,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            categories = catalog?.categories.orEmpty(),
+            allItems = catalog?.items.orEmpty(),
+            visible = visible,
+            catalogAvailable = catalog != null,
+        )
+        return
+    }
+
     val remembered = navigationMemory.position(MainDestination.LIVE)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
     var preview by remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
@@ -1148,13 +1309,20 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = if (isTv) 23.dp else 12.dp, vertical = if (isTv) 18.dp else 11.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(
+                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
+            ),
+    ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
         Spacer(Modifier.height(10.dp))
         ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory)
-        LiveInteractionHints(isTv)
-        Spacer(Modifier.height(8.dp))
+        if (isTv) LiveInteractionHints(true)
+        Spacer(Modifier.height(if (isTv) 8.dp else 4.dp))
         if (catalog == null && ContentType.LIVE in state.loadingTypes) {
             LoadingRing(label = "جاري تحميل القنوات…", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp))
         } else if (visible.isEmpty()) {
@@ -1222,6 +1390,69 @@ private fun LiveCatalogScreen(
 }
 
 @Composable
+private fun CompactLandscapeLiveCatalog(
+    state: HulkUiState,
+    navigationMemory: NavigationMemoryStore,
+    isFavorite: (ContentItem) -> Boolean,
+    onSelectCategory: (String?) -> Unit,
+    onSearch: (String) -> Unit,
+    onOpen: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem) -> Unit,
+    onRefresh: () -> Unit,
+    categories: List<Category>,
+    allItems: List<ContentItem>,
+    visible: List<ContentItem>,
+    catalogAvailable: Boolean,
+) {
+    val remembered = navigationMemory.position(MainDestination.LIVE)
+    val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, top = 7.dp, end = 12.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        item(key = "live-header") {
+            CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, false)
+        }
+        if (state.errorMessage != null) {
+            item(key = "live-error") { ErrorNotice(state.errorMessage) }
+        }
+        item(key = "live-categories") {
+            ReorderableLiveCategoryBar(categories, allItems, state.selectedCategoryId, onSelectCategory)
+        }
+        when {
+            !catalogAvailable && ContentType.LIVE in state.loadingTypes -> {
+                item(key = "live-loading") {
+                    Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                        LoadingRing(label = "جاري تحميل القنوات…")
+                    }
+                }
+            }
+            visible.isEmpty() -> item(key = "live-empty") { EmptyState("لا توجد قنوات مطابقة") }
+            else -> itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
+                ChannelListItem(
+                    item = channel,
+                    selected = false,
+                    onFocused = {
+                        navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index)
+                    },
+                    onClick = { onOpen(channel) },
+                    isFavorite = isFavorite(channel),
+                    onLongClick = { onToggleFavorite(channel) },
+                )
+            }
+        }
+    }
+    LaunchedEffect(visible, remembered.itemKey) {
+        if (visible.isNotEmpty() && remembered.itemKey.isNotBlank()) {
+            listState.scrollToItem(rememberedIndex + 2)
+        }
+    }
+}
+
+@Composable
 private fun LiveStage(
     item: ContentItem?,
     isFavorite: Boolean,
@@ -1252,19 +1483,24 @@ private fun LiveStage(
                 Text("على الهواء الان", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(item.name, color = colors.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FocusButton(
-                        "تشغيل القناة", onWatch,
-                        modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester).focusProperties {
-                            left = favoriteRequester; right = channelRequester
-                        }, compact = true,
-                    )
-                    FocusButton(
-                        if (isFavorite) "★ في المفضلة" else "+ المفضلة", onToggleFavorite,
-                        modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
-                            left = channelRequester; right = playRequester
-                        }, primary = false, compact = true,
-                    )
+                Box(Modifier.fillMaxWidth().padding(bottom = TV_LIVE_ACTION_INSET)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        FocusButton(
+                            "تشغيل القناة", onWatch,
+                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(playRequester).focusProperties {
+                                left = favoriteRequester; right = channelRequester
+                            }, compact = true,
+                        )
+                        FocusButton(
+                            if (isFavorite) "★ في المفضلة" else "+ المفضلة", onToggleFavorite,
+                            modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
+                                left = channelRequester; right = playRequester
+                            }, primary = false, compact = true,
+                        )
+                    }
                 }
             }
         }
@@ -1284,7 +1520,11 @@ private fun FavoritesScreen(
     val content = remember(state.catalogs, state.favorites) {
         state.catalogs.values.flatMap { it.items }.filter(isFavorite).distinctBy { "${it.type}:${it.id}" }
     }
-    Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+    ) {
         PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
         Spacer(Modifier.height(18.dp))
         if (content.isEmpty() && state.loadingTypes.isEmpty()) {
@@ -1314,7 +1554,11 @@ private fun UnifiedSearchScreen(
             .filter { it.matchesSearch(query) }
             .distinctBy { "${it.type}:${it.id}" }
     }
-    Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+    ) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
         Spacer(Modifier.height(14.dp))
         TvSearchField(
@@ -1465,12 +1709,18 @@ private fun DownloadsScreen(
     val remembered = navigationMemory.position(MainDestination.DOWNLOADS)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, downloads.lastIndex.coerceAtLeast(0))
     val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    val downloadsFocusScope = rememberCoroutineScope()
+    var downloadsFocusJob by remember { mutableStateOf<Job?>(null) }
     val context = LocalContext.current
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
     }
 
-    Column(Modifier.fillMaxSize().padding(if (isTv) 24.dp else 13.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+    ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1525,7 +1775,21 @@ private fun DownloadsScreen(
                         item = item,
                         isTv = isTv,
                         restoreFocus = remembered.itemKey == item.downloadId.toString() || (remembered.itemKey.isBlank() && index == rememberedIndex),
-                        onFocused = { navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index) },
+                        onFocused = {
+                            navigationMemory.save(MainDestination.DOWNLOADS, item.downloadId.toString(), index)
+                            if (isTv) {
+                                downloadsFocusJob?.cancel()
+                                downloadsFocusJob = downloadsFocusScope.launch {
+                                    // Compose's TV focus relocation can pivot a focused action
+                                    // above the LazyColumn viewport. Re-anchor the owning card
+                                    // after that relocation so its top edge is never clipped.
+                                    delay(120)
+                                    runCatching {
+                                        downloadsState.scrollToItem(index, scrollOffset = 0)
+                                    }
+                                }
+                            }
+                        },
                         onPlay = onPlay,
                         onDelete = onDelete,
                         onRetry = onRetry,
@@ -1562,7 +1826,7 @@ private fun DownloadCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (isTv) 220.dp else 220.dp)
+            .height(if (isTv) 164.dp else 220.dp)
             .clip(shape)
             .background(if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF11120E))
             .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .45f), shape)
@@ -1956,13 +2220,14 @@ private fun SettingsScreen(
     }
     LazyColumn(
         state = settingsListState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = if (isTv) 27.dp else 15.dp,
-            top = if (isTv) 36.dp else 15.dp,
-            end = if (isTv) 27.dp else 15.dp,
-            bottom = if (isTv) 32.dp else 15.dp,
-        ),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
+        contentPadding = if (isTv) {
+            PaddingValues(bottom = 24.dp)
+        } else {
+            PaddingValues(15.dp)
+        },
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item { PageTitle("الحساب والاعدادات", "ادارة اشتراكك وتجربة المشاهدة", 0, Icons.Rounded.Settings) }
@@ -2452,6 +2717,7 @@ private fun ReorderableCatalogCategoryBar(
     items: List<ContentItem>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
+    isTv: Boolean,
 ) {
     val context = LocalContext.current
     val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
@@ -2504,7 +2770,7 @@ private fun ReorderableCatalogCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 24.dp, vertical = 8.dp),
     ) {
         item { FocusButton("الكل", { onSelect(null) }, primary = selectedId == null, compact = true) }
         item { FocusButton("★ المفضلة", { onSelect(FAVORITES_CATEGORY_ID) }, primary = selectedId == FAVORITES_CATEGORY_ID, compact = true) }
@@ -2598,7 +2864,7 @@ private fun ReorderableLiveCategoryBar(
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
     ) {
         item {
             FocusButton(

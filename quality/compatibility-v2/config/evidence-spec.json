@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "scopes": {
+    "fast": [
+      "STATIC-RESULT.json",
+      "STATIC-RESULT.md",
+      "STATIC-RESULT.xml",
+      "BUILD-METADATA.txt",
+      "UNIT-TESTS.xml"
+    ],
+    "runtime": [
+      "PROFILE-CONFIG.txt",
+      "APPLICATION-LOCALE.txt",
+      "DEVICE-PROFILE.txt",
+      "WINDOW-METRICS.txt",
+      "INSTRUMENTATION.txt",
+      "INSTRUMENTATION.xml",
+      "FOREGROUND-APP.txt",
+      "IME-STATE.txt",
+      "ACTIVITY-TOP.txt",
+      "ACTIVITY-ACTIVITIES.txt",
+      "WINDOW-WINDOWS.txt",
+      "logcat.txt",
+      "window.xml",
+      "full-window.png",
+      "MEMINFO.txt",
+      "SHA256SUMS.txt"
+    ],
+    "visual": [
+      "actual.png",
+      "expected.png",
+      "diff.png",
+      "VISUAL-METADATA.json"
+    ],
+    "release": [
+      "PACKAGE-IDENTITY.txt",
+      "APK-ARCHITECTURES.md",
+      "AAB-ARCHITECTURES.md",
+      "APK-SIGNING.txt",
+      "AAB-SIGNING.txt",
+      "SHA256SUMS.txt"
+    ]
+  }
+}

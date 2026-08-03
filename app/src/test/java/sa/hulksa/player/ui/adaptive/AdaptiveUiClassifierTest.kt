@@ -8,7 +8,7 @@ import org.junit.Test
 
 class AdaptiveUiClassifierTest {
     @Test
-    fun compactPhoneUsesMobileTopNavigation() {
+    fun compactPhoneUsesTouchNavigationWithoutTelevisionRail() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
             smallestWidthDp = 411,
@@ -22,15 +22,15 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
-    fun resizedCompactContainerDoesNotKeepThePhysicalDisplayLayout() {
+    fun compactTabletWindowKeepsTabletFormFactorButUsesCompactNavigation() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
-            smallestWidthDp = 500,
+            smallestWidthDp = 800,
             widthDp = 500,
         )
         val window = classifyWindowWidth(500)
 
-        assertEquals(HulkDeviceClass.MOBILE, device)
+        assertEquals(HulkDeviceClass.TABLET, device)
         assertEquals(HulkWindowWidthClass.COMPACT, window)
         assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
     }
@@ -44,7 +44,15 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
-    fun landscapePhoneDoesNotBecomeTabletOrRail() {
+    fun windowHeightBreakpointsCoverShortLandscapeAndTallWindows() {
+        assertEquals(HulkWindowHeightClass.COMPACT, classifyWindowHeight(479))
+        assertEquals(HulkWindowHeightClass.MEDIUM, classifyWindowHeight(480))
+        assertEquals(HulkWindowHeightClass.MEDIUM, classifyWindowHeight(899))
+        assertEquals(HulkWindowHeightClass.EXPANDED, classifyWindowHeight(900))
+    }
+
+    @Test
+    fun landscapePhoneRemainsMobileAndDoesNotReceiveTabletRail() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
             smallestWidthDp = 411,
@@ -55,10 +63,11 @@ class AdaptiveUiClassifierTest {
         assertEquals(HulkDeviceClass.MOBILE, device)
         assertEquals(HulkWindowWidthClass.EXPANDED, window)
         assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
+        assertEquals(HulkOrientation.LANDSCAPE, classifyOrientation(891, 411))
     }
 
     @Test
-    fun portraitTabletUsesTabletLayoutWithoutTelevisionSizing() {
+    fun mediumTabletUsesRailWithoutTelevisionInteractionSemantics() {
         val device = classifyDeviceClass(
             isTelevisionDevice = false,
             smallestWidthDp = 600,
@@ -68,25 +77,50 @@ class AdaptiveUiClassifierTest {
 
         assertEquals(HulkDeviceClass.TABLET, device)
         assertEquals(HulkWindowWidthClass.MEDIUM, window)
-        assertEquals(HulkNavigationType.TOP_BAR, selectNavigationType(device, window))
-    }
-
-    @Test
-    fun expandedTabletUsesRailNavigation() {
-        val device = classifyDeviceClass(
-            isTelevisionDevice = false,
-            smallestWidthDp = 600,
-            widthDp = 1280,
-        )
-        val window = classifyWindowWidth(1280)
-
-        assertEquals(HulkDeviceClass.TABLET, device)
-        assertEquals(HulkWindowWidthClass.EXPANDED, window)
         assertEquals(HulkNavigationType.RAIL, selectNavigationType(device, window))
     }
 
     @Test
-    fun expandedTouchTabletUsesRailWithoutTelevisionInteractionModel() {
+    fun expandedTabletEnablesTwoPaneOnlyInLandscape() {
+        val landscape = resolveAdaptiveLayoutPolicy(
+            deviceClass = HulkDeviceClass.TABLET,
+            windowWidthClass = HulkWindowWidthClass.EXPANDED,
+            windowHeightClass = HulkWindowHeightClass.MEDIUM,
+            orientation = HulkOrientation.LANDSCAPE,
+            inputMode = HulkInputMode.TOUCH,
+        )
+        val portrait = resolveAdaptiveLayoutPolicy(
+            deviceClass = HulkDeviceClass.TABLET,
+            windowWidthClass = HulkWindowWidthClass.EXPANDED,
+            windowHeightClass = HulkWindowHeightClass.EXPANDED,
+            orientation = HulkOrientation.PORTRAIT,
+            inputMode = HulkInputMode.TOUCH,
+        )
+
+        assertEquals(HulkNavigationType.RAIL, landscape.navigationType)
+        assertTrue(landscape.useTwoPane)
+        assertFalse(portrait.useTwoPane)
+        assertEquals(HulkContentDensity.SPACIOUS, landscape.contentDensity)
+    }
+
+    @Test
+    fun televisionPolicyPreservesQualifiedEightDpOuterGutter() {
+        val policy = resolveAdaptiveLayoutPolicy(
+            deviceClass = HulkDeviceClass.TELEVISION,
+            windowWidthClass = HulkWindowWidthClass.EXPANDED,
+            windowHeightClass = HulkWindowHeightClass.MEDIUM,
+            orientation = HulkOrientation.LANDSCAPE,
+            inputMode = HulkInputMode.REMOTE,
+        )
+
+        assertEquals(HulkNavigationType.RAIL, policy.navigationType)
+        assertEquals(8, policy.pageHorizontalPaddingDp)
+        assertEquals(8, policy.pageVerticalPaddingDp)
+        assertTrue(policy.restoreFocus)
+    }
+
+    @Test
+    fun expandedTouchTabletUsesRailWithoutTelevisionFocusChrome() {
         val state = AdaptiveUiState(
             deviceClass = HulkDeviceClass.TABLET,
             windowWidthClass = HulkWindowWidthClass.EXPANDED,

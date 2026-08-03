@@ -1,0 +1,156 @@
+name: HULK SA Compatibility V2 - Targeted Retest
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile_id:
+        description: Exact profile id from quality/compatibility-v2/config/device-matrix.json
+        required: true
+        default: phone-small-api29
+        type: string
+      test_class:
+        description: Exact Android instrumentation class
+        required: true
+        default: sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-v2-targeted-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-profile:
+    runs-on: ubuntu-latest
+    outputs:
+      profile_id: ${{ steps.profile.outputs.profile_id }}
+      test_class: ${{ steps.profile.outputs.test_class }}
+      api: ${{ steps.profile.outputs.api }}
+      target: ${{ steps.profile.outputs.target }}
+      profile: ${{ steps.profile.outputs.profile }}
+      width: ${{ steps.profile.outputs.width }}
+      height: ${{ steps.profile.outputs.height }}
+      density: ${{ steps.profile.outputs.density }}
+      font_scale: ${{ steps.profile.outputs.font_scale }}
+      rotation: ${{ steps.profile.outputs.rotation }}
+      locale: ${{ steps.profile.outputs.locale }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: profile
+        env:
+          DISPATCH_PROFILE: ${{ inputs.profile_id }}
+          DISPATCH_TEST_CLASS: ${{ inputs.test_class }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          profile_id = os.environ.get('DISPATCH_PROFILE', '').strip()
+          test_class = (
+              os.environ.get('DISPATCH_TEST_CLASS', '').strip()
+              or 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest'
+          )
+          if not profile_id:
+              raise SystemExit('No targeted profile id was supplied')
+
+          data = json.loads(Path('quality/compatibility-v2/config/device-matrix.json').read_text(encoding='utf-8'))
+          profile = next((item for item in data['profiles'] if item['id'] == profile_id), None)
+          if profile is None:
+              raise SystemExit(f'Unknown profile id: {profile_id}')
+
+          target = profile['target']
+          avd_profile = 'tv_1080p' if target == 'android-tv' else 'pixel_2'
+          values = {
+              'profile_id': profile_id,
+              'test_class': test_class,
+              'api': profile['api'],
+              'target': target,
+              'profile': avd_profile,
+              'width': profile['width_px'],
+              'height': profile['height_px'],
+              'density': profile['density_dpi'],
+              'font_scale': profile['font_scale'],
+              # The emulator skin and wm size already use the final requested
+              # orientation. Applying user_rotation again would swap landscape
+              # phone geometry back to portrait.
+              'rotation': 0,
+              'locale': profile['locale'],
+          }
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              for key, value in values.items():
+                  out.write(f'{key}={value}\n')
+          PY
+
+  targeted:
+    needs: resolve-profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      HULK_PORTAL_URL: http://3162356.xyz:8080
+      HULK_CONFIG_URL: ''
+      EVIDENCE_ROOT: build/compatibility-v2/targeted/${{ needs.resolve-profile.outputs.profile_id }}
+      APP_APK: app/build/outputs/apk/debug/app-debug.apk
+      TEST_APK: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+      - uses: android-actions/setup-android@v4
+      - name: Build target APKs and validate tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          bash -n quality/compatibility-v2/configure_emulator_profile.sh
+          bash -n quality/compatibility-v2/collect_runtime_evidence.sh
+          bash -n quality/compatibility-v2/run_runtime_profile.sh
+          ./gradlew --no-daemon --console=plain \
+            :app:assembleDebug :app:assembleDebugAndroidTest \
+            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+      - name: Configure Linux KVM when available
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]] && sudo chmod a+rw /dev/kvm && [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            echo 'KVM_AVAILABLE=true' >> "$GITHUB_ENV"
+            ls -l /dev/kvm
+          else
+            echo 'KVM_AVAILABLE=false' >> "$GITHUB_ENV"
+            echo 'KVM is unavailable on this hosted runner; emulator boot and evidence remain mandatory.'
+          fi
+      - name: Execute selected profile and selected test class
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ needs.resolve-profile.outputs.api }}
+          target: ${{ needs.resolve-profile.outputs.target }}
+          arch: x86_64
+          profile: ${{ needs.resolve-profile.outputs.profile }}
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin ${{ needs.resolve-profile.outputs.width }}x${{ needs.resolve-profile.outputs.height }}
+          script: bash quality/compatibility-v2/run_runtime_profile.sh '${{ needs.resolve-profile.outputs.profile_id }}' '${{ needs.resolve-profile.outputs.width }}' '${{ needs.resolve-profile.outputs.height }}' '${{ needs.resolve-profile.outputs.density }}' '${{ needs.resolve-profile.outputs.font_scale }}' '${{ needs.resolve-profile.outputs.rotation }}' '${{ needs.resolve-profile.outputs.locale }}' '${{ needs.resolve-profile.outputs.test_class }}' 'build/compatibility-v2/targeted/${{ needs.resolve-profile.outputs.profile_id }}'
+      - name: Enforce targeted evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime \
+            --evidence-root "$EVIDENCE_ROOT" \
+            --out "$EVIDENCE_ROOT/gate"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-TARGETED-${{ needs.resolve-profile.outputs.profile_id }}-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_ROOT }}/
+          if-no-files-found: error
+          retention-days: 21
