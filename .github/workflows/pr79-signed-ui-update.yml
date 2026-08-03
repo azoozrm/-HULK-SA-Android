@@ -62,49 +62,60 @@ jobs:
           grep -F 'versionCode = 64' app/build.gradle.kts
           grep -F 'versionName = "0.9.3.20"' app/build.gradle.kts
           grep -F 'val productionPortalUrl = "http://3162356.xyz:8080"' app/build.gradle.kts
-          test "$(git branch --show-current)" = 'fix/v09320-galaxy-landscape-clean'
+          git merge-base --is-ancestor b9d8c92de054e9ae1bc5b1be98865a2c62e1debc HEAD
 
       - name: Verify production signing secrets
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          PROD_CERT_SHA256: ${{ secrets.PROD_CERT_SHA256 }}
+          HULK_SIGNING_KEYSTORE_B64: ${{ secrets.HULK_SIGNING_KEYSTORE_B64 }}
+          HULK_SIGNING_STORE_PASSWORD: ${{ secrets.HULK_SIGNING_STORE_PASSWORD }}
+          HULK_SIGNING_KEY_ALIAS: ${{ secrets.HULK_SIGNING_KEY_ALIAS }}
+          HULK_SIGNING_KEY_PASSWORD: ${{ secrets.HULK_SIGNING_KEY_PASSWORD }}
+          HULK_SIGNING_CERT_SHA256: ${{ secrets.HULK_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
-          for key in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD PROD_CERT_SHA256; do
-            test -n "${!key:-}" || { echo "Missing required production secret: $key" >&2; exit 1; }
-          done
+          missing=()
+          [[ -n "${HULK_SIGNING_KEYSTORE_B64:-}" ]] || missing+=(HULK_SIGNING_KEYSTORE_B64)
+          [[ -n "${HULK_SIGNING_STORE_PASSWORD:-}" ]] || missing+=(HULK_SIGNING_STORE_PASSWORD)
+          [[ -n "${HULK_SIGNING_KEY_ALIAS:-}" ]] || missing+=(HULK_SIGNING_KEY_ALIAS)
+          [[ -n "${HULK_SIGNING_KEY_PASSWORD:-}" ]] || missing+=(HULK_SIGNING_KEY_PASSWORD)
+          [[ -n "${HULK_SIGNING_CERT_SHA256:-}" ]] || missing+=(HULK_SIGNING_CERT_SHA256)
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required production secret: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
 
       - name: Materialize and inspect production keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          HULK_SIGNING_KEYSTORE_B64: ${{ secrets.HULK_SIGNING_KEYSTORE_B64 }}
+          HULK_SIGNING_STORE_PASSWORD: ${{ secrets.HULK_SIGNING_STORE_PASSWORD }}
+          HULK_SIGNING_KEY_ALIAS: ${{ secrets.HULK_SIGNING_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          KEYSTORE_PATH="$RUNNER_TEMP/hulk-sa-production.jks"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-          test -s "$KEYSTORE_PATH"
-          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          keystore="${RUNNER_TEMP}/hulk-sa-production.jks"
+          printf '%s' "$HULK_SIGNING_KEYSTORE_B64" | tr -d '\r\n ' | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          [[ -s "$keystore" ]]
+          keytool -list -keystore "$keystore" \
+            -storepass "$HULK_SIGNING_STORE_PASSWORD" \
+            -alias "$HULK_SIGNING_KEY_ALIAS" >/dev/null
+          printf 'HULK_KEYSTORE_PATH=%s\n' "$keystore" >> "$GITHUB_ENV"
 
       - name: Build signed production release
         env:
-          ORG_GRADLE_PROJECT_HULK_RELEASE_KEYSTORE_FILE: ${{ runner.temp }}/hulk-sa-production.jks
-          ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_HULK_RELEASE_KEYSTORE_FILE: ${{ env.HULK_KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_SIGNING_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_ALIAS: ${{ secrets.HULK_SIGNING_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon --console=plain clean :app:assembleRelease :app:bundleRelease
+          ./gradlew --no-daemon --console=plain --stacktrace \
+            clean :app:assembleRelease :app:bundleRelease
           test -f app/build/outputs/apk/release/app-release.apk
           test -f app/build/outputs/bundle/release/app-release.aab
 
       - name: Verify signed APK identity, ABI and certificate
         env:
-          PROD_CERT_SHA256: ${{ secrets.PROD_CERT_SHA256 }}
+          HULK_SIGNING_CERT_SHA256: ${{ secrets.HULK_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
           APK='app/build/outputs/apk/release/app-release.apk'
@@ -129,17 +140,17 @@ jobs:
           grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' signed-apk/evidence/APK-SIGNATURE.txt
 
           ACTUAL_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signed-apk/evidence/APK-SIGNATURE.txt | head -n1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED_CERT="$(printf '%s' "$PROD_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_CERT="$(printf '%s' "$HULK_SIGNING_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
           test -n "$ACTUAL_CERT"
           test "$ACTUAL_CERT" = "$EXPECTED_CERT" || {
-            echo "Production certificate mismatch" >&2
+            echo 'Production certificate mismatch' >&2
             echo "Actual: $ACTUAL_CERT" >&2
             exit 1
           }
 
           cp "$APK" signed-apk/HULK-SA-v0.9.3.20-SIGNED-UI-UPDATE.apk
           sha256sum signed-apk/HULK-SA-v0.9.3.20-SIGNED-UI-UPDATE.apk | tee signed-apk/evidence/APK-SHA256SUMS.txt
-          printf 'source_commit=%s\npackage=sa.hulksa.player\nversionName=0.9.3.20\nversionCode=64\ncertificate_sha256=%s\n' \
+          printf 'ui_source_commit=b9d8c92de054e9ae1bc5b1be98865a2c62e1debc\nbuild_commit=%s\npackage=sa.hulksa.player\nversionName=0.9.3.20\nversionCode=64\ncertificate_sha256=%s\n' \
             "$GITHUB_SHA" "$ACTUAL_CERT" > signed-apk/evidence/APK-METADATA.txt
 
       - uses: actions/upload-artifact@v7
