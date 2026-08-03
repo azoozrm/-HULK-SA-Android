@@ -7,20 +7,23 @@ path = Path(
 )
 text = path.read_text(encoding="utf-8")
 
-old_back = '''            device.pressBack()
-            instrumentation.waitForIdleSync()
+old_fallback = '''            if (imeVisible) {
+                device.pressBack()
+                instrumentation.waitForIdleSync()
+                imeProbe = 0
+                while (imeVisible && imeProbe < 20) {
+                    SystemClock.sleep(250L)
+                    imeVisible = readImeVisibility()
+                    imeProbe += 1
+                }
+            }
 
-            var imeVisible = true
 '''
-new_back = '''            instrumentation.waitForIdleSync()
-
-            var imeVisible = true
-'''
-if text.count(old_back) != 1:
+if text.count(old_fallback) != 1:
     raise SystemExit(
-        f"Expected exactly one redundant post-hide Back block, found {text.count(old_back)}",
+        f"Expected exactly one conditional Back fallback, found {text.count(old_fallback)}",
     )
-text = text.replace(old_back, new_back, 1)
+text = text.replace(old_fallback, "", 1)
 
 old_foreground = '''            assertTrue(
                 "Application package left the foreground while dismissing the portrait keyboard",
@@ -47,5 +50,7 @@ for required in (
 ):
     if required not in text:
         raise SystemExit(f"Missing expected portrait proof marker: {required}")
+if "device.pressBack()" in text[text.index("fun readImeVisibility"):text.index("scenario.onActivity { activity ->", text.index("assertFalse(\"Portrait keyboard"))]:
+    raise SystemExit("A post-hide Back fallback still remains in the portrait proof")
 
 path.write_text(text, encoding="utf-8")
