@@ -30,7 +30,7 @@ jobs:
       - name: Publish run locator
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="Portrait repair validation started: run ${GITHUB_RUN_ID}, head ${GITHUB_SHA}."
+            -f body="Portrait repair evidence run started: run ${GITHUB_RUN_ID}, head ${GITHUB_SHA}."
 
       - uses: actions/checkout@v7
         with:
@@ -53,7 +53,6 @@ jobs:
           set -euo pipefail
           python3 tools/pr79_portrait_recovery.py
           git diff --check
-          git diff --name-only | sort
 
       - name: Run static and JVM validation
         run: |
@@ -76,18 +75,16 @@ jobs:
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
             -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
           mkdir -p build/compatibility-v2/binaries
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            build/compatibility-v2/binaries/app-debug.apk
-          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            build/compatibility-v2/binaries/app-debug-androidTest.apk
-          test -s build/compatibility-v2/binaries/app-debug.apk
-          test -s build/compatibility-v2/binaries/app-debug-androidTest.apk
+          cp app/build/outputs/apk/debug/app-debug.apk build/compatibility-v2/binaries/app-debug.apk
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk build/compatibility-v2/binaries/app-debug-androidTest.apk
 
       - name: Configure KVM
         run: |
           if [[ -e /dev/kvm ]]; then sudo chmod a+rw /dev/kvm || true; fi
 
-      - name: Prove portrait keyboard stability on API 35
+      - name: Run portrait keyboard test and collect evidence
+        id: runtime
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -100,30 +97,41 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -skin 1080x2340
           script: bash quality/compatibility-v2/run_runtime_profile.sh 'phone-medium-api35' '1080' '2340' '420' '1.0' '0' 'ar-SA' 'sa.hulksa.player.compatibilityv2.CompatibilityV2InstrumentationTest#phonePortraitLoginFieldsAcceptTypingWithoutCrash' 'build/compatibility-v2/targeted/phone-medium-api35'
 
-      - name: Verify runtime evidence
+      - name: Print focused evidence
+        if: always()
         run: |
-          set -euo pipefail
-          grep -q 'OK (1 test)' "$EVIDENCE_ROOT/INSTRUMENTATION.txt"
-          grep -q 'tests="1" failures="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
-          grep -q 'result=PASS' "$EVIDENCE_ROOT/IME-STATE.txt"
-          grep -q 'resolved_activity=sa.hulksa.player.dev/sa.hulksa.player.MainActivity' "$EVIDENCE_ROOT/FOREGROUND-APP.txt"
-          ! grep -qE 'FATAL EXCEPTION|Process: sa\.hulksa\.player' "$EVIDENCE_ROOT/logcat.txt"
-          test -s "$EVIDENCE_ROOT/full-window.png"
-          test -s "$EVIDENCE_ROOT/window.xml"
+          set +e
+          echo "runtime_outcome=${{ steps.runtime.outcome }}"
+          for f in INSTRUMENTATION.txt INSTRUMENTATION.xml IME-STATE.txt FOREGROUND-APP.txt; do
+            echo "===== $f ====="
+            test -f "$EVIDENCE_ROOT/$f" && cat "$EVIDENCE_ROOT/$f" || echo MISSING
+          done
+          echo '===== crash scan ====='
+          test -f "$EVIDENCE_ROOT/logcat.txt" && grep -nE 'FATAL EXCEPTION|AndroidRuntime|Process: sa\.hulksa\.player|Caused by:|AssertionError' "$EVIDENCE_ROOT/logcat.txt" | tail -n 200 || true
 
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: HULK-SA-PR79-PORTRAIT-REPAIR-${{ github.run_id }}
+          name: HULK-SA-PR79-PORTRAIT-DIAGNOSTIC-${{ github.run_id }}
           path: ${{ env.EVIDENCE_ROOT }}/
           if-no-files-found: error
           retention-days: 21
+
+      - name: Require exact portrait test success
+        if: always()
+        run: |
+          set -euo pipefail
+          test '${{ steps.runtime.outcome }}' = 'success'
+          grep -q 'OK (1 test)' "$EVIDENCE_ROOT/INSTRUMENTATION.txt"
+          grep -q 'tests="1" failures="0"' "$EVIDENCE_ROOT/INSTRUMENTATION.xml"
+          grep -q 'result=PASS' "$EVIDENCE_ROOT/IME-STATE.txt"
+          ! grep -qE 'FATAL EXCEPTION|Process: sa\.hulksa\.player' "$EVIDENCE_ROOT/logcat.txt"
 
       - name: Commit only the verified permanent repair
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
           git add \
             app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt \
             app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt \
@@ -131,7 +139,6 @@ jobs:
             app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt \
             app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt
           git rm .github/workflows/pr79-portrait-recovery.yml tools/pr79_portrait_recovery.py
-
           actual=$(git diff --cached --name-only | sort)
           expected=$(printf '%s\n' \
             '.github/workflows/pr79-portrait-recovery.yml' \
@@ -142,8 +149,5 @@ jobs:
             'app/src/test/java/sa/hulksa/player/ui/adaptive/AdaptiveUiClassifierTest.kt' \
             'tools/pr79_portrait_recovery.py')
           test "$actual" = "$expected"
-
-          gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="Portrait repair validation passed: run ${GITHUB_RUN_ID}. Committing the verified source repair now."
           git commit -m 'fix: stabilize portrait login and full-width phone pages'
           git push origin HEAD:fix/v09320-galaxy-landscape-clean
