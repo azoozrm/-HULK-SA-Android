@@ -143,9 +143,9 @@ fi
 
 for path, markers in {
     compose_test: (
-        "phone-portrait-bottom-navigation.png",
-        "phone-short-landscape-bottom-navigation.png",
-        "tablet-navigation-rail.png",
+        'captureEvidence("phone-portrait-bottom-navigation")',
+        'captureEvidence("phone-short-landscape-bottom-navigation")',
+        'captureEvidence("tablet-navigation-rail")',
     ),
     collector: ("adaptive_evidence_required=true", "ADAPTIVE-EVIDENCE-PULL.txt"),
 }.items():
