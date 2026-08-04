@@ -69,10 +69,12 @@ jobs:
             set -eu
             adb shell wm size 1080x2400
             adb shell wm density 420
+            adb shell rm -rf /sdcard/Download/hulk-sa-adaptive-main-shell-evidence
             ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.compatibilityv2.AdaptiveMainShellComposeTest
             mkdir -p mobile-layout-visual
-            adb pull /sdcard/Android/data/sa.hulksa.player/files/adaptive-main-shell-evidence/. mobile-layout-visual/
+            adb pull /sdcard/Download/hulk-sa-adaptive-main-shell-evidence/. mobile-layout-visual/
             test -f mobile-layout-visual/phone-portrait-bottom-navigation.png
+            test -f mobile-layout-visual/phone-portrait-two-line-hero.png
             test -f mobile-layout-visual/phone-portrait-catalog-header.png
             test -f mobile-layout-visual/phone-portrait-page-title.png
             find mobile-layout-visual -type f -print0 | sort -z | xargs -0 sha256sum > mobile-layout-visual/SHA256SUMS.txt
