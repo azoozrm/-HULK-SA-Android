@@ -1,11 +1,6 @@
 name: HULK SA Signed Release Qualification
 
 on:
-  push:
-    branches:
-      - fix/v09320-galaxy-landscape-clean
-    paths:
-      - .github/workflows/signed-release-qualification.yml
   workflow_call:
     inputs:
       expected_version_code:
@@ -42,8 +37,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 concurrency:
   group: hulk-sa-signed-release-${{ github.workflow }}-${{ github.ref }}
@@ -58,13 +51,6 @@ jobs:
       HULK_CONFIG_URL: ''
 
     steps:
-      - name: Publish signed release run locator
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${GITHUB_REPOSITORY}/issues/79/comments" \
-            -f body="V3 signed release started: run ${GITHUB_RUN_ID}, head ${GITHUB_SHA}."
-
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
         with:
