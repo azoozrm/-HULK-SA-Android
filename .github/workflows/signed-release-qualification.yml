@@ -1,6 +1,11 @@
 name: HULK SA Signed Release Qualification
 
 on:
+  push:
+    branches:
+      - fix/v09320-galaxy-landscape-clean
+    paths:
+      - .github/workflows/signed-release-qualification.yml
   workflow_call:
     inputs:
       expected_version_code:
