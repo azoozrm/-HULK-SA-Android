@@ -38,11 +38,11 @@ class AdaptiveMainShellComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun render(adaptive: AdaptiveUiState) {
+    private fun render(adaptive: AdaptiveUiState, initialDestination: MainDestination = MainDestination.HOME) {
         composeRule.setContent {
             HulkTheme {
                 CompositionLocalProvider(LocalAdaptiveUi provides adaptive) {
-                    var destination by remember { mutableStateOf(MainDestination.HOME) }
+                    var destination by remember { mutableStateOf(initialDestination) }
                     MainShellScreen(
                         state = HulkUiState(
                             screen = HulkScreen.MAIN,
@@ -92,6 +92,10 @@ class AdaptiveMainShellComposeTest {
         val content = composeRule.onNodeWithTag("main-shell-content").fetchSemanticsNode().boundsInRoot
         val navigation = composeRule.onNodeWithTag("mobile-bottom-navigation").fetchSemanticsNode().boundsInRoot
         assertTrue("Bottom navigation overlaps the content viewport", content.bottom <= navigation.top + 1f)
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("Bottom dock touches the left edge", navigation.left >= 9f * density)
+        assertTrue("Bottom dock touches the right edge", root.right - navigation.right >= 9f * density)
         captureEvidence("phone-portrait-bottom-navigation")
     }
 
@@ -111,6 +115,51 @@ class AdaptiveMainShellComposeTest {
         composeRule.onNodeWithTag("mobile-bottom-nav-home").assertIsDisplayed()
         composeRule.onNodeWithTag("adaptive-navigation-rail").assertDoesNotExist()
         captureEvidence("phone-short-landscape-bottom-navigation")
+    }
+
+    @Test
+    fun phonePortraitCatalogHeaderKeepsSafeHorizontalInsets() {
+        render(
+            AdaptiveUiState(
+                deviceClass = HulkDeviceClass.MOBILE,
+                windowWidthClass = HulkWindowWidthClass.COMPACT,
+                navigationType = HulkNavigationType.BOTTOM_BAR,
+                inputMode = HulkInputMode.TOUCH,
+                screenWidthDp = 360,
+                screenHeightDp = 800,
+            ),
+            MainDestination.LIVE,
+        )
+        composeRule.onNodeWithTag("catalog-header").assertIsDisplayed()
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val header = composeRule.onNodeWithTag("catalog-header").fetchSemanticsNode().boundsInRoot
+        assertTrue("Catalog header touches the left edge", header.left >= 16f * density)
+        assertTrue("Catalog header touches the right edge", root.right - header.right >= 16f * density)
+        captureEvidence("phone-portrait-catalog-header")
+    }
+
+    @Test
+    fun phonePortraitPageTitleKeepsSafeHorizontalInsets() {
+        render(
+            AdaptiveUiState(
+                deviceClass = HulkDeviceClass.MOBILE,
+                windowWidthClass = HulkWindowWidthClass.COMPACT,
+                navigationType = HulkNavigationType.BOTTOM_BAR,
+                inputMode = HulkInputMode.TOUCH,
+                screenWidthDp = 360,
+                screenHeightDp = 800,
+            ),
+            MainDestination.FAVORITES,
+        )
+        composeRule.onNodeWithTag("page-title").assertIsDisplayed()
+        composeRule.onNodeWithTag("page-title-text").assertIsDisplayed()
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val header = composeRule.onNodeWithTag("page-title").fetchSemanticsNode().boundsInRoot
+        assertTrue("Page title touches the left edge", header.left >= 16f * density)
+        assertTrue("Page title touches the right edge", root.right - header.right >= 16f * density)
+        captureEvidence("phone-portrait-page-title")
     }
 
     @Test

@@ -156,10 +156,16 @@ private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
+private val MOBILE_PAGE_GUTTER = 18.dp
+private val MOBILE_PAGE_TOP_PADDING = 18.dp
 
 @Composable
 private fun resolvedPageHorizontalGutter(isTv: Boolean) =
-    if (isTv) TV_PAGE_GUTTER else LocalAdaptiveUi.current.layoutPolicy.pageHorizontalPaddingDp.dp
+    if (isTv) {
+        TV_PAGE_GUTTER
+    } else {
+        maxOf(MOBILE_PAGE_GUTTER, LocalAdaptiveUi.current.layoutPolicy.pageHorizontalPaddingDp.dp)
+    }
 
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
@@ -609,85 +615,87 @@ private fun MobileBottomNavigation(selected: MainDestination, onSelect: (MainDes
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
         navigationState.animateScrollToItem(selectedIndex)
     }
-    val containerShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+    val dockShape = RoundedCornerShape(20.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFF161710), Color(0xFF090A07)),
-                ),
-            )
-            .border(1.dp, colors.line.copy(alpha = .38f), containerShape)
-            .padding(vertical = if (compactLandscape) 4.dp else 6.dp)
-            .testTag("mobile-bottom-navigation"),
+            .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 8.dp),
     ) {
-        LazyRow(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = if (compactLandscape) 50.dp else 60.dp),
-            state = navigationState,
-            contentPadding = PaddingValues(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .clip(dockShape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF1A1B14), Color(0xFF0D0E0A)),
+                    ),
+                )
+                .border(1.dp, colors.gold.copy(alpha = .32f), dockShape)
+                .testTag("mobile-bottom-navigation"),
         ) {
-            items(destinations, key = { it.destination.name }) { entry ->
-                val active = selected == entry.destination
-                var focused by remember { mutableStateOf(false) }
-                val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
-                val itemShape = RoundedCornerShape(15.dp)
-                Column(
-                    modifier = Modifier
-                        .width(if (compactLandscape) 58.dp else 64.dp)
-                        .height(if (compactLandscape) 48.dp else 60.dp)
-                        .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
-                        .clip(itemShape)
-                        .background(
-                            if (active) colors.gold.copy(alpha = .18f) else Color(0xFF181914),
-                        )
-                        .border(
-                            width = when {
-                                keyboardFocused -> 2.dp
-                                active -> 1.5.dp
-                                else -> 1.dp
-                            },
-                            color = when {
-                                keyboardFocused || active -> colors.goldBright
-                                else -> colors.line.copy(alpha = .42f)
-                            },
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (compactLandscape) 54.dp else 68.dp),
+                state = navigationState,
+                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(destinations, key = { it.destination.name }) { entry ->
+                    val active = selected == entry.destination
+                    var focused by remember { mutableStateOf(false) }
+                    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator
+                    val itemShape = RoundedCornerShape(14.dp)
+                    val selectionBorder = if (active || keyboardFocused) {
+                        Modifier.border(
+                            width = if (keyboardFocused) 2.dp else 1.dp,
+                            color = colors.goldBright,
                             shape = itemShape,
                         )
-                        .onFocusChanged { focused = it.isFocused }
-                        .clickable(role = Role.Button) { onSelect(entry.destination) }
-                        .padding(horizontal = 4.dp, vertical = if (compactLandscape) 6.dp else 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(if (compactLandscape) 29.dp else 30.dp)
-                            .clip(CircleShape)
-                            .background(if (active) colors.gold else Color(0xFF24251D)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = entry.icon,
-                            contentDescription = entry.label,
-                            tint = if (active) Color.Black else colors.textMuted,
-                            modifier = Modifier.size(if (compactLandscape) 20.dp else 19.dp),
-                        )
+                    } else {
+                        Modifier
                     }
-                    if (!compactLandscape) {
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = entry.label,
-                            color = if (active) colors.text else colors.textMuted,
-                            fontSize = 9.sp,
-                            lineHeight = 10.sp,
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    Column(
+                        modifier = Modifier
+                            .width(if (compactLandscape) 58.dp else 62.dp)
+                            .height(if (compactLandscape) 46.dp else 56.dp)
+                            .testTag("mobile-bottom-nav-${entry.destination.name.lowercase(Locale.ROOT)}")
+                            .clip(itemShape)
+                            .background(if (active) colors.gold.copy(alpha = .14f) else Color.Transparent)
+                            .then(selectionBorder)
+                            .onFocusChanged { focused = it.isFocused }
+                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .padding(horizontal = 4.dp, vertical = if (compactLandscape) 5.dp else 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (compactLandscape) 28.dp else 30.dp)
+                                .clip(CircleShape)
+                                .background(if (active) colors.gold else Color.White.copy(alpha = .06f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = entry.icon,
+                                contentDescription = entry.label,
+                                tint = if (active) Color.Black else colors.textMuted,
+                                modifier = Modifier.size(if (compactLandscape) 19.dp else 18.dp),
+                            )
+                        }
+                        if (!compactLandscape) {
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = entry.label,
+                                color = if (active) colors.text else colors.textMuted,
+                                fontSize = 9.sp,
+                                lineHeight = 10.sp,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
@@ -949,7 +957,7 @@ private fun CinemaHero(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (isTv) 374.dp else 288.dp)
+            .height(if (isTv) 374.dp else 340.dp)
             .background(Color(0xFF0A0B08)),
     ) {
         if (!image.isNullOrBlank()) {
@@ -980,12 +988,16 @@ private fun CinemaHero(
         )
 
         Row(
-            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 26.dp, vertical = 18.dp),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(horizontal = if (isTv) 26.dp else 20.dp, vertical = 18.dp)
+                .testTag("home-hero-header"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
                 Text("الرئيسية", color = colors.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("احدث اضافات HULK", color = colors.textMuted, fontSize = 11.sp)
+                Text("احدث اضافات HULK", color = colors.textMuted, fontSize = 11.sp, modifier = Modifier.testTag("home-hero-section-label"))
             }
             if (isLoading) LoadingRing()
             Spacer(Modifier.width(10.dp))
@@ -995,19 +1007,24 @@ private fun CinemaHero(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) .58f else .86f)
-                .padding(start = 27.dp, end = 27.dp, bottom = if (isTv) 38.dp else 24.dp),
+                .fillMaxWidth(if (isTv) .58f else 1f)
+                .padding(
+                    start = if (isTv) 27.dp else 20.dp,
+                    end = if (isTv) 27.dp else 20.dp,
+                    bottom = if (isTv) 38.dp else 24.dp,
+                ),
         ) {
-            Text("وصل حديثا", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("وصل حديثا", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("home-hero-new-label"))
             Spacer(Modifier.height(5.dp))
             Text(
                 item.name,
                 color = Color.White,
-                fontSize = if (isTv) 39.sp else 28.sp,
-                lineHeight = if (isTv) 47.sp else 34.sp,
+                fontSize = if (isTv) 39.sp else 24.sp,
+                lineHeight = if (isTv) 47.sp else 29.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("home-hero-headline"),
             )
             Spacer(Modifier.height(9.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -1224,7 +1241,7 @@ private fun PosterCatalogScreen(
             .fillMaxSize()
             .padding(
                 horizontal = resolvedPageHorizontalGutter(isTv),
-                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else MOBILE_PAGE_TOP_PADDING,
             ),
     ) {
         CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
@@ -1413,7 +1430,7 @@ private fun LiveCatalogScreen(
             .fillMaxSize()
             .padding(
                 horizontal = resolvedPageHorizontalGutter(isTv),
-                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
+                vertical = if (isTv) TV_PAGE_GUTTER else MOBILE_PAGE_TOP_PADDING,
             ),
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
@@ -1622,9 +1639,12 @@ private fun FavoritesScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(resolvedPageHorizontalGutter(isTv)),
+            .padding(
+                horizontal = resolvedPageHorizontalGutter(isTv),
+                vertical = if (isTv) TV_PAGE_GUTTER else MOBILE_PAGE_TOP_PADDING,
+            ),
     ) {
-        PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
+        PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star, isTv)
         Spacer(Modifier.height(18.dp))
         if (content.isEmpty() && state.loadingTypes.isEmpty()) {
             EmptyState("لم تضف اي محتوى الى قائمتك بعد")
@@ -1656,9 +1676,12 @@ private fun UnifiedSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(resolvedPageHorizontalGutter(isTv)),
+            .padding(
+                horizontal = resolvedPageHorizontalGutter(isTv),
+                vertical = if (isTv) TV_PAGE_GUTTER else MOBILE_PAGE_TOP_PADDING,
+            ),
     ) {
-        PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
+        PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search, isTv)
         Spacer(Modifier.height(14.dp))
         TvSearchField(
             value = state.searchQuery,
@@ -1818,9 +1841,12 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(resolvedPageHorizontalGutter(isTv)),
+            .padding(
+                horizontal = resolvedPageHorizontalGutter(isTv),
+                vertical = if (isTv) TV_PAGE_GUTTER else MOBILE_PAGE_TOP_PADDING,
+            ),
     ) {
-        PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
+        PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download, isTv)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             InfoPill("مكتمل  $completed")
@@ -2325,11 +2351,11 @@ private fun SettingsScreen(
         contentPadding = if (isTv) {
             PaddingValues(bottom = 24.dp)
         } else {
-            PaddingValues(horizontal = resolvedPageHorizontalGutter(false), vertical = 15.dp)
+            PaddingValues(horizontal = resolvedPageHorizontalGutter(false), vertical = MOBILE_PAGE_TOP_PADDING)
         },
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        item { PageTitle("الحساب والاعدادات", "ادارة اشتراكك وتجربة المشاهدة", 0, Icons.Rounded.Settings) }
+        item { PageTitle("الحساب والاعدادات", "ادارة اشتراكك وتجربة المشاهدة", 0, Icons.Rounded.Settings, isTv) }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                 AccountMetric("الحساب", account?.username?.let { "••••${it.takeLast(4)}" } ?: "—", Modifier.weight(1f))
@@ -2757,9 +2783,24 @@ private fun CatalogHeader(
     isTv: Boolean,
 ) {
     val colors = LocalHulkColors.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-        Column(Modifier.width(if (isTv) 185.dp else 105.dp)) {
-            Text(title, color = colors.text, fontSize = if (isTv) 27.sp else 20.sp, fontWeight = FontWeight.Bold)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (isTv) 0.dp else 2.dp)
+            .testTag("catalog-header"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.width(if (isTv) 185.dp else 116.dp)) {
+            Text(
+                title,
+                color = colors.text,
+                fontSize = if (isTv) 27.sp else 20.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("catalog-header-title"),
+            )
             Text("$resultCount عنصر", color = colors.textMuted, fontSize = 10.sp)
         }
         HulkTextField(query, onSearch, "ابحث في $title…", Modifier.weight(1f).widthIn(max = 630.dp))
@@ -3138,16 +3179,44 @@ private fun FavoriteHint(isTv: Boolean) {
 }
 
 @Composable
-private fun PageTitle(title: String, subtitle: String, count: Int, icon: ImageVector) {
+private fun PageTitle(title: String, subtitle: String, count: Int, icon: ImageVector, isTv: Boolean) {
     val colors = LocalHulkColors.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(42.dp).clip(CircleShape).background(colors.gold.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
-            Icon(icon, title, tint = colors.goldBright, modifier = Modifier.size(21.dp))
+    val iconContainerSize = if (isTv) 42.dp else 38.dp
+    val iconSize = if (isTv) 21.dp else 19.dp
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (isTv) 0.dp else 2.dp, vertical = if (isTv) 0.dp else 3.dp)
+            .testTag("page-title"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(iconContainerSize)
+                .clip(CircleShape)
+                .background(colors.gold.copy(alpha = .12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, title, tint = colors.goldBright, modifier = Modifier.size(iconSize))
         }
-        Spacer(Modifier.width(11.dp))
-        Column {
-            Text(title, color = colors.text, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-            Text(if (count > 0) "$subtitle  •  $count" else subtitle, color = colors.textMuted, fontSize = 11.sp)
+        Spacer(Modifier.width(if (isTv) 11.dp else 10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                color = colors.text,
+                fontSize = if (isTv) 25.sp else 20.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("page-title-text"),
+            )
+            Text(
+                if (count > 0) "$subtitle  •  $count" else subtitle,
+                color = colors.textMuted,
+                fontSize = if (isTv) 11.sp else 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
