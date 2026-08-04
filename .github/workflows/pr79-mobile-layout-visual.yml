@@ -69,9 +69,7 @@ jobs:
             set -eu
             adb shell wm size 1080x2400
             adb shell wm density 420
-            ./gradlew --no-daemon --console=plain \
-              :app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.compatibilityv2.AdaptiveMainShellComposeTest
+            ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.compatibilityv2.AdaptiveMainShellComposeTest
             mkdir -p mobile-layout-visual
             adb pull /sdcard/Android/data/sa.hulksa.player/files/adaptive-main-shell-evidence/. mobile-layout-visual/
             test -f mobile-layout-visual/phone-portrait-bottom-navigation.png
