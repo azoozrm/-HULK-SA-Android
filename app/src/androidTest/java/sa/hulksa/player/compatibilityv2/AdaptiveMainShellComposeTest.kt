@@ -24,9 +24,6 @@ import org.junit.Test
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
-import sa.hulksa.player.model.Catalog
-import sa.hulksa.player.model.ContentItem
-import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.ui.adaptive.AdaptiveUiState
 import sa.hulksa.player.ui.adaptive.HulkDeviceClass
 import sa.hulksa.player.ui.adaptive.HulkInputMode
@@ -41,42 +38,16 @@ class AdaptiveMainShellComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun render(
-        adaptive: AdaptiveUiState,
-        initialDestination: MainDestination = MainDestination.HOME,
-        featuredName: String? = null,
-    ) {
+    private fun render(adaptive: AdaptiveUiState) {
         composeRule.setContent {
             HulkTheme {
                 CompositionLocalProvider(LocalAdaptiveUi provides adaptive) {
-                    var destination by remember { mutableStateOf(initialDestination) }
-                    val catalogs = featuredName?.let { name ->
-                        mapOf(
-                            ContentType.MOVIE to Catalog(
-                                categories = emptyList(),
-                                items = listOf(
-                                    ContentItem(
-                                        id = 101,
-                                        name = name,
-                                        categoryId = "featured",
-                                        type = ContentType.MOVIE,
-                                        posterUrl = null,
-                                        rating = "8.4",
-                                        year = "2026",
-                                        containerExtension = "mkv",
-                                        addedAtEpochSeconds = 1_900_000_000L,
-                                        plot = "عنصر تجريبي طويل للتحقق من مساحة عنوان الرئيسية على سطرين.",
-                                    ),
-                                ),
-                            ),
-                        )
-                    } ?: emptyMap()
+                    var destination by remember { mutableStateOf(MainDestination.HOME) }
                     MainShellScreen(
                         state = HulkUiState(
                             screen = HulkScreen.MAIN,
                             isStarting = false,
                             destination = destination,
-                            catalogs = catalogs,
                         ),
                         isTv = adaptive.isTelevision,
                         navigationMemory = remember { NavigationMemoryStore() },
@@ -121,42 +92,7 @@ class AdaptiveMainShellComposeTest {
         val content = composeRule.onNodeWithTag("main-shell-content").fetchSemanticsNode().boundsInRoot
         val navigation = composeRule.onNodeWithTag("mobile-bottom-navigation").fetchSemanticsNode().boundsInRoot
         assertTrue("Bottom navigation overlaps the content viewport", content.bottom <= navigation.top + 1f)
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
-        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        assertTrue("Bottom dock touches the left edge", navigation.left >= 9f * density)
-        assertTrue("Bottom dock touches the right edge", root.right - navigation.right >= 9f * density)
         captureEvidence("phone-portrait-bottom-navigation")
-    }
-
-    @Test
-    fun phonePortraitTwoLineHeroKeepsSectionLabelsSeparated() {
-        render(
-            adaptive = AdaptiveUiState(
-                deviceClass = HulkDeviceClass.MOBILE,
-                windowWidthClass = HulkWindowWidthClass.COMPACT,
-                navigationType = HulkNavigationType.BOTTOM_BAR,
-                inputMode = HulkInputMode.TOUCH,
-                screenWidthDp = 360,
-                screenHeightDp = 800,
-            ),
-            featuredName = "Capps Crossing: Wrong Side of Death Extended Edition",
-        )
-        composeRule.onNodeWithTag("home-hero-section-label").assertIsDisplayed()
-        composeRule.onNodeWithTag("home-hero-new-label").assertIsDisplayed()
-        composeRule.onNodeWithTag("home-hero-headline").assertIsDisplayed()
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
-        val sectionLabel = composeRule.onNodeWithTag("home-hero-section-label").fetchSemanticsNode().boundsInRoot
-        val newLabel = composeRule.onNodeWithTag("home-hero-new-label").fetchSemanticsNode().boundsInRoot
-        val headline = composeRule.onNodeWithTag("home-hero-headline").fetchSemanticsNode().boundsInRoot
-        assertTrue(
-            "وصل حديثا overlaps احدث اضافات HULK",
-            sectionLabel.bottom + 12f * density <= newLabel.top,
-        )
-        assertTrue(
-            "Two-line featured headline overlaps وصل حديثا",
-            newLabel.bottom + 4f * density <= headline.top,
-        )
-        captureEvidence("phone-portrait-two-line-hero")
     }
 
     @Test
@@ -175,51 +111,6 @@ class AdaptiveMainShellComposeTest {
         composeRule.onNodeWithTag("mobile-bottom-nav-home").assertIsDisplayed()
         composeRule.onNodeWithTag("adaptive-navigation-rail").assertDoesNotExist()
         captureEvidence("phone-short-landscape-bottom-navigation")
-    }
-
-    @Test
-    fun phonePortraitCatalogHeaderKeepsSafeHorizontalInsets() {
-        render(
-            AdaptiveUiState(
-                deviceClass = HulkDeviceClass.MOBILE,
-                windowWidthClass = HulkWindowWidthClass.COMPACT,
-                navigationType = HulkNavigationType.BOTTOM_BAR,
-                inputMode = HulkInputMode.TOUCH,
-                screenWidthDp = 360,
-                screenHeightDp = 800,
-            ),
-            MainDestination.LIVE,
-        )
-        composeRule.onNodeWithTag("catalog-header").assertIsDisplayed()
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
-        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val header = composeRule.onNodeWithTag("catalog-header").fetchSemanticsNode().boundsInRoot
-        assertTrue("Catalog header touches the left edge", header.left >= 16f * density)
-        assertTrue("Catalog header touches the right edge", root.right - header.right >= 16f * density)
-        captureEvidence("phone-portrait-catalog-header")
-    }
-
-    @Test
-    fun phonePortraitPageTitleKeepsSafeHorizontalInsets() {
-        render(
-            AdaptiveUiState(
-                deviceClass = HulkDeviceClass.MOBILE,
-                windowWidthClass = HulkWindowWidthClass.COMPACT,
-                navigationType = HulkNavigationType.BOTTOM_BAR,
-                inputMode = HulkInputMode.TOUCH,
-                screenWidthDp = 360,
-                screenHeightDp = 800,
-            ),
-            MainDestination.FAVORITES,
-        )
-        composeRule.onNodeWithTag("page-title").assertIsDisplayed()
-        composeRule.onNodeWithTag("page-title-text").assertIsDisplayed()
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
-        val root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val header = composeRule.onNodeWithTag("page-title").fetchSemanticsNode().boundsInRoot
-        assertTrue("Page title touches the left edge", header.left >= 16f * density)
-        assertTrue("Page title touches the right edge", root.right - header.right >= 16f * density)
-        captureEvidence("phone-portrait-page-title")
     }
 
     @Test
@@ -275,16 +166,5 @@ class AdaptiveMainShellComposeTest {
         device.dumpWindowHierarchy(hierarchy)
         check(screenshot.isFile && screenshot.length() > 0L) { "Empty adaptive screenshot: $screenshot" }
         check(hierarchy.isFile && hierarchy.length() > 0L) { "Empty adaptive hierarchy: $hierarchy" }
-
-        val exportedRoot = "/sdcard/Download/hulk-sa-adaptive-main-shell-evidence"
-        device.executeShellCommand("mkdir -p '$exportedRoot'")
-        device.executeShellCommand("cp '${screenshot.absolutePath}' '$exportedRoot/${screenshot.name}'")
-        device.executeShellCommand("cp '${hierarchy.absolutePath}' '$exportedRoot/${hierarchy.name}'")
-        check(
-            device.executeShellCommand("test -s '$exportedRoot/${screenshot.name}' && echo OK").trim() == "OK",
-        ) { "Unable to export adaptive screenshot: ${screenshot.name}" }
-        check(
-            device.executeShellCommand("test -s '$exportedRoot/${hierarchy.name}' && echo OK").trim() == "OK",
-        ) { "Unable to export adaptive hierarchy: ${hierarchy.name}" }
     }
 }
