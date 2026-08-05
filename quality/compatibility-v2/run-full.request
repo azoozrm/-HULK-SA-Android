@@ -1,4 +1,4 @@
-requested_for_parent=a99f3adcb2bc44294d6e91d69e85632a32a4977c
-reason=qualify-android-11-window-crash-correction
-request_sequence=rescue-full-matrix-5
-requested_at=2026-08-05T22:39:12+03:00
+requested_for_parent=3d5249756206696237844dc46d59af1d4986193a
+reason=qualify-adaptive-login-reachability-and-tv-entry-focus
+request_sequence=rescue-full-matrix-6
+requested_at=2026-08-05T23:03:00+03:00
