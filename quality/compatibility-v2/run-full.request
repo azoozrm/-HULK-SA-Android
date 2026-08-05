@@ -1,4 +1,4 @@
-requested_for_parent=ad736a3d30a71fa06c5379fa065566398ae3a7d9
-reason=qualify-stable-tv4k-adb-readiness
-request_sequence=rescue-full-matrix-10
-requested_at=2026-08-06T01:08:00+03:00
+requested_for_parent=cad3181f9cbd19ce1a9c501d7bdcc47caef096a3
+reason=qualify-resolved-tv4k-avd-path
+request_sequence=rescue-full-matrix-11
+requested_at=2026-08-06T01:29:36+03:00
