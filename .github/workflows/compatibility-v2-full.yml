@@ -66,6 +66,8 @@ jobs:
               ]),
           }
           for profile in profiles:
+              if profile['id'] == 'tv-4k-api36':
+                  continue
               include.append({
                   'id': profile['id'],
                   'api': profile['api'],
@@ -112,6 +114,7 @@ jobs:
           bash -n quality/compatibility-v2/prepare_avd_profile.sh
           bash -n quality/compatibility-v2/collect_runtime_evidence.sh
           bash -n quality/compatibility-v2/run_runtime_profile.sh
+          bash -n quality/compatibility-v2/run_stable_emulator_profile.sh
           ./gradlew --no-daemon --console=plain \
             clean :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest \
             -PHULK_PORTAL_URL="$HULK_PORTAL_URL" -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
@@ -188,11 +191,71 @@ jobs:
           if-no-files-found: error
           retention-days: 21
 
+  runtime-tv-4k:
+    needs: build-test-binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-BINARIES-${{ github.run_id }}
+          path: build/compatibility-v2/binaries
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+
+      - name: Configure Linux KVM when available
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]] && sudo chmod a+rw /dev/kvm && [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            echo 'KVM_AVAILABLE=true' >> "$GITHUB_ENV"
+            ls -l /dev/kvm
+          else
+            echo 'KVM_AVAILABLE=false' >> "$GITHUB_ENV"
+            echo 'KVM is unavailable on this hosted runner; emulator boot and evidence remain mandatory.'
+          fi
+
+      - name: Install the canonical Android TV image
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'emulator' \
+            'system-images;android-36;android-tv;x86_64'
+
+      - name: Run 4K instrumentation after stable ADB readiness
+        run: |
+          bash quality/compatibility-v2/run_stable_emulator_profile.sh \
+            'tv-4k-api36' \
+            'build/compatibility-v2/runtime/tv-4k-api36'
+
+      - name: Enforce 4K runtime evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 quality/compatibility-v2/evidence_gate.py \
+            --scope runtime \
+            --evidence-root 'build/compatibility-v2/runtime/tv-4k-api36' \
+            --out 'build/compatibility-v2/runtime/tv-4k-api36/gate'
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-COMPATIBILITY-V2-RUNTIME-tv-4k-api36-${{ github.run_id }}
+          path: build/compatibility-v2/runtime/tv-4k-api36/
+          if-no-files-found: error
+          retention-days: 21
+
   publish-full-matrix-result:
     if: always()
     needs:
       - build-test-binaries
       - runtime-matrix
+      - runtime-tv-4k
     runs-on: ubuntu-latest
     steps:
       - name: Publish final Full Matrix status
@@ -200,11 +263,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BUILD_RESULT: ${{ needs.build-test-binaries.result }}
           MATRIX_RESULT: ${{ needs.runtime-matrix.result }}
+          TV_4K_RESULT: ${{ needs.runtime-tv-4k.result }}
         run: |
           set -euo pipefail
           state=failure
           description="Full Matrix run ${GITHUB_RUN_ID} failed"
-          if [[ "$BUILD_RESULT" == success && "$MATRIX_RESULT" == success ]]; then
+          if [[ "$BUILD_RESULT" == success && "$MATRIX_RESULT" == success && "$TV_4K_RESULT" == success ]]; then
             state=success
             description="Full Matrix run ${GITHUB_RUN_ID} passed"
           fi
