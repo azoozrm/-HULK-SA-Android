@@ -1,9 +1,12 @@
 package sa.hulksa.player
 
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.WindowInsets
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -12,9 +15,11 @@ import sa.hulksa.player.ui.theme.HulkTheme
 
 class TvMainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
+    private var initialImePolicyApplied = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContent {
             HulkTheme {
                 HulkApp(viewModel = viewModel, isTelevisionDevice = true)
@@ -29,7 +34,25 @@ class TvMainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) window.decorView.post { enterImmersiveModeSafely() }
+        if (hasFocus) {
+            window.decorView.post {
+                enterImmersiveModeSafely()
+                hideInitialImeOnce()
+            }
+        }
+    }
+
+    private fun hideInitialImeOnce() {
+        if (initialImePolicyApplied) return
+        initialImePolicyApplied = true
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.insetsController?.hide(WindowInsets.Type.ime())
+            } else {
+                val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                inputMethodManager?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
