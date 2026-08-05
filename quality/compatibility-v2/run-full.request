@@ -1,4 +1,4 @@
-requested_for_parent=11830c273a4317912e6b89ff9cafa76a91c5694b
-reason=qualify-compact-phone-login-rescue
-request_sequence=rescue-full-matrix-7
-requested_at=2026-08-05T23:52:00+03:00
+requested_for_parent=c28ddeb809029241ffd2be08c64fbc2f2b280028
+reason=qualify-stable-compact-login-scroll-policy
+request_sequence=rescue-full-matrix-8
+requested_at=2026-08-06T00:16:00+03:00
