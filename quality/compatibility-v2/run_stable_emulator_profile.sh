@@ -4,7 +4,7 @@ set -Eeuo pipefail
 profile="${1:?profile id is required}"
 out="${2:-build/compatibility-v2/runtime/$profile}"
 matrix_file="quality/compatibility-v2/config/device-matrix.json"
-avd_name="hulk-${profile//[^a-zA-Z0-9_-]/-}"
+avd_name="hulk_${profile//[^a-zA-Z0-9_]/_}"
 serial="emulator-5554"
 readiness="$out/EMULATOR-READINESS.txt"
 console_log="$out/EMULATOR-CONSOLE.log"
@@ -55,7 +55,11 @@ fi
 hardware_profile="tv_1080p"
 system_image="system-images;android-${api};${target};x86_64"
 emulator_bin="${ANDROID_HOME:?ANDROID_HOME is required}/emulator/emulator"
+android_user_home="${ANDROID_USER_HOME:-${HOME}/.android}"
+avd_home="${ANDROID_AVD_HOME:-${android_user_home}/avd}"
 emulator_pid=""
+export ANDROID_AVD_HOME="$avd_home"
+mkdir -p "$avd_home"
 
 cleanup() {
   set +e
@@ -67,22 +71,140 @@ cleanup() {
 }
 trap cleanup EXIT
 
+record_avd_inventory() {
+  {
+    echo "requested_avd_name=$avd_name"
+    echo "android_user_home=$android_user_home"
+    echo "android_avd_home=$avd_home"
+    echo "avd_inventory_begin"
+    find "$avd_home" -maxdepth 3 -mindepth 1 -printf '%y %p\n' 2>&1 | sort || true
+    echo "avd_inventory_end"
+    echo "avdmanager_list_begin"
+    avdmanager list avd 2>&1 || true
+    echo "avdmanager_list_end"
+  } >> "$readiness"
+}
+
 echo no | avdmanager create avd \
   --force \
   --name "$avd_name" \
   --package "$system_image" \
   --device "$hardware_profile"
 
-printf 'hw.cpu.ncore=2\nhw.ramSize=2048M\ndisk.dataPartition.size=4096M\n' \
-  >> "$HOME/.android/avd/${avd_name}.avd/config.ini"
+record_avd_inventory
 
-bash quality/compatibility-v2/prepare_avd_profile.sh \
-  "$width" "$height" "$density" "$avd_name"
+descriptor="$avd_home/${avd_name}.ini"
+if [[ ! -f "$descriptor" ]]; then
+  mapfile -t descriptors < <(
+    find "$avd_home" -maxdepth 1 -type f -name '*.ini' -print | sort
+  )
+  if (( ${#descriptors[@]} == 1 )); then
+    descriptor="${descriptors[0]}"
+  else
+    {
+      echo "result=BLOCKED"
+      echo "failure_reason=unable to resolve exactly one AVD descriptor after creation"
+      echo "descriptor_count=${#descriptors[@]}"
+    } >> "$readiness"
+    exit 3
+  fi
+fi
+
+registered_avd_name="$(basename "$descriptor" .ini)"
+avd_path="$(sed -n 's/^path=//p' "$descriptor" | tail -n 1)"
+avd_path_rel="$(sed -n 's/^path.rel=//p' "$descriptor" | tail -n 1)"
+
+if [[ -n "$avd_path" ]]; then
+  if [[ "$avd_path" = /* ]]; then
+    avd_dir="$avd_path"
+  else
+    avd_dir="$android_user_home/$avd_path"
+  fi
+elif [[ -n "$avd_path_rel" ]]; then
+  avd_dir="$android_user_home/$avd_path_rel"
+else
+  avd_dir="$avd_home/${registered_avd_name}.avd"
+fi
+
+config="$avd_dir/config.ini"
+if [[ ! -f "$config" ]]; then
+  mapfile -t configs < <(
+    find "$avd_home" -maxdepth 3 -type f -path '*.avd/config.ini' -print | sort
+  )
+  if (( ${#configs[@]} == 1 )); then
+    config="${configs[0]}"
+    avd_dir="$(dirname "$config")"
+  else
+    {
+      echo "resolved_descriptor=$descriptor"
+      echo "descriptor_path=$avd_path"
+      echo "descriptor_path_rel=$avd_path_rel"
+      echo "result=BLOCKED"
+      echo "failure_reason=unable to resolve exactly one AVD config after creation"
+      echo "config_count=${#configs[@]}"
+    } >> "$readiness"
+    exit 3
+  fi
+fi
+
+{
+  echo "resolved_descriptor=$descriptor"
+  echo "registered_avd_name=$registered_avd_name"
+  echo "resolved_avd_dir=$avd_dir"
+  echo "resolved_avd_config=$config"
+} >> "$readiness"
+
+python3 - "$config" "$width" "$height" "$density" <<'PY_CONFIG'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+width, height, density = sys.argv[2:]
+replacements = {
+    'skin.name': f'{width}x{height}',
+    'skin.path': f'{width}x{height}',
+    'hw.lcd.width': width,
+    'hw.lcd.height': height,
+    'hw.lcd.density': density,
+    'hw.cpu.ncore': '2',
+    'hw.ramSize': '2048M',
+    'disk.dataPartition.size': '4096M',
+}
+lines = path.read_text(encoding='utf-8').splitlines()
+output = []
+seen = set()
+for line in lines:
+    key = line.split('=', 1)[0].strip() if '=' in line else ''
+    if key in replacements:
+        output.append(f'{key}={replacements[key]}')
+        seen.add(key)
+    else:
+        output.append(line)
+for key, value in replacements.items():
+    if key not in seen:
+        output.append(f'{key}={value}')
+path.write_text('\n'.join(output) + '\n', encoding='utf-8')
+PY_CONFIG
+
+for expected in \
+  "skin.name=${width}x${height}" \
+  "skin.path=${width}x${height}" \
+  "hw.lcd.width=${width}" \
+  "hw.lcd.height=${height}" \
+  "hw.lcd.density=${density}" \
+  'hw.cpu.ncore=2' \
+  'hw.ramSize=2048M' \
+  'disk.dataPartition.size=4096M'; do
+  grep -Fxq "$expected" "$config" || {
+    echo "AVD config verification failed: $expected" >&2
+    exit 3
+  }
+done
 
 adb start-server
 "$emulator_bin" \
   -port 5554 \
-  -avd "$avd_name" \
+  -avd "$registered_avd_name" \
   -no-window \
   -gpu swiftshader_indirect \
   -noaudio \
