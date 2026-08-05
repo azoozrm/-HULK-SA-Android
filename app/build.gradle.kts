@@ -89,6 +89,7 @@ val generateTvFixedMainSource = tasks.register("generateTvFixedMainSource") {
     group = "build setup"
     description = "Generates the main source tree with TV-only rail and download corrections."
     inputs.dir(mainSourceRoot)
+    inputs.file(rootProject.file("gradle/tv-source-patches.properties"))
     outputs.dir(tvFixedMainSourceRoot)
 
     doLast {
@@ -103,52 +104,32 @@ val generateTvFixedMainSource = tasks.register("generateTvFixedMainSource") {
             "sa/hulksa/player/ui/screens/MainShellScreen.kt",
         )
         var source = mainShell.readText()
-        source = source.replaceExactlyOnce(
-            oldValue = "import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.size",
-            newValue = "import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.offset\nimport androidx.compose.foundation.layout.size",
-            label = "offset import",
-        )
-        source = source.replaceExactlyOnce(
-            oldValue = "        BrandLogo(Modifier.size(railLogoSize))",
-            newValue = """        if (LocalAdaptiveUi.current.isTelevision) {
-            BrandBadge(
-                Modifier
-                    .size(if (expanded) 76.dp else 50.dp)
-                    .offset(x = if (expanded) 0.dp else (-4).dp),
+        val patchManifest = rootProject.file("gradle/tv-source-patches.properties")
+        val patchProperties = java.util.Properties().apply {
+            patchManifest.inputStream().use(::load)
+        }
+        val patchOrder = patchProperties.getProperty("patch.order")
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            .orEmpty()
+        if (patchOrder.isEmpty()) {
+            throw GradleException("TV source patch manifest has no ordered patches.")
+        }
+        patchOrder.forEach { patchId ->
+            fun requiredProperty(suffix: String): String =
+                patchProperties.getProperty("$patchId.$suffix")
+                    ?: throw GradleException("TV source patch property is missing: $patchId.$suffix")
+
+            val decoder = java.util.Base64.getDecoder()
+            val oldValue = String(decoder.decode(requiredProperty("old.base64")), Charsets.UTF_8)
+            val newValue = String(decoder.decode(requiredProperty("new.base64")), Charsets.UTF_8)
+            source = source.replaceExactlyOnce(
+                oldValue = oldValue,
+                newValue = newValue,
+                label = requiredProperty("label"),
             )
-        } else {
-            BrandLogo(Modifier.size(railLogoSize))
-        }""",
-            label = "TV rail logo",
-        )
-        source = source.replaceExactlyOnce(
-            oldValue = """    val televisionFocused = focused && adaptiveUi.showFocusHighlights
-    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator""",
-            newValue = """    val isTelevision = adaptiveUi.isTelevision
-    val televisionFocused = focused && adaptiveUi.showFocusHighlights
-    val keyboardFocused = focused && !isTelevision && adaptiveUi.showKeyboardFocusIndicator""",
-            label = "TV rail focus classification",
-        )
-        source = source.replaceExactlyOnce(
-            oldValue = """            .border(
-                if (televisionFocused || keyboardFocused) 2.dp else 0.dp,
-                colors.goldBright,
-                RoundedCornerShape(12.dp),
-            )""",
-            newValue = """            .then(
-                if (keyboardFocused) {
-                    Modifier.border(2.dp, colors.goldBright, RoundedCornerShape(12.dp))
-                } else {
-                    Modifier
-                },
-            )""",
-            label = "TV rail outline",
-        )
-        source = source.replaceExactlyOnce(
-            oldValue = "            .height(if (isTv) 164.dp else 220.dp)",
-            newValue = "            .height(220.dp)",
-            label = "TV download card height",
-        )
+        }
         mainShell.writeText(source)
     }
 }
@@ -187,12 +168,12 @@ android {
         }
     }
 
+
     sourceSets {
         getByName("main") {
             java.setSrcDirs(listOf(tvFixedMainSourceRoot.get().asFile))
         }
     }
-
     signingConfigs {
         if (releaseSigningConfigured) {
             create("release") {
