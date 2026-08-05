@@ -78,9 +78,7 @@ class MainActivity : ComponentActivity() {
             window.attributes = attributes
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.insetsController?.show(WindowInsets.Type.systemBars())
-        } else {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             window.decorView.systemUiVisibility =
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
