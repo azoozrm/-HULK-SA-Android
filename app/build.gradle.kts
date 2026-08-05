@@ -10,6 +10,21 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+fun String.replaceExactlyOnce(
+    oldValue: String,
+    newValue: String,
+    label: String,
+): String {
+    val firstMatch = indexOf(oldValue)
+    if (firstMatch < 0) {
+        throw GradleException("TV UI source patch anchor is missing: $label")
+    }
+    if (indexOf(oldValue, firstMatch + oldValue.length) >= 0) {
+        throw GradleException("TV UI source patch anchor is not unique: $label")
+    }
+    return replaceRange(firstMatch, firstMatch + oldValue.length, newValue)
+}
+
 val productionPortalUrl = "http://3162356.xyz:8080"
 val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse(productionPortalUrl)
 val configUrl = providers.gradleProperty("HULK_CONFIG_URL").orElse("")
@@ -65,6 +80,76 @@ val releaseKeystoreFile = if (releaseSigningConfigured) {
     null
 }
 
+// Keep the checked-in adaptive/mobile source untouched and compile a deterministic copy
+// containing only the approved Android TV corrections. Every anchor is verified exactly
+// once so a future source change fails loudly instead of silently applying a stale patch.
+val mainShellSource = layout.projectDirectory.file(
+    "src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt",
+)
+val tvFixedMainShellSourceRoot = layout.buildDirectory.dir("generated/source/tv-fixed-main-shell/main")
+val tvFixedMainShellOutput = tvFixedMainShellSourceRoot.map {
+    it.file("sa/hulksa/player/ui/screens/TvFixedMainShellScreen.kt")
+}
+val generateTvFixedMainShellSource = tasks.register("generateTvFixedMainShellSource") {
+    group = "build setup"
+    description = "Generates MainShell with TV-only rail, logo, and download-card corrections."
+    inputs.file(mainShellSource)
+    outputs.file(tvFixedMainShellOutput)
+
+    doLast {
+        var source = mainShellSource.asFile.readText()
+        source = source.replaceExactlyOnce(
+            oldValue = "import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.size",
+            newValue = "import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.offset\nimport androidx.compose.foundation.layout.size",
+            label = "offset import",
+        )
+        source = source.replaceExactlyOnce(
+            oldValue = "        BrandLogo(Modifier.size(railLogoSize))",
+            newValue = """        if (LocalAdaptiveUi.current.isTelevision) {
+            BrandBadge(
+                Modifier
+                    .size(if (expanded) 76.dp else 50.dp)
+                    .offset(x = if (expanded) 0.dp else (-4).dp),
+            )
+        } else {
+            BrandLogo(Modifier.size(railLogoSize))
+        }""",
+            label = "TV rail logo",
+        )
+        source = source.replaceExactlyOnce(
+            oldValue = """    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && adaptiveUi.showKeyboardFocusIndicator""",
+            newValue = """    val isTelevision = adaptiveUi.isTelevision
+    val televisionFocused = focused && adaptiveUi.showFocusHighlights
+    val keyboardFocused = focused && !isTelevision && adaptiveUi.showKeyboardFocusIndicator""",
+            label = "TV rail focus classification",
+        )
+        source = source.replaceExactlyOnce(
+            oldValue = "                if (televisionFocused || keyboardFocused) 2.dp else 0.dp,",
+            newValue = "                if (keyboardFocused) 2.dp else 0.dp,",
+            label = "TV rail outline",
+        )
+        source = source.replaceExactlyOnce(
+            oldValue = "            .height(if (isTv) 164.dp else 220.dp)",
+            newValue = "            .height(220.dp)",
+            label = "TV download card height",
+        )
+
+        val output = tvFixedMainShellOutput.get().asFile
+        output.parentFile.mkdirs()
+        output.writeText(source)
+    }
+}
+
+tasks.configureEach {
+    val needsTvFixedSource =
+        (name.startsWith("compile") && name.endsWith("Kotlin")) ||
+            name.startsWith("lint", ignoreCase = true)
+    if (needsTvFixedSource) {
+        dependsOn(generateTvFixedMainShellSource)
+    }
+}
+
 android {
     namespace = "sa.hulksa.player"
     compileSdk = 36
@@ -87,6 +172,13 @@ android {
                 "armeabi-v7a",
                 "x86_64",
             )
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            java.exclude("sa/hulksa/player/ui/screens/MainShellScreen.kt")
+            java.srcDir(tvFixedMainShellSourceRoot)
         }
     }
 
