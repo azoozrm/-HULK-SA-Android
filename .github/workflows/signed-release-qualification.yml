@@ -34,9 +34,9 @@ on:
         required: true
         default: '0.9.3.20'
         type: string
-  push:
+  pull_request:
     branches:
-      - fix/v09320-galaxy-landscape-clean
+      - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - '.github/workflows/signed-release-qualification.yml'
 
@@ -44,7 +44,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hulk-sa-signed-release-${{ github.workflow }}-${{ github.ref }}
+  group: hulk-sa-signed-release-${{ github.workflow }}-refs/heads/${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -57,6 +57,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -133,6 +135,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
