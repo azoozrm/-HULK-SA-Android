@@ -78,9 +78,9 @@ class MainActivity : ComponentActivity() {
             window.attributes = attributes
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.insetsController?.show(WindowInsets.Type.systemBars())
-        } else {
+        // System bars are visible by default on phones. Do not access
+        // WindowInsetsController before DecorView is attached on Android 11+.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             window.decorView.systemUiVisibility =
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
