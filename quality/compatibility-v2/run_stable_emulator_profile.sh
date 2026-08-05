@@ -56,6 +56,8 @@ hardware_profile="tv_1080p"
 system_image="system-images;android-${api};${target};x86_64"
 emulator_bin="${ANDROID_HOME:?ANDROID_HOME is required}/emulator/emulator"
 emulator_pid=""
+avd_home="${ANDROID_AVD_HOME:-${HOME}/.android/avd}"
+avd_dir="${avd_home}/${avd_name}.avd"
 
 cleanup() {
   set +e
@@ -67,14 +69,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+mkdir -p "$avd_home"
 echo no | avdmanager create avd \
   --force \
   --name "$avd_name" \
   --package "$system_image" \
-  --device "$hardware_profile"
+  --device "$hardware_profile" \
+  --path "$avd_dir"
 
 printf 'hw.cpu.ncore=2\nhw.ramSize=2048M\ndisk.dataPartition.size=4096M\n' \
-  >> "$HOME/.android/avd/${avd_name}.avd/config.ini"
+  >> "$avd_dir/config.ini"
 
 bash quality/compatibility-v2/prepare_avd_profile.sh \
   "$width" "$height" "$density" "$avd_name"
