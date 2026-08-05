@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -60,6 +61,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
@@ -78,15 +80,16 @@ fun LoginScreen(
     onLogin: (String, String, Boolean) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
     val uriHandler = LocalUriHandler.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val view = LocalView.current
     val tvInitialFocusRequester = remember { FocusRequester() }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var showPassword by remember { mutableStateOf(false) }
-    var rememberAccount by remember { mutableStateOf(true) }
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var showPassword by rememberSaveable { mutableStateOf(false) }
+    var rememberAccount by rememberSaveable { mutableStateOf(true) }
     val hideKeyboard: () -> Unit = {
         keyboardController?.hide()
         (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
@@ -145,8 +148,12 @@ fun LoginScreen(
         }
 
         val wideThreshold = if (isTv) 900.dp else 760.dp
-        val compactHeight = !isTv && maxHeight < 600.dp
-        val compactMobileLandscape = !isTv && maxWidth > maxHeight && maxHeight < 520.dp
+        val stableWindowWidthDp = adaptiveUi.screenWidthDp
+        val stableWindowHeightDp = adaptiveUi.screenHeightDp
+        val compactHeight = !isTv && stableWindowHeightDp < 600
+        val compactMobileLandscape = !isTv &&
+            stableWindowWidthDp > stableWindowHeightDp &&
+            stableWindowHeightDp < 520
         val wide = maxWidth >= wideThreshold && (!compactHeight || compactMobileLandscape)
         val compactWideTv = isTv && wide && maxWidth < 1180.dp
         if (wide) {
@@ -423,7 +430,7 @@ private fun LoginPanel(
     Column(
         modifier = modifier
             .widthIn(max = 474.dp)
-            .then(if (compact) Modifier.verticalScroll(panelScrollState) else Modifier)
+            .then(if (landscapePhone) Modifier.verticalScroll(panelScrollState) else Modifier)
             .clip(panelShape)
             .background(
                 Brush.verticalGradient(
