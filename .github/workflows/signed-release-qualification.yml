@@ -34,6 +34,11 @@ on:
         required: true
         default: '0.9.3.20'
         type: string
+  push:
+    branches:
+      - fix/v09320-galaxy-landscape-clean
+    paths:
+      - '.github/workflows/signed-release-qualification.yml'
 
 permissions:
   contents: read
