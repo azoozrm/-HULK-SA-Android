@@ -61,6 +61,20 @@ emulator_pid=""
 export ANDROID_AVD_HOME="$avd_home"
 mkdir -p "$avd_home"
 
+refresh_checksums() {
+  if [[ ! -d "$out" ]]; then
+    return 0
+  fi
+
+  (
+    cd "$out"
+    find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 \
+      | sort -z \
+      | xargs -0 sha256sum > SHA256SUMS.txt
+    sha256sum -c SHA256SUMS.txt
+  )
+}
+
 cleanup() {
   local cleanup_result=PASS
   local attempt
@@ -98,6 +112,7 @@ cleanup() {
   fi
 
   echo "cleanup_result=$cleanup_result" >> "$readiness"
+  refresh_checksums >/dev/null 2>&1 || cleanup_result=FAILED
 }
 trap cleanup EXIT
 
