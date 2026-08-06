@@ -62,12 +62,42 @@ export ANDROID_AVD_HOME="$avd_home"
 mkdir -p "$avd_home"
 
 cleanup() {
+  local cleanup_result=PASS
+  local attempt
   set +e
-  adb -s "$serial" emu kill >/dev/null 2>&1
+
+  echo "cleanup_started=true" >> "$readiness"
+
+  timeout 15 adb -s "$serial" emu kill >/dev/null 2>&1 || true
+
   if [[ -n "$emulator_pid" ]] && kill -0 "$emulator_pid" >/dev/null 2>&1; then
-    kill "$emulator_pid" >/dev/null 2>&1
-    wait "$emulator_pid" >/dev/null 2>&1
+    kill -TERM "$emulator_pid" >/dev/null 2>&1 || true
+
+    for attempt in {1..15}; do
+      if ! kill -0 "$emulator_pid" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+
+    if kill -0 "$emulator_pid" >/dev/null 2>&1; then
+      cleanup_result=FORCED
+      kill -KILL "$emulator_pid" >/dev/null 2>&1 || true
+    fi
+
+    for attempt in {1..5}; do
+      if ! kill -0 "$emulator_pid" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+
+    if kill -0 "$emulator_pid" >/dev/null 2>&1; then
+      cleanup_result=FAILED
+    fi
   fi
+
+  echo "cleanup_result=$cleanup_result" >> "$readiness"
 }
 trap cleanup EXIT
 
@@ -325,3 +355,5 @@ bash quality/compatibility-v2/run_runtime_profile.sh \
   "$expected_width_class" \
   "$expected_height_class" \
   "$expected_orientation"
+
+echo "runtime_completed=true" >> "$readiness"
