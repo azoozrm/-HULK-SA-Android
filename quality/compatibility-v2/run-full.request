@@ -1,4 +1,4 @@
-requested_for_parent=cad3181f9cbd19ce1a9c501d7bdcc47caef096a3
-reason=qualify-resolved-tv4k-avd-path
-request_sequence=rescue-full-matrix-11
-requested_at=2026-08-06T01:29:36+03:00
+requested_for_parent=2f47c1afb0a1481bc3f42b9bd84eef0ff1145f12
+reason=qualify-bounded-tv4k-emulator-cleanup
+request_sequence=rescue-full-matrix-12
+requested_at=2026-08-06T03:19:00+03:00
