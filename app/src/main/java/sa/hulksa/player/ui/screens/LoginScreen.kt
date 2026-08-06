@@ -217,8 +217,8 @@ fun LoginScreen(
                         onOpenWebsite = openWebsite,
                         onNonTextFocus = hideKeyboard,
                         initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                        compact = compactMobileLandscape,
-                        landscapePhone = compactMobileLandscape,
+                        compact = compactMobileLandscape || compactTvHeight,
+                        landscapePhone = compactMobileLandscape || compactTvHeight,
                         modifier = Modifier
                             .width(
                                 when {
