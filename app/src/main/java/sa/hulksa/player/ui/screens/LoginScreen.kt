@@ -147,6 +147,7 @@ fun LoginScreen(
             return@BoxWithConstraints
         }
 
+        val availableWidth = maxWidth
         val wideThreshold = if (isTv) 900.dp else 760.dp
         val stableWindowWidthDp = adaptiveUi.screenWidthDp
         val stableWindowHeightDp = adaptiveUi.screenHeightDp
@@ -206,7 +207,7 @@ fun LoginScreen(
                 Row(
                     modifier = Modifier
                         .width(rowWidth)
-                        .widthIn(max = maxWidth - horizontalPadding * 2)
+                        .widthIn(max = availableWidth - horizontalPadding * 2)
                         .then(
                             if (compactMobileLandscape) {
                                 Modifier.fillMaxHeight()
