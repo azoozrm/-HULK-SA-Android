@@ -160,41 +160,44 @@ fun LoginScreen(
         val compactTvHeight = isTv && wide && maxHeight < 640.dp
         if (wide) {
             val horizontalPadding = when {
-                compactMobileLandscape -> 18.dp
+                compactMobileLandscape -> 12.dp
                 isTv && maxWidth >= 1440.dp -> 58.dp
                 compactWideTv -> 20.dp
                 isTv -> 30.dp
                 else -> 36.dp
             }
             val verticalPadding = when {
-                compactMobileLandscape -> 7.dp
+                compactMobileLandscape -> 6.dp
                 compactTvHeight -> 12.dp
                 compactWideTv -> 8.dp
                 isTv -> 24.dp
                 else -> 20.dp
             }
             val itemSpacing = when {
-                compactMobileLandscape -> 18.dp
+                compactMobileLandscape -> 12.dp
                 compactTvHeight -> 24.dp
                 compactWideTv -> 20.dp
                 isTv -> 36.dp
                 else -> 30.dp
             }
+            val innerWidth = availableWidth - horizontalPadding * 2
             val panelWidth = when {
-                compactMobileLandscape -> 480.dp
+                compactMobileLandscape -> (innerWidth * .58f).coerceAtMost(430.dp)
                 compactTvHeight -> 420.dp
                 compactWideTv -> 440.dp
                 isTv -> 450.dp
                 else -> 430.dp
             }
             val brandColumnWidth = when {
-                compactMobileLandscape -> 480.dp
+                compactMobileLandscape -> (innerWidth - panelWidth - itemSpacing * 2 - 1.dp)
+                    .coerceAtLeast(180.dp)
                 compactTvHeight -> 420.dp
                 compactWideTv -> 440.dp
                 isTv -> 450.dp
                 else -> 430.dp
             }
-            val rowWidth = panelWidth + brandColumnWidth + itemSpacing * 2 + 1.dp
+            val rowWidth = (panelWidth + brandColumnWidth + itemSpacing * 2 + 1.dp)
+                .coerceAtMost(innerWidth)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -207,7 +210,6 @@ fun LoginScreen(
                 Row(
                     modifier = Modifier
                         .width(rowWidth)
-                        .widthIn(max = availableWidth - horizontalPadding * 2)
                         .then(
                             if (compactMobileLandscape) {
                                 Modifier.fillMaxHeight()
@@ -232,7 +234,7 @@ fun LoginScreen(
                             .width(1.dp)
                             .height(
                                 when {
-                                    compactMobileLandscape -> 280.dp
+                                    compactMobileLandscape -> 250.dp
                                     compactTvHeight -> 300.dp
                                     compactWideTv -> 280.dp
                                     else -> 330.dp
@@ -346,14 +348,14 @@ private fun LoginBrand(
     val haloSize = when {
         isTv && compact -> 320.dp
         isTv -> 390.dp
-        landscapePhone -> 190.dp
+        landscapePhone -> 164.dp
         compact -> 112.dp
         else -> 196.dp
     }
     val logoSize = when {
         isTv && compact -> 250.dp
         isTv -> 306.dp
-        landscapePhone -> 156.dp
+        landscapePhone -> 136.dp
         compact -> 92.dp
         else -> 160.dp
     }
@@ -379,7 +381,7 @@ private fun LoginBrand(
                 when {
                     isTv && compact -> 26.dp
                     isTv -> 32.dp
-                    landscapePhone -> 22.dp
+                    landscapePhone -> 20.dp
                     compact -> 16.dp
                     else -> 22.dp
                 },
@@ -394,7 +396,7 @@ private fun LoginBrand(
                         when {
                             isTv && compact -> 8.dp
                             isTv -> 10.dp
-                            landscapePhone -> 6.dp
+                            landscapePhone -> 5.dp
                             compact -> 4.dp
                             else -> 6.dp
                         },
