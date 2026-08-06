@@ -179,6 +179,21 @@ fun LoginScreen(
                 isTv -> 36.dp
                 else -> 30.dp
             }
+            val panelWidth = when {
+                compactMobileLandscape -> 480.dp
+                compactTvHeight -> 420.dp
+                compactWideTv -> 440.dp
+                isTv -> 450.dp
+                else -> 430.dp
+            }
+            val brandColumnWidth = when {
+                compactMobileLandscape -> 480.dp
+                compactTvHeight -> 420.dp
+                compactWideTv -> 440.dp
+                isTv -> 450.dp
+                else -> 430.dp
+            }
+            val rowWidth = panelWidth + brandColumnWidth + itemSpacing * 2 + 1.dp
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -190,8 +205,8 @@ fun LoginScreen(
             ) {
                 Row(
                     modifier = Modifier
-                        .widthIn(max = if (compactTvHeight) 1040.dp else 1110.dp)
-                        .fillMaxWidth()
+                        .width(rowWidth)
+                        .widthIn(max = maxWidth - horizontalPadding * 2)
                         .then(
                             if (compactMobileLandscape) {
                                 Modifier.fillMaxHeight()
@@ -202,37 +217,13 @@ fun LoginScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(itemSpacing),
                 ) {
-                    LoginPanel(
-                        username = username,
-                        onUsernameChange = { username = it },
-                        password = password,
-                        onPasswordChange = { password = it },
-                        showPassword = showPassword,
-                        onShowPasswordChange = { showPassword = !showPassword },
-                        rememberAccount = rememberAccount,
-                        onRememberChange = { rememberAccount = !rememberAccount },
-                        isLoading = isLoading,
-                        errorMessage = errorMessage,
-                        onSubmit = submit,
-                        onOpenWebsite = openWebsite,
-                        onNonTextFocus = hideKeyboard,
-                        initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                        compact = compactMobileLandscape,
-                        compactTv = compactTvHeight,
+                    LoginBrand(
+                        isTv = isTv,
+                        compact = compactMobileLandscape || compactTvHeight,
                         landscapePhone = compactMobileLandscape,
                         modifier = Modifier
-                            .width(
-                                when {
-                                    compactMobileLandscape -> 480.dp
-                                    compactTvHeight -> 420.dp
-                                    compactWideTv -> 440.dp
-                                    isTv -> 450.dp
-                                    else -> 430.dp
-                                },
-                            )
-                            .then(
-                                if (compactMobileLandscape) Modifier.fillMaxHeight() else Modifier,
-                            ),
+                            .width(brandColumnWidth)
+                            .fillMaxHeight(),
                     )
 
                     Box(
@@ -257,13 +248,29 @@ fun LoginScreen(
                             ),
                     )
 
-                    LoginBrand(
-                        isTv = isTv,
-                        compact = compactMobileLandscape || compactTvHeight,
+                    LoginPanel(
+                        username = username,
+                        onUsernameChange = { username = it },
+                        password = password,
+                        onPasswordChange = { password = it },
+                        showPassword = showPassword,
+                        onShowPasswordChange = { showPassword = !showPassword },
+                        rememberAccount = rememberAccount,
+                        onRememberChange = { rememberAccount = !rememberAccount },
+                        isLoading = isLoading,
+                        errorMessage = errorMessage,
+                        onSubmit = submit,
+                        onOpenWebsite = openWebsite,
+                        onNonTextFocus = hideKeyboard,
+                        initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
+                        compact = compactMobileLandscape,
+                        compactTv = compactTvHeight,
                         landscapePhone = compactMobileLandscape,
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
+                            .width(panelWidth)
+                            .then(
+                                if (compactMobileLandscape) Modifier.fillMaxHeight() else Modifier,
+                            ),
                     )
                 }
             }
