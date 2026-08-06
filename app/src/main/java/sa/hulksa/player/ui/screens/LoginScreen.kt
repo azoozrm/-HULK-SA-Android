@@ -156,6 +156,7 @@ fun LoginScreen(
             stableWindowHeightDp < 520
         val wide = maxWidth >= wideThreshold && (!compactHeight || compactMobileLandscape)
         val compactWideTv = isTv && wide && maxWidth < 1180.dp
+        val compactTvHeight = isTv && wide && maxHeight < 640.dp
         if (wide) {
             val horizontalPadding = when {
                 compactMobileLandscape -> 18.dp
@@ -166,12 +167,14 @@ fun LoginScreen(
             }
             val verticalPadding = when {
                 compactMobileLandscape -> 7.dp
+                compactTvHeight -> 8.dp
                 compactWideTv -> 8.dp
                 isTv -> 24.dp
                 else -> 20.dp
             }
             val itemSpacing = when {
                 compactMobileLandscape -> 18.dp
+                compactTvHeight -> 20.dp
                 compactWideTv -> 20.dp
                 isTv -> 36.dp
                 else -> 30.dp
@@ -187,13 +190,13 @@ fun LoginScreen(
             ) {
                 Row(
                     modifier = Modifier
-                        .widthIn(max = 1110.dp)
+                        .widthIn(max = if (compactTvHeight) 960.dp else 1110.dp)
                         .fillMaxWidth()
                         .then(
                             if (compactMobileLandscape) {
                                 Modifier.fillMaxHeight()
                             } else {
-                                Modifier.heightIn(max = 680.dp)
+                                Modifier.heightIn(max = if (compactTvHeight) 500.dp else 680.dp)
                             },
                         ),
                     verticalAlignment = Alignment.CenterVertically,
@@ -214,12 +217,13 @@ fun LoginScreen(
                         onOpenWebsite = openWebsite,
                         onNonTextFocus = hideKeyboard,
                         initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                        compact = compactMobileLandscape,
+                        compact = compactMobileLandscape || compactTvHeight,
                         landscapePhone = compactMobileLandscape,
                         modifier = Modifier
                             .width(
                                 when {
                                     compactMobileLandscape -> 480.dp
+                                    compactTvHeight -> 390.dp
                                     compactWideTv -> 440.dp
                                     isTv -> 450.dp
                                     else -> 430.dp
@@ -233,7 +237,14 @@ fun LoginScreen(
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(if (compactMobileLandscape) 280.dp else if (compactWideTv) 280.dp else 330.dp)
+                            .height(
+                                when {
+                                    compactMobileLandscape -> 280.dp
+                                    compactTvHeight -> 240.dp
+                                    compactWideTv -> 280.dp
+                                    else -> 330.dp
+                                },
+                            )
                             .background(
                                 Brush.verticalGradient(
                                     listOf(
@@ -247,7 +258,7 @@ fun LoginScreen(
 
                     LoginBrand(
                         isTv = isTv,
-                        compact = compactMobileLandscape,
+                        compact = compactMobileLandscape || compactTvHeight,
                         landscapePhone = compactMobileLandscape,
                         modifier = Modifier
                             .weight(1f)
@@ -324,12 +335,14 @@ private fun LoginBrand(
 ) {
     val colors = LocalHulkColors.current
     val haloSize = when {
+        isTv && compact -> 270.dp
         isTv -> 390.dp
         landscapePhone -> 190.dp
         compact -> 112.dp
         else -> 196.dp
     }
     val logoSize = when {
+        isTv && compact -> 210.dp
         isTv -> 306.dp
         landscapePhone -> 156.dp
         compact -> 92.dp
@@ -355,6 +368,7 @@ private fun LoginBrand(
         ) {
             val logoShape = RoundedCornerShape(
                 when {
+                    isTv && compact -> 24.dp
                     isTv -> 32.dp
                     landscapePhone -> 22.dp
                     compact -> 16.dp
@@ -369,6 +383,7 @@ private fun LoginBrand(
                     .border(1.dp, colors.gold.copy(alpha = .20f), logoShape)
                     .padding(
                         when {
+                            isTv && compact -> 8.dp
                             isTv -> 10.dp
                             landscapePhone -> 6.dp
                             compact -> 4.dp
