@@ -603,31 +603,145 @@ private fun NavigationItem(
 
 @Composable
 private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+    val colors = LocalHulkColors.current
     val navigationState = rememberLazyListState()
+
     LaunchedEffect(selected) {
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
-        navigationState.animateScrollToItem(selectedIndex + 1)
+        navigationState.animateScrollToItem(selectedIndex)
     }
-    LazyRow(
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF090A07))
-            .navigationBarsPadding(),
-        state = navigationState,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        item { BrandBadge(Modifier.size(40.dp)) }
-        items(destinations, key = { it.destination.name }) { entry ->
-            FocusButton(
-                text = entry.label,
-                onClick = { onSelect(entry.destination) },
-                primary = selected == entry.destination,
-                compact = true,
-                modifier = Modifier.heightIn(min = 48.dp),
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF080907),
+                        Color(0xFF11120E),
+                        Color(0xFF080907),
+                    ),
+                ),
             )
+            .navigationBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            state = navigationState,
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items(destinations, key = { it.destination.name }) { entry ->
+                val active = selected == entry.destination
+                val itemWidth by animateDpAsState(
+                    targetValue = if (active) 108.dp else 54.dp,
+                    label = "mobileNavItemWidth",
+                )
+                val itemHeight by animateDpAsState(
+                    targetValue = if (active) 54.dp else 50.dp,
+                    label = "mobileNavItemHeight",
+                )
+                val iconScale by animateFloatAsState(
+                    targetValue = if (active) 1.14f else 0.94f,
+                    label = "mobileNavIconScale",
+                )
+                val itemLift by animateDpAsState(
+                    targetValue = if (active) (-3).dp else 0.dp,
+                    label = "mobileNavItemLift",
+                )
+                val labelAlpha by animateFloatAsState(
+                    targetValue = if (active) 1f else 0f,
+                    label = "mobileNavLabelAlpha",
+                )
+
+                Row(
+                    modifier = Modifier
+                        .width(itemWidth)
+                        .height(itemHeight)
+                        .offset(y = itemLift)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (active) {
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        colors.goldBright,
+                                        colors.gold,
+                                    ),
+                                )
+                            } else {
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = .065f),
+                                        Color.White.copy(alpha = .035f),
+                                    ),
+                                )
+                            },
+                        )
+                        .border(
+                            width = if (active) 1.5.dp else 1.dp,
+                            color = if (active) {
+                                colors.goldBright.copy(alpha = .95f)
+                            } else {
+                                Color.White.copy(alpha = .08f)
+                            },
+                            shape = RoundedCornerShape(18.dp),
+                        )
+                        .graphicsLayer {
+                            scaleX = if (active) 1.02f else 1f
+                            scaleY = if (active) 1.02f else 1f
+                            shadowElevation = if (active) 18f else 0f
+                            shape = RoundedCornerShape(18.dp)
+                            clip = false
+                        }
+                        .clickable(role = Role.Button) { onSelect(entry.destination) }
+                        .padding(horizontal = if (active) 12.dp else 0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        imageVector = entry.icon,
+                        contentDescription = entry.label,
+                        tint = if (active) Color.Black else colors.textMuted,
+                        modifier = Modifier
+                            .size(23.dp)
+                            .graphicsLayer {
+                                scaleX = iconScale
+                                scaleY = iconScale
+                            },
+                    )
+
+                    if (active) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = entry.label,
+                            color = Color.Black.copy(alpha = labelAlpha),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
         }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .width(52.dp)
+                .height(2.dp)
+                .clip(RoundedCornerShape(99.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color.Transparent,
+                            colors.goldBright.copy(alpha = .85f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
     }
 }
 
