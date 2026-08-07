@@ -472,7 +472,6 @@ fun MainShellScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                MobileNavigation(state.destination, rememberingSelectDestination)
                 Box(Modifier.weight(1f)) {
                     DestinationContent(
                         state = state,
@@ -498,6 +497,7 @@ fun MainShellScreen(
                         onLogout = onLogout,
                     )
                 }
+                MobileNavigation(state.destination, rememberingSelectDestination)
             }
         }
     }
@@ -603,32 +603,159 @@ private fun NavigationItem(
 
 @Composable
 private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+    val colors = LocalHulkColors.current
     val navigationState = rememberLazyListState()
-    LaunchedEffect(selected) {
-        val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
-        navigationState.animateScrollToItem(selectedIndex + 1)
-    }
-    LazyRow(
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
+    val isWide = configuration.screenWidthDp >= 600
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF090A07))
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-        state = navigationState,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .navigationBarsPadding()
+            .padding(horizontal = if (isLandscape || isWide) 4.dp else 8.dp, vertical = 4.dp),
     ) {
-        item { BrandBadge(Modifier.size(40.dp)) }
-        items(destinations, key = { it.destination.name }) { entry ->
-            FocusButton(
-                text = entry.label,
-                onClick = { onSelect(entry.destination) },
-                primary = selected == entry.destination,
-                compact = true,
-                modifier = Modifier.heightIn(min = 48.dp),
-            )
+        if (isLandscape || isWide) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                destinations.forEach { entry ->
+                    val active = selected == entry.destination
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (active) 1.08f else 1f,
+                        label = "mobileNavIconScaleWide",
+                    )
+                    val labelAlpha by animateFloatAsState(
+                        targetValue = if (active) 1f else .72f,
+                        label = "mobileNavLabelAlphaWide",
+                    )
+                    val indicatorWidth by animateDpAsState(
+                        targetValue = if (active) 26.dp else 0.dp,
+                        label = "mobileNavIndicatorWidthWide",
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .padding(horizontal = 2.dp, vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .height(2.dp)
+                                .width(indicatorWidth)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(if (active) colors.goldBright else Color.Transparent),
+                        )
+
+                        Spacer(Modifier.height(3.dp))
+
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = entry.label,
+                            tint = if (active) colors.goldBright else colors.textMuted,
+                            modifier = Modifier
+                                .size(23.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                },
+                        )
+
+                        Spacer(Modifier.height(2.dp))
+
+                        Text(
+                            text = entry.label,
+                            color = if (active) {
+                                colors.text.copy(alpha = labelAlpha)
+                            } else {
+                                colors.textMuted.copy(alpha = labelAlpha)
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                state = navigationState,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(destinations, key = { it.destination.name }) { entry ->
+                    val active = selected == entry.destination
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (active) 1.08f else 1f,
+                        label = "mobileNavIconScalePortrait",
+                    )
+                    val labelAlpha by animateFloatAsState(
+                        targetValue = if (active) 1f else .72f,
+                        label = "mobileNavLabelAlphaPortrait",
+                    )
+                    val indicatorWidth by animateDpAsState(
+                        targetValue = if (active) 26.dp else 0.dp,
+                        label = "mobileNavIndicatorWidthPortrait",
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .widthIn(min = 52.dp)
+                            .height(54.dp)
+                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .padding(horizontal = 3.dp, vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .height(2.dp)
+                                .width(indicatorWidth)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(if (active) colors.goldBright else Color.Transparent),
+                        )
+
+                        Spacer(Modifier.height(3.dp))
+
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = entry.label,
+                            tint = if (active) colors.goldBright else colors.textMuted,
+                            modifier = Modifier
+                                .size(23.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                },
+                        )
+
+                        Spacer(Modifier.height(1.dp))
+
+                        Text(
+                            text = entry.label,
+                            color = if (active) {
+                                colors.text.copy(alpha = labelAlpha)
+                            } else {
+                                colors.textMuted.copy(alpha = labelAlpha)
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
         }
+
     }
 }
 
