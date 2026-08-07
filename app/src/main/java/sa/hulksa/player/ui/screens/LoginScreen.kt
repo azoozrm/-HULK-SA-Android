@@ -185,7 +185,7 @@ fun LoginScreen(
                 compactMobileLandscape -> (innerWidth * .58f).coerceAtMost(430.dp)
                 compactTvHeight -> 402.dp
                 compactWideTv -> 424.dp
-                isTv -> 444.dp
+                isTv -> 456.dp
                 else -> 430.dp
             }
             val brandColumnWidth = when {
@@ -193,8 +193,14 @@ fun LoginScreen(
                     .coerceAtLeast(180.dp)
                 compactTvHeight -> 402.dp
                 compactWideTv -> 424.dp
-                isTv -> 444.dp
+                isTv -> 432.dp
                 else -> 430.dp
+            }
+            val tvRightBias = when {
+                compactTvHeight -> 8.dp
+                compactWideTv -> 12.dp
+                isTv -> 18.dp
+                else -> 0.dp
             }
             val rowWidth = (panelWidth + brandColumnWidth + sideGap * 2 + 1.dp)
                 .coerceAtMost(innerWidth)
@@ -214,7 +220,8 @@ fun LoginScreen(
                             } else {
                                 Modifier.heightIn(max = if (compactTvHeight) 560.dp else 680.dp)
                             },
-                        ),
+                        )
+                        .then(if (isTv) Modifier.padding(start = tvRightBias) else Modifier),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
@@ -621,21 +628,19 @@ private fun LoginPanel(
             onFocused = onNonTextFocus,
             outlined = true,
         )
-        if (!compact) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "hulksa.com",
-                color = colors.goldBright.copy(alpha = .86f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(role = Role.Button, onClick = onOpenWebsite)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-            )
-        }
+        Spacer(Modifier.height(if (compact) 4.dp else 6.dp))
+        Text(
+            text = "hulksa.com",
+            color = colors.goldBright.copy(alpha = .86f),
+            fontSize = if (compact) 11.sp else 12.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .heightIn(min = if (compact) 34.dp else 44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button, onClick = onOpenWebsite)
+                .padding(horizontal = 14.dp, vertical = if (compact) 8.dp else 10.dp),
+        )
     }
 }
 
