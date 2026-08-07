@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -239,11 +240,14 @@ fun LoginScreen(
                             compact = false,
                             compactTv = compactTvHeight,
                             landscapePhone = false,
-                            modifier = Modifier.width(panelWidth),
+                            modifier = Modifier
+                                .width(panelWidth)
+                                .offset(x = if (compactTvHeight || compactWideTv) (-12).dp else 0.dp),
                         )
 
                         Box(
                             modifier = Modifier
+                                .offset(x = if (compactTvHeight || compactWideTv) (-24).dp else 0.dp)
                                 .width(1.dp)
                                 .height(
                                     when {
