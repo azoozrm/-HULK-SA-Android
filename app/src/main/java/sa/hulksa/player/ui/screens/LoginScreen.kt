@@ -175,7 +175,7 @@ fun LoginScreen(
                 else -> 20.dp
             }
             val sideGap = when {
-                compactMobileLandscape -> 18.dp
+                compactMobileLandscape -> 16.dp
                 compactTvHeight -> 28.dp
                 compactWideTv -> 32.dp
                 isTv -> 36.dp
@@ -183,7 +183,7 @@ fun LoginScreen(
             }
             val innerWidth = availableWidth - horizontalPadding * 2
             val panelWidth = when {
-                compactMobileLandscape -> (innerWidth * .50f).coerceIn(286.dp, 360.dp)
+                compactMobileLandscape -> (innerWidth * .48f).coerceIn(280.dp, 344.dp)
                 compactTvHeight -> 402.dp
                 compactWideTv -> 424.dp
                 isTv -> 456.dp
@@ -191,7 +191,7 @@ fun LoginScreen(
             }
             val brandColumnWidth = when {
                 compactMobileLandscape -> (innerWidth - panelWidth - sideGap * 2 - 1.dp)
-                    .coerceAtLeast(250.dp)
+                    .coerceAtLeast(252.dp)
                 compactTvHeight -> 402.dp
                 compactWideTv -> 424.dp
                 isTv -> 432.dp
@@ -297,20 +297,19 @@ fun LoginScreen(
                             landscapePhone = true,
                             modifier = Modifier
                                 .width(panelWidth)
-                                .fillMaxHeight()
-                                .offset(x = (-8).dp),
+                                .offset(x = (-10).dp),
                         )
 
                         Spacer(Modifier.width(sideGap))
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
-                                .height(220.dp)
+                                .height(210.dp)
                                 .background(
                                     Brush.verticalGradient(
                                         listOf(
                                             Color.Transparent,
-                                            colors.gold.copy(alpha = .22f),
+                                            colors.gold.copy(alpha = .30f),
                                             Color.Transparent,
                                         ),
                                     ),
@@ -360,7 +359,7 @@ fun LoginScreen(
                         when {
                             isTv -> 10.dp
                             compactHeight -> 6.dp
-                            else -> 16.dp
+                            else -> 20.dp
                         },
                     ),
                 )
@@ -400,14 +399,14 @@ private fun LoginBrand(
     val haloSize = when {
         isTv && compact -> 320.dp
         isTv -> 390.dp
-        landscapePhone -> 224.dp
+        landscapePhone -> 232.dp
         compact -> 104.dp
         else -> 166.dp
     }
     val logoSize = when {
         isTv && compact -> 250.dp
         isTv -> 306.dp
-        landscapePhone -> 188.dp
+        landscapePhone -> 196.dp
         compact -> 84.dp
         else -> 136.dp
     }
@@ -493,23 +492,21 @@ private fun LoginPanel(
         },
     )
     val panelHorizontalPadding = when {
-        landscapePhone -> 14.dp
+        landscapePhone -> 12.dp
         compact -> 14.dp
         else -> 28.dp
     }
     val panelVerticalPadding = when {
-        landscapePhone -> 4.dp
+        landscapePhone -> 2.dp
         compact -> 6.dp
         else -> 22.dp
     }
-    val compactFieldHeight = if (landscapePhone) 38.dp else 38.dp
-    val compactButtonHeight = if (landscapePhone) 38.dp else 36.dp
-    val panelScrollState = rememberScrollState()
+    val compactFieldHeight = if (landscapePhone) 36.dp else 38.dp
+    val compactButtonHeight = if (landscapePhone) 36.dp else 36.dp
 
     Column(
         modifier = modifier
             .widthIn(max = 474.dp)
-            .then(if (landscapePhone) Modifier.verticalScroll(panelScrollState) else Modifier)
             .clip(panelShape)
             .background(
                 Brush.verticalGradient(
@@ -526,7 +523,7 @@ private fun LoginPanel(
         Text(
             text = "اهلا بك",
             color = colors.text,
-            fontSize = if (compact) if (landscapePhone) 20.sp else 18.sp else 31.sp,
+            fontSize = if (compact) if (landscapePhone) 19.sp else 18.sp else 31.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
@@ -535,11 +532,11 @@ private fun LoginPanel(
         Text(
             text = "ادخل بيانات الاشتراك الخاص بك",
             color = colors.textMuted,
-            fontSize = if (compact) if (landscapePhone) 10.sp else 9.sp else 13.sp,
+            fontSize = if (compact) if (landscapePhone) 9.sp else 9.sp else 13.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (compact) 3.dp else 7.dp))
+        Spacer(Modifier.height(if (compact) 2.dp else 7.dp))
         Box(
             modifier = Modifier
                 .width(38.dp)
@@ -547,7 +544,7 @@ private fun LoginPanel(
                 .clip(RoundedCornerShape(2.dp))
                 .background(colors.gold),
         )
-        Spacer(Modifier.height(if (compact) 4.dp else 18.dp))
+        Spacer(Modifier.height(if (compact) 3.dp else 18.dp))
 
         HulkTextField(
             value = username,
@@ -568,7 +565,7 @@ private fun LoginPanel(
                 imeAction = ImeAction.Next,
             ),
         )
-        Spacer(Modifier.height(if (compact) 4.dp else 10.dp))
+        Spacer(Modifier.height(if (compact) 3.dp else 10.dp))
         HulkTextField(
             value = password,
             onValueChange = onPasswordChange,
@@ -583,7 +580,7 @@ private fun LoginPanel(
             ),
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
         )
-        Spacer(Modifier.height(if (compact) 2.dp else 8.dp))
+        Spacer(Modifier.height(if (compact) 1.dp else 8.dp))
 
         LoginOption(
             text = "اظهار كلمة المرور",
@@ -605,7 +602,7 @@ private fun LoginPanel(
             ErrorNotice(errorMessage)
         }
 
-        Spacer(Modifier.height(if (compact) 4.dp else 13.dp))
+        Spacer(Modifier.height(if (compact) 3.dp else 13.dp))
         FocusButton(
             text = if (isLoading) "جاري الدخول..." else "دخول الى HULK",
             onClick = onSubmit,
@@ -616,7 +613,7 @@ private fun LoginPanel(
                 .heightIn(min = if (compact) compactButtonHeight else 52.dp),
             onFocused = onNonTextFocus,
         )
-        Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+        Spacer(Modifier.height(if (compact) 3.dp else 8.dp))
         FocusButton(
             text = "اشترك او جدد",
             onClick = onOpenWebsite,
@@ -628,7 +625,7 @@ private fun LoginPanel(
             onFocused = onNonTextFocus,
             outlined = true,
         )
-        Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
+        Spacer(Modifier.height(if (compact) 1.dp else 4.dp))
         Text(
             text = "hulksa.com",
             color = colors.goldBright.copy(alpha = .86f),
@@ -636,10 +633,10 @@ private fun LoginPanel(
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
             modifier = Modifier
-                .heightIn(min = if (compact) 32.dp else 48.dp)
+                .heightIn(min = if (compact) 28.dp else 48.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .clickable(role = Role.Button, onClick = onOpenWebsite)
-                .padding(horizontal = 14.dp, vertical = if (compact) 6.dp else 12.dp),
+                .padding(horizontal = 14.dp, vertical = if (compact) 4.dp else 12.dp),
         )
     }
 }
@@ -666,7 +663,7 @@ private fun LoginOption(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = if (compact) 32.dp else 48.dp)
+            .heightIn(min = if (compact) 30.dp else 48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(background)
             .border(if (focused) 1.dp else 0.dp, outline, RoundedCornerShape(10.dp))
@@ -675,7 +672,7 @@ private fun LoginOption(
                 if (it.isFocused) onFocused()
             }
             .clickable(role = Role.Checkbox, onClick = onClick)
-            .padding(horizontal = if (compact) 5.dp else 7.dp, vertical = if (compact) 3.dp else 6.dp),
+            .padding(horizontal = if (compact) 5.dp else 7.dp, vertical = if (compact) 2.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
