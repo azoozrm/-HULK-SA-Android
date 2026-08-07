@@ -106,6 +106,7 @@ fun LoginScreen(
         onLogin(username.trim(), password, rememberAccount)
     }
     val openWebsite = { runCatching { uriHandler.openUri(HULK_WEBSITE) }; Unit }
+
     LaunchedEffect(isLoading, isStarting) {
         if (isLoading || isStarting) {
             keyboardController?.hide()
@@ -133,9 +134,7 @@ fun LoginScreen(
                     ),
                 ),
             )
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { dismissKeyboard() })
-            }
+            .pointerInput(Unit) { detectTapGestures(onTap = { dismissKeyboard() }) }
             .safeDrawingPadding()
             .imePadding(),
     ) {
@@ -158,6 +157,7 @@ fun LoginScreen(
         val wide = maxWidth >= wideThreshold && (!compactHeight || compactMobileLandscape)
         val compactWideTv = isTv && wide && maxWidth < 1180.dp
         val compactTvHeight = isTv && wide && maxHeight < 640.dp
+
         if (wide) {
             val horizontalPadding = when {
                 compactMobileLandscape -> 12.dp
@@ -198,13 +198,11 @@ fun LoginScreen(
             }
             val rowWidth = (panelWidth + brandColumnWidth + itemSpacing * 2 + 1.dp)
                 .coerceAtMost(innerWidth)
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(
-                        horizontal = horizontalPadding,
-                        vertical = verticalPadding,
-                    ),
+                    .padding(horizontal = horizontalPadding, vertical = verticalPadding),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(
@@ -236,8 +234,7 @@ fun LoginScreen(
                             onOpenWebsite = openWebsite,
                             onNonTextFocus = hideKeyboard,
                             initialFocusRequester = tvInitialFocusRequester,
-                            compact = false,
-                            compactTv = compactTvHeight,
+                            compact = compactTvHeight,
                             landscapePhone = false,
                             modifier = Modifier.width(panelWidth),
                         )
@@ -311,7 +308,6 @@ fun LoginScreen(
                             onNonTextFocus = hideKeyboard,
                             initialFocusRequester = null,
                             compact = compactMobileLandscape,
-                            compactTv = false,
                             landscapePhone = compactMobileLandscape,
                             modifier = Modifier
                                 .width(panelWidth)
@@ -474,7 +470,6 @@ private fun LoginPanel(
     onNonTextFocus: () -> Unit,
     initialFocusRequester: FocusRequester?,
     compact: Boolean = false,
-    compactTv: Boolean = false,
     landscapePhone: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -482,215 +477,220 @@ private fun LoginPanel(
     val panelShape = RoundedCornerShape(
         when {
             landscapePhone -> 20.dp
-            compactTv -> 22.dp
             compact -> 18.dp
             else -> 26.dp
         },
     )
     val panelHorizontalPadding = when {
         landscapePhone -> 18.dp
-        compactTv -> 22.dp
         compact -> 14.dp
         else -> 28.dp
     }
     val panelVerticalPadding = when {
         landscapePhone -> 8.dp
-        compactTv -> 12.dp
         compact -> 6.dp
         else -> 22.dp
     }
     val compactFieldHeight = if (landscapePhone) 42.dp else 38.dp
     val compactButtonHeight = if (landscapePhone) 42.dp else 36.dp
-    val fieldHeight = if (compactTv) 46.dp else if (compact) compactFieldHeight else 55.dp
-    val buttonHeight = if (compactTv) 44.dp else if (compact) compactButtonHeight else 52.dp
     val panelScrollState = rememberScrollState()
+
     Column(
         modifier = modifier
             .widthIn(max = 474.dp)
             .then(if (landscapePhone) Modifier.verticalScroll(panelScrollState) else Modifier)
             .clip(panelShape)
-            .background(colors.surface)
-            .border(1.dp, colors.gold.copy(alpha = .18f), panelShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xF5141611),
+                        Color(0xF20A0B08),
+                    ),
+                ),
+            )
+            .border(1.dp, Color.White.copy(alpha = .075f), panelShape)
             .padding(horizontal = panelHorizontalPadding, vertical = panelVerticalPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = "اهلا بك",
-            color = colors.textPrimary,
-            fontSize = when {
-                landscapePhone -> 24.sp
-                compactTv -> 26.sp
-                compact -> 20.sp
-                else -> 30.sp
-            },
+            color = colors.text,
+            fontSize = if (compact) if (landscapePhone) 21.sp else 18.sp else 31.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (compact || compactTv) 4.dp else 8.dp))
+        Spacer(Modifier.height(if (compact) 1.dp else 4.dp))
         Text(
             text = "ادخل بيانات الاشتراك الخاص بك",
-            color = colors.textSecondary,
-            fontSize = when {
-                landscapePhone -> 12.sp
-                compactTv -> 13.sp
-                compact -> 11.sp
-                else -> 14.sp
-            },
+            color = colors.textMuted,
+            fontSize = if (compact) if (landscapePhone) 10.sp else 9.sp else 13.sp,
             textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (compact || compactTv) 6.dp else 10.dp))
+        Spacer(Modifier.height(if (compact) 3.dp else 7.dp))
         Box(
-            Modifier
-                .width(if (compact || compactTv) 36.dp else 46.dp)
+            modifier = Modifier
+                .width(38.dp)
                 .height(3.dp)
-                .background(colors.gold, RoundedCornerShape(50)),
+                .clip(RoundedCornerShape(2.dp))
+                .background(colors.gold),
         )
-        Spacer(Modifier.height(if (compact || compactTv) 8.dp else 14.dp))
+        Spacer(Modifier.height(if (compact) 4.dp else 18.dp))
+
         HulkTextField(
             value = username,
             onValueChange = onUsernameChange,
             label = "اسم المستخدم",
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Text,
-                imeAction = ImeAction.Next,
-            ),
             modifier = Modifier
-                .fillMaxWidth()
-                .height(fieldHeight)
                 .then(
                     if (initialFocusRequester != null) {
                         Modifier.focusRequester(initialFocusRequester)
                     } else {
                         Modifier
                     },
-                ),
+                )
+                .fillMaxWidth()
+                .heightIn(min = if (compact) compactFieldHeight else 55.dp),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Next,
+            ),
         )
-        Spacer(Modifier.height(if (compact || compactTv) 6.dp else 10.dp))
+        Spacer(Modifier.height(if (compact) 4.dp else 10.dp))
         HulkTextField(
             value = password,
             onValueChange = onPasswordChange,
             label = "كلمة المرور",
-            singleLine = true,
-            visualTransformation = if (showPassword) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = if (compact) compactFieldHeight else 55.dp),
+            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done,
             ),
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(fieldHeight),
         )
-        Spacer(Modifier.height(if (compact || compactTv) 2.dp else 4.dp))
+        Spacer(Modifier.height(if (compact) 2.dp else 8.dp))
+
         LoginOption(
-            label = "اظهار كلمة المرور",
+            text = "اظهار كلمة المرور",
             checked = showPassword,
             onClick = onShowPasswordChange,
-            onFocus = onNonTextFocus,
-            compact = compact || compactTv,
+            onFocused = onNonTextFocus,
+            compact = compact,
         )
         LoginOption(
-            label = "تذكر الحساب على هذا الجهاز",
+            text = "تذكر الحساب على هذا الجهاز",
             checked = rememberAccount,
             onClick = onRememberChange,
-            onFocus = onNonTextFocus,
-            compact = compact || compactTv,
+            onFocused = onNonTextFocus,
+            compact = compact,
         )
-        Spacer(Modifier.height(if (compact || compactTv) 4.dp else 8.dp))
+
+        if (errorMessage != null) {
+            Spacer(Modifier.height(9.dp))
+            ErrorNotice(errorMessage)
+        }
+
+        Spacer(Modifier.height(if (compact) 4.dp else 13.dp))
         FocusButton(
             text = if (isLoading) "جاري الدخول..." else "دخول الى HULK",
             onClick = onSubmit,
             enabled = !isLoading,
+            compact = compact,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(buttonHeight),
+                .heightIn(min = if (compact) compactButtonHeight else 52.dp),
+            onFocused = onNonTextFocus,
         )
-        Spacer(Modifier.height(if (compact || compactTv) 6.dp else 10.dp))
+        Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
         FocusButton(
-            text = "اشتراك او تجديد",
+            text = "اشترك او جدد",
             onClick = onOpenWebsite,
+            compact = compact,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(buttonHeight),
-            filled = false,
+                .heightIn(min = if (compact) compactButtonHeight else 52.dp),
+            primary = false,
+            onFocused = onNonTextFocus,
+            outlined = true,
         )
-        if (!errorMessage.isNullOrBlank()) {
-            Spacer(Modifier.height(if (compact || compactTv) 6.dp else 10.dp))
-            ErrorNotice(errorMessage)
-        }
-        Spacer(Modifier.height(if (compact || compactTv) 6.dp else 10.dp))
+
+        Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
         Text(
             text = "hulksa.com",
-            color = colors.textSecondary,
-            fontSize = if (compact || compactTv) 12.sp else 13.sp,
-            fontWeight = FontWeight.SemiBold,
+            color = colors.goldBright.copy(alpha = .86f),
+            fontSize = if (compact) 11.sp else 12.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
             modifier = Modifier
-                .clickable(
-                    role = Role.Button,
-                    onClick = onOpenWebsite,
-                )
+                .heightIn(min = if (compact) 36.dp else 48.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button, onClick = onOpenWebsite)
                 .onFocusChanged { if (it.isFocused) onNonTextFocus() }
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = if (compact) 8.dp else 12.dp),
         )
     }
 }
 
 @Composable
 private fun LoginOption(
-    label: String,
+    text: String,
     checked: Boolean,
     onClick: () -> Unit,
-    onFocus: () -> Unit,
-    compact: Boolean,
+    onFocused: () -> Unit,
+    compact: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val borderColor by animateColorAsState(
-        targetValue = if (focused) colors.gold else colors.border,
-        label = "login-option-border",
+    val background by animateColorAsState(
+        targetValue = if (focused) colors.gold.copy(alpha = .09f) else Color.Transparent,
+        label = "loginOptionBackground",
     )
+    val outline by animateColorAsState(
+        targetValue = if (focused) colors.gold.copy(alpha = .72f) else Color.Transparent,
+        label = "loginOptionOutline",
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = if (compact) 40.dp else 48.dp)
+            .heightIn(min = if (compact) 32.dp else 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(background)
+            .border(if (focused) 1.dp else 0.dp, outline, RoundedCornerShape(10.dp))
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) onFocus()
+                if (it.isFocused) onFocused()
             }
-            .clickable(
-                role = Role.Checkbox,
-                onClick = onClick,
-            )
-            .padding(horizontal = 4.dp),
+            .clickable(role = Role.Checkbox, onClick = onClick)
+            .padding(horizontal = if (compact) 5.dp else 7.dp, vertical = if (compact) 3.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
             modifier = Modifier
                 .size(if (compact) 18.dp else 20.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(if (checked) colors.gold else Color.Transparent)
-                .border(1.dp, borderColor, RoundedCornerShape(6.dp)),
+                .background(if (checked) colors.gold else Color(0xFF1B1C17))
+                .border(
+                    1.dp,
+                    if (checked) colors.goldBright.copy(alpha = .75f) else Color.White.copy(alpha = .18f),
+                    RoundedCornerShape(6.dp),
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {
-                Text(
-                    text = "✓",
-                    color = Color.Black,
-                    fontSize = if (compact) 11.sp else 12.sp,
-                    fontWeight = FontWeight.Bold,
-                )
+                Text("✓", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Black)
             }
         }
+        Spacer(Modifier.width(if (compact) 7.dp else 10.dp))
         Text(
-            text = label,
-            color = colors.textPrimary,
-            fontSize = if (compact) 12.sp else 13.sp,
+            text = text,
+            color = if (focused) colors.text else colors.textMuted,
+            fontSize = if (compact) 10.sp else 12.sp,
+            fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
             maxLines = 2,
         )
     }
