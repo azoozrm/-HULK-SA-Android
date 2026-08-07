@@ -605,6 +605,9 @@ private fun NavigationItem(
 private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
     val colors = LocalHulkColors.current
     val navigationState = rememberLazyListState()
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
+    val isWide = configuration.screenWidthDp >= 600
 
     LaunchedEffect(selected) {
         val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
@@ -616,76 +619,144 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
             .fillMaxWidth()
             .background(Color(0xFF090A07))
             .navigationBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = if (isLandscape || isWide) 4.dp else 8.dp, vertical = 4.dp),
     ) {
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            state = navigationState,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items(destinations, key = { it.destination.name }) { entry ->
-                val active = selected == entry.destination
-                val iconScale by animateFloatAsState(
-                    targetValue = if (active) 1.08f else 1f,
-                    label = "mobileNavIconScale",
-                )
-                val labelAlpha by animateFloatAsState(
-                    targetValue = if (active) 1f else .72f,
-                    label = "mobileNavLabelAlpha",
-                )
-                val indicatorWidth by animateDpAsState(
-                    targetValue = if (active) 28.dp else 0.dp,
-                    label = "mobileNavIndicatorWidth",
-                )
-
-                Column(
-                    modifier = Modifier
-                        .widthIn(min = 52.dp)
-                        .height(58.dp)
-                        .clickable(role = Role.Button) { onSelect(entry.destination) }
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .height(2.dp)
-                            .width(indicatorWidth)
-                            .clip(RoundedCornerShape(99.dp))
-                            .background(
-                                if (active) colors.goldBright else Color.Transparent,
-                            ),
+        if (isLandscape || isWide) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                destinations.forEach { entry ->
+                    val active = selected == entry.destination
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (active) 1.08f else 1f,
+                        label = "mobileNavIconScaleWide",
+                    )
+                    val labelAlpha by animateFloatAsState(
+                        targetValue = if (active) 1f else .72f,
+                        label = "mobileNavLabelAlphaWide",
+                    )
+                    val indicatorWidth by animateDpAsState(
+                        targetValue = if (active) 26.dp else 0.dp,
+                        label = "mobileNavIndicatorWidthWide",
                     )
 
-                    Spacer(Modifier.height(5.dp))
-
-                    Icon(
-                        imageVector = entry.icon,
-                        contentDescription = entry.label,
-                        tint = if (active) colors.goldBright else colors.textMuted,
+                    Column(
                         modifier = Modifier
-                            .size(24.dp)
-                            .graphicsLayer {
-                                scaleX = iconScale
-                                scaleY = iconScale
+                            .weight(1f)
+                            .height(54.dp)
+                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .padding(horizontal = 2.dp, vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .height(2.dp)
+                                .width(indicatorWidth)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(if (active) colors.goldBright else Color.Transparent),
+                        )
+
+                        Spacer(Modifier.height(3.dp))
+
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = entry.label,
+                            tint = if (active) colors.goldBright else colors.textMuted,
+                            modifier = Modifier
+                                .size(23.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                },
+                        )
+
+                        Spacer(Modifier.height(2.dp))
+
+                        Text(
+                            text = entry.label,
+                            color = if (active) {
+                                colors.text.copy(alpha = labelAlpha)
+                            } else {
+                                colors.textMuted.copy(alpha = labelAlpha)
                             },
+                            fontSize = 9.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                state = navigationState,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(destinations, key = { it.destination.name }) { entry ->
+                    val active = selected == entry.destination
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (active) 1.08f else 1f,
+                        label = "mobileNavIconScalePortrait",
+                    )
+                    val labelAlpha by animateFloatAsState(
+                        targetValue = if (active) 1f else .72f,
+                        label = "mobileNavLabelAlphaPortrait",
+                    )
+                    val indicatorWidth by animateDpAsState(
+                        targetValue = if (active) 26.dp else 0.dp,
+                        label = "mobileNavIndicatorWidthPortrait",
                     )
 
-                    Spacer(Modifier.height(3.dp))
+                    Column(
+                        modifier = Modifier
+                            .widthIn(min = 52.dp)
+                            .height(54.dp)
+                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .padding(horizontal = 3.dp, vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .height(2.dp)
+                                .width(indicatorWidth)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(if (active) colors.goldBright else Color.Transparent),
+                        )
 
-                    Text(
-                        text = entry.label,
-                        color = if (active) {
-                            colors.text.copy(alpha = labelAlpha)
-                        } else {
-                            colors.textMuted.copy(alpha = labelAlpha)
-                        },
-                        fontSize = 10.sp,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                        maxLines = 1,
-                    )
+                        Spacer(Modifier.height(3.dp))
+
+                        Icon(
+                            imageVector = entry.icon,
+                            contentDescription = entry.label,
+                            tint = if (active) colors.goldBright else colors.textMuted,
+                            modifier = Modifier
+                                .size(23.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                },
+                        )
+
+                        Spacer(Modifier.height(1.dp))
+
+                        Text(
+                            text = entry.label,
+                            color = if (active) {
+                                colors.text.copy(alpha = labelAlpha)
+                            } else {
+                                colors.textMuted.copy(alpha = labelAlpha)
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
