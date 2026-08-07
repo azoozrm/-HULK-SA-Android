@@ -173,30 +173,30 @@ fun LoginScreen(
                 isTv -> 24.dp
                 else -> 20.dp
             }
-            val itemSpacing = when {
+            val sideGap = when {
                 compactMobileLandscape -> 12.dp
-                compactTvHeight -> 18.dp
-                compactWideTv -> 22.dp
-                isTv -> 30.dp
+                compactTvHeight -> 28.dp
+                compactWideTv -> 32.dp
+                isTv -> 36.dp
                 else -> 30.dp
             }
             val innerWidth = availableWidth - horizontalPadding * 2
             val panelWidth = when {
                 compactMobileLandscape -> (innerWidth * .58f).coerceAtMost(430.dp)
-                compactTvHeight -> 382.dp
-                compactWideTv -> 404.dp
-                isTv -> 424.dp
+                compactTvHeight -> 402.dp
+                compactWideTv -> 424.dp
+                isTv -> 444.dp
                 else -> 430.dp
             }
             val brandColumnWidth = when {
-                compactMobileLandscape -> (innerWidth - panelWidth - itemSpacing * 2 - 1.dp)
+                compactMobileLandscape -> (innerWidth - panelWidth - sideGap * 2 - 1.dp)
                     .coerceAtLeast(180.dp)
-                compactTvHeight -> 382.dp
-                compactWideTv -> 404.dp
-                isTv -> 424.dp
+                compactTvHeight -> 402.dp
+                compactWideTv -> 424.dp
+                isTv -> 444.dp
                 else -> 430.dp
             }
-            val rowWidth = (panelWidth + brandColumnWidth + itemSpacing * 2 + 1.dp)
+            val rowWidth = (panelWidth + brandColumnWidth + sideGap * 2 + 1.dp)
                 .coerceAtMost(innerWidth)
 
             Box(
@@ -216,7 +216,7 @@ fun LoginScreen(
                             },
                         ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(itemSpacing),
+                    horizontalArrangement = Arrangement.Center,
                 ) {
                     if (isTv) {
                         LoginPanel(
@@ -239,6 +239,7 @@ fun LoginScreen(
                             modifier = Modifier.width(panelWidth),
                         )
 
+                        Spacer(Modifier.width(sideGap))
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
@@ -259,6 +260,7 @@ fun LoginScreen(
                                     ),
                                 ),
                         )
+                        Spacer(Modifier.width(sideGap))
 
                         LoginBrand(
                             isTv = true,
@@ -277,6 +279,7 @@ fun LoginScreen(
                                 .fillMaxHeight(),
                         )
 
+                        Spacer(Modifier.width(sideGap))
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
@@ -291,6 +294,7 @@ fun LoginScreen(
                                     ),
                                 ),
                         )
+                        Spacer(Modifier.width(sideGap))
 
                         LoginPanel(
                             username = username,
@@ -617,21 +621,21 @@ private fun LoginPanel(
             onFocused = onNonTextFocus,
             outlined = true,
         )
-
-        Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
-        Text(
-            text = "hulksa.com",
-            color = colors.goldBright.copy(alpha = .86f),
-            fontSize = if (compact) 11.sp else 12.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .heightIn(min = if (compact) 36.dp else 48.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(role = Role.Button, onClick = onOpenWebsite)
-                .onFocusChanged { if (it.isFocused) onNonTextFocus() }
-                .padding(horizontal = 14.dp, vertical = if (compact) 8.dp else 12.dp),
-        )
+        if (!compact) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "hulksa.com",
+                color = colors.goldBright.copy(alpha = .86f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(role = Role.Button, onClick = onOpenWebsite)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+        }
     }
 }
 
