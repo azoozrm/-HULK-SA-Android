@@ -175,9 +175,9 @@ fun LoginScreen(
             }
             val itemSpacing = when {
                 compactMobileLandscape -> 12.dp
-                compactTvHeight -> 24.dp
-                compactWideTv -> 20.dp
-                isTv -> 36.dp
+                compactTvHeight -> 18.dp
+                compactWideTv -> 16.dp
+                isTv -> 28.dp
                 else -> 30.dp
             }
             val innerWidth = availableWidth - horizontalPadding * 2
@@ -221,25 +221,12 @@ fun LoginScreen(
                     horizontalArrangement = Arrangement.spacedBy(itemSpacing),
                 ) {
                     if (isTv) {
-                        LoginPanel(
-                            username = username,
-                            onUsernameChange = { username = it },
-                            password = password,
-                            onPasswordChange = { password = it },
-                            showPassword = showPassword,
-                            onShowPasswordChange = { showPassword = !showPassword },
-                            rememberAccount = rememberAccount,
-                            onRememberChange = { rememberAccount = !rememberAccount },
-                            isLoading = isLoading,
-                            errorMessage = errorMessage,
-                            onSubmit = submit,
-                            onOpenWebsite = openWebsite,
-                            onNonTextFocus = hideKeyboard,
-                            initialFocusRequester = tvInitialFocusRequester,
-                            compact = false,
-                            compactTv = compactTvHeight,
-                            landscapePhone = false,
-                            modifier = Modifier.width(panelWidth),
+                        LoginBrand(
+                            isTv = true,
+                            compact = compactTvHeight,
+                            modifier = Modifier
+                                .width(brandColumnWidth)
+                                .fillMaxHeight(),
                         )
 
                         Box(
@@ -263,12 +250,25 @@ fun LoginScreen(
                                 ),
                         )
 
-                        LoginBrand(
-                            isTv = true,
-                            compact = compactTvHeight,
-                            modifier = Modifier
-                                .width(brandColumnWidth)
-                                .fillMaxHeight(),
+                        LoginPanel(
+                            username = username,
+                            onUsernameChange = { username = it },
+                            password = password,
+                            onPasswordChange = { password = it },
+                            showPassword = showPassword,
+                            onShowPasswordChange = { showPassword = !showPassword },
+                            rememberAccount = rememberAccount,
+                            onRememberChange = { rememberAccount = !rememberAccount },
+                            isLoading = isLoading,
+                            errorMessage = errorMessage,
+                            onSubmit = submit,
+                            onOpenWebsite = openWebsite,
+                            onNonTextFocus = hideKeyboard,
+                            initialFocusRequester = tvInitialFocusRequester,
+                            compact = false,
+                            compactTv = compactTvHeight,
+                            landscapePhone = false,
+                            modifier = Modifier.width(panelWidth),
                         )
                     } else {
                         LoginBrand(
