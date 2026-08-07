@@ -184,9 +184,9 @@ fun LoginScreen(
             val innerWidth = availableWidth - horizontalPadding * 2
             val panelWidth = when {
                 compactMobileLandscape -> (innerWidth * .58f).coerceAtMost(430.dp)
-                compactTvHeight -> 420.dp
-                compactWideTv -> 440.dp
-                isTv -> 450.dp
+                compactTvHeight -> 392.dp
+                compactWideTv -> 416.dp
+                isTv -> 430.dp
                 else -> 430.dp
             }
             val brandColumnWidth = when {
@@ -242,12 +242,11 @@ fun LoginScreen(
                             landscapePhone = false,
                             modifier = Modifier
                                 .width(panelWidth)
-                                .offset(x = if (compactTvHeight || compactWideTv) (-12).dp else 0.dp),
+                                .offset(x = if (compactTvHeight || compactWideTv) 10.dp else 0.dp),
                         )
 
                         Box(
                             modifier = Modifier
-                                .offset(x = if (compactTvHeight || compactWideTv) (-24).dp else 0.dp)
                                 .width(1.dp)
                                 .height(
                                     when {
