@@ -472,7 +472,6 @@ fun MainShellScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                MobileNavigation(state.destination, rememberingSelectDestination)
                 Box(Modifier.weight(1f)) {
                     DestinationContent(
                         state = state,
@@ -498,6 +497,7 @@ fun MainShellScreen(
                         onLogout = onLogout,
                     )
                 }
+                MobileNavigation(state.destination, rememberingSelectDestination)
             }
         }
     }
@@ -612,7 +612,6 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF090A07))
-            .statusBarsPadding()
             .navigationBarsPadding(),
         state = navigationState,
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
