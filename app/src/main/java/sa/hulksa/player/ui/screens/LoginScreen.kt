@@ -220,61 +220,106 @@ fun LoginScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(itemSpacing),
                 ) {
-                    LoginBrand(
-                        isTv = isTv,
-                        compact = compactMobileLandscape || compactTvHeight,
-                        landscapePhone = compactMobileLandscape,
-                        modifier = Modifier
-                            .width(brandColumnWidth)
-                            .fillMaxHeight(),
-                    )
+                    if (isTv) {
+                        LoginPanel(
+                            username = username,
+                            onUsernameChange = { username = it },
+                            password = password,
+                            onPasswordChange = { password = it },
+                            showPassword = showPassword,
+                            onShowPasswordChange = { showPassword = !showPassword },
+                            rememberAccount = rememberAccount,
+                            onRememberChange = { rememberAccount = !rememberAccount },
+                            isLoading = isLoading,
+                            errorMessage = errorMessage,
+                            onSubmit = submit,
+                            onOpenWebsite = openWebsite,
+                            onNonTextFocus = hideKeyboard,
+                            initialFocusRequester = tvInitialFocusRequester,
+                            compact = false,
+                            compactTv = compactTvHeight,
+                            landscapePhone = false,
+                            modifier = Modifier.width(panelWidth),
+                        )
 
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(
-                                when {
-                                    compactMobileLandscape -> 250.dp
-                                    compactTvHeight -> 300.dp
-                                    compactWideTv -> 280.dp
-                                    else -> 330.dp
-                                },
-                            )
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        Color.Transparent,
-                                        colors.gold.copy(alpha = .22f),
-                                        Color.Transparent,
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(
+                                    when {
+                                        compactTvHeight -> 300.dp
+                                        compactWideTv -> 280.dp
+                                        else -> 330.dp
+                                    },
+                                )
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color.Transparent,
+                                            colors.gold.copy(alpha = .22f),
+                                            Color.Transparent,
+                                        ),
                                     ),
                                 ),
-                            ),
-                    )
+                        )
 
-                    LoginPanel(
-                        username = username,
-                        onUsernameChange = { username = it },
-                        password = password,
-                        onPasswordChange = { password = it },
-                        showPassword = showPassword,
-                        onShowPasswordChange = { showPassword = !showPassword },
-                        rememberAccount = rememberAccount,
-                        onRememberChange = { rememberAccount = !rememberAccount },
-                        isLoading = isLoading,
-                        errorMessage = errorMessage,
-                        onSubmit = submit,
-                        onOpenWebsite = openWebsite,
-                        onNonTextFocus = hideKeyboard,
-                        initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                        compact = compactMobileLandscape,
-                        compactTv = compactTvHeight,
-                        landscapePhone = compactMobileLandscape,
-                        modifier = Modifier
-                            .width(panelWidth)
-                            .then(
-                                if (compactMobileLandscape) Modifier.fillMaxHeight() else Modifier,
-                            ),
-                    )
+                        LoginBrand(
+                            isTv = true,
+                            compact = compactTvHeight,
+                            modifier = Modifier
+                                .width(brandColumnWidth)
+                                .fillMaxHeight(),
+                        )
+                    } else {
+                        LoginBrand(
+                            isTv = false,
+                            compact = compactMobileLandscape,
+                            landscapePhone = compactMobileLandscape,
+                            modifier = Modifier
+                                .width(brandColumnWidth)
+                                .fillMaxHeight(),
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(if (compactMobileLandscape) 250.dp else 330.dp)
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color.Transparent,
+                                            colors.gold.copy(alpha = .22f),
+                                            Color.Transparent,
+                                        ),
+                                    ),
+                                ),
+                        )
+
+                        LoginPanel(
+                            username = username,
+                            onUsernameChange = { username = it },
+                            password = password,
+                            onPasswordChange = { password = it },
+                            showPassword = showPassword,
+                            onShowPasswordChange = { showPassword = !showPassword },
+                            rememberAccount = rememberAccount,
+                            onRememberChange = { rememberAccount = !rememberAccount },
+                            isLoading = isLoading,
+                            errorMessage = errorMessage,
+                            onSubmit = submit,
+                            onOpenWebsite = openWebsite,
+                            onNonTextFocus = hideKeyboard,
+                            initialFocusRequester = null,
+                            compact = compactMobileLandscape,
+                            compactTv = false,
+                            landscapePhone = compactMobileLandscape,
+                            modifier = Modifier
+                                .width(panelWidth)
+                                .then(
+                                    if (compactMobileLandscape) Modifier.fillMaxHeight() else Modifier,
+                                ),
+                        )
+                    }
                 }
             }
         } else {
