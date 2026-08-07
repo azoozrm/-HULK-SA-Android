@@ -609,11 +609,6 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val isWide = configuration.screenWidthDp >= 600
 
-    LaunchedEffect(selected) {
-        val selectedIndex = destinations.indexOfFirst { it.destination == selected }.coerceAtLeast(0)
-        navigationState.animateScrollToItem(selectedIndex)
-    }
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -761,13 +756,6 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
             }
         }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color.White.copy(alpha = .06f)),
-        )
     }
 }
 
