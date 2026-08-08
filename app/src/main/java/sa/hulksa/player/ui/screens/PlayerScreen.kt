@@ -2,7 +2,15 @@
 
 package sa.hulksa.player.ui.screens
 
+import android.content.Context
 import android.graphics.Color as AndroidColor
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -111,6 +119,7 @@ private const val PLAYER_FAVORITES_CATEGORY = "__player_favorites__"
 private const val RESUME_PROMPT_THRESHOLD_MS = 30_000L
 private const val SEEK_STEP_MS = 10_000L
 private const val NEXT_EPISODE_SECONDS = 8
+private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 
 private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
@@ -122,6 +131,16 @@ private data class PlayerTrackOption(
     val trackIndex: Int,
     val selected: Boolean,
 )
+
+private fun hasUsableNetwork(context: Context): Boolean {
+    val manager = context.applicationContext
+        .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return false
+    val network = manager.activeNetwork ?: return false
+    val capabilities = manager.getNetworkCapabilities(network) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -141,6 +160,8 @@ fun PlayerScreen(
     var retryNonce by remember(request) { mutableIntStateOf(0) }
     var pendingSeekMs by remember(request) { mutableLongStateOf(0L) }
     var finalError by remember(request) { mutableStateOf<String?>(null) }
+    var offlineFailure by remember(request) { mutableStateOf(false) }
+    var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
     var buffering by remember(request) { mutableStateOf(true) }
     var controlsVisible by remember(request) { mutableStateOf(!request.isLive) }
     var browserVisible by remember(request) { mutableStateOf(false) }
@@ -299,11 +320,53 @@ fun PlayerScreen(
 
     BackHandler { handleBackAction() }
 
+    DisposableEffect(context, request) {
+        val manager = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val mainHandler = Handler(Looper.getMainLooper())
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private fun publishNetworkState() {
+                val available = hasUsableNetwork(context)
+                mainHandler.post { networkAvailable = available }
+            }
+
+            override fun onAvailable(network: Network) = publishNetworkState()
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = publishNetworkState()
+
+            override fun onLost(network: Network) = publishNetworkState()
+        }
+
+        if (manager != null) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    manager.registerDefaultNetworkCallback(callback)
+                } else {
+                    manager.registerNetworkCallback(
+                        NetworkRequest.Builder()
+                            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            .build(),
+                        callback,
+                    )
+                }
+            }
+            networkAvailable = hasUsableNetwork(context)
+        }
+
+        onDispose {
+            mainHandler.removeCallbacksAndMessages(null)
+            if (manager != null) runCatching { manager.unregisterNetworkCallback(callback) }
+        }
+    }
+
     DisposableEffect(player, request) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
-                if (playbackState == Player.STATE_READY) finalError = null
+                if (playbackState == Player.STATE_READY) {
+                    finalError = null
+                    offlineFailure = false
+                }
                 if (
                     playbackState == Player.STATE_ENDED &&
                     !request.isLive &&
@@ -330,10 +393,18 @@ fun PlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (candidateIndex < request.candidates.lastIndex) {
+                if (!hasUsableNetwork(context)) {
+                    pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
+                    buffering = false
+                    controlsVisible = true
+                    offlineFailure = true
+                    finalError = PLAYER_OFFLINE_MESSAGE
+                } else if (candidateIndex < request.candidates.lastIndex) {
+                    offlineFailure = false
                     pendingSeekMs = player.currentPosition.coerceAtLeast(0L)
                     candidateIndex += 1
                 } else {
+                    offlineFailure = false
                     buffering = false
                     controlsVisible = true
                     finalError = if (request.isLive) {
@@ -374,6 +445,20 @@ fun PlayerScreen(
         player.playWhenReady = !resumePromptVisible
         pendingSeekMs = 0L
         manualSeekTargetMs = null
+    }
+
+    LaunchedEffect(networkAvailable, offlineFailure, finalError, request.historyKey) {
+        if (networkAvailable && offlineFailure && finalError != null) {
+            pendingSeekMs = if (request.isLive) {
+                0L
+            } else {
+                maxOf(currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+            }
+            offlineFailure = false
+            candidateIndex = 0
+            delay(500L)
+            retryNonce += 1
+        }
     }
 
     LaunchedEffect(manualSeekTargetMs, request) {
@@ -775,7 +860,12 @@ fun PlayerScreen(
                 message = finalError!!,
                 canChooseChannel = request.isLive && liveCatalog?.items?.isNotEmpty() == true,
                 canChooseServer = request.candidates.size > 1,
-                onRetry = { pendingSeekMs = currentPositionMs; candidateIndex = 0; retryNonce += 1 },
+                onRetry = {
+                    offlineFailure = false
+                    pendingSeekMs = currentPositionMs
+                    candidateIndex = 0
+                    retryNonce += 1
+                },
                 onChooseChannel = { browserVisible = true },
                 onChooseServer = { activePanel = PlayerPanel.SERVERS },
                 onBack = onBack,
