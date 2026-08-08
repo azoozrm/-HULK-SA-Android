@@ -448,13 +448,29 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(networkAvailable, offlineFailure, finalError, request.historyKey) {
-        if (networkAvailable && offlineFailure && finalError != null) {
+        if (!networkAvailable) {
+            delay(350L)
+            if (hasUsableNetwork(context)) return@LaunchedEffect
+            pendingSeekMs = if (request.isLive) {
+                0L
+            } else {
+                maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+            }
+            player.pause()
+            buffering = false
+            controlsVisible = true
+            offlineFailure = true
+            finalError = PLAYER_OFFLINE_MESSAGE
+            return@LaunchedEffect
+        }
+
+        if (offlineFailure && finalError == PLAYER_OFFLINE_MESSAGE) {
             val resumePositionMs = if (request.isLive) {
                 0L
             } else {
-                maxOf(currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+                maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
-            delay(500L)
+            delay(700L)
             if (!hasUsableNetwork(context)) return@LaunchedEffect
             pendingSeekMs = resumePositionMs
             candidateIndex = 0
