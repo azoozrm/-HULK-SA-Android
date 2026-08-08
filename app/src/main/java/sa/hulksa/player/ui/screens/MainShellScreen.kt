@@ -101,6 +101,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -154,6 +155,44 @@ private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
+
+internal data class TvPageSafeInsets(
+    val horizontalDp: Float,
+    val verticalDp: Float,
+)
+
+internal fun tvPageSafeInsets(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+): TvPageSafeInsets {
+    val width = screenWidthDp.coerceAtLeast(1).toFloat()
+    val height = screenHeightDp.coerceAtLeast(1).toFloat()
+    val widthPressure = ((1280f - width) / 320f).coerceIn(0f, 1f)
+    val heightPressure = ((720f - height) / 180f).coerceIn(0f, 1f)
+    val compactPressure = maxOf(widthPressure, heightPressure)
+
+    return TvPageSafeInsets(
+        horizontalDp = 8f + (10f * compactPressure),
+        verticalDp = 8f + (8f * compactPressure),
+    )
+}
+
+@Composable
+private fun Modifier.adaptiveTvPageSafePadding(
+    isTv: Boolean,
+    mobileHorizontal: Dp,
+    mobileVertical: Dp = mobileHorizontal,
+): Modifier {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val safeInsets = tvPageSafeInsets(
+        screenWidthDp = adaptiveUi.screenWidthDp,
+        screenHeightDp = adaptiveUi.screenHeightDp,
+    )
+    return padding(
+        horizontal = if (isTv) safeInsets.horizontalDp.dp else mobileHorizontal,
+        vertical = if (isTv) safeInsets.verticalDp.dp else mobileVertical,
+    )
+}
 
 internal fun tvRailLogoSizeDp(screenWidthDp: Int): Float =
     (screenWidthDp.coerceAtLeast(1) / 32f).coerceIn(28f, 60f)
@@ -1259,10 +1298,7 @@ private fun PosterCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(
-                horizontal = if (isTv) TV_PAGE_GUTTER else 13.dp,
-                vertical = if (isTv) TV_PAGE_GUTTER else 12.dp,
-            ),
+            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp, mobileVertical = 12.dp),
     ) {
         CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
@@ -1334,10 +1370,7 @@ private fun LiveCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(
-                horizontal = if (isTv) TV_PAGE_GUTTER else 12.dp,
-                vertical = if (isTv) TV_PAGE_GUTTER else 11.dp,
-            ),
+            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 12.dp, mobileVertical = 11.dp),
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
@@ -1482,7 +1515,7 @@ private fun FavoritesScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp),
     ) {
         PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
         Spacer(Modifier.height(18.dp))
@@ -1516,7 +1549,7 @@ private fun UnifiedSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp),
     ) {
         PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
         Spacer(Modifier.height(14.dp))
@@ -1702,7 +1735,7 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 13.dp),
+            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp),
     ) {
         PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
         Spacer(Modifier.height(12.dp))
@@ -2296,7 +2329,7 @@ private fun SettingsScreen(
         state = settingsListState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
+            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 0.dp),
         contentPadding = if (isTv) {
             PaddingValues(bottom = 24.dp)
         } else {
