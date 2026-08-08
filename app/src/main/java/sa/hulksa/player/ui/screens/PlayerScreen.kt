@@ -449,15 +449,17 @@ fun PlayerScreen(
 
     LaunchedEffect(networkAvailable, offlineFailure, finalError, request.historyKey) {
         if (networkAvailable && offlineFailure && finalError != null) {
-            pendingSeekMs = if (request.isLive) {
+            val resumePositionMs = if (request.isLive) {
                 0L
             } else {
                 maxOf(currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
-            offlineFailure = false
-            candidateIndex = 0
             delay(500L)
+            if (!hasUsableNetwork(context)) return@LaunchedEffect
+            pendingSeekMs = resumePositionMs
+            candidateIndex = 0
             retryNonce += 1
+            offlineFailure = false
         }
     }
 
