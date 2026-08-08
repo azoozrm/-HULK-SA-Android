@@ -1,5 +1,6 @@
 package sa.hulksa.player
 
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
@@ -12,11 +13,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import androidx.test.ext.junit.runners.AndroidJUnit4
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
+import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.PlaybackRequest
 
 @RunWith(AndroidJUnit4::class)
@@ -58,17 +59,19 @@ class ProductionAuthenticatedSmokeTest {
                 val movie = movieCatalog.items.first()
                 repository.contentDetails(session, movie.id)
 
-                val seriesAndEpisode = seriesCatalog.items.asSequence()
-                    .take(MAX_SERIES_PROBES)
-                    .mapNotNull { series ->
-                        val bundle = try {
-                            repository.seriesBundle(session, series.id)
-                        } catch (_: Exception) {
-                            null
-                        }
-                        bundle?.episodes?.firstOrNull()?.let { episode -> series to episode }
+                var seriesAndEpisode: Pair<ContentItem, Episode>? = null
+                for (series in seriesCatalog.items.take(MAX_SERIES_PROBES)) {
+                    val bundle = try {
+                        repository.seriesBundle(session, series.id)
+                    } catch (_: Exception) {
+                        null
                     }
-                    .firstOrNull()
+                    val episode = bundle?.episodes?.firstOrNull()
+                    if (episode != null) {
+                        seriesAndEpisode = series to episode
+                        break
+                    }
+                }
                 assertTrue(
                     "No production series with a reachable episode was found in the bounded smoke sample",
                     seriesAndEpisode != null,
