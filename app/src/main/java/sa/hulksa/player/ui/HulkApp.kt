@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.model.ContentType
+import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
@@ -99,7 +100,18 @@ fun HulkApp(
                         onSelectCategory = viewModel::selectCategory,
                         onSearch = viewModel::updateSearch,
                         onOpen = viewModel::open,
-                        onOpenHistory = viewModel::openHistory,
+                        onOpenHistory = { entry ->
+                            val localDownload = state.downloads.firstOrNull { download ->
+                                download.historyKey == entry.key &&
+                                    download.status == OfflineStatus.COMPLETED &&
+                                    !download.localUri.isNullOrBlank()
+                            }
+                            if (localDownload != null) {
+                                viewModel.playDownload(localDownload)
+                            } else {
+                                viewModel.openHistory(entry)
+                            }
+                        },
                         onToggleFavorite = viewModel::toggleFavorite,
                         onRefresh = viewModel::refresh,
                         onClearHistory = viewModel::clearHistory,
