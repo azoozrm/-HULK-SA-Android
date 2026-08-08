@@ -1020,11 +1020,18 @@ private fun CinemaHero(
     onFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
+    val configuration = LocalConfiguration.current
+    val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
+    val heroHeight = when {
+        isTv -> 374.dp
+        isPortraitPhone -> (configuration.screenWidthDp * .94f).coerceIn(336f, 360f).dp
+        else -> 288.dp
+    }
     val image = item.backdropUrl ?: item.posterUrl
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (isTv) 374.dp else 288.dp)
+            .height(heroHeight)
             .background(Color(0xFF0A0B08)),
     ) {
         if (!image.isNullOrBlank()) {
