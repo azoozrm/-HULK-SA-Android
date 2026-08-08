@@ -1,0 +1,103 @@
+name: HULK SA Production Authenticated Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hulk-sa-production-authenticated-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authenticated-smoke:
+    name: Authenticated catalog/details/stream smoke
+    runs-on: ubuntu-latest
+    environment: production-e2e
+    timeout-minutes: 60
+    env:
+      HULK_E2E_USERNAME: ${{ secrets.HULK_E2E_USERNAME }}
+      HULK_E2E_PASSWORD: ${{ secrets.HULK_E2E_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Validate protected E2E inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$HULK_E2E_USERNAME" ]] || { echo 'Missing HULK_E2E_USERNAME in production-e2e environment' >&2; exit 2; }
+          [[ -n "$HULK_E2E_PASSWORD" ]] || { echo 'Missing HULK_E2E_PASSWORD in production-e2e environment' >&2; exit 2; }
+          echo 'PASS: protected production E2E credentials are available'
+
+      - name: Configure Linux KVM when available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod a+rw /dev/kvm || true
+          fi
+
+      - name: Run protected production instrumentation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save
+          script: >-
+            ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.ProductionAuthenticatedSmokeTest
+            -Pandroid.testInstrumentationRunnerArguments.hulkProductionE2e=true
+            -Pandroid.testInstrumentationRunnerArguments.hulkE2eUsername="$HULK_E2E_USERNAME"
+            -Pandroid.testInstrumentationRunnerArguments.hulkE2ePassword="$HULK_E2E_PASSWORD"
+
+      - name: Publish sanitized evidence
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/production-e2e-evidence
+          cat > build/production-e2e-evidence/SUMMARY.md <<EOF
+          # HULK SA Production Authenticated Smoke
+
+          - Source SHA: \`${GITHUB_SHA}\`
+          - Workflow run: \`${GITHUB_RUN_ID}\`
+          - Runtime: Android API 35 / x86_64 emulator
+          - Production login: PASS
+          - Live catalog: PASS
+          - Movie catalog and details: PASS
+          - Series catalog and episode lookup: PASS
+          - Live stream bounded byte probe: PASS
+          - Movie stream bounded byte probe: PASS
+          - Episode stream bounded byte probe: PASS
+          - Credentials persisted by test: NO
+          - Credentials included in evidence artifact: NO
+          EOF
+          sha256sum build/production-e2e-evidence/SUMMARY.md > build/production-e2e-evidence/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: HULK-SA-PRODUCTION-AUTHENTICATED-SMOKE-${{ github.run_id }}
+          path: build/production-e2e-evidence/
+          if-no-files-found: error
+          retention-days: 14
