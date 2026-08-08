@@ -4,15 +4,22 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.SharedPreferences
 import android.database.Cursor
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import sa.hulksa.player.model.OfflineStatus
 
 internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var store: DurableDownloadPreferenceStore? = null
     private var bridge: DurableDownloadLifecycleBridge? = null
+    private var connectivityManager: ConnectivityManager? = null
     private var knownSchedulingStates: Map<Long, DurableDownloadSchedulingState> = emptyMap()
+    private var forceWaitingNetworkReenqueue = false
 
     private val reconcileRunnable = Runnable(::reconcile)
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -23,17 +30,55 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
             requestReconciliation()
         }
     }
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            requestNetworkRecoveryIfUsable(network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            if (hasUsableInternet(capabilities)) {
+                requestNetworkRecovery()
+            }
+        }
+    }
 
     override fun onCreate(): Boolean {
         val appContext = context?.applicationContext ?: return false
         store = DurableDownloadPreferenceStore(appContext)
         store?.register(preferenceListener)
+        connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
+        runCatching {
+            connectivityManager?.registerNetworkCallback(
+                NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build(),
+                networkCallback,
+            )
+        }
         mainHandler.post {
             bridge = DurableDownloadLifecycleBridge(appContext)
             reconcile()
         }
         return true
     }
+
+    private fun requestNetworkRecoveryIfUsable(network: Network) {
+        val capabilities = connectivityManager?.getNetworkCapabilities(network) ?: return
+        if (hasUsableInternet(capabilities)) {
+            requestNetworkRecovery()
+        }
+    }
+
+    private fun requestNetworkRecovery() {
+        mainHandler.post {
+            forceWaitingNetworkReenqueue = true
+            requestReconciliation()
+        }
+    }
+
+    private fun hasUsableInternet(capabilities: NetworkCapabilities): Boolean =
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 
     private fun requestReconciliation() {
         mainHandler.removeCallbacks(reconcileRunnable)
@@ -43,6 +88,8 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private fun reconcile() {
         val currentStore = store ?: return
         val currentBridge = bridge ?: return
+        val forceNetworkRecovery = forceWaitingNetworkReenqueue
+        forceWaitingNetworkReenqueue = false
         val snapshot = currentStore.snapshot()
         val recordsById = snapshot.records.associateBy { it.downloadId }
         val currentStates = recordsById.mapValues { (_, record) ->
@@ -53,7 +100,12 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         recordsById.forEach { (downloadId, record) ->
             val currentState = currentStates.getValue(downloadId)
             val previousState = knownSchedulingStates[downloadId]
+            val forceWaitingNetwork =
+                forceNetworkRecovery &&
+                    record.status == OfflineStatus.WAITING_NETWORK &&
+                    currentState.action == DurableDownloadLifecycleAction.ENQUEUE
             if (
+                !forceWaitingNetwork &&
                 !shouldApplyDurableDownloadSchedulingState(
                     previous = previousState,
                     current = currentState,
