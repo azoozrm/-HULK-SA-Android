@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
@@ -86,6 +87,7 @@ fun LoginScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val view = LocalView.current
+    val fontScale = LocalDensity.current.fontScale
     val tvInitialFocusRequester = remember { FocusRequester() }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -182,7 +184,13 @@ fun LoginScreen(
                 else -> 30.dp
             }
             val innerWidth = availableWidth - horizontalPadding * 2
+            val maxAccessibleLandscapePanelWidth =
+                (innerWidth - sideGap * 2 - 1.dp - 252.dp).coerceAtLeast(280.dp)
             val panelWidth = when {
+                compactMobileLandscape && fontScale >= 1.3f ->
+                    (innerWidth * .52f)
+                        .coerceIn(320.dp, 450.dp)
+                        .coerceAtMost(maxAccessibleLandscapePanelWidth)
                 compactMobileLandscape -> (innerWidth * .48f).coerceIn(280.dp, 344.dp)
                 compactTvHeight -> 402.dp
                 compactWideTv -> 424.dp
@@ -503,10 +511,12 @@ private fun LoginPanel(
     }
     val compactFieldHeight = if (landscapePhone) 36.dp else 38.dp
     val compactButtonHeight = if (landscapePhone) 36.dp else 36.dp
+    val panelScrollState = rememberScrollState()
 
     Column(
         modifier = modifier
             .widthIn(max = 474.dp)
+            .then(if (landscapePhone) Modifier.verticalScroll(panelScrollState) else Modifier)
             .clip(panelShape)
             .background(
                 Brush.verticalGradient(
