@@ -275,6 +275,7 @@ fun PlayerScreen(
 
     fun handleBackAction() {
         when {
+            finalError != null -> saveAndBack()
             browserVisible -> browserVisible = false
             activePanel != null -> activePanel = null
             resumePromptVisible -> {
