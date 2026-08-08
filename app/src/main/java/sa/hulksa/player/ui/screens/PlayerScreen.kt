@@ -182,6 +182,7 @@ fun PlayerScreen(
     val unlockFocus = remember { FocusRequester() }
     val nextEpisodePlayFocus = remember { FocusRequester() }
     val nextEpisodeCancelFocus = remember { FocusRequester() }
+    val errorRetryFocus = remember { FocusRequester() }
     val currentChannel = remember(liveCatalog, request.streamId) {
         liveCatalog?.items?.firstOrNull { it.id == request.streamId }
     }
@@ -471,6 +472,13 @@ fun PlayerScreen(
         if (target != null) {
             withFrameNanos { }
             runCatching { target.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(finalError, request.historyKey) {
+        if (finalError != null) {
+            withFrameNanos { }
+            runCatching { errorRetryFocus.requestFocus() }
         }
     }
 
@@ -770,6 +778,7 @@ fun PlayerScreen(
                 onChooseChannel = { browserVisible = true },
                 onChooseServer = { activePanel = PlayerPanel.SERVERS },
                 onBack = onBack,
+                retryFocusRequester = errorRetryFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -1281,6 +1290,7 @@ private fun PlayerErrorPanel(
     onChooseChannel: () -> Unit,
     onChooseServer: () -> Unit,
     onBack: () -> Unit,
+    retryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1294,7 +1304,7 @@ private fun PlayerErrorPanel(
         ErrorNotice(message)
         Spacer(Modifier.height(15.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            FocusButton("اعادة المحاولة", onRetry)
+            FocusButton("اعادة المحاولة", onRetry, modifier = Modifier.focusRequester(retryFocusRequester))
             if (canChooseChannel) FocusButton("اختيار قناة", onChooseChannel, primary = false)
             if (canChooseServer) FocusButton("اختيار مصدر", onChooseServer, primary = false)
             FocusButton("رجوع", onBack, primary = false)
