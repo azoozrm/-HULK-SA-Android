@@ -548,6 +548,9 @@ private fun CinematicNavigationRail(
     onSelect: (MainDestination) -> Unit,
 ) {
     var railHasFocus by remember { mutableStateOf(false) }
+    val destinationFocusRequesters = remember {
+        destinations.associate { entry -> entry.destination to FocusRequester() }
+    }
     val expanded = railHasFocus
     val adaptiveUi = LocalAdaptiveUi.current
     val metrics = tvRailMetrics(
@@ -558,6 +561,13 @@ private fun CinematicNavigationRail(
         targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
         label = "railWidth",
     )
+    LaunchedEffect(railHasFocus, selected) {
+        if (railHasFocus) {
+            destinationFocusRequesters[selected]?.let { requester ->
+                runCatching { requester.requestFocus() }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -587,6 +597,7 @@ private fun CinematicNavigationRail(
                 expanded = expanded,
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
+                modifier = Modifier.focusRequester(destinationFocusRequesters.getValue(entry.destination)),
             )
             Spacer(Modifier.height(metrics.itemGapDp.dp))
         }
@@ -598,6 +609,7 @@ private fun CinematicNavigationRail(
                 expanded = expanded,
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
+                modifier = Modifier.focusRequester(destinationFocusRequesters.getValue(entry.destination)),
             )
         }
         Spacer(Modifier.height((metrics.itemGapDp * 2f).dp))
@@ -611,6 +623,7 @@ private fun NavigationItem(
     expanded: Boolean,
     metrics: TvRailMetrics,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -618,7 +631,7 @@ private fun NavigationItem(
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val active = selected || showFocused
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(metrics.itemHeightDp.dp)
             .clip(RoundedCornerShape(metrics.cornerRadiusDp.dp))
