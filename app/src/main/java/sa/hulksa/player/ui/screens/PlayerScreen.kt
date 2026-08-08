@@ -142,6 +142,13 @@ private fun hasUsableNetwork(context: Context): Boolean {
         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 }
 
+private fun PlaybackRequest.usesOnlyLocalMedia(): Boolean =
+    candidates.isNotEmpty() && candidates.all { candidate ->
+        val source = candidate.trim()
+        source.startsWith("file:", ignoreCase = true) ||
+            source.startsWith("content:", ignoreCase = true)
+    }
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun PlayerScreen(
@@ -156,6 +163,7 @@ fun PlayerScreen(
     onPlayNextEpisode: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val localPlayback = remember(request) { request.usesOnlyLocalMedia() }
     var candidateIndex by remember(request) { mutableIntStateOf(0) }
     var retryNonce by remember(request) { mutableIntStateOf(0) }
     var pendingSeekMs by remember(request) { mutableLongStateOf(0L) }
@@ -393,7 +401,7 @@ fun PlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (!hasUsableNetwork(context)) {
+                if (!localPlayback && !hasUsableNetwork(context)) {
                     pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
                     buffering = false
                     controlsVisible = true
@@ -447,7 +455,9 @@ fun PlayerScreen(
         manualSeekTargetMs = null
     }
 
-    LaunchedEffect(networkAvailable, offlineFailure, finalError, request.historyKey) {
+    LaunchedEffect(networkAvailable, offlineFailure, finalError, request.historyKey, localPlayback) {
+        if (localPlayback) return@LaunchedEffect
+
         if (!networkAvailable) {
             delay(350L)
             if (hasUsableNetwork(context)) return@LaunchedEffect
