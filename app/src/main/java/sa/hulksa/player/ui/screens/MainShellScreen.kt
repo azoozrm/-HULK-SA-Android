@@ -491,7 +491,7 @@ fun MainShellScreen(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .focusProperties { left = currentRailRequester },
+                        .focusProperties { right = currentRailRequester },
                 ) {
                     DestinationContent(
                         state = state,
