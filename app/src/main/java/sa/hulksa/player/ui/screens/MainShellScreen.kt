@@ -510,9 +510,15 @@ private fun CinematicNavigationRail(
 ) {
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
-    val railWidth by animateDpAsState(if (expanded) 202.dp else 90.dp, label = "railWidth")
-    val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val railLogoSize = tvRailLogoSizeDp(screenWidthDp).dp
+    val adaptiveUi = LocalAdaptiveUi.current
+    val metrics = tvRailMetrics(
+        screenWidthDp = adaptiveUi.screenWidthDp,
+        screenHeightDp = adaptiveUi.screenHeightDp,
+    )
+    val railWidth by animateDpAsState(
+        targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
+        label = "railWidth",
+    )
 
     Column(
         modifier = Modifier
@@ -525,19 +531,25 @@ private fun CinematicNavigationRail(
                     listOf(Color(0xFF090A07), Color(0xF70A0B08)),
                 ),
             )
-            .padding(start = 10.dp, end = 10.dp, top = 24.dp, bottom = 18.dp),
+            .padding(
+                start = metrics.outerHorizontalPaddingDp.dp,
+                end = metrics.outerHorizontalPaddingDp.dp,
+                top = metrics.topPaddingDp.dp,
+                bottom = metrics.bottomPaddingDp.dp,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BrandLogo(Modifier.size(railLogoSize))
-        Spacer(Modifier.height(10.dp))
+        BrandLogo(Modifier.size(metrics.logoSizeDp.dp))
+        Spacer(Modifier.height(metrics.logoItemGapDp.dp))
         destinations.filterNot { it.destination == MainDestination.SETTINGS }.forEach { entry ->
             NavigationItem(
                 entry = entry,
                 selected = selected == entry.destination,
                 expanded = expanded,
+                metrics = metrics,
                 onClick = { onSelect(entry.destination) },
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(metrics.itemGapDp.dp))
         }
         Spacer(Modifier.weight(1f))
         destinations.first { it.destination == MainDestination.SETTINGS }.let { entry ->
@@ -545,10 +557,11 @@ private fun CinematicNavigationRail(
                 entry = entry,
                 selected = selected == entry.destination,
                 expanded = expanded,
+                metrics = metrics,
                 onClick = { onSelect(entry.destination) },
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height((metrics.itemGapDp * 2f).dp))
     }
 }
 
@@ -557,6 +570,7 @@ private fun NavigationItem(
     entry: DestinationEntry,
     selected: Boolean,
     expanded: Boolean,
+    metrics: TvRailMetrics,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -567,8 +581,8 @@ private fun NavigationItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .height(metrics.itemHeightDp.dp)
+            .clip(RoundedCornerShape(metrics.cornerRadiusDp.dp))
             .background(
                 when {
                     showFocused -> colors.gold
@@ -578,7 +592,7 @@ private fun NavigationItem(
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 13.dp),
+            .padding(horizontal = metrics.itemHorizontalPaddingDp.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
     ) {
@@ -586,14 +600,14 @@ private fun NavigationItem(
             imageVector = entry.icon,
             contentDescription = entry.label,
             tint = if (showFocused) Color.Black else if (active) colors.goldBright else colors.textMuted,
-            modifier = Modifier.size(23.dp),
+            modifier = Modifier.size(metrics.iconSizeDp.dp),
         )
         if (expanded) {
-            Spacer(Modifier.width(11.dp))
+            Spacer(Modifier.width(metrics.iconLabelGapDp.dp))
             Text(
                 entry.label,
                 color = if (showFocused) Color.Black else if (active) colors.text else colors.textMuted,
-                fontSize = 14.sp,
+                fontSize = metrics.labelSizeSp.sp,
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
             )
