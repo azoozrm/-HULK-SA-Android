@@ -475,14 +475,24 @@ fun MainShellScreen(
             }
         }
     }
+    val tvRailFocusRequesters = remember {
+        destinations.associate { entry -> entry.destination to FocusRequester() }
+    }
+    val currentRailRequester = tvRailFocusRequesters.getValue(state.destination)
     Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
                     selected = state.destination,
                     onSelect = rememberingSelectDestination,
+                    destinationFocusRequesters = tvRailFocusRequesters,
                 )
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .focusProperties { left = currentRailRequester },
+                ) {
                     DestinationContent(
                         state = state,
                         // A rail is a layout choice; only an actual TV uses TV interaction semantics.
@@ -546,11 +556,9 @@ fun MainShellScreen(
 private fun CinematicNavigationRail(
     selected: MainDestination,
     onSelect: (MainDestination) -> Unit,
+    destinationFocusRequesters: Map<MainDestination, FocusRequester>,
 ) {
     var railHasFocus by remember { mutableStateOf(false) }
-    val destinationFocusRequesters = remember {
-        destinations.associate { entry -> entry.destination to FocusRequester() }
-    }
     val expanded = railHasFocus
     val adaptiveUi = LocalAdaptiveUi.current
     val metrics = tvRailMetrics(
@@ -561,13 +569,6 @@ private fun CinematicNavigationRail(
         targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
         label = "railWidth",
     )
-    LaunchedEffect(railHasFocus, selected) {
-        if (railHasFocus) {
-            destinationFocusRequesters[selected]?.let { requester ->
-                runCatching { requester.requestFocus() }
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
