@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
+import sa.hulksa.player.MainDestination
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation
@@ -55,6 +56,10 @@ fun HulkApp(
         isPlayer = state.screen == HulkScreen.PLAYER,
     )
     val navigationMemory = remember { NavigationMemoryStore() }
+    // Favorite state changes must update the star immediately, but they must not rebuild
+    // Home recommendation membership/order while the user is focused on those rows.
+    // Refresh recommendation inputs only when catalogs/history actually change.
+    val homeRecommendationFavorites = remember(state.catalogs, state.history) { state.favorites }
     val notify: (String) -> Unit = { message ->
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
@@ -92,7 +97,11 @@ fun HulkApp(
                     )
 
                     HulkScreen.MAIN -> MainShellScreen(
-                        state = state,
+                        state = if (state.destination == MainDestination.HOME) {
+                            state.copy(favorites = homeRecommendationFavorites)
+                        } else {
+                            state
+                        },
                         isTv = isTv,
                         navigationMemory = navigationMemory,
                         isFavorite = viewModel::isFavorite,
