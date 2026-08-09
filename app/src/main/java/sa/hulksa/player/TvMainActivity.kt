@@ -3,6 +3,8 @@ package sa.hulksa.player
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -13,9 +15,12 @@ import androidx.activity.viewModels
 import sa.hulksa.player.ui.HulkApp
 import sa.hulksa.player.ui.theme.HulkTheme
 
+private const val TV_CATALOG_VERTICAL_KEY_INTERVAL_MS = 90L
+
 class TvMainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
     private var initialImePolicyApplied = false
+    private var lastCatalogVerticalKeyAtMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,6 +30,28 @@ class TvMainActivity : ComponentActivity() {
                 HulkApp(viewModel = viewModel, isTelevisionDevice = true)
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val state = viewModel.state.value
+        val isMovieOrSeriesGrid =
+            state.screen == HulkScreen.MAIN &&
+                (state.destination == MainDestination.MOVIES || state.destination == MainDestination.SERIES)
+        val isVerticalDpad =
+            event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+
+        if (isMovieOrSeriesGrid && isVerticalDpad && event.action == KeyEvent.ACTION_DOWN) {
+            val now = SystemClock.uptimeMillis()
+            if (now - lastCatalogVerticalKeyAtMs < TV_CATALOG_VERTICAL_KEY_INTERVAL_MS) {
+                // Let one focus move settle before accepting the next one. LazyVerticalGrid can
+                // otherwise process a second D-pad event while the previous row is still being
+                // laid out, which lets spatial focus search fall back to a different column.
+                return true
+            }
+            lastCatalogVerticalKeyAtMs = now
+        }
+
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onResume() {
