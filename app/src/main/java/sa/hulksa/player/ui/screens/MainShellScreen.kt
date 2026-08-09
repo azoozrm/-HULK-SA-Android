@@ -1329,9 +1329,19 @@ private fun PosterCatalogScreen(
                 LoadingRing(label = "جاري تحميل $title…", modifier = Modifier.align(Alignment.Center))
             } else if (visible.isEmpty()) {
                 EmptyState("لا توجد نتائج مطابقة")
+            } else if (isTv) {
+                TvCatalogGrid(
+                    content = visible,
+                    destination = destination,
+                    navigationMemory = navigationMemory,
+                    isFavorite = isFavorite,
+                    onOpen = onOpen,
+                    onToggleFavorite = onToggleFavorite,
+                    restoreFocusedCard = state.searchQuery.isBlank(),
+                )
             } else {
                 ContentGrid(
-                    visible, isTv, destination, navigationMemory, isFavorite, onOpen, onToggleFavorite,
+                    visible, false, destination, navigationMemory, isFavorite, onOpen, onToggleFavorite,
                     restoreFocusedCard = state.searchQuery.isBlank(),
                 )
             }
