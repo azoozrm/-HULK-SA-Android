@@ -486,11 +486,13 @@ fun HistoryCard(
     } else {
         0f
     }
-    val primaryTitle = entry.seriesTitle
-        ?.takeIf { entry.streamKind.equals("series", ignoreCase = true) && it.isNotBlank() }
-        ?: entry.title
+    val primaryTitle = if (entry.streamKind.equals("series", ignoreCase = true)) {
+        historyPrimaryTitle(entry)
+    } else {
+        entry.title
+    }
     val metadata = historyMetadata(entry)
-    val episodeTitle = usefulEpisodeTitle(entry)
+    val episodeTitle = if (adaptiveUi.isTelevision) null else usefulEpisodeTitle(entry)
     val dismissFromContinueWatching: (Boolean) -> Unit = { moveFocusFirst ->
         if (canDismiss && viewModel != null) {
             if (moveFocusFirst) {
@@ -572,10 +574,10 @@ fun HistoryCard(
             Text(
                 primaryTitle,
                 color = Color.White,
-                fontSize = if (adaptiveUi.isTelevision) 13.sp else 12.sp,
-                lineHeight = if (adaptiveUi.isTelevision) 15.sp else 14.sp,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 12.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 14.sp else 14.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = if (adaptiveUi.isTelevision) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(3.dp))
@@ -773,6 +775,18 @@ fun InfoPill(text: String, modifier: Modifier = Modifier) {
     }
 }
 
+private fun historyPrimaryTitle(entry: HistoryEntry): String {
+    if (!entry.streamKind.equals("series", ignoreCase = true)) return entry.title
+    return entry.seriesTitle
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: entry.title
+            .substringBefore(" · ")
+            .trim()
+            .takeIf(String::isNotBlank)
+        ?: entry.title
+}
+
 private fun historyMetadata(entry: HistoryEntry): String {
     if (entry.isLive) return "بث مباشر"
 
@@ -784,9 +798,10 @@ private fun historyMetadata(entry: HistoryEntry): String {
     }
 
     return if (entry.streamKind.equals("series", ignoreCase = true)) {
+        val (season, episodeNumber) = historyEpisodeNumbers(entry)
         val episode = listOfNotNull(
-            entry.season?.let { "S${latinInt(it)}" },
-            entry.episodeNumber?.let { "E${latinInt(it)}" },
+            season?.let { "S${latinInt(it)}" },
+            episodeNumber?.let { "E${latinInt(it)}" },
         ).joinToString(" · ")
         listOf(episode.ifBlank { "مسلسل" }, time).joinToString(" · ")
     } else {
@@ -794,13 +809,55 @@ private fun historyMetadata(entry: HistoryEntry): String {
     }
 }
 
+private fun historyEpisodeNumbers(entry: HistoryEntry): Pair<Int?, Int?> {
+    var season = entry.season
+    var episodeNumber = entry.episodeNumber
+    if (!entry.streamKind.equals("series", ignoreCase = true) || (season != null && episodeNumber != null)) {
+        return season to episodeNumber
+    }
+
+    val source = listOfNotNull(entry.episodeTitle, entry.title)
+        .joinToString(" ")
+        .toLatinDigits()
+    val patterns = listOf(
+        Regex("""\bS\s*(\d{1,3})\s*[-._· ]*E(?:P)?\s*(\d{1,4})\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bSeason\s*(\d{1,3})\s*[-._· ]*(?:Episode|Ep|E)\s*(\d{1,4})\b""", RegexOption.IGNORE_CASE),
+        Regex("""الموسم\s*(\d{1,3}).{0,12}الحلقة\s*(\d{1,4})""", RegexOption.IGNORE_CASE),
+        Regex("""\b(\d{1,3})\s*[xX]\s*(\d{1,4})\b"""),
+    )
+    for (pattern in patterns) {
+        val match = pattern.find(source) ?: continue
+        if (season == null) season = match.groupValues.getOrNull(1)?.toIntOrNull()
+        if (episodeNumber == null) episodeNumber = match.groupValues.getOrNull(2)?.toIntOrNull()
+        if (season != null || episodeNumber != null) break
+    }
+    return season to episodeNumber
+}
+
 private fun usefulEpisodeTitle(entry: HistoryEntry): String? {
     if (!entry.streamKind.equals("series", ignoreCase = true)) return null
-    val title = entry.episodeTitle?.trim()?.takeIf(String::isNotBlank) ?: return null
-    val seriesTitle = entry.seriesTitle?.trim()
-    if (!seriesTitle.isNullOrBlank() && title.equals(seriesTitle, ignoreCase = true)) return null
-    if (Regex("""^(?:episode|ep|الحلقة)\s*\d+$""", RegexOption.IGNORE_CASE).matches(title)) return null
+    val title = entry.episodeTitle
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: entry.title.substringAfter(" · ", "").trim().takeIf(String::isNotBlank)
+        ?: return null
+    val seriesTitle = historyPrimaryTitle(entry)
+    if (title.equals(seriesTitle, ignoreCase = true)) return null
+    val normalized = title.toLatinDigits()
+    if (Regex("""^(?:episode|ep|الحلقة)\s*\d+$""", RegexOption.IGNORE_CASE).matches(normalized)) return null
     return title
+}
+
+private fun String.toLatinDigits(): String = buildString(length) {
+    for (character in this@toLatinDigits) {
+        append(
+            when (character) {
+                in '٠'..'٩' -> ('0'.code + character.code - '٠'.code).toChar()
+                in '۰'..'۹' -> ('0'.code + character.code - '۰'.code).toChar()
+                else -> character
+            },
+        )
+    }
 }
 
 private fun latinInt(value: Int): String = String.format(Locale.US, "%d", value)
