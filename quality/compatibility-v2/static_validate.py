@@ -63,31 +63,40 @@ def _read(path: Path) -> str:
 
 
 def player_surface_seek_contract(text: str) -> bool:
+    remote_gate = re.search(
+        r"val\s+tvRemoteInput\s*=\s*adaptiveUi\.isTelevision\s*\|\|\s*"
+        r"adaptiveUi\.inputMode\s*==\s*HulkInputMode\.REMOTE",
+        text,
+    )
     left = re.search(
-        r"KEYCODE_DPAD_LEFT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{\s*"
-        r"seekBy\(\s*-SEEK_STEP_MS\s*\)",
+        r"KEYCODE_DPAD_LEFT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{"
+        r"(?:(?!KEYCODE_DPAD_RIGHT).)*?"
+        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*SEEK_STEP_MS\s*else\s*-SEEK_STEP_MS\s*\)",
         text,
         re.DOTALL,
     )
     right = re.search(
-        r"KEYCODE_DPAD_RIGHT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{\s*"
-        r"seekBy\(\s*SEEK_STEP_MS\s*\)",
+        r"KEYCODE_DPAD_RIGHT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{"
+        r"(?:(?!KEYCODE_MEDIA_REWIND).)*?"
+        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*-SEEK_STEP_MS\s*else\s*SEEK_STEP_MS\s*\)",
         text,
         re.DOTALL,
     )
-    return left is not None and right is not None
+    return remote_gate is not None and left is not None and right is not None
 
 
 def player_seekbar_contract(text: str) -> bool:
     left = re.search(
-        r"KEYCODE_DPAD_LEFT\s*->\s*\{\s*previewMs\s*=\s*"
-        r"\(previewMs\s*-\s*SEEK_STEP_MS\)",
+        r"KEYCODE_DPAD_LEFT\s*->\s*\{\s*previewMs\s*=\s*if\s*\(\s*tvRemoteInput\s*\)\s*\{"
+        r"\s*\(previewMs\s*\+\s*SEEK_STEP_MS\)\.coerceAtMost\(durationMs\)"
+        r"\s*\}\s*else\s*\{\s*\(previewMs\s*-\s*SEEK_STEP_MS\)\.coerceAtLeast\(0L\)",
         text,
         re.DOTALL,
     )
     right = re.search(
-        r"KEYCODE_DPAD_RIGHT\s*->\s*\{\s*previewMs\s*=\s*"
-        r"\(previewMs\s*\+\s*SEEK_STEP_MS\)",
+        r"KEYCODE_DPAD_RIGHT\s*->\s*\{\s*previewMs\s*=\s*if\s*\(\s*tvRemoteInput\s*\)\s*\{"
+        r"\s*\(previewMs\s*-\s*SEEK_STEP_MS\)\.coerceAtLeast\(0L\)"
+        r"\s*\}\s*else\s*\{\s*\(previewMs\s*\+\s*SEEK_STEP_MS\)\.coerceAtMost\(durationMs\)",
         text,
         re.DOTALL,
     )
@@ -288,15 +297,15 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         add(
             "player-surface-dpad-seek-direction",
             player_surface_seek_contract(player_text),
-            "Player surface maps D-pad Left to rewind and Right to forward",
-            "Player surface D-pad seek direction is reversed or unverified",
+            "TV/remote player surface maps RTL D-pad Left to forward and Right to rewind while preserving non-TV mapping",
+            "TV/remote player surface RTL D-pad seek contract is reversed or unverified",
             [str(player_file)],
         )
         add(
             "player-seekbar-dpad-direction",
             player_seekbar_contract(player_text),
-            "Seek bar maps D-pad Left to rewind and Right to forward",
-            "Seek bar D-pad direction is reversed or unverified",
+            "TV/remote seek bar maps RTL D-pad Left to forward and Right to rewind while preserving non-TV mapping",
+            "TV/remote seek bar RTL D-pad direction is reversed or unverified",
             [str(player_file)],
         )
         focus_races = player_focus_race_findings(player_text)

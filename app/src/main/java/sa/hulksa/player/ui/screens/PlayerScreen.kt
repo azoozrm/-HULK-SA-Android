@@ -163,6 +163,8 @@ fun PlayerScreen(
     onPlayNextEpisode: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     val localPlayback = remember(request) { request.usesOnlyLocalMedia() }
     var candidateIndex by remember(request) { mutableIntStateOf(0) }
     var retryNonce by remember(request) { mutableIntStateOf(0) }
@@ -686,10 +688,11 @@ fun PlayerScreen(
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-                        seekBy(-SEEK_STEP_MS); true
+                        // The VOD timeline is visually RTL on TV/remote: left advances, right rewinds.
+                        seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-                        seekBy(SEEK_STEP_MS); true
+                        seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS); true
                     } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> if (!request.isLive && surfaceFocused) {
                         seekBy(-SEEK_STEP_MS); true
@@ -1185,6 +1188,8 @@ private fun SeekableProgressBar(
     onSeekingChanged: (Boolean) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     var focused by remember { mutableStateOf(false) }
     var previewMs by remember { mutableLongStateOf(positionMs) }
 
@@ -1254,11 +1259,19 @@ private fun SeekableProgressBar(
                     if (event.type != KeyEventType.KeyDown || durationMs <= 0L) return@onPreviewKeyEvent false
                     when (event.nativeKeyEvent.keyCode) {
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-                            previewMs = (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            previewMs = if (tvRemoteInput) {
+                                (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            } else {
+                                (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            }
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            previewMs = (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            previewMs = if (tvRemoteInput) {
+                                (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            } else {
+                                (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            }
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_CENTER,
