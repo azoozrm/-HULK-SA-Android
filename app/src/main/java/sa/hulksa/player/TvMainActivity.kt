@@ -32,15 +32,15 @@ class TvMainActivity : ComponentActivity() {
         }
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val state = viewModel.state.value
         val isMovieOrSeriesGrid =
             state.screen == HulkScreen.MAIN &&
                 (state.destination == MainDestination.MOVIES || state.destination == MainDestination.SERIES)
         val isVerticalDpad =
-            event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+            keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
 
-        if (isMovieOrSeriesGrid && isVerticalDpad && event.action == KeyEvent.ACTION_DOWN) {
+        if (isMovieOrSeriesGrid && isVerticalDpad) {
             val now = SystemClock.uptimeMillis()
             if (now - lastCatalogVerticalKeyAtMs < TV_CATALOG_VERTICAL_KEY_INTERVAL_MS) {
                 // Let one focus move settle before accepting the next one. LazyVerticalGrid can
@@ -51,7 +51,7 @@ class TvMainActivity : ComponentActivity() {
             lastCatalogVerticalKeyAtMs = now
         }
 
-        return super.dispatchKeyEvent(event)
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onResume() {
