@@ -17,6 +17,7 @@ import sa.hulksa.player.security.CredentialVault
 class HulkRepository(context: Context) {
     private val portalResolver = PortalResolver(context)
     private val client = XtreamClient()
+    private val movieCardMetadataClient = MovieCardMetadataClient()
     private val vault = CredentialVault(context)
     private val diagnostics = ServerDiagnosticsEngine(context)
 
@@ -39,6 +40,12 @@ class HulkRepository(context: Context) {
 
     suspend fun contentDetails(session: AuthenticatedSession, movieId: Int): ContentDetails =
         client.contentDetails(session, movieId)
+
+    suspend fun movieCardMetadata(
+        session: AuthenticatedSession,
+        movieId: Int,
+    ): MovieCardTechnicalMetadata =
+        movieCardMetadataClient.fetch(session, movieId)
 
     suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
         client.seriesBundle(session, seriesId)
