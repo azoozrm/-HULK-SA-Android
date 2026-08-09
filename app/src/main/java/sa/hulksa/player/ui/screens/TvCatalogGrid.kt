@@ -87,7 +87,11 @@ internal fun TvCatalogGrid(
         }
     }
 
-    suspend fun focusIndex(index: Int, columnCount: Int) {
+    suspend fun focusIndex(
+        index: Int,
+        columnCount: Int,
+        ensureFullyVisible: Boolean,
+    ) {
         val requester = contentKeys.getOrNull(index)?.let(focusRequesters::get) ?: return
         val visible = gridState.layoutInfo.visibleItemsInfo
         if (visible.none { it.index == index }) {
@@ -107,7 +111,9 @@ internal fun TvCatalogGrid(
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == index } }
                 .first { it }
         }
-        ensureIndexFullyVisible(index)
+        if (ensureFullyVisible) {
+            ensureIndexFullyVisible(index)
+        }
         runCatching { requester.requestFocus() }
     }
 
@@ -172,13 +178,26 @@ internal fun TvCatalogGrid(
                                 itemCount = content.size,
                                 columnCount = columnCount,
                                 move = move,
-                            ) ?: return@onPreviewKeyEvent false
+                            )
+
+                            if (nextIndex == null) {
+                                // RTL catalog policy:
+                                // - Physical RIGHT from the row's right-most card is allowed to
+                                //   escape to the navigation rail.
+                                // - Physical LEFT from the row's left-most card is consumed so
+                                //   Compose cannot spatially fall back to an unrelated control.
+                                return@onPreviewKeyEvent move == TvGridFocusMove.LEFT
+                            }
 
                             pendingTargetIndex = nextIndex
                             navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)
                             focusMoveJob?.cancel()
                             focusMoveJob = focusScope.launch {
-                                focusIndex(nextIndex, columnCount)
+                                focusIndex(
+                                    index = nextIndex,
+                                    columnCount = columnCount,
+                                    ensureFullyVisible = move == TvGridFocusMove.UP || move == TvGridFocusMove.DOWN,
+                                )
                                 if (pendingTargetIndex == nextIndex) {
                                     pendingTargetIndex = null
                                 }
