@@ -478,7 +478,6 @@ fun MainShellScreen(
     val tvRailFocusRequesters = remember {
         destinations.associate { entry -> entry.destination to FocusRequester() }
     }
-    val currentRailRequester = tvRailFocusRequesters.getValue(state.destination)
     Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
@@ -487,12 +486,7 @@ fun MainShellScreen(
                     onSelect = rememberingSelectDestination,
                     destinationFocusRequesters = tvRailFocusRequesters,
                 )
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .focusProperties { right = currentRailRequester },
-                ) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
                     DestinationContent(
                         state = state,
                         // A rail is a layout choice; only an actual TV uses TV interaction semantics.
@@ -565,6 +559,7 @@ private fun CinematicNavigationRail(
         screenWidthDp = adaptiveUi.screenWidthDp,
         screenHeightDp = adaptiveUi.screenHeightDp,
     )
+    val selectedRequester = destinationFocusRequesters.getValue(selected)
     val railWidth by animateDpAsState(
         targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
         label = "railWidth",
@@ -574,6 +569,11 @@ private fun CinematicNavigationRail(
         modifier = Modifier
             .width(railWidth)
             .fillMaxHeight()
+            .focusProperties {
+                onEnter = {
+                    selectedRequester.requestFocus()
+                }
+            }
             .focusGroup()
             .onFocusChanged { railHasFocus = it.hasFocus }
             .background(
