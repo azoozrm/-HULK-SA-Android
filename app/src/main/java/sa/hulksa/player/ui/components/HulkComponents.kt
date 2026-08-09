@@ -40,9 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -51,11 +50,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -65,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
@@ -74,7 +78,6 @@ import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.R
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.HistoryEntry
-import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -466,12 +469,14 @@ fun HistoryCard(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val layoutDirection = LocalLayoutDirection.current
     val viewModel = remember(context) {
         context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
     }
-    val canDismiss = !entry.isLive && entry.durationMs > 0L
-    var focused by remember { mutableStateOf(false) }
-    var remoteLongPressHandled by remember { mutableStateOf(false) }
+    val canDismiss = !entry.isLive
+    var focused by remember(entry.key) { mutableStateOf(false) }
+    var remoteLongPressHandled by remember(entry.key) { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
     val shape = RoundedCornerShape(12.dp)
@@ -480,22 +485,17 @@ fun HistoryCard(
     } else {
         0f
     }
-    val dismissFromContinueWatching: () -> Unit = {
-        if (canDismiss) {
-            viewModel?.onPlaybackProgress(
-                PlaybackRequest(
-                    title = entry.title,
-                    posterUrl = entry.posterUrl,
-                    candidates = emptyList(),
-                    isLive = false,
-                    historyKey = entry.key,
-                    streamKind = entry.streamKind,
-                    streamId = entry.streamId,
-                    extension = entry.extension,
-                ),
-                positionMs = entry.durationMs,
-                durationMs = entry.durationMs,
-            )
+    val dismissFromContinueWatching: (Boolean) -> Unit = { moveFocusFirst ->
+        if (canDismiss && viewModel != null) {
+            if (moveFocusFirst) {
+                val forward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Left else FocusDirection.Right
+                val backward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Right else FocusDirection.Left
+                val movedToNeighbor = focusManager.moveFocus(forward) || focusManager.moveFocus(backward)
+                if (!movedToNeighbor) {
+                    focusManager.moveFocus(FocusDirection.Up)
+                }
+            }
+            viewModel.removeHistoryEntry(entry.key)
         }
     }
     Box(
@@ -517,12 +517,18 @@ fun HistoryCard(
                         (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
                         !remoteLongPressHandled
                     ) {
+                        // Own the whole select-key gesture, but do not mutate the list while
+                        // the key is still held. Removing on KEY_UP prevents repeats or the
+                        // trailing release from activating the card that replaces this one.
                         remoteLongPressHandled = true
-                        dismissFromContinueWatching()
                     }
                     true
                 } else if (event.type == KeyEventType.KeyUp) {
-                    if (!remoteLongPressHandled) onClick()
+                    if (remoteLongPressHandled) {
+                        dismissFromContinueWatching(true)
+                    } else {
+                        onClick()
+                    }
                     remoteLongPressHandled = false
                     true
                 } else {
@@ -532,7 +538,7 @@ fun HistoryCard(
             .combinedClickable(
                 role = Role.Button,
                 onClick = onClick,
-                onLongClick = if (canDismiss) dismissFromContinueWatching else null,
+                onLongClick = if (canDismiss) ({ dismissFromContinueWatching(false) }) else null,
             ),
     ) {
         if (!entry.posterUrl.isNullOrBlank()) {

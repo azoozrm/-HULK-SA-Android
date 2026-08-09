@@ -542,6 +542,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(history = updated) }
     }
 
+    fun removeHistoryEntry(key: String) {
+        val updated = userLibrary.removeHistory(key)
+        mutableState.update { it.copy(history = updated) }
+    }
+
     fun toggleFavorite(item: ContentItem) {
         val now = SystemClock.elapsedRealtime()
         if (now - lastFavoriteToggleAtMs < 700L) return

@@ -86,6 +86,12 @@ class UserLibrary(context: Context) {
         return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
     }
 
+    fun removeHistory(key: String): List<HistoryEntry> {
+        val current = history()
+        if (current.none { it.key == key }) return current
+        return saveHistory(current.filterNot { it.key == key })
+    }
+
     fun resumePosition(key: String): Long {
         val entry = history().firstOrNull { it.key == key } ?: return 0L
         if (entry.durationMs > 0L && entry.positionMs.toDouble() / entry.durationMs >= COMPLETED_RATIO) return 0L
