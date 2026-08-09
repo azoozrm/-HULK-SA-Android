@@ -71,6 +71,10 @@ data class PlaybackRequest(
     val resumePositionMs: Long = 0L,
     val introEndMs: Long? = null,
     val creditsStartMs: Long? = null,
+    val seriesTitle: String? = null,
+    val season: Int? = null,
+    val episodeNumber: Int? = null,
+    val episodeTitle: String? = null,
 )
 
 data class HistoryEntry(
@@ -84,6 +88,10 @@ data class HistoryEntry(
     val positionMs: Long,
     val durationMs: Long,
     val updatedAtEpochMs: Long,
+    val seriesTitle: String? = null,
+    val season: Int? = null,
+    val episodeNumber: Int? = null,
+    val episodeTitle: String? = null,
 )
 
 enum class OfflineStatus {
