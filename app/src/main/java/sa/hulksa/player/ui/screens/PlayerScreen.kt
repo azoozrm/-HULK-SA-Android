@@ -126,6 +126,7 @@ private const val RESUME_PROMPT_THRESHOLD_MS = 30_000L
 private const val SEEK_STEP_MS = 10_000L
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
+private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
 
 private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
@@ -154,6 +155,44 @@ private fun PlaybackRequest.usesOnlyLocalMedia(): Boolean =
         source.startsWith("file:", ignoreCase = true) ||
             source.startsWith("content:", ignoreCase = true)
     }
+
+private fun movieCardQualityLabel(height: Int): String? = when {
+    height >= 2160 -> "4K"
+    height >= 1440 -> "QHD"
+    height >= 1080 -> "FHD"
+    height >= 720 -> "HD"
+    height > 0 -> "SD"
+    else -> null
+}
+
+private fun Context.cacheVerifiedMovieCardMetadata(
+    request: PlaybackRequest,
+    videoHeight: Int? = null,
+    durationMs: Long? = null,
+) {
+    if (!request.streamKind.equals("movie", ignoreCase = true)) return
+
+    val editor = applicationContext
+        .getSharedPreferences(MOVIE_CARD_METADATA_PREFS, Context.MODE_PRIVATE)
+        .edit()
+    var changed = false
+
+    videoHeight
+        ?.let(::movieCardQualityLabel)
+        ?.let { quality ->
+            editor.putString("movie:${request.streamId}:quality", quality)
+            changed = true
+        }
+
+    durationMs
+        ?.takeIf { it > 0L }
+        ?.let { duration ->
+            editor.putLong("movie:${request.streamId}:duration_ms", duration)
+            changed = true
+        }
+
+    if (changed) editor.apply()
+}
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -190,6 +229,7 @@ fun PlayerScreen(
     var currentPositionMs by remember(request) { mutableLongStateOf(0L) }
     var manualSeekTargetMs by remember(request) { mutableStateOf<Long?>(null) }
     var durationMs by remember(request) { mutableLongStateOf(0L) }
+    var cachedMovieDurationMs by remember(request) { mutableLongStateOf(0L) }
     var bufferedPercent by remember(request) { mutableIntStateOf(0) }
     var surfaceFocused by remember { mutableStateOf(false) }
     var controlsLocked by remember(request) { mutableStateOf(false) }
@@ -407,6 +447,10 @@ fun PlayerScreen(
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 videoHeight = videoSize.height
+                context.cacheVerifiedMovieCardMetadata(
+                    request = request,
+                    videoHeight = videoSize.height,
+                )
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -529,6 +573,13 @@ fun PlayerScreen(
                 currentPositionMs = player.currentPosition.coerceAtLeast(0L)
             }
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
+            if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
+                context.cacheVerifiedMovieCardMetadata(
+                    request = request,
+                    durationMs = durationMs,
+                )
+                cachedMovieDurationMs = durationMs
+            }
             bufferedPercent = player.bufferedPercentage.coerceIn(0, 100)
         }
     }
@@ -2210,17 +2261,20 @@ private fun languageLabel(code: String): String = when (code.lowercase(Locale.RO
 
 private fun qualityLabel(height: Int): String = when {
     height >= 2160 -> "4K"
-    height >= 1440 -> "1440p"
-    height >= 1080 -> "1080p"
-    height >= 720 -> "720p"
-    height >= 480 -> "480p"
-    height > 0 -> "${height}p"
+    height >= 1440 -> "QHD"
+    height >= 1080 -> "FHD"
+    height >= 720 -> "HD"
+    height > 0 -> "SD"
     else -> "تلقائي"
 }
 
 private fun qualitySortValue(label: String): Int = when (label) {
     "4K" -> 2160
-    else -> label.removeSuffix("p").toIntOrNull() ?: 0
+    "QHD" -> 1440
+    "FHD" -> 1080
+    "HD" -> 720
+    "SD" -> 480
+    else -> 0
 }
 
 private fun resizeLabel(index: Int): String = when (index) {
