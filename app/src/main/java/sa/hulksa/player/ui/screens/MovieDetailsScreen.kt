@@ -262,24 +262,6 @@ fun MovieDetailsScreen(
                                     modifier = Modifier.weight(.86f),
                                 )
                             }
-                            if (download != null && download.status != OfflineStatus.COMPLETED && download.status != OfflineStatus.FAILED) {
-                                Spacer(Modifier.height(8.dp))
-                                MovieDownloadProgress(download)
-                            }
-                            if (download != null) {
-                                Spacer(Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Start,
-                                ) {
-                                    FocusButton(
-                                        text = if (download.status == OfflineStatus.COMPLETED) "حذف التحميل" else "الغاء التحميل",
-                                        onClick = onCancelDownload,
-                                        primary = false,
-                                        compact = true,
-                                    )
-                                }
-                            }
                         } else {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -342,6 +324,32 @@ fun MovieDetailsScreen(
                     LoadingRing(
                         modifier = Modifier.align(Alignment.TopStart).padding(top = if (isTv) 30.dp else 18.dp, start = if (isTv) 102.dp else 78.dp),
                     )
+                }
+            }
+        }
+
+        if (isTv && download != null) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 38.dp, vertical = 8.dp),
+                ) {
+                    if (download.status != OfflineStatus.COMPLETED && download.status != OfflineStatus.FAILED) {
+                        MovieDownloadProgress(download)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start,
+                    ) {
+                        FocusButton(
+                            text = if (download.status == OfflineStatus.COMPLETED) "حذف التحميل" else "الغاء التحميل",
+                            onClick = onCancelDownload,
+                            primary = false,
+                            compact = true,
+                        )
+                    }
                 }
             }
         }
