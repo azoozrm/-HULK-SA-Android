@@ -162,7 +162,9 @@ internal fun TvCatalogGrid(
                         },
                     onLongClick = { onToggleFavorite(item) },
                     onFocused = {
-                        pendingTargetIndex = null
+                        if (pendingTargetIndex == index) {
+                            pendingTargetIndex = null
+                        }
                         navigationMemory.save(destination, key, index)
                     },
                 )
