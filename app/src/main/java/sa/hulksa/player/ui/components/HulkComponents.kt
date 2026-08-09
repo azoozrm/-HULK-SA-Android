@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,9 +119,9 @@ private fun compactMovieDuration(durationMs: Long?): String? {
     val hours = totalMinutes / 60L
     val minutes = totalMinutes % 60L
     return when {
-        hours > 0L && minutes > 0L -> String.format(Locale.US, "%dس %02dد", hours, minutes)
-        hours > 0L -> String.format(Locale.US, "%dس", hours)
-        else -> String.format(Locale.US, "%dد", minutes)
+        hours > 0L && minutes > 0L -> String.format(Locale.US, "%dh %02dm", hours, minutes)
+        hours > 0L -> String.format(Locale.US, "%dh", hours)
+        else -> String.format(Locale.US, "%dm", minutes)
     }
 }
 
@@ -136,33 +137,41 @@ private fun compactMovieRating(raw: String?): String? {
 @Composable
 private fun MovieMetadataBadge(
     text: String,
-    emphasized: Boolean = false,
+    modifier: Modifier = Modifier,
+    filledAccent: Boolean = false,
+    accentText: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(7.dp)
     Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
+        modifier = modifier
+            .height(21.dp)
+            .clip(shape)
             .background(
-                if (emphasized) {
-                    colors.goldBright.copy(alpha = .18f)
+                if (filledAccent) {
+                    colors.goldBright.copy(alpha = .94f)
                 } else {
-                    Color.Black.copy(alpha = .72f)
+                    Color.Black.copy(alpha = .78f)
                 },
             )
             .border(
                 1.dp,
-                if (emphasized) colors.goldBright.copy(alpha = .48f) else Color.White.copy(alpha = .14f),
-                RoundedCornerShape(50),
+                if (filledAccent) colors.goldBright else Color.White.copy(alpha = .22f),
+                shape,
             )
-            .padding(horizontal = 5.dp, vertical = 2.dp),
+            .padding(horizontal = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            color = if (emphasized) colors.goldBright else Color.White,
+            color = when {
+                filledAccent -> Color(0xFF171309)
+                accentText -> colors.goldBright
+                else -> Color.White
+            },
             fontSize = 9.sp,
             lineHeight = 10.sp,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Black,
             maxLines = 1,
         )
     }
@@ -530,17 +539,33 @@ fun CompactPosterCard(
                     },
                 ),
         )
+        if (polishMovieCard) {
+            verifiedMovieMetadata.quality
+                ?.takeIf(String::isNotBlank)
+                ?.let { quality ->
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        MovieMetadataBadge(
+                            text = quality,
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.TopLeft)
+                                .padding(7.dp),
+                            filledAccent = true,
+                        )
+                    }
+                }
+        }
         if (isFavorite) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(AbsoluteAlignment.TopRight)
                     .padding(7.dp)
                     .size(25.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = .76f)),
+                    .background(Color.Black.copy(alpha = .78f))
+                    .border(1.dp, Color.White.copy(alpha = .16f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("★", color = colors.goldBright, fontSize = 14.sp)
+                Text("★", color = colors.goldBright, fontSize = 14.sp, fontWeight = FontWeight.Black)
             }
         }
         Column(
@@ -560,19 +585,33 @@ fun CompactPosterCard(
             )
             if (polishMovieCard) {
                 val rating = compactMovieRating(item.rating)
-                val quality = verifiedMovieMetadata.quality
                 val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
-                if (rating != null || quality != null || duration != null) {
+                if (rating != null || duration != null) {
                     Spacer(Modifier.height(5.dp))
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            rating?.let { MovieMetadataBadge("★ $it", emphasized = true) }
-                            quality?.let { MovieMetadataBadge(it, emphasized = true) }
-                            duration?.let { MovieMetadataBadge(it) }
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                rating?.let {
+                                    MovieMetadataBadge(
+                                        text = "★ $it",
+                                        accentText = true,
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                duration?.let {
+                                    MovieMetadataBadge(text = it)
+                                }
+                            }
                         }
                     }
                 }
