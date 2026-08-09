@@ -1254,13 +1254,17 @@ private fun HistorySection(
             runCatching { targetRequester.requestFocus() }
         }
     }
+    val polishContinueWatching = isTv && rowKey == "continue"
     Column {
         Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(if (polishContinueWatching) 11.dp else 10.dp))
         LazyRow(
             state = rowState,
-            contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(
+                horizontal = if (polishContinueWatching) 8.dp else 5.dp,
+                vertical = if (polishContinueWatching) 10.dp else 7.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (polishContinueWatching) 16.dp else 14.dp),
         ) {
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
                 val restore = remembered.rowKey == rowKey &&
@@ -1268,7 +1272,9 @@ private fun HistorySection(
                 HistoryCard(
                     entry,
                     { onOpen(entry) },
-                    Modifier.width(if (isTv) 214.dp else 190.dp).restoreFocus(restore, targetRequester),
+                    Modifier
+                        .width(if (polishContinueWatching) 226.dp else if (isTv) 214.dp else 190.dp)
+                        .restoreFocus(restore, targetRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
                 )
             }
