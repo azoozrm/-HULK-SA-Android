@@ -475,12 +475,16 @@ fun MainShellScreen(
             }
         }
     }
+    val tvRailFocusRequesters = remember {
+        destinations.associate { entry -> entry.destination to FocusRequester() }
+    }
     Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
                     selected = state.destination,
                     onSelect = rememberingSelectDestination,
+                    destinationFocusRequesters = tvRailFocusRequesters,
                 )
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     DestinationContent(
@@ -546,6 +550,7 @@ fun MainShellScreen(
 private fun CinematicNavigationRail(
     selected: MainDestination,
     onSelect: (MainDestination) -> Unit,
+    destinationFocusRequesters: Map<MainDestination, FocusRequester>,
 ) {
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
@@ -554,6 +559,7 @@ private fun CinematicNavigationRail(
         screenWidthDp = adaptiveUi.screenWidthDp,
         screenHeightDp = adaptiveUi.screenHeightDp,
     )
+    val selectedRequester = destinationFocusRequesters.getValue(selected)
     val railWidth by animateDpAsState(
         targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
         label = "railWidth",
@@ -563,6 +569,11 @@ private fun CinematicNavigationRail(
         modifier = Modifier
             .width(railWidth)
             .fillMaxHeight()
+            .focusProperties {
+                onEnter = {
+                    selectedRequester.requestFocus()
+                }
+            }
             .focusGroup()
             .onFocusChanged { railHasFocus = it.hasFocus }
             .background(
@@ -587,6 +598,7 @@ private fun CinematicNavigationRail(
                 expanded = expanded,
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
+                modifier = Modifier.focusRequester(destinationFocusRequesters.getValue(entry.destination)),
             )
             Spacer(Modifier.height(metrics.itemGapDp.dp))
         }
@@ -598,6 +610,7 @@ private fun CinematicNavigationRail(
                 expanded = expanded,
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
+                modifier = Modifier.focusRequester(destinationFocusRequesters.getValue(entry.destination)),
             )
         }
         Spacer(Modifier.height((metrics.itemGapDp * 2f).dp))
@@ -611,6 +624,7 @@ private fun NavigationItem(
     expanded: Boolean,
     metrics: TvRailMetrics,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -618,7 +632,7 @@ private fun NavigationItem(
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val active = selected || showFocused
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(metrics.itemHeightDp.dp)
             .clip(RoundedCornerShape(metrics.cornerRadiusDp.dp))
