@@ -35,10 +35,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,10 +80,102 @@ import coil3.compose.AsyncImage
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.R
 import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
+
+private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
+
+private data class VerifiedMovieCardMetadata(
+    val quality: String? = null,
+    val durationMs: Long? = null,
+)
+
+private fun Context.verifiedMovieCardMetadata(item: ContentItem): VerifiedMovieCardMetadata {
+    if (item.type != ContentType.MOVIE) return VerifiedMovieCardMetadata()
+
+    val prefs = applicationContext.getSharedPreferences(MOVIE_CARD_METADATA_PREFS, Context.MODE_PRIVATE)
+    val quality = prefs.getString("movie:${item.id}:quality", null)
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    val duration = prefs.getLong("movie:${item.id}:duration_ms", 0L)
+        .takeIf { it > 0L }
+
+    return VerifiedMovieCardMetadata(
+        quality = quality,
+        durationMs = duration,
+    )
+}
+
+private fun compactMovieDuration(durationMs: Long?): String? {
+    val totalMinutes = durationMs
+        ?.takeIf { it > 0L }
+        ?.div(60_000L)
+        ?: return null
+    if (totalMinutes <= 0L) return null
+
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return when {
+        hours > 0L && minutes > 0L -> String.format(Locale.US, "%dh %02dm", hours, minutes)
+        hours > 0L -> String.format(Locale.US, "%dh", hours)
+        else -> String.format(Locale.US, "%dm", minutes)
+    }
+}
+
+private fun compactMovieRating(raw: String?): String? {
+    val value = raw
+        ?.trim()
+        ?.toDoubleOrNull()
+        ?.takeIf { it > 0.0 }
+        ?: return null
+    return String.format(Locale.US, "%.1f", value)
+}
+
+@Composable
+private fun MovieMetadataBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    filledAccent: Boolean = false,
+    accentText: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(7.dp)
+    Box(
+        modifier = modifier
+            .height(21.dp)
+            .clip(shape)
+            .background(
+                if (filledAccent) {
+                    Color.Black.copy(alpha = .82f)
+                } else {
+                    Color.Black.copy(alpha = .78f)
+                },
+            )
+            .border(
+                1.dp,
+                if (filledAccent) colors.goldBright.copy(alpha = .38f) else Color.White.copy(alpha = .22f),
+                shape,
+            )
+            .padding(horizontal = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = when {
+                filledAccent -> Color.White
+                accentText -> colors.goldBright
+                else -> Color.White
+            },
+            fontSize = 9.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+        )
+    }
+}
 
 @Composable
 fun BrandLogo(
@@ -341,6 +435,25 @@ fun CompactPosterCard(
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val context = LocalContext.current
+    val polishMovieCard = item.type == ContentType.MOVIE
+    val viewModel = remember(context) {
+        context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
+    }
+    var verifiedMovieMetadata by remember(item.type, item.id) {
+        mutableStateOf(context.verifiedMovieCardMetadata(item))
+    }
+    LaunchedEffect(polishMovieCard, item.id, viewModel) {
+        if (polishMovieCard && viewModel != null) {
+            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
+                verifiedMovieMetadata = VerifiedMovieCardMetadata(
+                    quality = quality,
+                    durationMs = durationMs,
+                )
+            }
+        }
+    }
+
     var focused by remember { mutableStateOf(false) }
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
@@ -408,45 +521,106 @@ fun CompactPosterCard(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        .56f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = .96f),
-                    ),
+                    if (polishMovieCard) {
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            .42f to Color.Transparent,
+                            .62f to Color.Black.copy(alpha = .28f),
+                            .76f to Color.Black.copy(alpha = .64f),
+                            .90f to Color.Black.copy(alpha = .90f),
+                            1f to Color.Black.copy(alpha = .98f),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            .56f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = .96f),
+                        )
+                    },
                 ),
         )
+        if (polishMovieCard) {
+            verifiedMovieMetadata.quality
+                ?.takeIf(String::isNotBlank)
+                ?.let { quality ->
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        MovieMetadataBadge(
+                            text = quality,
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.TopLeft)
+                                .padding(7.dp),
+                            filledAccent = true,
+                        )
+                    }
+                }
+        }
         if (isFavorite) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(AbsoluteAlignment.TopRight)
                     .padding(7.dp)
                     .size(25.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = .76f)),
+                    .background(Color.Black.copy(alpha = .78f))
+                    .border(1.dp, Color.White.copy(alpha = .16f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("★", color = colors.goldBright, fontSize = 14.sp)
+                Text("★", color = colors.goldBright, fontSize = 14.sp, fontWeight = FontWeight.Black)
             }
         }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(9.dp),
+                .padding(if (polishMovieCard) 10.dp else 9.dp),
         ) {
             Text(
                 text = item.name,
                 color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontWeight = if (polishMovieCard) FontWeight.Black else FontWeight.Bold,
+                fontSize = if (polishMovieCard && adaptiveUi.isTelevision) 13.sp else 12.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 15.sp,
+                lineHeight = if (polishMovieCard && adaptiveUi.isTelevision) 16.sp else 15.sp,
             )
-            val meta = listOfNotNull(item.year, item.rating?.let { "★ $it" }).joinToString(" · ")
-            if (meta.isNotEmpty()) {
-                Spacer(Modifier.height(2.dp))
-                Text(meta, color = Color(0xFFE0D7B8), fontSize = 9.sp, maxLines = 1)
+            if (polishMovieCard) {
+                val rating = compactMovieRating(item.rating)
+                val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
+                if (rating != null || duration != null) {
+                    Spacer(Modifier.height(5.dp))
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                rating?.let {
+                                    MovieMetadataBadge(
+                                        text = "★ $it",
+                                        accentText = true,
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                duration?.let {
+                                    MovieMetadataBadge(text = it)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                val meta = listOfNotNull(item.year, item.rating?.let { "★ $it" }).joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(meta, color = Color(0xFFE0D7B8), fontSize = 9.sp, maxLines = 1)
+                }
             }
         }
     }

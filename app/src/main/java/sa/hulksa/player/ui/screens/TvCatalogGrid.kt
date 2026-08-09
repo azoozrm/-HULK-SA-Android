@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,6 +26,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
@@ -37,6 +39,8 @@ private val TV_GRID_MIN_CELL_WIDTH = 132.dp
 private val TV_GRID_HORIZONTAL_SPACING = 14.dp
 private val TV_GRID_VERTICAL_SPACING = 15.dp
 private val TV_GRID_HORIZONTAL_CONTENT_PADDING = 5.dp
+private val TV_GRID_BOTTOM_CONTENT_PADDING = 44.dp
+private val TV_GRID_FOCUS_VIEWPORT_INSET = 10.dp
 
 @Composable
 internal fun TvCatalogGrid(
@@ -61,10 +65,33 @@ internal fun TvCatalogGrid(
         contentKeys.associateWith { FocusRequester() }
     }
     val focusScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val focusViewportInsetPx = with(density) { TV_GRID_FOCUS_VIEWPORT_INSET.roundToPx() }
     var focusMoveJob by remember { mutableStateOf<Job?>(null) }
     var pendingTargetIndex by remember(contentKeys, destination) { mutableStateOf<Int?>(null) }
 
-    suspend fun focusIndex(index: Int, columnCount: Int) {
+    suspend fun ensureIndexFullyVisible(index: Int) {
+        val layoutInfo = gridState.layoutInfo
+        val itemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+        val viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx
+        val viewportEnd = layoutInfo.viewportEndOffset - focusViewportInsetPx
+        val itemTop = itemInfo.offset.y
+        val itemBottom = itemTop + itemInfo.size.height
+        val correction = when {
+            itemBottom > viewportEnd -> itemBottom - viewportEnd
+            itemTop < viewportStart -> itemTop - viewportStart
+            else -> 0
+        }
+        if (correction != 0) {
+            gridState.scrollBy(correction.toFloat())
+        }
+    }
+
+    suspend fun focusIndex(
+        index: Int,
+        columnCount: Int,
+        ensureFullyVisible: Boolean,
+    ) {
         val requester = contentKeys.getOrNull(index)?.let(focusRequesters::get) ?: return
         val visible = gridState.layoutInfo.visibleItemsInfo
         if (visible.none { it.index == index }) {
@@ -84,6 +111,9 @@ internal fun TvCatalogGrid(
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == index } }
                 .first { it }
         }
+        if (ensureFullyVisible) {
+            ensureIndexFullyVisible(index)
+        }
         runCatching { requester.requestFocus() }
     }
 
@@ -92,6 +122,7 @@ internal fun TvCatalogGrid(
             gridState.scrollToItem(targetIndex)
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
                 .first { it }
+            ensureIndexFullyVisible(targetIndex)
             runCatching { focusRequesters.getValue(targetKey).requestFocus() }
         }
     }
@@ -112,7 +143,7 @@ internal fun TvCatalogGrid(
                 start = TV_GRID_HORIZONTAL_CONTENT_PADDING,
                 top = 5.dp,
                 end = TV_GRID_HORIZONTAL_CONTENT_PADDING,
-                bottom = 28.dp,
+                bottom = TV_GRID_BOTTOM_CONTENT_PADDING,
             ),
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -147,13 +178,26 @@ internal fun TvCatalogGrid(
                                 itemCount = content.size,
                                 columnCount = columnCount,
                                 move = move,
-                            ) ?: return@onPreviewKeyEvent false
+                            )
+
+                            if (nextIndex == null) {
+                                // RTL catalog policy:
+                                // - Physical RIGHT from the row's right-most card is allowed to
+                                //   escape to the navigation rail.
+                                // - Physical LEFT from the row's left-most card is consumed so
+                                //   Compose cannot spatially fall back to an unrelated control.
+                                return@onPreviewKeyEvent move == TvGridFocusMove.LEFT
+                            }
 
                             pendingTargetIndex = nextIndex
                             navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)
                             focusMoveJob?.cancel()
                             focusMoveJob = focusScope.launch {
-                                focusIndex(nextIndex, columnCount)
+                                focusIndex(
+                                    index = nextIndex,
+                                    columnCount = columnCount,
+                                    ensureFullyVisible = move == TvGridFocusMove.UP || move == TvGridFocusMove.DOWN,
+                                )
                                 if (pendingTargetIndex == nextIndex) {
                                     pendingTargetIndex = null
                                 }

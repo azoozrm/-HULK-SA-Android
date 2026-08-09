@@ -1,6 +1,7 @@
 package sa.hulksa.player
 
 import android.app.Application
+import android.content.Context
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.HulkRepository
@@ -80,6 +83,11 @@ data class HulkUiState(
     }
 }
 
+private data class MovieCardProbeMetadata(
+    val quality: String? = null,
+    val durationMs: Long? = null,
+)
+
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
     private val repository = HulkRepository(application)
@@ -103,6 +111,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var detailsJob: Job? = null
     private var diagnosticsJob: Job? = null
     private var playerReturnScreen = HulkScreen.MAIN
+    private val movieCardMetadataPrefs = application.getSharedPreferences(
+        MOVIE_CARD_METADATA_PREFS,
+        Context.MODE_PRIVATE,
+    )
+    private val movieCardProbeSemaphore = Semaphore(MOVIE_CARD_PROBE_CONCURRENCY)
+    private val movieCardProbeCallbacks =
+        mutableMapOf<Int, MutableList<(String?, Long?) -> Unit>>()
+    private val movieCardProbeInFlight = mutableSetOf<Int>()
+    private val movieCardProbeAttempted = mutableSetOf<Int>()
 
     init {
         restoreSession()
@@ -299,6 +316,91 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         mutableState.update { it.copy(catalogs = it.catalogs - types, errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
+    }
+
+    fun prefetchMovieCardMetadata(
+        item: ContentItem,
+        onResult: (quality: String?, durationMs: Long?) -> Unit,
+    ) {
+        if (item.type != ContentType.MOVIE) return
+
+        val cached = readMovieCardMetadata(item.id)
+        if (cached.quality != null && cached.durationMs != null) {
+            onResult(cached.quality, cached.durationMs)
+            return
+        }
+
+        movieCardProbeCallbacks.getOrPut(item.id) { mutableListOf() }.add(onResult)
+        if (item.id in movieCardProbeInFlight) return
+
+        if (item.id in movieCardProbeAttempted) {
+            notifyMovieCardProbeCallbacks(item.id, cached)
+            return
+        }
+
+        val activeSession = session ?: run {
+            notifyMovieCardProbeCallbacks(item.id, cached)
+            return
+        }
+
+        movieCardProbeAttempted += item.id
+        movieCardProbeInFlight += item.id
+
+        viewModelScope.launch {
+            val fetched = runCatching {
+                movieCardProbeSemaphore.withPermit {
+                    repository.movieCardMetadata(activeSession, item.id)
+                }
+            }.getOrNull()
+
+            if (fetched != null) {
+                cacheMovieCardMetadata(
+                    movieId = item.id,
+                    quality = fetched.quality,
+                    durationMs = fetched.durationMs,
+                )
+            }
+
+            movieCardProbeInFlight -= item.id
+            notifyMovieCardProbeCallbacks(item.id, readMovieCardMetadata(item.id))
+        }
+    }
+
+    private fun readMovieCardMetadata(movieId: Int): MovieCardProbeMetadata {
+        val quality = movieCardMetadataPrefs
+            .getString("movie:$movieId:quality", null)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val durationMs = movieCardMetadataPrefs
+            .getLong("movie:$movieId:duration_ms", 0L)
+            .takeIf { it > 0L }
+        return MovieCardProbeMetadata(quality = quality, durationMs = durationMs)
+    }
+
+    private fun cacheMovieCardMetadata(
+        movieId: Int,
+        quality: String?,
+        durationMs: Long?,
+    ) {
+        if (quality == null && durationMs == null) return
+        movieCardMetadataPrefs.edit().apply {
+            quality?.let { putString("movie:$movieId:quality", it) }
+            durationMs
+                ?.takeIf { it > 0L }
+                ?.let { putLong("movie:$movieId:duration_ms", it) }
+        }.apply()
+    }
+
+    private fun notifyMovieCardProbeCallbacks(
+        movieId: Int,
+        metadata: MovieCardProbeMetadata,
+    ) {
+        movieCardProbeCallbacks
+            .remove(movieId)
+            .orEmpty()
+            .forEach { callback ->
+                callback(metadata.quality, metadata.durationMs)
+            }
     }
 
     fun open(item: ContentItem) {
@@ -653,6 +755,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         loadedCatalogs.clear()
         homeCatalogs.clear()
         selectedCategoryByType.clear()
+        movieCardProbeCallbacks.clear()
+        movieCardProbeInFlight.clear()
+        movieCardProbeAttempted.clear()
     }
 
     fun logout() {
@@ -821,5 +926,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         private const val HOME_RECENT_LIMIT = 240
         private const val HOME_RATED_LIMIT = 120
         private const val HOME_CATALOG_LIMIT = 320
+        private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
+        private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
     }
 }
