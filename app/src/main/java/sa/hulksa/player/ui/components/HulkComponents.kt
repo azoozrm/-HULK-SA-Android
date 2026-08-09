@@ -149,14 +149,14 @@ private fun MovieMetadataBadge(
             .clip(shape)
             .background(
                 if (filledAccent) {
-                    colors.goldBright.copy(alpha = .94f)
+                    Color.Black.copy(alpha = .82f)
                 } else {
                     Color.Black.copy(alpha = .78f)
                 },
             )
             .border(
                 1.dp,
-                if (filledAccent) colors.goldBright else Color.White.copy(alpha = .22f),
+                if (filledAccent) colors.goldBright.copy(alpha = .38f) else Color.White.copy(alpha = .22f),
                 shape,
             )
             .padding(horizontal = 7.dp),
@@ -165,7 +165,7 @@ private fun MovieMetadataBadge(
         Text(
             text = text,
             color = when {
-                filledAccent -> Color(0xFF171309)
+                filledAccent -> Color.White
                 accentText -> colors.goldBright
                 else -> Color.White
             },
