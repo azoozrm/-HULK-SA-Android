@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -581,15 +582,43 @@ fun HistoryCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(3.dp))
-            Text(
-                metadata,
-                color = colors.goldBright,
-                fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
-                lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (metadata.time.isNotBlank()) {
+                        Text(
+                            metadata.time,
+                            color = colors.goldBright,
+                            fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
+                            lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "·",
+                            color = colors.goldBright,
+                            fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
+                            lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        metadata.label,
+                        color = colors.goldBright,
+                        fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
+                        lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (episodeTitle != null) {
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -787,8 +816,13 @@ private fun historyPrimaryTitle(entry: HistoryEntry): String {
         ?: entry.title
 }
 
-private fun historyMetadata(entry: HistoryEntry): String {
-    if (entry.isLive) return "بث مباشر"
+private data class HistoryMetadata(
+    val label: String,
+    val time: String,
+)
+
+private fun historyMetadata(entry: HistoryEntry): HistoryMetadata {
+    if (entry.isLive) return HistoryMetadata(label = "بث مباشر", time = "")
 
     val elapsed = formatHistoryTime(entry.positionMs)
     val time = if (entry.durationMs > 0L) {
@@ -797,16 +831,17 @@ private fun historyMetadata(entry: HistoryEntry): String {
         elapsed
     }
 
-    return if (entry.streamKind.equals("series", ignoreCase = true)) {
+    val label = if (entry.streamKind.equals("series", ignoreCase = true)) {
         val (season, episodeNumber) = historyEpisodeNumbers(entry)
-        val episode = listOfNotNull(
+        listOfNotNull(
             season?.let { "S${latinInt(it)}" },
             episodeNumber?.let { "E${latinInt(it)}" },
-        ).joinToString(" · ")
-        listOf(episode.ifBlank { "مسلسل" }, time).joinToString(" · ")
+        ).joinToString(" · ").ifBlank { "مسلسل" }
     } else {
-        "فيلم · $time"
+        "فيلم"
     }
+
+    return HistoryMetadata(label = label, time = time)
 }
 
 private fun historyEpisodeNumbers(entry: HistoryEntry): Pair<Int?, Int?> {
