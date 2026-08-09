@@ -230,50 +230,102 @@ fun MovieDetailsScreen(
                             )
                         }
                         Spacer(Modifier.height(15.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            FocusButton(
-                                text = if (resumePosition != null) {
-                                    "▶ استكمال · ${detailsFormatTime(resumePosition)}"
-                                } else {
-                                    "▶ مشاهدة الفيلم"
-                                },
-                                onClick = onPlay,
-                                compact = !isTv,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .focusRequester(playFocusRequester),
-                            )
-                            FocusButton(
-                                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                                onClick = onToggleFavorite,
-                                primary = false,
-                                compact = !isTv,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        if (download != null && download.status != OfflineStatus.COMPLETED && download.status != OfflineStatus.FAILED) {
-                            Spacer(Modifier.height(8.dp))
-                            MovieDownloadProgress(download)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            FocusButton(
-                                text = movieDownloadLabel(download),
-                                onClick = onDownload,
-                                primary = false,
-                                enabled = download?.status != OfflineStatus.COMPLETED,
-                                compact = true,
-                            )
-                            if (download != null) {
+                        if (isTv) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 FocusButton(
-                                    text = if (download.status == OfflineStatus.COMPLETED) "حذف التحميل" else "الغاء التحميل",
-                                    onClick = onCancelDownload,
+                                    text = if (resumePosition != null) {
+                                        "▶ استكمال · ${detailsFormatTime(resumePosition)}"
+                                    } else {
+                                        "▶ مشاهدة الفيلم"
+                                    },
+                                    onClick = onPlay,
+                                    modifier = Modifier
+                                        .weight(1.12f)
+                                        .focusRequester(playFocusRequester),
+                                )
+                                FocusButton(
+                                    text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                                    onClick = onToggleFavorite,
+                                    primary = false,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FocusButton(
+                                    text = movieDownloadLabel(download),
+                                    onClick = onDownload,
+                                    primary = false,
+                                    enabled = download?.status != OfflineStatus.COMPLETED,
+                                    compact = true,
+                                    modifier = Modifier.weight(.86f),
+                                )
+                            }
+                            if (download != null && download.status != OfflineStatus.COMPLETED && download.status != OfflineStatus.FAILED) {
+                                Spacer(Modifier.height(8.dp))
+                                MovieDownloadProgress(download)
+                            }
+                            if (download != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Start,
+                                ) {
+                                    FocusButton(
+                                        text = if (download.status == OfflineStatus.COMPLETED) "حذف التحميل" else "الغاء التحميل",
+                                        onClick = onCancelDownload,
+                                        primary = false,
+                                        compact = true,
+                                    )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                FocusButton(
+                                    text = if (resumePosition != null) {
+                                        "▶ استكمال · ${detailsFormatTime(resumePosition)}"
+                                    } else {
+                                        "▶ مشاهدة الفيلم"
+                                    },
+                                    onClick = onPlay,
+                                    compact = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .focusRequester(playFocusRequester),
+                                )
+                                FocusButton(
+                                    text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                                    onClick = onToggleFavorite,
                                     primary = false,
                                     compact = true,
+                                    modifier = Modifier.weight(1f),
                                 )
+                            }
+                            if (download != null && download.status != OfflineStatus.COMPLETED && download.status != OfflineStatus.FAILED) {
+                                Spacer(Modifier.height(8.dp))
+                                MovieDownloadProgress(download)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                FocusButton(
+                                    text = movieDownloadLabel(download),
+                                    onClick = onDownload,
+                                    primary = false,
+                                    enabled = download?.status != OfflineStatus.COMPLETED,
+                                    compact = true,
+                                )
+                                if (download != null) {
+                                    FocusButton(
+                                        text = if (download.status == OfflineStatus.COMPLETED) "حذف التحميل" else "الغاء التحميل",
+                                        onClick = onCancelDownload,
+                                        primary = false,
+                                        compact = true,
+                                    )
+                                }
                             }
                         }
                     }
@@ -305,16 +357,23 @@ fun MovieDetailsScreen(
 
         if (hasMovieInformation(details)) {
             item {
-                MovieInformation(
-                    details = details,
-                    isTv = isTv,
-                    modifier = Modifier.padding(
-                        start = if (isTv) 38.dp else 18.dp,
-                        end = if (isTv) 38.dp else 18.dp,
-                        top = if (isTv) 6.dp else 8.dp,
-                        bottom = if (isTv) 14.dp else 20.dp,
-                    ),
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = if (isTv) 38.dp else 18.dp,
+                            end = if (isTv) 38.dp else 18.dp,
+                            top = if (isTv) 6.dp else 8.dp,
+                            bottom = if (isTv) 14.dp else 20.dp,
+                        ),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    MovieInformation(
+                        details = details,
+                        isTv = isTv,
+                        modifier = if (isTv) Modifier.fillMaxWidth(.72f) else Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
 
@@ -452,7 +511,6 @@ private fun MovieInformation(
     val colors = LocalHulkColors.current
     Column(
         modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(colors.surface.copy(alpha = .82f))
             .border(1.dp, colors.line.copy(alpha = .8f), RoundedCornerShape(14.dp))
