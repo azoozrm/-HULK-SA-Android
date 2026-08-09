@@ -480,8 +480,8 @@ fun HistoryCard(
     var focused by remember(entry.key) { mutableStateOf(false) }
     var remoteLongPressHandled by remember(entry.key) { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.045f else 1f, label = "historyScale")
-    val shape = RoundedCornerShape(12.dp)
+    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
+    val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 14.dp else 12.dp)
     val progress = if (entry.durationMs > 0L) {
         (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f)
     } else {
@@ -509,11 +509,15 @@ fun HistoryCard(
     }
     Box(
         modifier = modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = if (showFocused && adaptiveUi.isTelevision) 16.dp.toPx() else 0f
+            }
             .aspectRatio(16f / 9f)
             .clip(shape)
             .background(Color(0xFF15160F))
-            .border(if (showFocused) 3.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+            .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
@@ -561,8 +565,10 @@ fun HistoryCard(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        .48f to Color.Black.copy(alpha = .08f),
-                        1f to Color.Black.copy(alpha = .97f),
+                        .40f to Color.Transparent,
+                        .66f to Color.Black.copy(alpha = .38f),
+                        .84f to Color.Black.copy(alpha = .78f),
+                        1f to Color.Black.copy(alpha = .96f),
                     ),
                 ),
         )
@@ -570,7 +576,7 @@ fun HistoryCard(
             Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 9.dp),
+                .padding(horizontal = if (adaptiveUi.isTelevision) 12.dp else 10.dp, vertical = if (adaptiveUi.isTelevision) 10.dp else 9.dp),
         ) {
             Text(
                 primaryTitle,
@@ -581,7 +587,7 @@ fun HistoryCard(
                 maxLines = if (adaptiveUi.isTelevision) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(if (adaptiveUi.isTelevision) 4.dp else 3.dp))
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -630,7 +636,7 @@ fun HistoryCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(if (adaptiveUi.isTelevision) 6.dp else 5.dp))
+            Spacer(Modifier.height(if (adaptiveUi.isTelevision) 7.dp else 5.dp))
             Box(
                 Modifier
                     .fillMaxWidth()
