@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -130,6 +131,41 @@ private fun compactMovieRating(raw: String?): String? {
         ?.takeIf { it > 0.0 }
         ?: return null
     return String.format(Locale.US, "%.1f", value)
+}
+
+@Composable
+private fun MovieMetadataBadge(
+    text: String,
+    emphasized: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (emphasized) {
+                    colors.goldBright.copy(alpha = .18f)
+                } else {
+                    Color.Black.copy(alpha = .72f)
+                },
+            )
+            .border(
+                1.dp,
+                if (emphasized) colors.goldBright.copy(alpha = .48f) else Color.White.copy(alpha = .14f),
+                RoundedCornerShape(50),
+            )
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = if (emphasized) colors.goldBright else Color.White,
+            fontSize = 9.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
@@ -392,9 +428,23 @@ fun CompactPosterCard(
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
     val polishMovieCard = item.type == ContentType.MOVIE
-    val verifiedMovieMetadata = remember(item.type, item.id) {
-        context.verifiedMovieCardMetadata(item)
+    val viewModel = remember(context) {
+        context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
     }
+    var verifiedMovieMetadata by remember(item.type, item.id) {
+        mutableStateOf(context.verifiedMovieCardMetadata(item))
+    }
+    LaunchedEffect(polishMovieCard, item.id, viewModel) {
+        if (polishMovieCard && viewModel != null) {
+            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
+                verifiedMovieMetadata = VerifiedMovieCardMetadata(
+                    quality = quality,
+                    durationMs = durationMs,
+                )
+            }
+        }
+    }
+
     var focused by remember { mutableStateOf(false) }
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
@@ -465,10 +515,11 @@ fun CompactPosterCard(
                     if (polishMovieCard) {
                         Brush.verticalGradient(
                             0f to Color.Transparent,
-                            .48f to Color.Transparent,
-                            .70f to Color.Black.copy(alpha = .34f),
-                            .86f to Color.Black.copy(alpha = .72f),
-                            1f to Color.Black.copy(alpha = .96f),
+                            .42f to Color.Transparent,
+                            .62f to Color.Black.copy(alpha = .28f),
+                            .76f to Color.Black.copy(alpha = .64f),
+                            .90f to Color.Black.copy(alpha = .90f),
+                            1f to Color.Black.copy(alpha = .98f),
                         )
                     } else {
                         Brush.verticalGradient(
@@ -501,35 +552,28 @@ fun CompactPosterCard(
             Text(
                 text = item.name,
                 color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontWeight = if (polishMovieCard) FontWeight.Black else FontWeight.Bold,
+                fontSize = if (polishMovieCard && adaptiveUi.isTelevision) 13.sp else 12.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 15.sp,
+                lineHeight = if (polishMovieCard && adaptiveUi.isTelevision) 16.sp else 15.sp,
             )
             if (polishMovieCard) {
-                val year = item.year
-                    ?.trim()
-                    ?.takeIf { it.isNotBlank() && !item.name.contains(it) }
-                val meta = listOfNotNull(
-                    year,
-                    compactMovieRating(item.rating)?.let { "★ $it" },
-                    verifiedMovieMetadata.quality,
-                    compactMovieDuration(verifiedMovieMetadata.durationMs),
-                ).joinToString(" · ")
-                if (meta.isNotEmpty()) {
-                    Spacer(Modifier.height(3.dp))
+                val rating = compactMovieRating(item.rating)
+                val quality = verifiedMovieMetadata.quality
+                val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
+                if (rating != null || quality != null || duration != null) {
+                    Spacer(Modifier.height(5.dp))
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                        Text(
-                            text = meta,
-                            color = Color(0xFFE8DDBA),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.End,
-                        )
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            rating?.let { MovieMetadataBadge("★ $it", emphasized = true) }
+                            quality?.let { MovieMetadataBadge(it, emphasized = true) }
+                            duration?.let { MovieMetadataBadge(it) }
+                        }
                     }
                 }
             } else {
