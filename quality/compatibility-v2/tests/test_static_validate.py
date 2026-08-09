@@ -47,18 +47,27 @@ class StaticValidationTest(unittest.TestCase):
             encoding="utf-8",
         )
         valid_player = """
+val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
 AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-    seekBy(-SEEK_STEP_MS); true
+    seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
 } else false
 AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-    seekBy(SEEK_STEP_MS); true
+    seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS); true
 } else false
 AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-    previewMs = (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+    previewMs = if (tvRemoteInput) {
+        (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+    } else {
+        (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+    }
     true
 }
 AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-    previewMs = (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+    previewMs = if (tvRemoteInput) {
+        (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+    } else {
+        (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+    }
     true
 }
 """
@@ -100,12 +109,27 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             )
             self.assertEqual("FAIL", result.status)
 
-    def test_reversed_player_seek_contract_fails(self) -> None:
+    def test_legacy_ltr_player_seek_contract_fails(self) -> None:
+        text = """
+val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) { seekBy(-SEEK_STEP_MS); true }
+KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) { seekBy(SEEK_STEP_MS); true }
+"""
+        self.assertFalse(MODULE.player_surface_seek_contract(text))
+
+    def test_unscoped_rtl_player_seek_contract_fails(self) -> None:
         text = """
 KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) { seekBy(SEEK_STEP_MS); true }
 KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) { seekBy(-SEEK_STEP_MS); true }
 """
         self.assertFalse(MODULE.player_surface_seek_contract(text))
+
+    def test_legacy_ltr_seekbar_contract_fails(self) -> None:
+        text = """
+KEYCODE_DPAD_LEFT -> { previewMs = (previewMs - SEEK_STEP_MS).coerceAtLeast(0L); true }
+KEYCODE_DPAD_RIGHT -> { previewMs = (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs); true }
+"""
+        self.assertFalse(MODULE.player_seekbar_contract(text))
 
     def test_focus_retry_loop_is_reported(self) -> None:
         text = """
