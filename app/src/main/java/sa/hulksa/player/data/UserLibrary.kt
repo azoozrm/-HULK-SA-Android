@@ -47,6 +47,12 @@ class UserLibrary(context: Context) {
                         positionMs = item.optLong("position", 0L),
                         durationMs = item.optLong("duration", 0L),
                         updatedAtEpochMs = item.optLong("updated", 0L),
+                        seriesTitle = item.optString("seriesTitle").takeUnless { it.isBlank() },
+                        season = item.optInt("season").takeIf { item.has("season") && !item.isNull("season") },
+                        episodeNumber = item.optInt("episodeNumber").takeIf {
+                            item.has("episodeNumber") && !item.isNull("episodeNumber")
+                        },
+                        episodeTitle = item.optString("episodeTitle").takeUnless { it.isBlank() },
                     ),
                 )
             }
@@ -66,11 +72,16 @@ class UserLibrary(context: Context) {
             positionMs = previous?.positionMs ?: request.resumePositionMs,
             durationMs = previous?.durationMs ?: 0L,
             updatedAtEpochMs = System.currentTimeMillis(),
+            seriesTitle = request.seriesTitle ?: previous?.seriesTitle,
+            season = request.season ?: previous?.season,
+            episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
+            episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
         )
         return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
     }
 
     fun updateProgress(request: PlaybackRequest, positionMs: Long, durationMs: Long): List<HistoryEntry> {
+        val previous = history().firstOrNull { it.key == request.historyKey }
         val entry = HistoryEntry(
             key = request.historyKey,
             title = request.title,
@@ -82,6 +93,10 @@ class UserLibrary(context: Context) {
             positionMs = if (request.isLive) 0L else positionMs.coerceAtLeast(0L),
             durationMs = if (request.isLive) 0L else durationMs.coerceAtLeast(0L),
             updatedAtEpochMs = System.currentTimeMillis(),
+            seriesTitle = request.seriesTitle ?: previous?.seriesTitle,
+            season = request.season ?: previous?.season,
+            episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
+            episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
         )
         return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
     }
@@ -121,7 +136,13 @@ class UserLibrary(context: Context) {
                     .put("live", entry.isLive)
                     .put("position", entry.positionMs)
                     .put("duration", entry.durationMs)
-                    .put("updated", entry.updatedAtEpochMs),
+                    .put("updated", entry.updatedAtEpochMs)
+                    .apply {
+                        entry.seriesTitle?.let { put("seriesTitle", it) }
+                        entry.season?.let { put("season", it) }
+                        entry.episodeNumber?.let { put("episodeNumber", it) }
+                        entry.episodeTitle?.let { put("episodeTitle", it) }
+                    },
             )
         }
         preferences.edit().putString(KEY_HISTORY, array.toString()).apply()
