@@ -306,8 +306,8 @@ fun PlayerScreen(
 
     fun handleBackAction() {
         when {
-            finalError != null -> saveAndBack()
             browserVisible -> browserVisible = false
+            finalError != null -> saveAndBack()
             activePanel != null -> activePanel = null
             resumePromptVisible -> {
                 resumePromptVisible = false
@@ -657,6 +657,26 @@ fun PlayerScreen(
                     return@onPreviewKeyEvent true
                 }
                 if (request.isLive) {
+                    if (tvRemoteInput && !controlsVisible && surfaceFocused) {
+                        when (keyCode) {
+                            AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                            AndroidKeyEvent.KEYCODE_ENTER,
+                            AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+                            -> {
+                                controlsVisible = false
+                                activePanel = null
+                                browserVisible = true
+                                return@onPreviewKeyEvent true
+                            }
+                            AndroidKeyEvent.KEYCODE_DPAD_LEFT,
+                            AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
+                            -> {
+                                activePanel = null
+                                revealControls()
+                                return@onPreviewKeyEvent true
+                            }
+                        }
+                    }
                     when (keyCode) {
                         AndroidKeyEvent.KEYCODE_DPAD_UP,
                         AndroidKeyEvent.KEYCODE_CHANNEL_UP,
@@ -771,7 +791,6 @@ fun PlayerScreen(
                     hasSubtitles = subtitleTracks.isNotEmpty(),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
-                    onOpenChannels = { browserVisible = true },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onReload = { pendingSeekMs = 0L; candidateIndex = 0; retryNonce += 1 },
                     onMute = { isMuted = !isMuted; player.volume = if (isMuted) 0f else 1f },
@@ -897,7 +916,7 @@ fun PlayerScreen(
                     candidateIndex = 0
                     retryNonce += 1
                 },
-                onChooseChannel = { browserVisible = true },
+                onChooseChannel = { controlsVisible = false; browserVisible = true },
                 onChooseServer = { activePanel = PlayerPanel.SERVERS },
                 onBack = onBack,
                 retryFocusRequester = errorRetryFocus,
@@ -921,7 +940,11 @@ fun PlayerScreen(
                 },
                 onSelectChannel = { channel -> browserVisible = false; onSelectLiveChannel(channel) },
                 onClose = { browserVisible = false },
-                modifier = Modifier.align(Alignment.Center),
+                modifier = if (tvRemoteInput) {
+                    Modifier.align(Alignment.CenterStart).padding(start = 24.dp)
+                } else {
+                    Modifier.align(Alignment.Center)
+                },
             )
         }
 
@@ -1123,7 +1146,6 @@ private fun ModernLiveControls(
     hasSubtitles: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onOpenChannels: () -> Unit,
     onPlayPause: () -> Unit,
     onReload: () -> Unit,
     onMute: () -> Unit,
@@ -1155,7 +1177,7 @@ private fun ModernLiveControls(
             Spacer(Modifier.weight(1f))
             Text(
                 if (adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE) {
-                    "السهم لاعلى: القناة التالية  •  السهم لاسفل: القناة السابقة"
+                    "OK: القنوات والفئات  •  يمين/يسار: ادوات المشغل  •  اعلى/اسفل: تبديل القناة"
                 } else {
                     "اسحب لاعلى للقناة التالية  •  اسحب لاسفل للقناة السابقة"
                 },
@@ -1167,8 +1189,7 @@ private fun ModernLiveControls(
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
             item { FocusButton("القناة التالية", onNext, compact = true) }
-            item { FocusButton("القنوات", onOpenChannels, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
-            item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, primary = false, compact = true) }
+            item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
             if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
@@ -1596,6 +1617,7 @@ private fun LiveChannelBrowser(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
     val current = remember(catalog, currentStreamId) {
         catalog?.items?.firstOrNull { it.id == currentStreamId }
     }
@@ -1641,12 +1663,16 @@ private fun LiveChannelBrowser(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .72f)))
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = if (adaptiveUi.isTelevision) .46f else .72f)),
+    )
     Column(
         modifier = modifier
-            .fillMaxHeight(.80f)
-            .fillMaxWidth(.76f)
-            .widthIn(max = 920.dp)
+            .fillMaxHeight(if (adaptiveUi.isTelevision) .90f else .80f)
+            .fillMaxWidth(if (adaptiveUi.isTelevision) .62f else .76f)
+            .widthIn(max = if (adaptiveUi.isTelevision) 980.dp else 920.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(Brush.verticalGradient(listOf(Color(0xFF15170F), Color(0xFF080906))))
             .border(1.dp, colors.gold.copy(alpha = .46f), RoundedCornerShape(24.dp))
