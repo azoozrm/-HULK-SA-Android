@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +81,7 @@ import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import java.util.Locale
 
 @Composable
 fun BrandLogo(
@@ -478,13 +480,20 @@ fun HistoryCard(
     var focused by remember(entry.key) { mutableStateOf(false) }
     var remoteLongPressHandled by remember(entry.key) { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
+    val scale by animateFloatAsState(if (showFocused) 1.045f else 1f, label = "historyScale")
     val shape = RoundedCornerShape(12.dp)
     val progress = if (entry.durationMs > 0L) {
         (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f)
     } else {
         0f
     }
+    val primaryTitle = if (entry.streamKind.equals("series", ignoreCase = true)) {
+        historyPrimaryTitle(entry)
+    } else {
+        entry.title
+    }
+    val metadata = historyMetadata(entry)
+    val episodeTitle = if (adaptiveUi.isTelevision) null else usefulEpisodeTitle(entry)
     val dismissFromContinueWatching: (Boolean) -> Unit = { moveFocusFirst ->
         if (canDismiss && viewModel != null) {
             if (moveFocusFirst) {
@@ -542,25 +551,100 @@ fun HistoryCard(
             ),
     ) {
         if (!entry.posterUrl.isNullOrBlank()) {
-            AsyncImage(entry.posterUrl, entry.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            AsyncImage(entry.posterUrl, primaryTitle, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             BrandLogo(Modifier.align(Alignment.Center).size(76.dp))
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.94f)))))
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(10.dp)) {
-            Text(entry.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        .48f to Color.Black.copy(alpha = .08f),
+                        1f to Color.Black.copy(alpha = .97f),
+                    ),
+                ),
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+        ) {
             Text(
-                "استكمال المشاهدة  •  ${formatHistoryTime(entry.positionMs)}",
-                color = colors.goldBright,
-                fontSize = if (adaptiveUi.isTelevision) 12.sp else 9.sp,
-                lineHeight = if (adaptiveUi.isTelevision) 14.sp else 11.sp,
+                primaryTitle,
+                color = Color.White,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 12.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 14.sp else 14.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = if (adaptiveUi.isTelevision) 2 else 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(5.dp))
-            Box(Modifier.fillMaxWidth().height(3.dp).clip(CircleShape).background(Color.White.copy(.25f))) {
-                Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(colors.goldBright))
+            Spacer(Modifier.height(3.dp))
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (metadata.time.isNotBlank()) {
+                        Text(
+                            metadata.time,
+                            color = colors.goldBright,
+                            fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
+                            lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "·",
+                            color = colors.goldBright,
+                            fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
+                            lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        metadata.label,
+                        color = colors.goldBright,
+                        fontSize = if (adaptiveUi.isTelevision) 11.sp else 9.sp,
+                        lineHeight = if (adaptiveUi.isTelevision) 13.sp else 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (episodeTitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    episodeTitle,
+                    color = Color.White.copy(alpha = .82f),
+                    fontSize = if (adaptiveUi.isTelevision) 9.sp else 8.sp,
+                    lineHeight = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(if (adaptiveUi.isTelevision) 6.dp else 5.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(if (adaptiveUi.isTelevision) 5.dp else 3.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = .28f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(colors.goldBright),
+                )
             }
         }
     }
@@ -720,4 +804,110 @@ fun InfoPill(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-private fun formatHistoryTime(ms:Long):String{val s=ms.coerceAtLeast(0)/1000;return if(s>=3600)"%d:%02d:%02d".format(s/3600,(s%3600)/60,s%60) else "%02d:%02d".format(s/60,s%60)}
+private fun historyPrimaryTitle(entry: HistoryEntry): String {
+    if (!entry.streamKind.equals("series", ignoreCase = true)) return entry.title
+    return entry.seriesTitle
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: entry.title
+            .substringBefore(" · ")
+            .trim()
+            .takeIf(String::isNotBlank)
+        ?: entry.title
+}
+
+private data class HistoryMetadata(
+    val label: String,
+    val time: String,
+)
+
+private fun historyMetadata(entry: HistoryEntry): HistoryMetadata {
+    if (entry.isLive) return HistoryMetadata(label = "بث مباشر", time = "")
+
+    val elapsed = formatHistoryTime(entry.positionMs)
+    val time = if (entry.durationMs > 0L) {
+        "$elapsed / ${formatHistoryTime(entry.durationMs)}"
+    } else {
+        elapsed
+    }
+
+    val label = if (entry.streamKind.equals("series", ignoreCase = true)) {
+        val (season, episodeNumber) = historyEpisodeNumbers(entry)
+        listOfNotNull(
+            season?.let { "S${latinInt(it)}" },
+            episodeNumber?.let { "E${latinInt(it)}" },
+        ).joinToString(" · ").ifBlank { "مسلسل" }
+    } else {
+        "فيلم"
+    }
+
+    return HistoryMetadata(label = label, time = time)
+}
+
+private fun historyEpisodeNumbers(entry: HistoryEntry): Pair<Int?, Int?> {
+    var season = entry.season
+    var episodeNumber = entry.episodeNumber
+    if (!entry.streamKind.equals("series", ignoreCase = true) || (season != null && episodeNumber != null)) {
+        return season to episodeNumber
+    }
+
+    val source = listOfNotNull(entry.episodeTitle, entry.title)
+        .joinToString(" ")
+        .toLatinDigits()
+    val patterns = listOf(
+        Regex("""\bS\s*(\d{1,3})\s*[-._· ]*E(?:P)?\s*(\d{1,4})\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bSeason\s*(\d{1,3})\s*[-._· ]*(?:Episode|Ep|E)\s*(\d{1,4})\b""", RegexOption.IGNORE_CASE),
+        Regex("""الموسم\s*(\d{1,3}).{0,12}الحلقة\s*(\d{1,4})""", RegexOption.IGNORE_CASE),
+        Regex("""\b(\d{1,3})\s*[xX]\s*(\d{1,4})\b"""),
+    )
+    for (pattern in patterns) {
+        val match = pattern.find(source) ?: continue
+        if (season == null) season = match.groupValues.getOrNull(1)?.toIntOrNull()
+        if (episodeNumber == null) episodeNumber = match.groupValues.getOrNull(2)?.toIntOrNull()
+        if (season != null || episodeNumber != null) break
+    }
+    return season to episodeNumber
+}
+
+private fun usefulEpisodeTitle(entry: HistoryEntry): String? {
+    if (!entry.streamKind.equals("series", ignoreCase = true)) return null
+    val title = entry.episodeTitle
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: entry.title.substringAfter(" · ", "").trim().takeIf(String::isNotBlank)
+        ?: return null
+    val seriesTitle = historyPrimaryTitle(entry)
+    if (title.equals(seriesTitle, ignoreCase = true)) return null
+    val normalized = title.toLatinDigits()
+    if (Regex("""^(?:episode|ep|الحلقة)\s*\d+$""", RegexOption.IGNORE_CASE).matches(normalized)) return null
+    return title
+}
+
+private fun String.toLatinDigits(): String = buildString(length) {
+    for (character in this@toLatinDigits) {
+        append(
+            when (character) {
+                in '٠'..'٩' -> ('0'.code + character.code - '٠'.code).toChar()
+                in '۰'..'۹' -> ('0'.code + character.code - '۰'.code).toChar()
+                else -> character
+            },
+        )
+    }
+}
+
+private fun latinInt(value: Int): String = String.format(Locale.US, "%d", value)
+
+private fun formatHistoryTime(ms: Long): String {
+    val seconds = ms.coerceAtLeast(0L) / 1000L
+    return if (seconds >= 3600L) {
+        String.format(
+            Locale.US,
+            "%d:%02d:%02d",
+            seconds / 3600L,
+            (seconds % 3600L) / 60L,
+            seconds % 60L,
+        )
+    } else {
+        String.format(Locale.US, "%02d:%02d", seconds / 60L, seconds % 60L)
+    }
+}
