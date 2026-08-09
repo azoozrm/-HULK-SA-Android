@@ -23,11 +23,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,6 +94,12 @@ fun MovieDetailsScreen(
         ?.trim()
         ?.takeIf(String::isNotBlank)
         ?.takeUnless { year -> item.name.contains(year, ignoreCase = true) }
+    val playFocusRequester = remember(item.id) { FocusRequester() }
+    LaunchedEffect(item.id, isTv) {
+        if (isTv) {
+            runCatching { playFocusRequester.requestFocus() }
+        }
+    }
     val relatedFavoriteOverrides = remember(item.id) { mutableStateMapOf<String, Boolean>() }
     val relatedIsFavorite: (ContentItem) -> Boolean = { related ->
         relatedFavoriteOverrides["${related.type.name}:${related.id}"] ?: isRelatedFavorite(related)
@@ -233,7 +242,9 @@ fun MovieDetailsScreen(
                                 },
                                 onClick = onPlay,
                                 compact = !isTv,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(playFocusRequester),
                             )
                             FocusButton(
                                 text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
