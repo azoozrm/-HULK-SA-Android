@@ -193,6 +193,10 @@ class XtreamClient {
             streamKind = "series",
             streamId = episode.id,
             extension = episode.containerExtension,
+            seriesTitle = series.name,
+            season = episode.season,
+            episodeNumber = episode.episodeNumber,
+            episodeTitle = episode.title,
         )
     }
 
@@ -219,6 +223,10 @@ class XtreamClient {
             streamId = entry.streamId,
             extension = extension,
             resumePositionMs = entry.positionMs,
+            seriesTitle = entry.seriesTitle,
+            season = entry.season,
+            episodeNumber = entry.episodeNumber,
+            episodeTitle = entry.episodeTitle,
         )
     }
 
