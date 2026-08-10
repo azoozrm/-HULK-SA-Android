@@ -61,21 +61,26 @@ fun ProfileAwareHulkApp(
             return
         }
 
+        // Enter the switching state before touching session state. This prevents
+        // repeated remote clicks and makes the logout/login transition observable
+        // as one deterministic operation by the effect below.
+        switching = true
+        managingProfiles = false
+        switchError = null
+
         if (!profileStore.setActiveProfile(profile.id)) {
+            switching = false
             switchError = "تعذر اختيار الملف الشخصي. حاول مرة اخرى."
             return
         }
 
+        profileRevision++
         viewModel.logout()
         viewModel.login(
             username = credentials.username,
             password = credentials.password,
             remember = true,
         )
-        switching = true
-        managingProfiles = false
-        switchError = null
-        profileRevision++
     }
 
     LaunchedEffect(
