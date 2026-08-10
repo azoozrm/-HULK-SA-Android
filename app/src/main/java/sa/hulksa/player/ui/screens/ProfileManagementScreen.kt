@@ -13,12 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,8 +46,6 @@ import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
-private val PROFILE_AVATARS = listOf("default", "gold", "dark", "classic", "kids")
-
 @Composable
 fun ProfileManagementScreen(
     profiles: List<UserProfile>,
@@ -65,14 +61,17 @@ fun ProfileManagementScreen(
     var editingProfile by remember { mutableStateOf<UserProfile?>(null) }
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    var avatarKey by remember { mutableStateOf(UserProfile.DEFAULT_AVATAR_KEY) }
+    var avatarKey by remember { mutableStateOf(PROFILE_AVATARS.first()) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    fun normalizedAvatarKey(raw: String): String =
+        raw.takeIf { it in PROFILE_AVATARS } ?: PROFILE_AVATARS.first()
 
     fun openCreate() {
         editingProfile = null
         creating = true
         name = ""
-        avatarKey = UserProfile.DEFAULT_AVATAR_KEY
+        avatarKey = PROFILE_AVATARS.first()
         error = null
     }
 
@@ -80,7 +79,7 @@ fun ProfileManagementScreen(
         editingProfile = profile
         creating = false
         name = profile.displayName
-        avatarKey = profile.avatarKey
+        avatarKey = normalizedAvatarKey(profile.avatarKey)
         error = null
     }
 
@@ -368,11 +367,11 @@ private fun ProfileManagementCard(
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AvatarBubble(
-            name = profile.displayName,
+        ProfileAvatarArtwork(
             avatarKey = profile.avatarKey,
-            active = active,
-            isTv = isTv,
+            displayName = profile.displayName,
+            size = if (isTv) 66.dp else 56.dp,
+            highlighted = active,
         )
 
         Spacer(Modifier.width(if (isTv) 18.dp else 12.dp))
@@ -440,38 +439,19 @@ private fun AvatarChoice(
     isTv: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
     var focused by remember(key) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (focused && isTv) 1.08f else 1f,
+        targetValue = if (focused && isTv) 1.10f else 1f,
         label = "profileAvatarScale",
     )
-    val size = if (isTv) 62.dp else 52.dp
+    val size = if (isTv) 72.dp else 58.dp
 
     Box(
         modifier = Modifier
-            .size(size)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
-            .background(
-                if (selected) {
-                    Brush.linearGradient(listOf(colors.goldDeep, colors.gold))
-                } else {
-                    Brush.linearGradient(listOf(colors.surfaceRaised, colors.surface))
-                },
-            )
-            .border(
-                if (focused || selected) 2.dp else 1.dp,
-                when {
-                    focused -> colors.goldBright
-                    selected -> colors.gold.copy(alpha = .72f)
-                    else -> Color.White.copy(alpha = .12f)
-                },
-                CircleShape,
-            )
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
@@ -491,62 +471,13 @@ private fun AvatarChoice(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = avatarGlyph(key),
-            color = Color.White,
-            fontSize = if (isTv) 20.sp else 17.sp,
-            fontWeight = FontWeight.Black,
+        ProfileAvatarArtwork(
+            avatarKey = key,
+            displayName = "",
+            size = size,
+            highlighted = focused || selected,
         )
     }
-}
-
-@Composable
-private fun AvatarBubble(
-    name: String,
-    avatarKey: String,
-    active: Boolean,
-    isTv: Boolean,
-) {
-    val colors = LocalHulkColors.current
-    val bubbleSize = if (isTv) 66.dp else 56.dp
-
-    Box(
-        modifier = Modifier
-            .size(bubbleSize)
-            .clip(CircleShape)
-            .background(
-                if (active) {
-                    Brush.linearGradient(listOf(colors.goldDeep, colors.gold.copy(alpha = .76f)))
-                } else {
-                    Brush.linearGradient(listOf(colors.surfaceRaised, colors.surface))
-                },
-            )
-            .border(
-                1.5.dp,
-                if (active) colors.goldBright.copy(alpha = .72f) else Color.White.copy(alpha = .12f),
-                CircleShape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = if (avatarKey == "default") {
-                name.trim().firstOrNull()?.uppercase() ?: "H"
-            } else {
-                avatarGlyph(avatarKey)
-            },
-            color = Color.White,
-            fontSize = if (isTv) 23.sp else 20.sp,
-            fontWeight = FontWeight.Black,
-        )
-    }
-}
-
-private fun avatarGlyph(key: String): String = when (key) {
-    "gold" -> "★"
-    "dark" -> "H"
-    "classic" -> "◆"
-    "kids" -> "K"
-    else -> "A"
 }
 
 @Composable
