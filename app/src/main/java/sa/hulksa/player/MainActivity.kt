@@ -15,7 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
-import sa.hulksa.player.ui.HulkApp
+import sa.hulksa.player.ui.ProfileAwareHulkApp
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class MainActivity : ComponentActivity() {
@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             HulkTheme {
-                HulkApp(
+                ProfileAwareHulkApp(
                     viewModel = viewModel,
                     isTelevisionDevice = isTelevisionDevice,
                 )
