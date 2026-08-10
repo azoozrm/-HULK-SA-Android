@@ -53,7 +53,6 @@ import kotlinx.coroutines.delay
 import sa.hulksa.player.R
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
-import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -166,12 +165,10 @@ fun ProfilePickerScreen(
 
             Spacer(Modifier.height(if (isTv) 26.dp else 18.dp))
 
-            FocusButton(
-                text = "إدارة الملفات الشخصية",
-                onClick = onManageProfiles,
-                primary = false,
-                compact = true,
+            ProfileManageButton(
+                isTv = isTv,
                 enabled = !isSwitching,
+                onClick = onManageProfiles,
             )
 
             Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
@@ -205,6 +202,71 @@ fun ProfilePickerScreen(
 }
 
 @Composable
+private fun ProfileManageButton(
+    isTv: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused && isTv) 1.06f else 1f,
+        label = "profileManageButtonScale",
+    )
+    val shape = RoundedCornerShape(if (isTv) 15.dp else 13.dp)
+
+    Box(
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = if (focused && isTv) 16.dp.toPx() else 0f
+            }
+            .clip(shape)
+            .background(
+                if (focused) colors.gold.copy(alpha = .22f)
+                else colors.surfaceRaised,
+            )
+            .border(
+                if (focused) 2.5.dp else 1.dp,
+                if (focused) colors.goldBright else Color.White.copy(alpha = .10f),
+                shape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                if (!isTv || !remoteSelect) {
+                    false
+                } else if (!enabled) {
+                    true
+                } else {
+                    when (event.type) {
+                        KeyEventType.KeyDown -> true
+                        KeyEventType.KeyUp -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(
+                horizontal = if (isTv) 20.dp else 16.dp,
+                vertical = if (isTv) 11.dp else 9.dp,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "إدارة الملفات الشخصية",
+            color = if (focused) colors.goldBright else colors.text,
+            fontSize = if (isTv) 14.sp else 13.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
 private fun ProfilePickerCard(
     profile: UserProfile,
     isActive: Boolean,
@@ -222,7 +284,6 @@ private fun ProfilePickerCard(
     val cardWidth = if (isTv) 180.dp else 140.dp
     val avatarSize = if (isTv) 98.dp else 76.dp
     val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
-    val initial = profile.displayName.trim().firstOrNull()?.uppercase() ?: "H"
 
     Column(
         modifier = Modifier
@@ -279,32 +340,12 @@ private fun ProfilePickerCard(
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .size(avatarSize)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            colors.goldDeep.copy(alpha = .94f),
-                            colors.gold.copy(alpha = .66f),
-                        ),
-                    ),
-                )
-                .border(
-                    1.5.dp,
-                    if (focused || isActive) colors.goldBright.copy(alpha = .80f) else Color.White.copy(alpha = .16f),
-                    CircleShape,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = initial,
-                color = Color.White,
-                fontSize = if (isTv) 37.sp else 28.sp,
-                fontWeight = FontWeight.Black,
-            )
-        }
+        ProfileAvatarArtwork(
+            avatarKey = profile.avatarKey,
+            displayName = profile.displayName,
+            size = avatarSize,
+            highlighted = focused || isActive,
+        )
 
         Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
 
@@ -321,34 +362,81 @@ private fun ProfilePickerCard(
 
         Spacer(Modifier.height(7.dp))
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            if (isActive) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.gold.copy(alpha = .15f))
-                        .border(1.dp, colors.gold.copy(alpha = .35f), RoundedCornerShape(50))
-                        .padding(horizontal = 9.dp, vertical = 3.dp),
-                ) {
-                    Text(
-                        text = "الحالي",
-                        color = colors.goldBright,
-                        fontSize = if (isTv) 11.sp else 10.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            } else {
+        if (isActive) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.gold.copy(alpha = .15f))
+                    .border(1.dp, colors.gold.copy(alpha = .35f), RoundedCornerShape(50))
+                    .padding(horizontal = 9.dp, vertical = 3.dp),
+            ) {
                 Text(
-                    text = if (profile.kind == ProfileKind.KIDS) "ملف أطفال" else "ملف شخصي",
-                    color = colors.textMuted,
+                    text = "الحالي",
+                    color = colors.goldBright,
                     fontSize = if (isTv) 11.sp else 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.Bold,
                 )
             }
+        } else if (profile.kind == ProfileKind.KIDS) {
+            Text(
+                text = "أطفال",
+                color = colors.textMuted,
+                fontSize = if (isTv) 11.sp else 10.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            Spacer(Modifier.height(if (isTv) 17.dp else 15.dp))
         }
     }
 }
+
+@Composable
+private fun ProfileAvatarArtwork(
+    avatarKey: String,
+    displayName: String,
+    size: androidx.compose.ui.unit.Dp,
+    highlighted: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    val palette = when (avatarKey) {
+        "gold" -> listOf(Color(0xFFFFD95A), Color(0xFF9E6C00))
+        "dark" -> listOf(Color(0xFF6C7080), Color(0xFF20232B))
+        "classic" -> listOf(Color(0xFF78C7A5), Color(0xFF244E3D))
+        "kids" -> listOf(Color(0xFF8EC5FF), Color(0xFF5B4DB8))
+        else -> listOf(Color(0xFFFFB15A), Color(0xFF8E5C12))
+    }
+    val face = when (avatarKey) {
+        "gold" -> "◕‿◕"
+        "dark" -> "•ᴗ•"
+        "classic" -> "ᵔᴗᵔ"
+        "kids" -> "☺"
+        else -> displayName.trim().firstOrNull()?.uppercase() ?: "H"
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.linearGradient(palette))
+            .border(
+                if (highlighted) 2.dp else 1.25.dp,
+                if (highlighted) colors.goldBright.copy(alpha = .9f) else Color.White.copy(alpha = .18f),
+                CircleShape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = face,
+            color = Color.White,
+            fontSize = when {
+                avatarKey == "default" && isLetterAvatar(face) -> 34.sp
+                size >= 90.dp -> 24.sp
+                else -> 18.sp
+            },
+            fontWeight = FontWeight.Black,
+        )
+    }
+}
+
+private fun isLetterAvatar(value: String): Boolean = value.length == 1 && value.first().isLetter()
