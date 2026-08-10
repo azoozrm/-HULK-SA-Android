@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import sa.hulksa.player.model.PortalConfig
 import sa.hulksa.player.security.CredentialVault
 
 class SeriesCardMetadataStore private constructor(context: Context) {
@@ -20,6 +21,9 @@ class SeriesCardMetadataStore private constructor(context: Context) {
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val inFlight = mutableMapOf<Int, Deferred<SeriesCardTechnicalMetadata>>()
     private val attemptedThisProcess = mutableSetOf<Int>()
+
+    @Volatile
+    private var resolvedPortal: PortalConfig? = null
 
     suspend fun metadata(seriesId: Int): SeriesCardTechnicalMetadata {
         readCached(seriesId)?.let { return it }
@@ -49,8 +53,11 @@ class SeriesCardMetadataStore private constructor(context: Context) {
 
     private suspend fun fetchAndCache(seriesId: Int): SeriesCardTechnicalMetadata {
         val credentials = credentialVault.load() ?: return SeriesCardTechnicalMetadata()
-        val portal = runCatching { portalResolver.resolve() }.getOrNull()
+        val portal = resolvedPortal ?: runCatching { portalResolver.resolve() }
+            .getOrNull()
+            ?.also { resolvedPortal = it }
             ?: return SeriesCardTechnicalMetadata()
+
         val metadata = runCatching {
             client.fetch(
                 portal = portal,
