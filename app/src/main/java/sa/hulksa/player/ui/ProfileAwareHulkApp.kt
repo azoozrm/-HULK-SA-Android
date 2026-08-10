@@ -13,6 +13,8 @@ import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.ProfileStore
+import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.screens.ProfileManagementScreen
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
 
 @Composable
@@ -28,15 +30,51 @@ fun ProfileAwareHulkApp(
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
     var switching by rememberSaveable { mutableStateOf(false) }
     var switchError by rememberSaveable { mutableStateOf<String?>(null) }
+    var managingProfiles by rememberSaveable { mutableStateOf(false) }
+    var profileRevision by rememberSaveable { mutableStateOf(0) }
 
-    val profiles = profileStore.profiles()
-    val activeProfileId = profileStore.activeProfileId()
+    val profiles = remember(profileRevision) { profileStore.profiles() }
+    val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
     val showPicker = switching || shouldShowProfilePicker(
         profileCount = profiles.size,
         authenticated = authenticated,
         resolvedForSession = resolvedForSession,
     )
+
+    fun switchProfile(profile: UserProfile) {
+        if (switching) return
+
+        val currentProfileId = profileStore.activeProfileId()
+        if (profile.id == currentProfileId) {
+            switchError = null
+            resolvedForSession = true
+            managingProfiles = false
+            return
+        }
+
+        val credentials = sessionRepository.savedCredentials()
+        if (credentials == null) {
+            switchError = "تعذر تبديل الملف الشخصي بدون جلسة محفوظة. سجل الدخول من جديد ثم حاول مرة اخرى."
+            return
+        }
+
+        if (!profileStore.setActiveProfile(profile.id)) {
+            switchError = "تعذر اختيار الملف الشخصي. حاول مرة اخرى."
+            return
+        }
+
+        viewModel.logout()
+        viewModel.login(
+            username = credentials.username,
+            password = credentials.password,
+            remember = true,
+        )
+        switching = true
+        managingProfiles = false
+        switchError = null
+        profileRevision++
+    }
 
     LaunchedEffect(
         switching,
@@ -66,52 +104,48 @@ fun ProfileAwareHulkApp(
             !state.isLoading
         ) {
             resolvedForSession = false
+            managingProfiles = false
         }
     }
 
-    if (showPicker) {
-        ProfilePickerScreen(
+    when {
+        managingProfiles -> ProfileManagementScreen(
+            profiles = profiles,
+            activeProfileId = activeProfileId,
+            isTv = isTelevisionDevice,
+            onCreate = { name, avatarKey ->
+                val created = profileStore.createProfile(name, avatarKey = avatarKey)
+                if (created != null) profileRevision++
+                created != null
+            },
+            onUpdate = { profileId, name, avatarKey ->
+                val updated = profileStore.updateProfile(profileId, name, avatarKey)
+                if (updated) profileRevision++
+                updated
+            },
+            onDelete = { profileId ->
+                val deleted = profileStore.deleteProfile(profileId)
+                if (deleted) profileRevision++
+                deleted
+            },
+            onSelect = ::switchProfile,
+            onClose = {
+                managingProfiles = false
+                if (profiles.size <= 1) resolvedForSession = true
+            },
+        )
+
+        showPicker -> ProfilePickerScreen(
             profiles = profiles,
             activeProfileId = activeProfileId,
             isTv = isTelevisionDevice,
             isSwitching = switching,
             errorMessage = switchError,
-            onSelectProfile = { profile ->
-                if (switching) return@ProfilePickerScreen
-
-                val currentProfileId = profileStore.activeProfileId()
-                if (profile.id == currentProfileId) {
-                    switchError = null
-                    resolvedForSession = true
-                    return@ProfilePickerScreen
-                }
-
-                val credentials = sessionRepository.savedCredentials()
-                if (credentials == null) {
-                    switchError = "تعذر تبديل الملف الشخصي بدون جلسة محفوظة. سجل الدخول من جديد ثم حاول مرة اخرى."
-                    return@ProfilePickerScreen
-                }
-
-                if (!profileStore.setActiveProfile(profile.id)) {
-                    switchError = "تعذر اختيار الملف الشخصي. حاول مرة اخرى."
-                    return@ProfilePickerScreen
-                }
-
-                // Logout reloads the ViewModel's profile-scoped library snapshot from the
-                // newly active profile. The captured credentials are then used immediately
-                // to restore the authenticated account/session and account-scoped catalogs.
-                viewModel.logout()
-                viewModel.login(
-                    username = credentials.username,
-                    password = credentials.password,
-                    remember = true,
-                )
-                switching = true
-                switchError = null
-            },
+            onSelectProfile = ::switchProfile,
+            onManageProfiles = { managingProfiles = true },
         )
-    } else {
-        HulkApp(
+
+        else -> HulkApp(
             viewModel = viewModel,
             isTelevisionDevice = isTelevisionDevice,
         )
