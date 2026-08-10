@@ -24,31 +24,27 @@ class SeriesCardMetadataStore private constructor(context: Context) {
     suspend fun metadata(seriesId: Int): SeriesCardTechnicalMetadata {
         readCached(seriesId)?.let { return it }
 
-        synchronized(inFlight) {
-            inFlight[seriesId]?.let { return@synchronized it }
-            if (seriesId in attemptedThisProcess) {
-                return SeriesCardTechnicalMetadata()
-            }
-            attemptedThisProcess += seriesId
-            scope.async {
-                semaphore.withPermit { fetchAndCache(seriesId) }
-            }.also { inFlight[seriesId] = it }
-        }.let { existingOrNew ->
-            if (existingOrNew is Deferred<*>) {
-                @Suppress("UNCHECKED_CAST")
-                return try {
-                    (existingOrNew as Deferred<SeriesCardTechnicalMetadata>).await()
-                } finally {
-                    synchronized(inFlight) {
-                        if (inFlight[seriesId] === existingOrNew) {
-                            inFlight.remove(seriesId)
-                        }
-                    }
+        val deferred = synchronized(inFlight) {
+            inFlight[seriesId] ?: run {
+                if (seriesId in attemptedThisProcess) {
+                    return SeriesCardTechnicalMetadata()
                 }
+                attemptedThisProcess += seriesId
+                scope.async {
+                    semaphore.withPermit { fetchAndCache(seriesId) }
+                }.also { inFlight[seriesId] = it }
             }
         }
 
-        return SeriesCardTechnicalMetadata()
+        return try {
+            deferred.await()
+        } finally {
+            synchronized(inFlight) {
+                if (inFlight[seriesId] === deferred) {
+                    inFlight.remove(seriesId)
+                }
+            }
+        }
     }
 
     private suspend fun fetchAndCache(seriesId: Int): SeriesCardTechnicalMetadata {
