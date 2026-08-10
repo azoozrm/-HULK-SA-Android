@@ -6,10 +6,11 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.model.Credentials
+import sa.hulksa.player.model.PortalConfig
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -29,12 +30,22 @@ class SeriesCardMetadataClient {
     suspend fun fetch(
         session: AuthenticatedSession,
         seriesId: Int,
+    ): SeriesCardTechnicalMetadata = fetch(
+        portal = session.portal,
+        credentials = session.credentials,
+        seriesId = seriesId,
+    )
+
+    suspend fun fetch(
+        portal: PortalConfig,
+        credentials: Credentials,
+        seriesId: Int,
     ): SeriesCardTechnicalMetadata = withContext(Dispatchers.IO) {
-        val url = (session.portal.baseUrl.trimEnd('/') + "/player_api.php")
+        val url = (portal.baseUrl.trimEnd('/') + "/player_api.php")
             .toHttpUrl()
             .newBuilder()
-            .addQueryParameter("username", session.credentials.username)
-            .addQueryParameter("password", session.credentials.password)
+            .addQueryParameter("username", credentials.username)
+            .addQueryParameter("password", credentials.password)
             .addQueryParameter("action", "get_series_info")
             .addQueryParameter("series_id", seriesId.toString())
             .build()
