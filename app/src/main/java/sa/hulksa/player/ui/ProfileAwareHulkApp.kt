@@ -12,7 +12,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
-import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.screens.ProfileManagementScreen
@@ -26,7 +25,6 @@ fun ProfileAwareHulkApp(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val profileStore = remember(context) { ProfileStore(context) }
-    val sessionRepository = remember(context) { HulkRepository(context) }
 
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
     var switching by rememberSaveable { mutableStateOf(false) }
@@ -56,12 +54,6 @@ fun ProfileAwareHulkApp(
             return
         }
 
-        val credentials = sessionRepository.savedCredentials()
-        if (credentials == null) {
-            switchError = "تعذر تبديل الملف الشخصي بدون جلسة محفوظة. سجل الدخول من جديد ثم حاول مرة اخرى."
-            return
-        }
-
         switching = true
         managingProfiles = false
         switchError = null
@@ -72,51 +64,31 @@ fun ProfileAwareHulkApp(
             return
         }
 
+        // Profiles are local viewing contexts only. Do not logout/login here:
+        // re-authenticating the IPTV account creates a second server-side session
+        // and can cancel the already-active single-connection account.
         profileRevision++
-        viewModel.logout()
-        viewModel.login(
-            username = credentials.username,
-            password = credentials.password,
-            remember = true,
-        )
+        switching = false
+        resolvedForSession = true
     }
 
     LaunchedEffect(
-        switching,
         state.screen,
         state.isLoading,
         state.account,
-        state.errorMessage,
     ) {
-        if (switching && state.screen == HulkScreen.MAIN && !state.isLoading && state.account != null) {
-            switching = false
-            resolvedForSession = true
-            switchError = null
-        } else if (
-            switching &&
-            state.screen == HulkScreen.LOGIN &&
-            !state.isLoading &&
-            !state.errorMessage.isNullOrBlank()
-        ) {
-            switching = false
-            switchError = state.errorMessage
-        }
-
         if (
-            !switching &&
             state.account == null &&
             state.screen == HulkScreen.LOGIN &&
             !state.isLoading
         ) {
             resolvedForSession = false
             managingProfiles = false
+            switching = false
+            switchError = null
         }
     }
 
-    // Profile management is a nested destination of the picker. Intercept the
-    // system/remote Back action here so Android TV returns to the picker instead
-    // of allowing the Activity to finish. Editor-level Back is handled inside
-    // ProfileManagementScreen before this parent handler is reached.
     BackHandler(enabled = managingProfiles) {
         managingProfiles = false
     }
