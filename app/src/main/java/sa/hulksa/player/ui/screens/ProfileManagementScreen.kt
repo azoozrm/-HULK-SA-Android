@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -27,9 +29,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sa.hulksa.player.data.ProfileStore
@@ -74,75 +85,71 @@ fun ProfileManagementScreen(
     }
 
     Box(
-        Modifier
+        modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
-            .padding(horizontal = if (isTv) 52.dp else 18.dp, vertical = if (isTv) 32.dp else 20.dp),
+            .background(colors.background),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            colors.goldDeep.copy(alpha = .10f),
+                            Color.Transparent,
+                        ),
+                        radius = if (isTv) 1050f else 650f,
+                    ),
+                ),
+        )
+
         if (creating || editingProfile != null) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(top = if (isTv) 28.dp else 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = if (creating) "إضافة ملف شخصي" else "تعديل الملف الشخصي",
-                    color = colors.text,
-                    fontSize = if (isTv) 30.sp else 24.sp,
-                    fontWeight = FontWeight.Black,
-                )
-                Spacer(Modifier.height(24.dp))
-                HulkTextField(
-                    value = name,
-                    onValueChange = { name = it.take(ProfileStore.MAX_DISPLAY_NAME_LENGTH) },
-                    label = "اسم الملف الشخصي",
-                    modifier = Modifier.fillMaxWidth(if (isTv) .48f else 1f),
-                )
-                Spacer(Modifier.height(18.dp))
-                Text("اختر الصورة", color = colors.textMuted, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    PROFILE_AVATARS.forEach { key ->
-                        AvatarChoice(
-                            key = key,
-                            selected = avatarKey == key,
-                            onClick = { avatarKey = key },
-                        )
+            ProfileEditor(
+                creating = creating,
+                editingProfile = editingProfile,
+                name = name,
+                avatarKey = avatarKey,
+                error = error,
+                isTv = isTv,
+                onNameChange = { name = it.take(ProfileStore.MAX_DISPLAY_NAME_LENGTH) },
+                onAvatarChange = { avatarKey = it },
+                onSave = {
+                    val ok = if (creating) {
+                        onCreate(name, avatarKey)
+                    } else {
+                        val profile = editingProfile ?: return@ProfileEditor
+                        onUpdate(profile.id, name, avatarKey)
                     }
-                }
-                error?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text(it, color = colors.danger, textAlign = TextAlign.Center)
-                }
-                Spacer(Modifier.height(24.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    ActionButton("حفظ") {
-                        val ok = if (creating) {
-                            onCreate(name, avatarKey)
-                        } else {
-                            val profile = editingProfile ?: return@ActionButton
-                            onUpdate(profile.id, name, avatarKey)
-                        }
-                        if (ok) {
-                            creating = false
-                            editingProfile = null
-                            error = null
-                        } else {
-                            error = "تعذر الحفظ. تأكد من الاسم وعدد الملفات الشخصية."
-                        }
-                    }
-                    ActionButton("إلغاء", secondary = true) {
+                    if (ok) {
                         creating = false
                         editingProfile = null
                         error = null
+                    } else {
+                        error = "تعذر الحفظ. تأكد من الاسم وعدد الملفات الشخصية."
                     }
-                }
-            }
+                },
+                onCancel = {
+                    creating = false
+                    editingProfile = null
+                    error = null
+                },
+            )
             return@Box
         }
 
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = if (isTv) 58.dp else 18.dp,
+                    vertical = if (isTv) 38.dp else 20.dp,
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = if (isTv) 1120.dp else 760.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -150,63 +157,57 @@ fun ProfileManagementScreen(
                     Text(
                         text = "الملفات الشخصية",
                         color = colors.text,
-                        fontSize = if (isTv) 30.sp else 24.sp,
+                        fontSize = if (isTv) 32.sp else 25.sp,
                         fontWeight = FontWeight.Black,
                     )
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "أنشئ وعدّل واختر ملفك الشخصي",
+                        text = "أنشئ وعدّل واختر الملف المناسب لكل مشاهدة",
                         color = colors.textMuted,
                         fontSize = if (isTv) 14.sp else 13.sp,
                     )
                 }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (profiles.size < ProfileStore.MAX_PROFILES) {
-                        ActionButton("إضافة ملف", onClick = ::openCreate)
+                        ActionButton(
+                            text = "+ إضافة ملف",
+                            isTv = isTv,
+                            onClick = ::openCreate,
+                        )
                     }
-                    ActionButton("رجوع", secondary = true, onClick = onClose)
+                    ActionButton(
+                        text = "رجوع",
+                        secondary = true,
+                        isTv = isTv,
+                        onClick = onClose,
+                    )
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(if (isTv) 28.dp else 20.dp))
 
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = if (isTv) 1120.dp else 760.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
             ) {
                 items(profiles, key = UserProfile::id) { profile ->
                     val active = profile.id == activeProfileId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(colors.surface)
-                            .border(
-                                1.dp,
-                                if (active) colors.goldBright.copy(alpha = .65f) else Color.White.copy(alpha = .10f),
-                                RoundedCornerShape(16.dp),
-                            )
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AvatarBubble(profile.displayName, profile.avatarKey, active)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(profile.displayName, color = colors.text, fontWeight = FontWeight.Bold)
-                            Text(
-                                if (active) "الحالي" else if (profile.isPrimary) "الأساسي" else "ملف شخصي",
-                                color = if (active) colors.goldBright else colors.textMuted,
-                                fontSize = 12.sp,
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (!active) ActionButton("اختيار", secondary = true) { onSelect(profile) }
-                            ActionButton("تعديل", secondary = true) { openEdit(profile) }
-                            if (!profile.isPrimary && profiles.size > 1) {
-                                ActionButton("حذف", danger = true) {
-                                    if (!onDelete(profile.id)) error = "تعذر حذف الملف الشخصي."
-                                }
+                    ProfileManagementCard(
+                        profile = profile,
+                        active = active,
+                        profilesCount = profiles.size,
+                        isTv = isTv,
+                        onSelect = { onSelect(profile) },
+                        onEdit = { openEdit(profile) },
+                        onDelete = {
+                            if (!onDelete(profile.id)) {
+                                error = "تعذر حذف الملف الشخصي."
                             }
-                        }
-                    }
+                        },
+                    )
                 }
             }
         }
@@ -214,36 +215,327 @@ fun ProfileManagementScreen(
 }
 
 @Composable
-private fun AvatarChoice(key: String, selected: Boolean, onClick: () -> Unit) {
+private fun ProfileEditor(
+    creating: Boolean,
+    editingProfile: UserProfile?,
+    name: String,
+    avatarKey: String,
+    error: String?,
+    isTv: Boolean,
+    onNameChange: (String) -> Unit,
+    onAvatarChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+) {
     val colors = LocalHulkColors.current
+
     Box(
         modifier = Modifier
-            .size(54.dp)
-            .clip(CircleShape)
-            .background(if (selected) colors.goldDeep else colors.surfaceRaised)
-            .border(if (selected) 2.dp else 1.dp, if (selected) colors.goldBright else Color.White.copy(.12f), CircleShape)
-            .clickable(onClick = onClick),
+            .fillMaxSize()
+            .padding(
+                horizontal = if (isTv) 64.dp else 18.dp,
+                vertical = if (isTv) 42.dp else 22.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(avatarGlyph(key), color = colors.text, fontWeight = FontWeight.Black)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = if (isTv) 760.dp else 620.dp)
+                .clip(RoundedCornerShape(if (isTv) 26.dp else 20.dp))
+                .background(colors.surface.copy(alpha = .97f))
+                .border(
+                    1.dp,
+                    colors.gold.copy(alpha = .32f),
+                    RoundedCornerShape(if (isTv) 26.dp else 20.dp),
+                )
+                .padding(
+                    horizontal = if (isTv) 42.dp else 22.dp,
+                    vertical = if (isTv) 34.dp else 24.dp,
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = if (creating) "إضافة ملف شخصي" else "تعديل الملف الشخصي",
+                color = colors.text,
+                fontSize = if (isTv) 31.sp else 24.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = if (creating) {
+                    "أنشئ مساحة مشاهدة مستقلة للمفضلة وسجل المشاهدة"
+                } else {
+                    "حدّث اسم الملف أو مظهره بدون فقدان بياناته"
+                },
+                color = colors.textMuted,
+                fontSize = if (isTv) 14.sp else 12.sp,
+                textAlign = TextAlign.Center,
+            )
+
+            Spacer(Modifier.height(if (isTv) 28.dp else 20.dp))
+
+            HulkTextField(
+                value = name,
+                onValueChange = onNameChange,
+                label = "اسم الملف الشخصي",
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(if (isTv) 24.dp else 18.dp))
+
+            Text(
+                text = "اختر شخصية الملف",
+                color = colors.text,
+                fontSize = if (isTv) 16.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PROFILE_AVATARS.forEach { key ->
+                    AvatarChoice(
+                        key = key,
+                        selected = avatarKey == key,
+                        isTv = isTv,
+                        onClick = { onAvatarChange(key) },
+                    )
+                }
+            }
+
+            if (!error.isNullOrBlank()) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = error,
+                    color = colors.danger,
+                    fontSize = if (isTv) 13.sp else 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            Spacer(Modifier.height(if (isTv) 28.dp else 22.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ActionButton(
+                    text = "حفظ",
+                    isTv = isTv,
+                    onClick = onSave,
+                )
+                ActionButton(
+                    text = "إلغاء",
+                    secondary = true,
+                    isTv = isTv,
+                    onClick = onCancel,
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun AvatarBubble(name: String, avatarKey: String, active: Boolean) {
+private fun ProfileManagementCard(
+    profile: UserProfile,
+    active: Boolean,
+    profilesCount: Int,
+    isTv: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val colors = LocalHulkColors.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(if (isTv) 20.dp else 16.dp))
+            .background(if (active) colors.gold.copy(alpha = .08f) else colors.surface.copy(alpha = .96f))
+            .border(
+                1.dp,
+                if (active) colors.gold.copy(alpha = .52f) else Color.White.copy(alpha = .09f),
+                RoundedCornerShape(if (isTv) 20.dp else 16.dp),
+            )
+            .padding(
+                horizontal = if (isTv) 20.dp else 14.dp,
+                vertical = if (isTv) 16.dp else 13.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AvatarBubble(
+            name = profile.displayName,
+            avatarKey = profile.avatarKey,
+            active = active,
+            isTv = isTv,
+        )
+
+        Spacer(Modifier.width(if (isTv) 18.dp else 12.dp))
+
+        Column(
+            modifier = Modifier.widthIn(min = if (isTv) 230.dp else 130.dp),
+        ) {
+            Text(
+                text = profile.displayName,
+                color = colors.text,
+                fontSize = if (isTv) 17.sp else 15.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = when {
+                    active -> "الملف المستخدم الآن"
+                    profile.isPrimary -> "الملف الأساسي"
+                    else -> "ملف شخصي مستقل"
+                },
+                color = if (active) colors.goldBright else colors.textMuted,
+                fontSize = if (isTv) 12.sp else 11.sp,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+            )
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (!active) {
+                ActionButton(
+                    text = "اختيار",
+                    secondary = true,
+                    isTv = isTv,
+                    onClick = onSelect,
+                )
+            }
+            ActionButton(
+                text = "تعديل",
+                secondary = true,
+                isTv = isTv,
+                onClick = onEdit,
+            )
+            if (!profile.isPrimary && profilesCount > 1) {
+                ActionButton(
+                    text = "حذف",
+                    danger = true,
+                    isTv = isTv,
+                    onClick = onDelete,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AvatarChoice(
+    key: String,
+    selected: Boolean,
+    isTv: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember(key) { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused && isTv) 1.08f else 1f,
+        label = "profileAvatarScale",
+    )
+    val size = if (isTv) 62.dp else 52.dp
+
     Box(
         modifier = Modifier
-            .size(58.dp)
+            .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(CircleShape)
-            .background(if (active) colors.goldDeep else colors.surfaceRaised)
-            .border(1.dp, if (active) colors.goldBright else Color.White.copy(.12f), CircleShape),
+            .background(
+                if (selected) {
+                    Brush.linearGradient(listOf(colors.goldDeep, colors.gold))
+                } else {
+                    Brush.linearGradient(listOf(colors.surfaceRaised, colors.surface))
+                },
+            )
+            .border(
+                if (focused || selected) 2.dp else 1.dp,
+                when {
+                    focused -> colors.goldBright
+                    selected -> colors.gold.copy(alpha = .72f)
+                    else -> Color.White.copy(alpha = .12f)
+                },
+                CircleShape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                if (!isTv || !remoteSelect) {
+                    false
+                } else {
+                    when (event.type) {
+                        KeyEventType.KeyDown -> true
+                        KeyEventType.KeyUp -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = if (avatarKey == "default") name.trim().firstOrNull()?.toString().orEmpty().ifBlank { "H" } else avatarGlyph(avatarKey),
-            color = colors.text,
-            fontSize = 21.sp,
+            text = avatarGlyph(key),
+            color = Color.White,
+            fontSize = if (isTv) 20.sp else 17.sp,
+            fontWeight = FontWeight.Black,
+        )
+    }
+}
+
+@Composable
+private fun AvatarBubble(
+    name: String,
+    avatarKey: String,
+    active: Boolean,
+    isTv: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    val bubbleSize = if (isTv) 66.dp else 56.dp
+
+    Box(
+        modifier = Modifier
+            .size(bubbleSize)
+            .clip(CircleShape)
+            .background(
+                if (active) {
+                    Brush.linearGradient(listOf(colors.goldDeep, colors.gold.copy(alpha = .76f)))
+                } else {
+                    Brush.linearGradient(listOf(colors.surfaceRaised, colors.surface))
+                },
+            )
+            .border(
+                1.5.dp,
+                if (active) colors.goldBright.copy(alpha = .72f) else Color.White.copy(alpha = .12f),
+                CircleShape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (avatarKey == "default") {
+                name.trim().firstOrNull()?.uppercase() ?: "H"
+            } else {
+                avatarGlyph(avatarKey)
+            },
+            color = Color.White,
+            fontSize = if (isTv) 23.sp else 20.sp,
             fontWeight = FontWeight.Black,
         )
     }
@@ -253,8 +545,8 @@ private fun avatarGlyph(key: String): String = when (key) {
     "gold" -> "★"
     "dark" -> "H"
     "classic" -> "◆"
-    "kids" -> "☺"
-    else -> "H"
+    "kids" -> "K"
+    else -> "A"
 }
 
 @Composable
@@ -262,11 +554,19 @@ private fun ActionButton(
     text: String,
     secondary: Boolean = false,
     danger: Boolean = false,
+    isTv: Boolean,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    var focused by remember(text) { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused && isTv) 1.04f else 1f,
+        label = "profileActionScale",
+    )
+    val shape = RoundedCornerShape(if (isTv) 13.dp else 11.dp)
     val background = when {
-        danger -> colors.danger.copy(alpha = .15f)
+        danger -> colors.danger.copy(alpha = if (focused) .24f else .14f)
+        secondary && focused -> colors.gold.copy(alpha = .16f)
         secondary -> colors.surfaceRaised
         else -> colors.gold
     }
@@ -275,15 +575,54 @@ private fun ActionButton(
         secondary -> colors.text
         else -> Color.Black
     }
+
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(shape)
             .background(background)
-            .border(1.dp, if (danger) colors.danger.copy(.5f) else Color.White.copy(.08f), RoundedCornerShape(12.dp))
+            .border(
+                if (focused) 2.dp else 1.dp,
+                when {
+                    focused -> colors.goldBright
+                    danger -> colors.danger.copy(alpha = .42f)
+                    secondary -> Color.White.copy(alpha = .08f)
+                    else -> colors.gold.copy(alpha = .35f)
+                },
+                shape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                if (!isTv || !remoteSelect) {
+                    false
+                } else {
+                    when (event.type) {
+                        KeyEventType.KeyDown -> true
+                        KeyEventType.KeyUp -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(
+                horizontal = if (isTv) 17.dp else 14.dp,
+                vertical = if (isTv) 11.dp else 9.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = foreground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Text(
+            text = text,
+            color = foreground,
+            fontWeight = FontWeight.Bold,
+            fontSize = if (isTv) 13.sp else 12.sp,
+            maxLines = 1,
+        )
     }
 }
