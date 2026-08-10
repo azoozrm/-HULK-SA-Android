@@ -133,7 +133,7 @@ import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.BrandBadge
 import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ChannelListItem
-import sa.hulksa.player.ui.components.CompactPosterCard
+import sa.hulksa.player.ui.components.UniversalPosterCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HistoryCard
@@ -1220,7 +1220,7 @@ private fun PosterSection(
                 val itemKey = "${item.type}:${item.id}"
                 val restore = remembered.rowKey == rowKey &&
                     (remembered.itemKey == itemKey || (remembered.itemKey.isBlank() && index == targetIndex))
-                CompactPosterCard(
+                UniversalPosterCard(
                     item = item,
                     isFavorite = isFavorite(item),
                     onClick = { onOpen(item) },
@@ -2258,7 +2258,7 @@ private fun ContentGrid(
         itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
             val key = "${item.type}:${item.id}"
             val restore = remembered.itemKey == key || index == targetIndex
-            CompactPosterCard(
+            UniversalPosterCard(
                 item = item,
                 isFavorite = isFavorite(item),
                 onClick = { onOpen(item) },
