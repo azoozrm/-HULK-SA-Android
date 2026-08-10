@@ -110,6 +110,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
     private var detailsJob: Job? = null
     private var diagnosticsJob: Job? = null
+    private var profileLibraryRefreshJob: Job? = null
     private var playerReturnScreen = HulkScreen.MAIN
     private val movieCardMetadataPrefs = application.getSharedPreferences(
         MOVIE_CARD_METADATA_PREFS,
@@ -170,8 +171,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val selectedType = destination.catalogTypeOrNull() ?: current.selectedType
         val restoredCategory = destination.catalogTypeOrNull()?.let(selectedCategoryByType::get)
 
-        // Clicking the active destination should not rebuild the complete screen tree.
-        // Clear only transient errors/search text when necessary.
         if (
             current.destination == destination &&
             current.selectedType == selectedType &&
@@ -194,6 +193,41 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         ensureDestinationCatalogs(destination)
+    }
+
+    fun refreshProfileLibrary() {
+        val favorites = userLibrary.favorites()
+        val history = userLibrary.history()
+
+        mutableState.update {
+            it.copy(
+                favorites = favorites,
+                history = history,
+                errorMessage = null,
+            )
+        }
+
+        profileLibraryRefreshJob?.cancel()
+        val sourceCatalogs = loadedCatalogs
+            .filterKeys { it == ContentType.MOVIE || it == ContentType.SERIES }
+            .toMap()
+        if (sourceCatalogs.isEmpty()) return
+
+        profileLibraryRefreshJob = viewModelScope.launch {
+            val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
+                sourceCatalogs.mapValues { (_, catalog) ->
+                    compactHomeCatalog(catalog, favorites, history)
+                }
+            }
+            rebuiltHomeCatalogs.forEach { (type, catalog) ->
+                homeCatalogs[type] = catalog
+            }
+            mutableState.update { state ->
+                state.copy(
+                    catalogs = catalogsForDestination(state.destination, state.catalogs),
+                )
+            }
+        }
     }
 
     private fun MainDestination.catalogTypeOrNull(): ContentType? = when (this) {
@@ -758,6 +792,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         movieCardProbeCallbacks.clear()
         movieCardProbeInFlight.clear()
         movieCardProbeAttempted.clear()
+        profileLibraryRefreshJob?.cancel()
+        profileLibraryRefreshJob = null
     }
 
     fun logout() {
