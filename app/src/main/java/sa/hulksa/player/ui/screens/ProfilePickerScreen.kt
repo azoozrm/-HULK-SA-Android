@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,9 +38,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.painterResource
-import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +49,7 @@ import kotlinx.coroutines.delay
 import sa.hulksa.player.R
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -58,6 +60,7 @@ fun ProfilePickerScreen(
     isSwitching: Boolean,
     errorMessage: String?,
     onSelectProfile: (UserProfile) -> Unit,
+    onManageProfiles: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     val profileIds = remember(profiles) { profiles.map(UserProfile::id) }
@@ -148,7 +151,19 @@ fun ProfilePickerScreen(
                 }
             }
 
-            Spacer(Modifier.height(if (isTv) 24.dp else 18.dp))
+            Spacer(Modifier.height(if (isTv) 20.dp else 16.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                FocusButton(
+                    text = "إدارة الملفات الشخصية",
+                    onClick = onManageProfiles,
+                    primary = false,
+                    compact = true,
+                    enabled = !isSwitching,
+                )
+            }
+
+            Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
 
             when {
                 isSwitching -> Text(
