@@ -6,6 +6,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.model.AuthenticatedSession
@@ -73,6 +74,7 @@ class SeriesCardMetadataClient {
         }
 
         val episodesObject = root.optJSONObject("episodes") ?: root.nestedObject("episodes")
+        val episodesArray = root.optJSONArray("episodes") ?: root.nestedArray("episodes")
         val episodeObjects = buildList {
             episodesObject?.keys()?.forEach { seasonKey ->
                 val entries = episodesObject.optJSONArray(seasonKey) ?: return@forEach
@@ -80,18 +82,49 @@ class SeriesCardMetadataClient {
                     entries.optJSONObject(index)?.let { add(seasonKey to it) }
                 }
             }
+            if (isEmpty() && episodesArray != null) {
+                for (index in 0 until episodesArray.length()) {
+                    val episode = episodesArray.optJSONObject(index) ?: continue
+                    val seasonKey = episode.positiveInt("season")
+                        ?.toString()
+                        ?: episode.positiveInt("season_number")?.toString()
+                        ?: "1"
+                    add(seasonKey to episode)
+                }
+            }
         }
 
         val positiveSeasons = episodeObjects
             .asSequence()
             .mapNotNull { (seasonKey, episode) ->
-                episode.positiveInt("season") ?: seasonKey.toIntOrNull()?.takeIf { it > 0 }
+                episode.positiveInt("season")
+                    ?: episode.positiveInt("season_number")
+                    ?: seasonKey.toIntOrNull()?.takeIf { it > 0 }
             }
             .filter { it > 0 }
             .toSet()
 
+        val seasonsArray = root.optJSONArray("seasons") ?: root.nestedArray("seasons")
+        val seasonNumbersFromArray = buildSet {
+            if (seasonsArray != null) {
+                for (index in 0 until seasonsArray.length()) {
+                    val season = seasonsArray.optJSONObject(index) ?: continue
+                    val number = season.positiveInt("season_number")
+                        ?: season.positiveInt("season")
+                        ?: season.positiveInt("season_num")
+                    if (number != null) add(number)
+                }
+            }
+        }
+        val seasonsArrayCount = when {
+            seasonNumbersFromArray.isNotEmpty() -> seasonNumbersFromArray.size
+            seasonsArray != null && seasonsArray.length() > 0 -> seasonsArray.length()
+            else -> null
+        }
+
         val seasonCount = when {
             positiveSeasons.isNotEmpty() -> positiveSeasons.size
+            seasonsArrayCount != null -> seasonsArrayCount
             episodeObjects.isNotEmpty() -> 1
             else -> null
         }
@@ -220,6 +253,18 @@ class SeriesCardMetadataClient {
                 .trim()
                 .takeIf { it.startsWith("{") }
                 ?.let { runCatching { JSONObject(it) }.getOrNull() }
+            else -> null
+        }
+    }
+
+    private fun JSONObject.nestedArray(key: String): JSONArray? {
+        val value = opt(key)
+        return when (value) {
+            is JSONArray -> value
+            is String -> value
+                .trim()
+                .takeIf { it.startsWith("[") }
+                ?.let { runCatching { JSONArray(it) }.getOrNull() }
             else -> null
         }
     }
