@@ -115,13 +115,15 @@ fun ProfileAwareHulkApp(
             isTv = isTelevisionDevice,
             onCreate = { name, avatarKey ->
                 val created = profileStore.createProfile(name, avatarKey = avatarKey)
-                if (created != null) profileRevision++
-                created != null
+                val createdSuccessfully = created != null
+                if (createdSuccessfully) profileRevision++
+                createdSuccessfully
             },
             onUpdate = { profileId, name, avatarKey ->
                 val updated = profileStore.updateProfile(profileId, name, avatarKey)
-                if (updated) profileRevision++
-                updated
+                val updatedSuccessfully = updated != null
+                if (updatedSuccessfully) profileRevision++
+                updatedSuccessfully
             },
             onDelete = { profileId ->
                 val deleted = profileStore.deleteProfile(profileId)
