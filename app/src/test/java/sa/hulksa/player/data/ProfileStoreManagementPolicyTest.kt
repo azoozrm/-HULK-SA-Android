@@ -8,31 +8,21 @@ import org.junit.Test
 class ProfileStoreManagementPolicyTest {
     @Test
     fun profileNameIsTrimmedCollapsedAndLimited() {
-        val normalized = normalizeProfileNameForTest("   عبد    العزيز   ")
-        assertEquals("عبد العزيز", normalized)
+        assertEquals("عبد العزيز", normalizeProfileName("   عبد    العزيز   "))
 
         val long = "123456789012345678901234567890"
-        assertEquals(ProfileStore.MAX_DISPLAY_NAME_LENGTH, normalizeProfileNameForTest(long)?.length)
+        assertEquals(ProfileStore.MAX_DISPLAY_NAME_LENGTH, normalizeProfileName(long)?.length)
     }
 
     @Test
     fun blankProfileNameIsRejected() {
-        assertEquals(null, normalizeProfileNameForTest("   \n  "))
+        assertEquals(null, normalizeProfileName("   \n  "))
     }
 
     @Test
     fun deletePolicyProtectsPrimaryAndLastProfile() {
-        assertFalse(canDeleteProfileForTest(isPrimary = true, profileCount = 3))
-        assertFalse(canDeleteProfileForTest(isPrimary = false, profileCount = 1))
-        assertTrue(canDeleteProfileForTest(isPrimary = false, profileCount = 2))
+        assertFalse(canDeleteProfile(isPrimary = true, profileCount = 3))
+        assertFalse(canDeleteProfile(isPrimary = false, profileCount = 1))
+        assertTrue(canDeleteProfile(isPrimary = false, profileCount = 2))
     }
 }
-
-internal fun normalizeProfileNameForTest(raw: String): String? = raw
-    .trim()
-    .replace(Regex("\\s+"), " ")
-    .take(ProfileStore.MAX_DISPLAY_NAME_LENGTH)
-    .takeIf(String::isNotBlank)
-
-internal fun canDeleteProfileForTest(isPrimary: Boolean, profileCount: Int): Boolean =
-    !isPrimary && profileCount > 1
