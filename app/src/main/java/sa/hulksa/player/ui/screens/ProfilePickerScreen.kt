@@ -5,7 +5,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -38,6 +37,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -70,7 +74,7 @@ fun ProfilePickerScreen(
 
     LaunchedEffect(isTv, activeProfileId, profileIds) {
         if (!isTv || profiles.isEmpty()) return@LaunchedEffect
-        delay(180L)
+        delay(140L)
         val requester = focusRequesters[activeProfileId] ?: focusRequesters[profiles.first().id]
         requester?.let { runCatching { it.requestFocus() } }
     }
@@ -78,68 +82,77 @@ fun ProfilePickerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    0f to colors.background,
-                    .55f to Color(0xFF080904),
-                    1f to colors.background,
-                ),
-            )
-            .padding(
-                horizontal = if (isTv) 54.dp else 20.dp,
-                vertical = if (isTv) 34.dp else 24.dp,
-            ),
-        contentAlignment = Alignment.Center,
+            .background(colors.background),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            colors.goldDeep.copy(alpha = .12f),
+                            Color.Transparent,
+                        ),
+                        radius = if (isTv) 980f else 620f,
+                    ),
+                ),
+        )
+
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = if (isTv) 54.dp else 18.dp,
+                    vertical = if (isTv) 30.dp else 20.dp,
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Image(
                 painter = painterResource(R.drawable.hulk_sa_logo),
                 contentDescription = "HULK SA",
                 modifier = Modifier
-                    .width(if (isTv) 138.dp else 112.dp)
-                    .height(if (isTv) 82.dp else 66.dp),
+                    .width(if (isTv) 126.dp else 104.dp)
+                    .height(if (isTv) 74.dp else 62.dp),
                 contentScale = ContentScale.Fit,
             )
 
-            Spacer(Modifier.height(if (isTv) 18.dp else 14.dp))
+            Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
 
             Text(
                 text = "من يشاهد الآن؟",
                 color = colors.text,
-                fontSize = if (isTv) 31.sp else 25.sp,
-                lineHeight = if (isTv) 38.sp else 32.sp,
+                fontSize = if (isTv) 32.sp else 26.sp,
+                lineHeight = if (isTv) 39.sp else 32.sp,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(Modifier.height(7.dp))
+            Spacer(Modifier.height(6.dp))
 
             Text(
                 text = "اختر ملفك الشخصي للمتابعة",
                 color = colors.textMuted,
-                fontSize = if (isTv) 16.sp else 14.sp,
+                fontSize = if (isTv) 15.sp else 13.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(Modifier.height(if (isTv) 30.dp else 24.dp))
+            Spacer(Modifier.height(if (isTv) 28.dp else 22.dp))
 
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = if (isTv) 42.dp else 8.dp),
+                contentPadding = PaddingValues(horizontal = if (isTv) 42.dp else 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(
-                    if (isTv) 24.dp else 14.dp,
-                    Alignment.CenterHorizontally,
+                    space = if (isTv) 24.dp else 14.dp,
+                    alignment = Alignment.CenterHorizontally,
                 ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                itemsIndexed(
+                items(
                     items = profiles,
-                    key = { _, profile -> profile.id },
-                ) { _, profile ->
+                    key = UserProfile::id,
+                ) { profile ->
                     ProfilePickerCard(
                         profile = profile,
                         isActive = profile.id == activeProfileId,
@@ -151,19 +164,17 @@ fun ProfilePickerScreen(
                 }
             }
 
-            Spacer(Modifier.height(if (isTv) 20.dp else 16.dp))
+            Spacer(Modifier.height(if (isTv) 26.dp else 18.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                FocusButton(
-                    text = "إدارة الملفات الشخصية",
-                    onClick = onManageProfiles,
-                    primary = false,
-                    compact = true,
-                    enabled = !isSwitching,
-                )
-            }
+            FocusButton(
+                text = "إدارة الملفات الشخصية",
+                onClick = onManageProfiles,
+                primary = false,
+                compact = true,
+                enabled = !isSwitching,
+            )
 
-            Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
+            Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
 
             when {
                 isSwitching -> Text(
@@ -173,6 +184,7 @@ fun ProfilePickerScreen(
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
+
                 !errorMessage.isNullOrBlank() -> Text(
                     text = errorMessage,
                     color = colors.danger,
@@ -180,10 +192,11 @@ fun ProfilePickerScreen(
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
+
                 else -> Text(
-                    text = if (isTv) "استخدم الأسهم ثم زر الاختيار" else "المس الملف الشخصي للمتابعة",
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 13.sp else 12.sp,
+                    text = if (isTv) "حرّك بالأسهم واضغط OK مرة واحدة" else "المس الملف الشخصي للمتابعة",
+                    color = colors.textMuted.copy(alpha = .78f),
+                    fontSize = if (isTv) 12.sp else 11.sp,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -203,13 +216,13 @@ private fun ProfilePickerCard(
     val colors = LocalHulkColors.current
     var focused by remember(profile.id) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (focused && isTv) 1.06f else 1f,
+        targetValue = if (focused && isTv) 1.055f else 1f,
         label = "profilePickerScale",
     )
-    val cardWidth = if (isTv) 172.dp else 136.dp
-    val avatarSize = if (isTv) 102.dp else 78.dp
-    val shape = RoundedCornerShape(if (isTv) 18.dp else 15.dp)
-    val initial = profile.displayName.trim().firstOrNull()?.toString().orEmpty().ifBlank { "H" }
+    val cardWidth = if (isTv) 180.dp else 140.dp
+    val avatarSize = if (isTv) 98.dp else 76.dp
+    val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
+    val initial = profile.displayName.trim().firstOrNull()?.uppercase() ?: "H"
 
     Column(
         modifier = Modifier
@@ -217,10 +230,16 @@ private fun ProfilePickerCard(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (focused && isTv) 18.dp.toPx() else 0f
+                shadowElevation = if (focused && isTv) 22.dp.toPx() else 4.dp.toPx()
             }
             .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface)
+            .background(
+                when {
+                    focused -> colors.gold.copy(alpha = .12f)
+                    isActive -> colors.surfaceRaised
+                    else -> colors.surface.copy(alpha = .94f)
+                },
+            )
             .border(
                 width = when {
                     focused -> 3.dp
@@ -229,18 +248,34 @@ private fun ProfilePickerCard(
                 },
                 color = when {
                     focused -> colors.goldBright
-                    isActive -> colors.gold.copy(alpha = .72f)
+                    isActive -> colors.gold.copy(alpha = .60f)
                     else -> Color.White.copy(alpha = .10f)
                 },
                 shape = shape,
             )
             .focusRequester(focusRequester)
             .onFocusChanged { focused = it.isFocused }
-            .focusable(enabled)
+            .onPreviewKeyEvent { event ->
+                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                if (!isTv || !remoteSelect) {
+                    false
+                } else if (!enabled) {
+                    true
+                } else {
+                    when (event.type) {
+                        KeyEventType.KeyDown -> true
+                        KeyEventType.KeyUp -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
             .clickable(enabled = enabled, onClick = onClick)
             .padding(
-                horizontal = if (isTv) 15.dp else 12.dp,
-                vertical = if (isTv) 17.dp else 14.dp,
+                horizontal = if (isTv) 16.dp else 12.dp,
+                vertical = if (isTv) 18.dp else 14.dp,
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -251,51 +286,69 @@ private fun ProfilePickerCard(
                 .background(
                     Brush.linearGradient(
                         listOf(
-                            colors.goldDeep.copy(alpha = .88f),
-                            colors.surfaceRaised,
+                            colors.goldDeep.copy(alpha = .94f),
+                            colors.gold.copy(alpha = .66f),
                         ),
                     ),
                 )
                 .border(
                     1.5.dp,
-                    if (focused || isActive) colors.goldBright.copy(alpha = .72f) else Color.White.copy(alpha = .14f),
+                    if (focused || isActive) colors.goldBright.copy(alpha = .80f) else Color.White.copy(alpha = .16f),
                     CircleShape,
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = initial,
-                color = colors.text,
-                fontSize = if (isTv) 38.sp else 29.sp,
+                color = Color.White,
+                fontSize = if (isTv) 37.sp else 28.sp,
                 fontWeight = FontWeight.Black,
             )
         }
 
-        Spacer(Modifier.height(if (isTv) 14.dp else 11.dp))
+        Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
 
         Text(
             text = profile.displayName,
             color = colors.text,
             fontSize = if (isTv) 17.sp else 15.sp,
             lineHeight = if (isTv) 21.sp else 19.sp,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(7.dp))
 
-        Text(
-            text = when {
-                profile.kind == ProfileKind.KIDS -> "أطفال"
-                isActive -> "الحالي"
-                else -> "ملف شخصي"
-            },
-            color = if (isActive) colors.goldBright else colors.textMuted,
-            fontSize = if (isTv) 11.sp else 10.sp,
-            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-            textAlign = TextAlign.Center,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (isActive) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.gold.copy(alpha = .15f))
+                        .border(1.dp, colors.gold.copy(alpha = .35f), RoundedCornerShape(50))
+                        .padding(horizontal = 9.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = "الحالي",
+                        color = colors.goldBright,
+                        fontSize = if (isTv) 11.sp else 10.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            } else {
+                Text(
+                    text = if (profile.kind == ProfileKind.KIDS) "ملف أطفال" else "ملف شخصي",
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 11.sp else 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
     }
 }
