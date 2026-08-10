@@ -36,7 +36,9 @@ fun ProfileAwareHulkApp(
     val profiles = remember(profileRevision) { profileStore.profiles() }
     val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
-    val showPicker = switching || shouldShowProfilePicker(
+    val singleProfileNeedsResolution =
+        profiles.size == 1 && authenticated && !resolvedForSession
+    val showPicker = switching || singleProfileNeedsResolution || shouldShowProfilePicker(
         profileCount = profiles.size,
         authenticated = authenticated,
         resolvedForSession = resolvedForSession,
