@@ -30,7 +30,7 @@ import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.MovieDetailsScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerScreen
-import sa.hulksa.player.ui.screens.SeriesScreen
+import sa.hulksa.player.ui.screens.SeriesDetailsScreenV2
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -194,7 +194,7 @@ fun HulkApp(
                                 .filter { it.id != series.id && it.categoryId == series.categoryId }
                                 .take(10)
                                 .toList()
-                            SeriesScreen(
+                            SeriesDetailsScreenV2(
                                 series = series,
                                 details = state.selectedDetails,
                                 episodes = state.episodes,
