@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +51,7 @@ import kotlinx.coroutines.delay
 import sa.hulksa.player.R
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.components.ProfileAvatar
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -340,10 +339,9 @@ private fun ProfilePickerCard(
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ProfileAvatarArtwork(
+        ProfileAvatar(
             avatarKey = profile.avatarKey,
-            displayName = profile.displayName,
-            size = avatarSize,
+            modifier = Modifier.size(avatarSize),
             highlighted = focused || isActive,
         )
 
@@ -390,53 +388,3 @@ private fun ProfilePickerCard(
         }
     }
 }
-
-@Composable
-private fun ProfileAvatarArtwork(
-    avatarKey: String,
-    displayName: String,
-    size: androidx.compose.ui.unit.Dp,
-    highlighted: Boolean,
-) {
-    val colors = LocalHulkColors.current
-    val palette = when (avatarKey) {
-        "gold" -> listOf(Color(0xFFFFD95A), Color(0xFF9E6C00))
-        "dark" -> listOf(Color(0xFF6C7080), Color(0xFF20232B))
-        "classic" -> listOf(Color(0xFF78C7A5), Color(0xFF244E3D))
-        "kids" -> listOf(Color(0xFF8EC5FF), Color(0xFF5B4DB8))
-        else -> listOf(Color(0xFFFFB15A), Color(0xFF8E5C12))
-    }
-    val face = when (avatarKey) {
-        "gold" -> "◕‿◕"
-        "dark" -> "•ᴗ•"
-        "classic" -> "ᵔᴗᵔ"
-        "kids" -> "☺"
-        else -> displayName.trim().firstOrNull()?.uppercase() ?: "H"
-    }
-
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(Brush.linearGradient(palette))
-            .border(
-                if (highlighted) 2.dp else 1.25.dp,
-                if (highlighted) colors.goldBright.copy(alpha = .9f) else Color.White.copy(alpha = .18f),
-                CircleShape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = face,
-            color = Color.White,
-            fontSize = when {
-                avatarKey == "default" && isLetterAvatar(face) -> 34.sp
-                size >= 90.dp -> 24.sp
-                else -> 18.sp
-            },
-            fontWeight = FontWeight.Black,
-        )
-    }
-}
-
-private fun isLetterAvatar(value: String): Boolean = value.length == 1 && value.first().isLetter()
