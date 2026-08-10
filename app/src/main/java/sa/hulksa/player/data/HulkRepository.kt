@@ -18,6 +18,7 @@ class HulkRepository(context: Context) {
     private val portalResolver = PortalResolver(context)
     private val client = XtreamClient()
     private val movieCardMetadataClient = MovieCardMetadataClient()
+    private val seriesCardMetadataClient = SeriesCardMetadataClient()
     private val vault = CredentialVault(context)
     private val diagnostics = ServerDiagnosticsEngine(context)
 
@@ -46,6 +47,12 @@ class HulkRepository(context: Context) {
         movieId: Int,
     ): MovieCardTechnicalMetadata =
         movieCardMetadataClient.fetch(session, movieId)
+
+    suspend fun seriesCardMetadata(
+        session: AuthenticatedSession,
+        seriesId: Int,
+    ): SeriesCardTechnicalMetadata =
+        seriesCardMetadataClient.fetch(session, seriesId)
 
     suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
         client.seriesBundle(session, seriesId)
