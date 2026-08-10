@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.components.CompactPosterCard
+import sa.hulksa.player.ui.components.SeriesPosterCard
 
 private val TV_GRID_MIN_CELL_WIDTH = 132.dp
 private val TV_GRID_HORIZONTAL_SPACING = 14.dp
@@ -149,69 +150,83 @@ internal fun TvCatalogGrid(
         ) {
             itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
                 val key = contentKeys[index]
-                CompactPosterCard(
-                    item = item,
-                    isFavorite = isFavorite(item),
-                    onClick = { onOpen(item) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequesters.getValue(key))
-                        .onPreviewKeyEvent { event ->
-                            val move = when (event.key) {
-                                Key.DirectionLeft -> TvGridFocusMove.LEFT
-                                Key.DirectionRight -> TvGridFocusMove.RIGHT
-                                Key.DirectionUp -> TvGridFocusMove.UP
-                                Key.DirectionDown -> TvGridFocusMove.DOWN
-                                else -> null
-                            } ?: return@onPreviewKeyEvent false
+                val cardModifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequesters.getValue(key))
+                    .onPreviewKeyEvent { event ->
+                        val move = when (event.key) {
+                            Key.DirectionLeft -> TvGridFocusMove.LEFT
+                            Key.DirectionRight -> TvGridFocusMove.RIGHT
+                            Key.DirectionUp -> TvGridFocusMove.UP
+                            Key.DirectionDown -> TvGridFocusMove.DOWN
+                            else -> null
+                        } ?: return@onPreviewKeyEvent false
 
-                            if (event.type == KeyEventType.KeyUp) {
-                                return@onPreviewKeyEvent true
-                            }
-                            if (event.type != KeyEventType.KeyDown) {
-                                return@onPreviewKeyEvent false
-                            }
-
-                            val baseIndex = pendingTargetIndex ?: index
-                            val nextIndex = nextTvGridFocusIndex(
-                                currentIndex = baseIndex,
-                                itemCount = content.size,
-                                columnCount = columnCount,
-                                move = move,
-                            )
-
-                            if (nextIndex == null) {
-                                // RTL catalog policy:
-                                // - Physical RIGHT from the row's right-most card is allowed to
-                                //   escape to the navigation rail.
-                                // - Physical LEFT from the row's left-most card is consumed so
-                                //   Compose cannot spatially fall back to an unrelated control.
-                                return@onPreviewKeyEvent move == TvGridFocusMove.LEFT
-                            }
-
-                            pendingTargetIndex = nextIndex
-                            navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)
-                            focusMoveJob?.cancel()
-                            focusMoveJob = focusScope.launch {
-                                focusIndex(
-                                    index = nextIndex,
-                                    columnCount = columnCount,
-                                    ensureFullyVisible = move == TvGridFocusMove.UP || move == TvGridFocusMove.DOWN,
-                                )
-                                if (pendingTargetIndex == nextIndex) {
-                                    pendingTargetIndex = null
-                                }
-                            }
-                            true
-                        },
-                    onLongClick = { onToggleFavorite(item) },
-                    onFocused = {
-                        if (pendingTargetIndex == index) {
-                            pendingTargetIndex = null
+                        if (event.type == KeyEventType.KeyUp) {
+                            return@onPreviewKeyEvent true
                         }
-                        navigationMemory.save(destination, key, index)
-                    },
-                )
+                        if (event.type != KeyEventType.KeyDown) {
+                            return@onPreviewKeyEvent false
+                        }
+
+                        val baseIndex = pendingTargetIndex ?: index
+                        val nextIndex = nextTvGridFocusIndex(
+                            currentIndex = baseIndex,
+                            itemCount = content.size,
+                            columnCount = columnCount,
+                            move = move,
+                        )
+
+                        if (nextIndex == null) {
+                            // RTL catalog policy:
+                            // - Physical RIGHT from the row's right-most card is allowed to
+                            //   escape to the navigation rail.
+                            // - Physical LEFT from the row's left-most card is consumed so
+                            //   Compose cannot spatially fall back to an unrelated control.
+                            return@onPreviewKeyEvent move == TvGridFocusMove.LEFT
+                        }
+
+                        pendingTargetIndex = nextIndex
+                        navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)
+                        focusMoveJob?.cancel()
+                        focusMoveJob = focusScope.launch {
+                            focusIndex(
+                                index = nextIndex,
+                                columnCount = columnCount,
+                                ensureFullyVisible = move == TvGridFocusMove.UP || move == TvGridFocusMove.DOWN,
+                            )
+                            if (pendingTargetIndex == nextIndex) {
+                                pendingTargetIndex = null
+                            }
+                        }
+                        true
+                    }
+                val onFocusedCard = {
+                    if (pendingTargetIndex == index) {
+                        pendingTargetIndex = null
+                    }
+                    navigationMemory.save(destination, key, index)
+                }
+
+                if (destination == MainDestination.SERIES) {
+                    SeriesPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = onFocusedCard,
+                    )
+                } else {
+                    CompactPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = onFocusedCard,
+                    )
+                }
             }
         }
     }
