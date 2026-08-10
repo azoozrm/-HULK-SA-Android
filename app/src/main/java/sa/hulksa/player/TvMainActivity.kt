@@ -10,7 +10,7 @@ import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import sa.hulksa.player.ui.HulkApp
+import sa.hulksa.player.ui.ProfileAwareHulkApp
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class TvMainActivity : ComponentActivity() {
@@ -22,7 +22,7 @@ class TvMainActivity : ComponentActivity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContent {
             HulkTheme {
-                HulkApp(viewModel = viewModel, isTelevisionDevice = true)
+                ProfileAwareHulkApp(viewModel = viewModel, isTelevisionDevice = true)
             }
         }
     }
