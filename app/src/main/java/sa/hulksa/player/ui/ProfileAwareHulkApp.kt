@@ -64,9 +64,10 @@ fun ProfileAwareHulkApp(
             return
         }
 
-        // Profiles are local viewing contexts only. Do not logout/login here:
-        // re-authenticating the IPTV account creates a second server-side session
-        // and can cancel the already-active single-connection account.
+        // Profiles are local viewing contexts only. Keep the authenticated IPTV
+        // session intact, but refresh the profile-scoped library snapshot so
+        // favorites and continue-watching immediately belong to the new profile.
+        viewModel.refreshProfileLibrary()
         profileRevision++
         switching = false
         resolvedForSession = true
