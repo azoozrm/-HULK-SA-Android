@@ -8,21 +8,30 @@ import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.PlaybackRequest
 
 class UserLibrary(context: Context) {
-    private val preferences = context.getSharedPreferences("hulk_user_library", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val preferences = appContext.getSharedPreferences("hulk_user_library", Context.MODE_PRIVATE)
+    private val profileStore = ProfileStore(appContext)
 
-    fun favorites(): Set<String> = preferences.getStringSet(KEY_FAVORITES, emptySet()).orEmpty().toSet()
+    init {
+        migrateLegacyLibraryIfNeeded()
+    }
+
+    fun favorites(): Set<String> = preferences
+        .getStringSet(activeKey(KEY_FAVORITES), emptySet())
+        .orEmpty()
+        .toSet()
 
     fun toggle(item: ContentItem): Set<String> {
         val key = keyFor(item)
         val updated = favorites().toMutableSet().apply {
             if (!add(key)) remove(key)
         }
-        preferences.edit().putStringSet(KEY_FAVORITES, updated).apply()
+        preferences.edit().putStringSet(activeKey(KEY_FAVORITES), updated).apply()
         return updated
     }
 
     fun replaceFavorites(favorites: Set<String>) {
-        preferences.edit().putStringSet(KEY_FAVORITES, favorites.toSet()).apply()
+        preferences.edit().putStringSet(activeKey(KEY_FAVORITES), favorites.toSet()).apply()
     }
 
     fun isFavorite(item: ContentItem, favorites: Set<String>): Boolean = keyFor(item) in favorites
@@ -30,7 +39,7 @@ class UserLibrary(context: Context) {
     fun keyFor(item: ContentItem): String = "${item.type.name}:${item.id}"
 
     fun history(): List<HistoryEntry> = runCatching {
-        val raw = preferences.getString(KEY_HISTORY, null) ?: return emptyList()
+        val raw = preferences.getString(activeKey(KEY_HISTORY), null) ?: return emptyList()
         val array = JSONArray(raw)
         buildList {
             for (index in 0 until array.length()) {
@@ -114,7 +123,7 @@ class UserLibrary(context: Context) {
     }
 
     fun clearHistory(): List<HistoryEntry> {
-        preferences.edit().remove(KEY_HISTORY).apply()
+        preferences.edit().remove(activeKey(KEY_HISTORY)).apply()
         return emptyList()
     }
 
@@ -145,13 +154,42 @@ class UserLibrary(context: Context) {
                     },
             )
         }
-        preferences.edit().putString(KEY_HISTORY, array.toString()).apply()
+        preferences.edit().putString(activeKey(KEY_HISTORY), array.toString()).apply()
         return normalized
+    }
+
+    private fun activeKey(baseKey: String): String =
+        profileKey(profileStore.activeProfileId(), baseKey)
+
+    private fun profileKey(profileId: String, baseKey: String): String =
+        "profile:$profileId:$baseKey"
+
+    private fun migrateLegacyLibraryIfNeeded() {
+        if (preferences.getBoolean(KEY_PROFILE_SCOPE_MIGRATION_V1, false)) return
+
+        val primaryProfileId = ProfileStore.PRIMARY_PROFILE_ID
+        val scopedFavoritesKey = profileKey(primaryProfileId, KEY_FAVORITES)
+        val scopedHistoryKey = profileKey(primaryProfileId, KEY_HISTORY)
+        val editor = preferences.edit()
+
+        if (!preferences.contains(scopedFavoritesKey) && preferences.contains(KEY_FAVORITES)) {
+            editor.putStringSet(
+                scopedFavoritesKey,
+                preferences.getStringSet(KEY_FAVORITES, emptySet()).orEmpty().toSet(),
+            )
+        }
+        if (!preferences.contains(scopedHistoryKey) && preferences.contains(KEY_HISTORY)) {
+            preferences.getString(KEY_HISTORY, null)?.let { editor.putString(scopedHistoryKey, it) }
+        }
+
+        // Keep the legacy keys intact in v1.1 foundation as rollback safety.
+        editor.putBoolean(KEY_PROFILE_SCOPE_MIGRATION_V1, true).commit()
     }
 
     private companion object {
         const val KEY_FAVORITES = "favorites"
         const val KEY_HISTORY = "history"
+        const val KEY_PROFILE_SCOPE_MIGRATION_V1 = "profile_scope_migration_v1"
         const val MAX_HISTORY = 100
         const val COMPLETED_RATIO = .92
     }
