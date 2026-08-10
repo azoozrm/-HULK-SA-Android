@@ -5,6 +5,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import java.util.UUID
+
+internal fun normalizeProfileName(raw: String): String? = raw
+    .trim()
+    .replace(Regex("\\s+"), " ")
+    .take(ProfileStore.MAX_DISPLAY_NAME_LENGTH)
+    .takeIf(String::isNotBlank)
+
+internal fun canDeleteProfile(isPrimary: Boolean, profileCount: Int): Boolean =
+    !isPrimary && profileCount > 1
 
 class ProfileStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -40,6 +50,66 @@ class ProfileStore(context: Context) {
     fun setActiveProfile(profileId: String): Boolean {
         val target = profiles().firstOrNull { it.id == profileId } ?: return false
         return preferences.edit().putString(KEY_ACTIVE_PROFILE_ID, target.id).commit()
+    }
+
+    @Synchronized
+    fun createProfile(
+        displayName: String,
+        avatarKey: String = UserProfile.DEFAULT_AVATAR_KEY,
+        kind: ProfileKind = ProfileKind.STANDARD,
+    ): UserProfile? {
+        val normalizedName = normalizeProfileName(displayName) ?: return null
+        val current = profiles()
+        if (current.size >= MAX_PROFILES) return null
+
+        val profile = UserProfile(
+            id = "profile_${UUID.randomUUID()}",
+            displayName = normalizedName,
+            kind = kind,
+            avatarKey = avatarKey.trim().ifBlank { UserProfile.DEFAULT_AVATAR_KEY },
+            createdAtEpochMs = System.currentTimeMillis(),
+            isPrimary = false,
+        )
+        val updated = current + profile
+        if (!preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated)).commit()) return null
+        return profile
+    }
+
+    @Synchronized
+    fun updateProfile(
+        profileId: String,
+        displayName: String,
+        avatarKey: String,
+    ): UserProfile? {
+        val normalizedName = normalizeProfileName(displayName) ?: return null
+        val current = profiles()
+        val index = current.indexOfFirst { it.id == profileId }
+        if (index < 0) return null
+
+        val existing = current[index]
+        val updatedProfile = existing.copy(
+            displayName = normalizedName,
+            avatarKey = avatarKey.trim().ifBlank { UserProfile.DEFAULT_AVATAR_KEY },
+        )
+        val updated = current.toMutableList().apply { this[index] = updatedProfile }
+        if (!preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated)).commit()) return null
+        return updatedProfile
+    }
+
+    @Synchronized
+    fun deleteProfile(profileId: String): Boolean {
+        val current = profiles()
+        val target = current.firstOrNull { it.id == profileId } ?: return false
+        if (!canDeleteProfile(target.isPrimary, current.size)) return false
+
+        val updated = current.filterNot { it.id == profileId }
+        val activeId = preferences.getString(KEY_ACTIVE_PROFILE_ID, null)
+        val editor = preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated))
+        if (activeId == profileId) {
+            val fallback = updated.firstOrNull(UserProfile::isPrimary) ?: updated.first()
+            editor.putString(KEY_ACTIVE_PROFILE_ID, fallback.id)
+        }
+        return editor.commit()
     }
 
     fun schemaVersion(): Int = preferences.getInt(KEY_SCHEMA_VERSION, 0)
@@ -127,6 +197,8 @@ class ProfileStore(context: Context) {
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
         const val PRIMARY_PROFILE_ID = "primary"
+        const val MAX_PROFILES = 5
+        const val MAX_DISPLAY_NAME_LENGTH = 24
 
         private const val PRIMARY_PROFILE_NAME = "الرئيسي"
         private const val PREFERENCES_NAME = "hulk_profiles_v1"
