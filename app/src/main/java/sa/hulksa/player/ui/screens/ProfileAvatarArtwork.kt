@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -16,7 +17,7 @@ internal fun ProfileAvatarArtwork(
 ) {
     ProfileAvatar(
         avatarKey = avatarKey,
-        modifier = Modifier,
+        modifier = Modifier.size(size),
         highlighted = highlighted,
     )
 }
