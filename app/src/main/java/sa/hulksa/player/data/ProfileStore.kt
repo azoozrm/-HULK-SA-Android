@@ -7,6 +7,15 @@ import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import java.util.UUID
 
+internal fun normalizeProfileName(raw: String): String? = raw
+    .trim()
+    .replace(Regex("\\s+"), " ")
+    .take(ProfileStore.MAX_DISPLAY_NAME_LENGTH)
+    .takeIf(String::isNotBlank)
+
+internal fun canDeleteProfile(isPrimary: Boolean, profileCount: Int): Boolean =
+    !isPrimary && profileCount > 1
+
 class ProfileStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
@@ -49,7 +58,7 @@ class ProfileStore(context: Context) {
         avatarKey: String = UserProfile.DEFAULT_AVATAR_KEY,
         kind: ProfileKind = ProfileKind.STANDARD,
     ): UserProfile? {
-        val normalizedName = normalizeDisplayName(displayName) ?: return null
+        val normalizedName = normalizeProfileName(displayName) ?: return null
         val current = profiles()
         if (current.size >= MAX_PROFILES) return null
 
@@ -72,7 +81,7 @@ class ProfileStore(context: Context) {
         displayName: String,
         avatarKey: String,
     ): UserProfile? {
-        val normalizedName = normalizeDisplayName(displayName) ?: return null
+        val normalizedName = normalizeProfileName(displayName) ?: return null
         val current = profiles()
         val index = current.indexOfFirst { it.id == profileId }
         if (index < 0) return null
@@ -91,7 +100,7 @@ class ProfileStore(context: Context) {
     fun deleteProfile(profileId: String): Boolean {
         val current = profiles()
         val target = current.firstOrNull { it.id == profileId } ?: return false
-        if (target.isPrimary || current.size <= 1) return false
+        if (!canDeleteProfile(target.isPrimary, current.size)) return false
 
         val updated = current.filterNot { it.id == profileId }
         val activeId = preferences.getString(KEY_ACTIVE_PROFILE_ID, null)
@@ -184,12 +193,6 @@ class ProfileStore(context: Context) {
         }
         return array.toString()
     }
-
-    private fun normalizeDisplayName(raw: String): String? = raw
-        .trim()
-        .replace(Regex("\\s+"), " ")
-        .take(MAX_DISPLAY_NAME_LENGTH)
-        .takeIf(String::isNotBlank)
 
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
