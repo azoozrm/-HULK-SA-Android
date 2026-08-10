@@ -165,20 +165,26 @@ class UserLibrary(context: Context) {
         "profile:$profileId:$baseKey"
 
     private fun migrateLegacyLibraryIfNeeded() {
-        if (preferences.getBoolean(KEY_PROFILE_SCOPE_MIGRATION_V1, false)) return
-
         val primaryProfileId = ProfileStore.PRIMARY_PROFILE_ID
         val scopedFavoritesKey = profileKey(primaryProfileId, KEY_FAVORITES)
         val scopedHistoryKey = profileKey(primaryProfileId, KEY_HISTORY)
-        val editor = preferences.edit()
+        val plan = profileLibraryMigrationPlan(
+            migrationAlreadyComplete = preferences.getBoolean(KEY_PROFILE_SCOPE_MIGRATION_V1, false),
+            scopedFavoritesExist = preferences.contains(scopedFavoritesKey),
+            legacyFavoritesExist = preferences.contains(KEY_FAVORITES),
+            scopedHistoryExists = preferences.contains(scopedHistoryKey),
+            legacyHistoryExists = preferences.contains(KEY_HISTORY),
+        )
+        if (!plan.markMigrationComplete) return
 
-        if (!preferences.contains(scopedFavoritesKey) && preferences.contains(KEY_FAVORITES)) {
+        val editor = preferences.edit()
+        if (plan.copyLegacyFavorites) {
             editor.putStringSet(
                 scopedFavoritesKey,
                 preferences.getStringSet(KEY_FAVORITES, emptySet()).orEmpty().toSet(),
             )
         }
-        if (!preferences.contains(scopedHistoryKey) && preferences.contains(KEY_HISTORY)) {
+        if (plan.copyLegacyHistory) {
             preferences.getString(KEY_HISTORY, null)?.let { editor.putString(scopedHistoryKey, it) }
         }
 
