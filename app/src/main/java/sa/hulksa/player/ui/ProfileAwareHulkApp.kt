@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -61,9 +62,6 @@ fun ProfileAwareHulkApp(
             return
         }
 
-        // Enter the switching state before touching session state. This prevents
-        // repeated remote clicks and makes the logout/login transition observable
-        // as one deterministic operation by the effect below.
         switching = true
         managingProfiles = false
         switchError = null
@@ -113,6 +111,14 @@ fun ProfileAwareHulkApp(
             resolvedForSession = false
             managingProfiles = false
         }
+    }
+
+    // Profile management is a nested destination of the picker. Intercept the
+    // system/remote Back action here so Android TV returns to the picker instead
+    // of allowing the Activity to finish. Editor-level Back is handled inside
+    // ProfileManagementScreen before this parent handler is reached.
+    BackHandler(enabled = managingProfiles) {
+        managingProfiles = false
     }
 
     when {
