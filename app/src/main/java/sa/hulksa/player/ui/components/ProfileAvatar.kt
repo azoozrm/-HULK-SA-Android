@@ -22,12 +22,13 @@ fun ProfileAvatar(
     modifier: Modifier = Modifier,
     highlighted: Boolean = false,
 ) {
-    val palette = when (avatarKey) {
-        "gold" -> AvatarPalette(Color(0xFFF2C94C), Color(0xFF6B4A00), Color(0xFFFFF1A8), Color(0xFF2D1C00))
-        "dark" -> AvatarPalette(Color(0xFF31343A), Color(0xFF0B0D10), Color(0xFFD8DEE9), Color(0xFF111318))
-        "classic" -> AvatarPalette(Color(0xFF6F8F3D), Color(0xFF1F2B16), Color(0xFFDCE8B7), Color(0xFF18200F))
-        "kids" -> AvatarPalette(Color(0xFF55C2FF), Color(0xFF124866), Color(0xFFFFE082), Color(0xFF0C2A3A))
-        else -> AvatarPalette(Color(0xFFB8C74A), Color(0xFF263113), Color(0xFFE8F0A8), Color(0xFF16200B))
+    val normalizedKey = normalizeAvatarKey(avatarKey)
+    val palette = when (normalizedKey) {
+        "nova" -> AvatarPalette(Color(0xFF4F8DFF), Color(0xFF214C9E), Color(0xFFEAF3FF), Color(0xFF1D4A8A))
+        "sage" -> AvatarPalette(Color(0xFF55D6B3), Color(0xFF167D67), Color(0xFFE7FFF8), Color(0xFF16725F))
+        "orbit" -> AvatarPalette(Color(0xFF78B7E8), Color(0xFF315B7D), Color(0xFFF2FAFF), Color(0xFF31536D))
+        "sunny" -> AvatarPalette(Color(0xFFFFD45A), Color(0xFFB97A12), Color(0xFFFFF6C9), Color(0xFFC17A10))
+        else -> AvatarPalette(Color(0xFFFFA45A), Color(0xFFB55C17), Color(0xFFFFF0DF), Color(0xFFB45B17))
     }
 
     Box(
@@ -40,7 +41,7 @@ fun ProfileAvatar(
             )
             .border(
                 width = if (highlighted) 2.dp else 1.dp,
-                color = if (highlighted) Color(0xFFFFD54F) else Color.White.copy(alpha = .14f),
+                color = if (highlighted) Color(0xFFFFD54F) else Color.White.copy(alpha = .18f),
                 shape = CircleShape,
             ),
         contentAlignment = Alignment.Center,
@@ -49,40 +50,31 @@ fun ProfileAvatar(
             val w = size.width
             val h = size.height
 
-            // shoulders
             drawOval(
                 color = palette.body,
                 topLeft = Offset(w * .20f, h * .62f),
                 size = Size(w * .60f, h * .32f),
             )
 
-            // head
             drawCircle(
                 color = palette.face,
                 radius = w * .22f,
                 center = Offset(w * .50f, h * .39f),
             )
 
-            // hair / mask shape varies by preset
-            when (avatarKey) {
-                "gold" -> {
+            when (normalizedKey) {
+                "nova" -> {
                     drawArc(
                         color = palette.accent,
-                        startAngle = 190f,
-                        sweepAngle = 160f,
+                        startAngle = 192f,
+                        sweepAngle = 156f,
                         useCenter = true,
                         topLeft = Offset(w * .27f, h * .16f),
                         size = Size(w * .46f, h * .38f),
                     )
+                    drawCircle(Color.White.copy(alpha = .90f), w * .022f, Offset(w * .68f, h * .24f))
                 }
-                "dark" -> {
-                    drawRect(
-                        color = palette.accent,
-                        topLeft = Offset(w * .30f, h * .17f),
-                        size = Size(w * .40f, h * .15f),
-                    )
-                }
-                "classic" -> {
+                "sage" -> {
                     drawArc(
                         color = palette.accent,
                         startAngle = 180f,
@@ -92,15 +84,22 @@ fun ProfileAvatar(
                         size = Size(w * .44f, h * .32f),
                     )
                 }
-                "kids" -> {
+                "orbit" -> {
+                    drawRect(
+                        color = palette.accent,
+                        topLeft = Offset(w * .30f, h * .17f),
+                        size = Size(w * .40f, h * .15f),
+                    )
+                }
+                "sunny" -> {
                     drawCircle(palette.accent, w * .08f, Offset(w * .35f, h * .19f))
                     drawCircle(palette.accent, w * .08f, Offset(w * .65f, h * .19f))
                 }
                 else -> {
                     drawArc(
                         color = palette.accent,
-                        startAngle = 200f,
-                        sweepAngle = 140f,
+                        startAngle = 205f,
+                        sweepAngle = 130f,
                         useCenter = true,
                         topLeft = Offset(w * .29f, h * .18f),
                         size = Size(w * .42f, h * .30f),
@@ -108,15 +107,16 @@ fun ProfileAvatar(
                 }
             }
 
-            // eyes
-            drawCircle(palette.eye, w * .022f, Offset(w * .43f, h * .40f))
-            drawCircle(palette.eye, w * .022f, Offset(w * .57f, h * .40f))
+            val eyeY = h * .40f
+            drawCircle(palette.eye, w * .022f, Offset(w * .43f, eyeY))
+            drawCircle(palette.eye, w * .022f, Offset(w * .57f, eyeY))
 
-            // smile / mouth
+            val mouthStart = if (normalizedKey == "orbit") 0f else 15f
+            val mouthSweep = if (normalizedKey == "orbit") 180f else 150f
             drawArc(
                 color = palette.eye,
-                startAngle = 15f,
-                sweepAngle = 150f,
+                startAngle = mouthStart,
+                sweepAngle = mouthSweep,
                 useCenter = false,
                 topLeft = Offset(w * .42f, h * .43f),
                 size = Size(w * .16f, h * .10f),
@@ -126,12 +126,21 @@ fun ProfileAvatar(
     }
 }
 
+private fun normalizeAvatarKey(key: String): String = when (key) {
+    "ember", "default" -> "ember"
+    "nova", "gold" -> "nova"
+    "sage", "classic" -> "sage"
+    "orbit", "dark" -> "orbit"
+    "sunny", "kids" -> "sunny"
+    else -> "ember"
+}
+
 private data class AvatarPalette(
     val backgroundTop: Color,
     val backgroundBottom: Color,
     val face: Color,
     val body: Color,
 ) {
-    val accent: Color get() = body.copy(alpha = .95f)
+    val accent: Color get() = body.copy(alpha = .96f)
     val eye: Color get() = backgroundBottom
 }
