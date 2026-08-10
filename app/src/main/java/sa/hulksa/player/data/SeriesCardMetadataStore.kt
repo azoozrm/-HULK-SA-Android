@@ -20,22 +20,25 @@ class SeriesCardMetadataStore private constructor(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val inFlight = mutableMapOf<Int, Deferred<SeriesCardTechnicalMetadata>>()
-    private val attemptedThisProcess = mutableSetOf<Int>()
+    private val lastAttemptAtMs = mutableMapOf<Int, Long>()
 
     @Volatile
     private var resolvedPortal: PortalConfig? = null
 
     suspend fun metadata(seriesId: Int): SeriesCardTechnicalMetadata {
-        readCached(seriesId)?.let { return it }
+        val cached = readCached(seriesId)
+        if (cached?.isComplete() == true) return cached
 
         val deferred = synchronized(inFlight) {
             inFlight[seriesId] ?: run {
-                if (seriesId in attemptedThisProcess) {
-                    return SeriesCardTechnicalMetadata()
+                val now = System.currentTimeMillis()
+                val lastAttempt = lastAttemptAtMs[seriesId] ?: 0L
+                if (now - lastAttempt < RETRY_COOLDOWN_MS) {
+                    return cached ?: SeriesCardTechnicalMetadata()
                 }
-                attemptedThisProcess += seriesId
+                lastAttemptAtMs[seriesId] = now
                 scope.async {
-                    semaphore.withPermit { fetchAndCache(seriesId) }
+                    semaphore.withPermit { fetchAndCache(seriesId, cached) }
                 }.also { inFlight[seriesId] = it }
             }
         }
@@ -51,14 +54,17 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         }
     }
 
-    private suspend fun fetchAndCache(seriesId: Int): SeriesCardTechnicalMetadata {
-        val credentials = credentialVault.load() ?: return SeriesCardTechnicalMetadata()
+    private suspend fun fetchAndCache(
+        seriesId: Int,
+        cached: SeriesCardTechnicalMetadata?,
+    ): SeriesCardTechnicalMetadata {
+        val credentials = credentialVault.load() ?: return cached ?: SeriesCardTechnicalMetadata()
         val portal = resolvedPortal ?: runCatching { portalResolver.resolve() }
             .getOrNull()
             ?.also { resolvedPortal = it }
-            ?: return SeriesCardTechnicalMetadata()
+            ?: return cached ?: SeriesCardTechnicalMetadata()
 
-        val metadata = runCatching {
+        val fetched = runCatching {
             client.fetch(
                 portal = portal,
                 credentials = credentials,
@@ -66,15 +72,20 @@ class SeriesCardMetadataStore private constructor(context: Context) {
             )
         }.getOrDefault(SeriesCardTechnicalMetadata())
 
-        if (metadata.quality != null || metadata.seasonCount != null) {
+        val merged = SeriesCardTechnicalMetadata(
+            quality = fetched.quality ?: cached?.quality,
+            seasonCount = fetched.seasonCount ?: cached?.seasonCount,
+        )
+
+        if (merged.quality != null || merged.seasonCount != null) {
             preferences.edit().apply {
-                metadata.quality?.let { putString("series:$seriesId:quality", it) }
-                metadata.seasonCount
+                merged.quality?.let { putString("series:$seriesId:quality", it) }
+                merged.seasonCount
                     ?.takeIf { it > 0 }
                     ?.let { putInt("series:$seriesId:season_count", it) }
             }.apply()
         }
-        return metadata
+        return merged
     }
 
     private fun readCached(seriesId: Int): SeriesCardTechnicalMetadata? {
@@ -92,9 +103,13 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         )
     }
 
+    private fun SeriesCardTechnicalMetadata.isComplete(): Boolean =
+        !quality.isNullOrBlank() && (seasonCount ?: 0) > 0
+
     companion object {
         private const val PREFERENCES = "series_card_verified_metadata"
         private const val MAX_CONCURRENT_REQUESTS = 2
+        private const val RETRY_COOLDOWN_MS = 1_000L
 
         @Volatile
         private var instance: SeriesCardMetadataStore? = null
