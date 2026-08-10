@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,6 +81,12 @@ fun ProfileManagementScreen(
         creating = false
         name = profile.displayName
         avatarKey = normalizedAvatarKey(profile.avatarKey)
+        error = null
+    }
+
+    BackHandler(enabled = creating || editingProfile != null) {
+        creating = false
+        editingProfile = null
         error = null
     }
 
