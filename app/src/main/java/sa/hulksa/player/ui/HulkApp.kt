@@ -37,6 +37,7 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 fun HulkApp(
     viewModel: HulkViewModel,
     isTelevisionDevice: Boolean,
+    navigationMemory: NavigationMemoryStore,
 ) {
     val state by viewModel.state.collectAsState()
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
@@ -56,7 +57,6 @@ fun HulkApp(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
     )
-    val navigationMemory = remember { NavigationMemoryStore() }
     // Favorite state changes must update the star immediately, but they must not rebuild
     // Home recommendation membership/order while the user is focused on those rows.
     // Refresh recommendation inputs only when catalogs/history actually change.
