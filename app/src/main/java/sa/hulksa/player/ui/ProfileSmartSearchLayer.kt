@@ -184,6 +184,7 @@ internal fun ProfileSmartSearchLayer(
     val searchFieldRequester = remember { FocusRequester() }
     val firstSuggestionRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
+    val firstRecentRequester = remember { FocusRequester() }
     val railSearchRequester = remember { FocusRequester() }
 
     val recordAndOpen: (ContentItem) -> Unit = { item ->
@@ -235,6 +236,7 @@ internal fun ProfileSmartSearchLayer(
                     searchFieldRequester = searchFieldRequester,
                     firstSuggestionRequester = firstSuggestionRequester,
                     firstResultRequester = firstResultRequester,
+                    firstRecentRequester = firstRecentRequester,
                     railSearchRequester = if (isTv) railSearchRequester else null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
@@ -271,6 +273,7 @@ internal fun ProfileSmartSearchLayer(
                     searchFieldRequester = searchFieldRequester,
                     firstSuggestionRequester = firstSuggestionRequester,
                     firstResultRequester = firstResultRequester,
+                    firstRecentRequester = firstRecentRequester,
                     railSearchRequester = null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
@@ -313,6 +316,7 @@ private fun SmartSearchContent(
     searchFieldRequester: FocusRequester,
     firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
+    firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
     isFavorite: (ContentItem) -> Boolean,
     onSearch: (String) -> Unit,
@@ -410,9 +414,11 @@ private fun SmartSearchContent(
             isTv = isTv,
             hasSuggestions = suggestions.isNotEmpty(),
             hasResults = results.isNotEmpty(),
+            hasRecent = state.searchQuery.isBlank() && recentEntries.isNotEmpty(),
             searchFieldRequester = searchFieldRequester,
             firstSuggestionRequester = firstSuggestionRequester,
             firstResultRequester = firstResultRequester,
+            firstRecentRequester = firstRecentRequester,
             railSearchRequester = railSearchRequester,
         )
 
@@ -424,6 +430,8 @@ private fun SmartSearchContent(
                     modifier = Modifier.weight(1f),
                     entries = recentEntries,
                     isTv = isTv,
+                    firstRecentRequester = firstRecentRequester,
+                    searchFieldRequester = searchFieldRequester,
                     onOpen = onOpenRecent,
                     onRemove = onRemoveRecent,
                     onClear = onClearRecent,
@@ -519,9 +527,11 @@ private fun SmartSearchInput(
     isTv: Boolean,
     hasSuggestions: Boolean,
     hasResults: Boolean,
+    hasRecent: Boolean,
     searchFieldRequester: FocusRequester,
     firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
+    firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -539,6 +549,12 @@ private fun SmartSearchInput(
                 tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstResultRequester.requestFocus() }.isSuccess
+            }
+
+            hasRecent -> {
+                tvEditing = false
+                keyboardController?.hide()
+                runCatching { firstRecentRequester.requestFocus() }.isSuccess
             }
 
             else -> false
@@ -592,6 +608,8 @@ private fun SmartRecentSection(
     modifier: Modifier,
     entries: List<ProfileContentSearchHistoryEntry>,
     isTv: Boolean,
+    firstRecentRequester: FocusRequester,
+    searchFieldRequester: FocusRequester,
     onOpen: (ProfileContentSearchHistoryEntry) -> Unit,
     onRemove: (ProfileContentSearchHistoryEntry) -> Unit,
     onClear: () -> Unit,
@@ -611,9 +629,9 @@ private fun SmartRecentSection(
                 )
                 Text(
                     text = if (entries.isEmpty()) {
-                        "السجل يحفظ فقط المحتوى الحقيقي الذي تختاره"
+                        "يتم حفظ المحتوى الذي تختاره فقط"
                     } else {
-                        "سجل مستقل لهذا المستخدم، بدون كلمات عشوائية او تكرار"
+                        "المحتوى الذي تختاره يظهر هنا بدون تكرار"
                     },
                     color = colors.textMuted,
                     fontSize = if (isTv) 11.sp else 10.sp,
@@ -659,9 +677,17 @@ private fun SmartRecentSection(
                     items = entries,
                     key = { it.stableKey },
                 ) { entry ->
+                    val isFirstEntry = entries.firstOrNull()?.stableKey == entry.stableKey
                     SmartRecentCard(
                         entry = entry,
                         isTv = isTv,
+                        openButtonModifier = if (isTv && isFirstEntry) {
+                            Modifier
+                                .focusRequester(firstRecentRequester)
+                                .focusProperties { up = searchFieldRequester }
+                        } else {
+                            Modifier
+                        },
                         onOpen = { onOpen(entry) },
                         onRemove = { onRemove(entry) },
                     )
@@ -675,6 +701,7 @@ private fun SmartRecentSection(
 private fun SmartRecentCard(
     entry: ProfileContentSearchHistoryEntry,
     isTv: Boolean,
+    openButtonModifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -685,7 +712,13 @@ private fun SmartRecentCard(
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF11130F))
             .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClick = onOpen)
+            .then(
+                if (isTv) {
+                    Modifier
+                } else {
+                    Modifier.clickable(role = Role.Button, onClick = onOpen)
+                },
+            )
             .padding(10.dp),
     ) {
         AsyncImage(
@@ -714,11 +747,14 @@ private fun SmartRecentCard(
             maxLines = 1,
         )
         Spacer(Modifier.height(7.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.focusGroup(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             FocusButton(
                 text = "فتح",
                 onClick = onOpen,
-                modifier = Modifier.weight(1f),
+                modifier = openButtonModifier.weight(1f),
                 compact = true,
             )
             FocusButton(
