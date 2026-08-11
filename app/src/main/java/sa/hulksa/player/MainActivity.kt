@@ -3,6 +3,7 @@ package sa.hulksa.player
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
@@ -15,11 +16,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import sa.hulksa.player.ui.ProfileAwareHulkApp
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class MainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
+    private var currentScreen: HulkScreen = HulkScreen.LOGIN
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,6 +41,8 @@ class MainActivity : ComponentActivity() {
         }
 
         configurePhoneWindow()
+        applyPhoneOrientationPolicy(HulkScreen.LOGIN)
+        observePhoneOrientationPolicy()
         requestDownloadNotificationPermissionIfNeeded(
             televisionDevice = isTelevisionDevice,
         )
@@ -46,9 +56,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyPhoneOrientationPolicy(currentScreen, newConfig)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus && isTelevisionDevice()) enterImmersiveMode()
+    }
+
+    private fun observePhoneOrientationPolicy() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.state
+                    .map { it.screen }
+                    .distinctUntilChanged()
+                    .collect { screen ->
+                        currentScreen = screen
+                        applyPhoneOrientationPolicy(screen)
+                    }
+            }
+        }
+    }
+
+    private fun applyPhoneOrientationPolicy(
+        screen: HulkScreen,
+        configuration: Configuration = resources.configuration,
+    ) {
+        if (isTelevisionDevice()) return
+
+        val largeScreen = configuration.smallestScreenWidthDp >= LARGE_SCREEN_MIN_DP
+        val targetOrientation = when {
+            largeScreen -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            screen == HulkScreen.PLAYER -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+
+        if (requestedOrientation != targetOrientation) {
+            requestedOrientation = targetOrientation
+        }
     }
 
     private fun isTelevisionDevice(): Boolean {
@@ -101,5 +148,9 @@ class MainActivity : ComponentActivity() {
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         }
+    }
+
+    private companion object {
+        const val LARGE_SCREEN_MIN_DP = 600
     }
 }
