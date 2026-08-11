@@ -198,7 +198,7 @@ internal fun ProfileSearchHistoryLayer(
                     searchFieldRequester = searchFieldRequester,
                     firstRecentRequester = firstRecentRequester,
                     firstResultRequester = firstResultRequester,
-                    railSearchRequester = railSearchRequester,
+                    railSearchRequester = if (isTv) railSearchRequester else null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
                     onOpen = onOpen,
@@ -878,7 +878,6 @@ private fun SearchNavigationRail(
     onSwitchProfile: () -> Unit,
 ) {
     val adaptiveUi = LocalAdaptiveUi.current
-    val colors = LocalHulkColors.current
     val metrics = tvRailMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus || !isTv
@@ -932,7 +931,7 @@ private fun SearchNavigationRail(
                     modifier = Modifier
                         .focusRequester(destinationRequesters.getValue(entry.destination))
                         .then(
-                            if (entry.destination == MainDestination.SEARCH) {
+                            if (isTv && entry.destination == MainDestination.SEARCH) {
                                 Modifier.focusProperties { left = searchFieldRequester }
                             } else {
                                 Modifier
