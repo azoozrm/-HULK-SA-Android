@@ -25,13 +25,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
@@ -55,13 +58,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusGroup
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -294,7 +295,7 @@ private fun SearchExperienceContent(
     }
     val verticalPadding = when {
         isTv -> (screenHeight / 42f).coerceIn(14f, 24f).dp
-        screenHeight < 520 -> 10.dp
+        screenHeight < 520 -> 9.dp
         else -> 14.dp
     }
     val titleSize = when {
@@ -387,19 +388,26 @@ private fun SearchExperienceContent(
         Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
 
         if (queryBlank) {
-            if (recentQueries.isNotEmpty()) {
-                RecentSearchesSection(
-                    recentQueries = recentQueries,
-                    isTv = isTv,
-                    screenWidthDp = screenWidth,
-                    firstRecentRequester = firstRecentRequester,
-                    searchFieldRequester = searchFieldRequester,
-                    onUseRecent = onUseRecent,
-                    onRemoveRecent = onRemoveRecent,
-                    onClearRecent = onClearRecent,
-                )
-            } else {
-                SearchWelcomeState(isTv = isTv)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                if (recentQueries.isNotEmpty()) {
+                    RecentSearchesSection(
+                        recentQueries = recentQueries,
+                        isTv = isTv,
+                        screenWidthDp = screenWidth,
+                        firstRecentRequester = firstRecentRequester,
+                        searchFieldRequester = searchFieldRequester,
+                        onUseRecent = onUseRecent,
+                        onRemoveRecent = onRemoveRecent,
+                        onClearRecent = onClearRecent,
+                    )
+                } else {
+                    SearchWelcomeState(isTv = isTv)
+                }
             }
         } else {
             SearchResultsSection(
@@ -583,11 +591,10 @@ private fun RecentSearchesSection(
             contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
         ) {
-            items(
+            itemsIndexed(
                 items = recentQueries,
-                key = { it.lowercase() },
-            ) { recentQuery ->
-                val index = recentQueries.indexOf(recentQuery)
+                key = { _, query -> query.lowercase() },
+            ) { index, recentQuery ->
                 Column(
                     modifier = Modifier
                         .width(tileWidth)
@@ -640,7 +647,7 @@ private fun RecentSearchesSection(
         Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
         Text(
             text = if (isTv) {
-                "اضغط OK على بحث سابق لاستخدامه، أو ارجع الى حقل البحث لكتابة كلمة جديدة"
+                "اضغط OK على بحث سابق لاستخدامه، او ارجع الى حقل البحث لكتابة كلمة جديدة"
             } else {
                 "اختر بحثا سابقا او اكتب كلمة جديدة"
             },
@@ -922,7 +929,6 @@ private fun SearchNavigationRail(
                     entry = entry,
                     selected = selected == entry.destination,
                     expanded = expanded,
-                    isTv = isTv,
                     modifier = Modifier
                         .focusRequester(destinationRequesters.getValue(entry.destination))
                         .then(
@@ -945,7 +951,6 @@ private fun SearchNavigationRail(
             ),
             selected = false,
             expanded = expanded,
-            isTv = isTv,
             onClick = onSwitchProfile,
         )
 
@@ -956,7 +961,6 @@ private fun SearchNavigationRail(
                 entry = entry,
                 selected = false,
                 expanded = expanded,
-                isTv = isTv,
                 modifier = Modifier.focusRequester(destinationRequesters.getValue(entry.destination)),
                 onClick = { onSelectDestination(entry.destination) },
             )
@@ -969,7 +973,6 @@ private fun SearchRailItem(
     entry: SearchDestinationEntry,
     selected: Boolean,
     expanded: Boolean,
-    isTv: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
