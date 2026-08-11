@@ -17,6 +17,7 @@ import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.ProfileManagementScreen
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
 
@@ -31,6 +32,7 @@ fun ProfileAwareHulkApp(
     val context = LocalContext.current
     val profileStore = remember(context) { ProfileStore(context) }
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
+    val navigationMemoryByProfile = remember { mutableMapOf<String, NavigationMemoryStore>() }
 
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
     var switching by rememberSaveable { mutableStateOf(false) }
@@ -41,6 +43,9 @@ fun ProfileAwareHulkApp(
 
     val profiles = remember(profileRevision) { profileStore.profiles() }
     val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
+    val activeNavigationMemory = remember(activeProfileId) {
+        navigationMemoryByProfile.getOrPut(activeProfileId) { NavigationMemoryStore() }
+    }
     val routingPreferences = profilePreferencesStore.routing()
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
     val directEntryTarget = if (
@@ -131,6 +136,7 @@ fun ProfileAwareHulkApp(
             switching = false
             switchError = null
             pickerRequestedFromApp = false
+            navigationMemoryByProfile.clear()
         }
     }
 
@@ -164,7 +170,10 @@ fun ProfileAwareHulkApp(
             },
             onDelete = { profileId ->
                 val deleted = profileStore.deleteProfile(profileId)
-                if (deleted) profileRevision++
+                if (deleted) {
+                    navigationMemoryByProfile.remove(profileId)
+                    profileRevision++
+                }
                 deleted
             },
             onSelect = ::switchProfile,
@@ -196,6 +205,7 @@ fun ProfileAwareHulkApp(
             HulkApp(
                 viewModel = viewModel,
                 isTelevisionDevice = isTelevisionDevice,
+                navigationMemory = activeNavigationMemory,
             )
         }
     }
