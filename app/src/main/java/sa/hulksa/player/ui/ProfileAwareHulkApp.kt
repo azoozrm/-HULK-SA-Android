@@ -35,6 +35,9 @@ fun ProfileAwareHulkApp(
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
     val navigationMemoryByProfile = remember { mutableMapOf<String, NavigationMemoryStore>() }
     val destinationMemoryByProfile = remember { mutableMapOf<String, MainDestination>() }
+    val catalogNavigationMemoryByProfile = remember {
+        mutableMapOf<String, ProfileCatalogNavigationMemory>()
+    }
 
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
     var switching by rememberSaveable { mutableStateOf(false) }
@@ -48,6 +51,11 @@ fun ProfileAwareHulkApp(
     val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
     val activeNavigationMemory = remember(activeProfileId) {
         navigationMemoryByProfile.getOrPut(activeProfileId) { NavigationMemoryStore() }
+    }
+    val activeCatalogNavigationMemory = remember(activeProfileId) {
+        catalogNavigationMemoryByProfile.getOrPut(activeProfileId) {
+            ProfileCatalogNavigationMemory()
+        }
     }
     val routingPreferences = profilePreferencesStore.routing()
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
@@ -95,10 +103,21 @@ fun ProfileAwareHulkApp(
         createProfileRequested = false
         switchError = null
 
-        // Capture the current profile's top-level location before changing the
-        // active profile. A profile with no prior location always starts at Home.
+        // Capture both the top-level destination and the active catalog context
+        // before changing profiles. Catalog context is transient and stays local
+        // to each stable profile ID for this authenticated app session.
         destinationMemoryByProfile[currentProfileId] = state.destination
+        catalogNavigationMemoryByProfile
+            .getOrPut(currentProfileId) { ProfileCatalogNavigationMemory() }
+            .save(
+                destination = state.destination,
+                categoryId = state.selectedCategoryId,
+                query = state.searchQuery,
+            )
+
         val targetDestination = destinationMemoryByProfile[profile.id] ?: MainDestination.HOME
+        val targetCatalogMemory = catalogNavigationMemoryByProfile
+            .getOrPut(profile.id) { ProfileCatalogNavigationMemory() }
 
         if (!profileStore.setActiveProfile(profile.id)) {
             switching = false
@@ -107,10 +126,13 @@ fun ProfileAwareHulkApp(
         }
 
         // Profiles are local viewing contexts only. Keep the authenticated IPTV
-        // session intact, but restore the target profile's own top-level location
-        // and refresh its profile-scoped library snapshot without creating a new
-        // IPTV session.
+        // session intact, restore the target profile's own destination and catalog
+        // category/query, then refresh profile-scoped library data.
         viewModel.selectDestination(targetDestination)
+        if (targetDestination.isProfileCatalogDestination()) {
+            viewModel.updateSearch(targetCatalogMemory.query(targetDestination))
+            viewModel.selectCategory(targetCatalogMemory.category(targetDestination))
+        }
         viewModel.refreshProfileLibrary()
         profileRevision++
         switching = false
@@ -123,10 +145,19 @@ fun ProfileAwareHulkApp(
         activeProfileId,
         state.screen,
         state.destination,
+        state.selectedCategoryId,
+        state.searchQuery,
         switching,
     ) {
         if (authenticated && state.screen == HulkScreen.MAIN && !switching) {
             destinationMemoryByProfile[activeProfileId] = state.destination
+            catalogNavigationMemoryByProfile
+                .getOrPut(activeProfileId) { ProfileCatalogNavigationMemory() }
+                .save(
+                    destination = state.destination,
+                    categoryId = state.selectedCategoryId,
+                    query = state.searchQuery,
+                )
         }
     }
 
@@ -162,6 +193,7 @@ fun ProfileAwareHulkApp(
             pickerRequestedFromApp = false
             navigationMemoryByProfile.clear()
             destinationMemoryByProfile.clear()
+            catalogNavigationMemoryByProfile.clear()
         }
     }
 
@@ -203,6 +235,7 @@ fun ProfileAwareHulkApp(
                 if (deleted) {
                     navigationMemoryByProfile.remove(profileId)
                     destinationMemoryByProfile.remove(profileId)
+                    catalogNavigationMemoryByProfile.remove(profileId)
                     profileRevision++
                 }
                 deleted
@@ -248,6 +281,7 @@ fun ProfileAwareHulkApp(
                 viewModel = viewModel,
                 isTelevisionDevice = isTelevisionDevice,
                 navigationMemory = activeNavigationMemory,
+                catalogNavigationMemory = activeCatalogNavigationMemory,
             )
         }
     }
