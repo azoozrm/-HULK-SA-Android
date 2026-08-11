@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -602,15 +601,11 @@ private fun RecentSearchesSection(
         Spacer(Modifier.height(if (isTv) 14.dp else if (compactLandscape) 5.dp else if (compactHeight) 7.dp else 10.dp))
 
         if (compactLandscape) {
-            LazyColumn(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(vertical = 2.dp),
             ) {
-                itemsIndexed(
-                    items = recentQueries,
-                    key = { _, query -> query.lowercase() },
-                ) { index, recentQuery ->
+                recentQueries.forEachIndexed { index, recentQuery ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
