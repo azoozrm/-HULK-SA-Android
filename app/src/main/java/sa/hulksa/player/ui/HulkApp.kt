@@ -13,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +39,7 @@ fun HulkApp(
     viewModel: HulkViewModel,
     isTelevisionDevice: Boolean,
     navigationMemory: NavigationMemoryStore,
+    catalogNavigationMemory: ProfileCatalogNavigationMemory,
 ) {
     val state by viewModel.state.collectAsState()
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
@@ -63,6 +65,35 @@ fun HulkApp(
     val homeRecommendationFavorites = remember(state.catalogs, state.history) { state.favorites }
     val notify: (String) -> Unit = { message ->
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+
+    val selectDestinationWithProfileContext: (MainDestination) -> Unit = { destination ->
+        catalogNavigationMemory.save(
+            destination = state.destination,
+            categoryId = state.selectedCategoryId,
+            query = state.searchQuery,
+        )
+        viewModel.selectDestination(destination)
+        if (destination.isProfileCatalogDestination()) {
+            viewModel.updateSearch(catalogNavigationMemory.query(destination))
+            viewModel.selectCategory(catalogNavigationMemory.category(destination))
+        }
+    }
+    val selectCategoryWithProfileContext: (String?) -> Unit = { categoryId ->
+        catalogNavigationMemory.save(
+            destination = state.destination,
+            categoryId = categoryId,
+            query = state.searchQuery,
+        )
+        viewModel.selectCategory(categoryId)
+    }
+    val searchCatalogWithProfileContext: (String) -> Unit = { query ->
+        catalogNavigationMemory.save(
+            destination = state.destination,
+            categoryId = state.selectedCategoryId,
+            query = query,
+        )
+        viewModel.updateSearch(query)
     }
 
     BackHandler(
@@ -103,7 +134,7 @@ fun HulkApp(
                                 state = state,
                                 isTv = isTv,
                                 isFavorite = viewModel::isFavorite,
-                                onSelectDestination = viewModel::selectDestination,
+                                onSelectDestination = selectDestinationWithProfileContext,
                                 onSearch = viewModel::updateSearch,
                                 onOpen = viewModel::open,
                                 onToggleFavorite = { item ->
@@ -120,47 +151,52 @@ fun HulkApp(
                                 onSwitchProfile = requestProfileSwitch,
                             )
                         } else {
-                            MainShellScreen(
-                                state = if (state.destination == MainDestination.HOME) {
-                                    state.copy(favorites = homeRecommendationFavorites)
-                                } else {
-                                    state
-                                },
-                                isTv = isTv,
-                                navigationMemory = navigationMemory,
-                                isFavorite = viewModel::isFavorite,
-                                onSelectDestination = viewModel::selectDestination,
-                                onSelectCategory = viewModel::selectCategory,
-                                onSearch = viewModel::updateSearch,
-                                onOpen = viewModel::open,
-                                onOpenHistory = { entry ->
-                                    val localDownload = state.downloads.firstOrNull { download ->
-                                        download.historyKey == entry.key &&
-                                            download.status == OfflineStatus.COMPLETED &&
-                                            !download.localUri.isNullOrBlank()
-                                    }
-                                    if (localDownload != null) {
-                                        viewModel.playDownload(localDownload)
+                            // MainShell historically kept one local category/query map. Re-key the
+                            // shell at each top-level destination so that local map cannot override
+                            // the profile-owned catalog context restored above.
+                            key(catalogNavigationMemory, state.destination) {
+                                MainShellScreen(
+                                    state = if (state.destination == MainDestination.HOME) {
+                                        state.copy(favorites = homeRecommendationFavorites)
                                     } else {
-                                        viewModel.openHistory(entry)
-                                    }
-                                },
-                                onToggleFavorite = viewModel::toggleFavorite,
-                                onRefresh = viewModel::refresh,
-                                onClearHistory = viewModel::clearHistory,
-                                onPlayDownload = viewModel::playDownload,
-                                onDeleteDownload = { item ->
-                                    viewModel.deleteDownload(item)
-                                    notify("تم حذف التحميل.")
-                                },
-                                onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
-                                onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
-                                onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
-                                onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
-                                onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
-                                onRunDiagnostics = viewModel::runDiagnostics,
-                                onLogout = viewModel::logout,
-                            )
+                                        state
+                                    },
+                                    isTv = isTv,
+                                    navigationMemory = navigationMemory,
+                                    isFavorite = viewModel::isFavorite,
+                                    onSelectDestination = selectDestinationWithProfileContext,
+                                    onSelectCategory = selectCategoryWithProfileContext,
+                                    onSearch = searchCatalogWithProfileContext,
+                                    onOpen = viewModel::open,
+                                    onOpenHistory = { entry ->
+                                        val localDownload = state.downloads.firstOrNull { download ->
+                                            download.historyKey == entry.key &&
+                                                download.status == OfflineStatus.COMPLETED &&
+                                                !download.localUri.isNullOrBlank()
+                                        }
+                                        if (localDownload != null) {
+                                            viewModel.playDownload(localDownload)
+                                        } else {
+                                            viewModel.openHistory(entry)
+                                        }
+                                    },
+                                    onToggleFavorite = viewModel::toggleFavorite,
+                                    onRefresh = viewModel::refresh,
+                                    onClearHistory = viewModel::clearHistory,
+                                    onPlayDownload = viewModel::playDownload,
+                                    onDeleteDownload = { item ->
+                                        viewModel.deleteDownload(item)
+                                        notify("تم حذف التحميل.")
+                                    },
+                                    onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
+                                    onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
+                                    onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
+                                    onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
+                                    onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
+                                    onRunDiagnostics = viewModel::runDiagnostics,
+                                    onLogout = viewModel::logout,
+                                )
+                            }
                         }
                     }
 
