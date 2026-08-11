@@ -287,6 +287,7 @@ private fun SearchExperienceContent(
     val adaptiveUi = LocalAdaptiveUi.current
     val screenWidth = adaptiveUi.screenWidthDp
     val screenHeight = adaptiveUi.screenHeightDp
+    val compactHeight = !isTv && screenHeight < 560
     val horizontalPadding = when {
         isTv -> (screenWidth / 46f).coerceIn(18f, 34f).dp
         screenWidth >= 840 -> 28.dp
@@ -295,7 +296,7 @@ private fun SearchExperienceContent(
     }
     val verticalPadding = when {
         isTv -> (screenHeight / 42f).coerceIn(14f, 24f).dp
-        screenHeight < 520 -> 9.dp
+        compactHeight -> 8.dp
         else -> 14.dp
     }
     val titleSize = when {
@@ -326,11 +327,11 @@ private fun SearchExperienceContent(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compactHeight) 8.dp else 12.dp),
         ) {
             Box(
                 modifier = Modifier
-                    .size(if (isTv) 52.dp else 44.dp)
+                    .size(if (isTv) 52.dp else if (compactHeight) 38.dp else 44.dp)
                     .clip(CircleShape)
                     .background(colors.gold.copy(alpha = .14f))
                     .border(1.dp, colors.gold.copy(alpha = .34f), CircleShape),
@@ -340,7 +341,7 @@ private fun SearchExperienceContent(
                     imageVector = Icons.Rounded.Search,
                     contentDescription = null,
                     tint = colors.goldBright,
-                    modifier = Modifier.size(if (isTv) 27.dp else 23.dp),
+                    modifier = Modifier.size(if (isTv) 27.dp else if (compactHeight) 20.dp else 23.dp),
                 )
             }
 
@@ -348,19 +349,21 @@ private fun SearchExperienceContent(
                 Text(
                     text = "البحث",
                     color = colors.text,
-                    fontSize = titleSize,
+                    fontSize = if (compactHeight) 20.sp else titleSize,
                     fontWeight = FontWeight.Black,
                 )
-                Text(
-                    text = "ابحث في القنوات والافلام والمسلسلات من مكان واحد",
-                    color = colors.textMuted,
-                    fontSize = subtitleSize,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (!compactHeight) {
+                    Text(
+                        text = "ابحث في القنوات والافلام والمسلسلات من مكان واحد",
+                        color = colors.textMuted,
+                        fontSize = subtitleSize,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
-            if (!isTv && screenWidth >= 360) {
+            if (!isTv && screenWidth >= 390 && !compactHeight) {
                 FocusButton(
                     text = "تغيير المستخدم",
                     onClick = onSwitchProfile,
@@ -371,7 +374,7 @@ private fun SearchExperienceContent(
             }
         }
 
-        Spacer(Modifier.height(if (isTv) 18.dp else 14.dp))
+        Spacer(Modifier.height(if (isTv) 18.dp else if (compactHeight) 8.dp else 14.dp))
 
         SearchInput(
             value = state.searchQuery,
@@ -385,7 +388,7 @@ private fun SearchExperienceContent(
             railSearchRequester = railSearchRequester,
         )
 
-        Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
+        Spacer(Modifier.height(if (isTv) 16.dp else if (compactHeight) 8.dp else 12.dp))
 
         if (queryBlank) {
             Column(
@@ -398,6 +401,7 @@ private fun SearchExperienceContent(
                     RecentSearchesSection(
                         recentQueries = recentQueries,
                         isTv = isTv,
+                        compactHeight = compactHeight,
                         screenWidthDp = screenWidth,
                         firstRecentRequester = firstRecentRequester,
                         searchFieldRequester = searchFieldRequester,
@@ -406,7 +410,7 @@ private fun SearchExperienceContent(
                         onClearRecent = onClearRecent,
                     )
                 } else {
-                    SearchWelcomeState(isTv = isTv)
+                    SearchWelcomeState(isTv = isTv, compactHeight = compactHeight)
                 }
             }
         } else {
@@ -415,6 +419,7 @@ private fun SearchExperienceContent(
                 query = state.searchQuery.trim(),
                 results = results,
                 isTv = isTv,
+                compactHeight = compactHeight,
                 loading = loadingSearchCatalogs,
                 firstResultRequester = firstResultRequester,
                 searchFieldRequester = searchFieldRequester,
@@ -531,6 +536,7 @@ private fun SearchInput(
 private fun RecentSearchesSection(
     recentQueries: List<String>,
     isTv: Boolean,
+    compactHeight: Boolean,
     screenWidthDp: Int,
     firstRecentRequester: FocusRequester,
     searchFieldRequester: FocusRequester,
@@ -555,7 +561,7 @@ private fun RecentSearchesSection(
                 colors.gold.copy(alpha = .22f),
                 RoundedCornerShape(if (isTv) 20.dp else 16.dp),
             )
-            .padding(if (isTv) 18.dp else 13.dp),
+            .padding(if (isTv) 18.dp else if (compactHeight) 10.dp else 13.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -566,14 +572,16 @@ private fun RecentSearchesSection(
                 Text(
                     text = "عمليات البحث الاخيرة",
                     color = colors.text,
-                    fontSize = if (isTv) 19.sp else 16.sp,
+                    fontSize = if (isTv) 19.sp else if (compactHeight) 14.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
-                Text(
-                    text = "سجل مستقل لهذا المستخدم فقط",
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 11.sp else 10.sp,
-                )
+                if (!compactHeight) {
+                    Text(
+                        text = "سجل مستقل لهذا المستخدم فقط",
+                        color = colors.textMuted,
+                        fontSize = if (isTv) 11.sp else 10.sp,
+                    )
+                }
             }
             FocusButton(
                 text = "مسح الكل",
@@ -584,7 +592,7 @@ private fun RecentSearchesSection(
             )
         }
 
-        Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
+        Spacer(Modifier.height(if (isTv) 14.dp else if (compactHeight) 7.dp else 10.dp))
 
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
@@ -601,7 +609,7 @@ private fun RecentSearchesSection(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF11130F))
                         .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(14.dp))
-                        .padding(11.dp),
+                        .padding(if (compactHeight) 8.dp else 11.dp),
                 ) {
                     Text(
                         text = recentQuery,
@@ -611,7 +619,7 @@ private fun RecentSearchesSection(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(9.dp))
+                    Spacer(Modifier.height(if (compactHeight) 6.dp else 9.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -644,26 +652,28 @@ private fun RecentSearchesSection(
             }
         }
 
-        Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
-        Text(
-            text = if (isTv) {
-                "اضغط OK على بحث سابق لاستخدامه، او ارجع الى حقل البحث لكتابة كلمة جديدة"
-            } else {
-                "اختر بحثا سابقا او اكتب كلمة جديدة"
-            },
-            color = colors.textMuted.copy(alpha = .86f),
-            fontSize = if (isTv) 10.sp else 9.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (!compactHeight) {
+            Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
+            Text(
+                text = if (isTv) {
+                    "اضغط OK على بحث سابق لاستخدامه، او ارجع الى حقل البحث لكتابة كلمة جديدة"
+                } else {
+                    "اختر بحثا سابقا او اكتب كلمة جديدة"
+                },
+                color = colors.textMuted.copy(alpha = .86f),
+                fontSize = if (isTv) 10.sp else 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 
-    Spacer(Modifier.height(if (isTv) 18.dp else 13.dp))
-    SearchDiscoveryHint(isTv = isTv)
+    Spacer(Modifier.height(if (isTv) 18.dp else if (compactHeight) 8.dp else 13.dp))
+    SearchDiscoveryHint(isTv = isTv, compactHeight = compactHeight)
 }
 
 @Composable
-private fun SearchWelcomeState(isTv: Boolean) {
+private fun SearchWelcomeState(isTv: Boolean, compactHeight: Boolean) {
     val colors = LocalHulkColors.current
     Box(
         modifier = Modifier
@@ -671,7 +681,10 @@ private fun SearchWelcomeState(isTv: Boolean) {
             .clip(RoundedCornerShape(if (isTv) 20.dp else 16.dp))
             .background(colors.surfaceRaised.copy(alpha = .52f))
             .border(1.dp, Color.White.copy(alpha = .07f), RoundedCornerShape(if (isTv) 20.dp else 16.dp))
-            .padding(vertical = if (isTv) 34.dp else 26.dp, horizontal = 18.dp),
+            .padding(
+                vertical = if (isTv) 34.dp else if (compactHeight) 16.dp else 26.dp,
+                horizontal = 18.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -679,47 +692,51 @@ private fun SearchWelcomeState(isTv: Boolean) {
                 imageVector = Icons.Rounded.Search,
                 contentDescription = null,
                 tint = colors.goldBright,
-                modifier = Modifier.size(if (isTv) 42.dp else 34.dp),
+                modifier = Modifier.size(if (isTv) 42.dp else if (compactHeight) 28.dp else 34.dp),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(if (compactHeight) 6.dp else 10.dp))
             Text(
                 text = "ابحث عن المحتوى الذي تريده",
                 color = colors.text,
-                fontSize = if (isTv) 20.sp else 16.sp,
+                fontSize = if (isTv) 20.sp else if (compactHeight) 14.sp else 16.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(5.dp))
-            Text(
-                text = "اكتب اسم قناة او فيلم او مسلسل، ويمكنك ايضا البحث بالسنة او النوع",
-                color = colors.textMuted,
-                fontSize = if (isTv) 12.sp else 10.sp,
-                maxLines = 2,
-            )
+            if (!compactHeight) {
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    text = "اكتب اسم قناة او فيلم او مسلسل، ويمكنك ايضا البحث بالسنة او النوع",
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 12.sp else 10.sp,
+                    maxLines = 2,
+                )
+            }
         }
     }
 
-    Spacer(Modifier.height(if (isTv) 18.dp else 13.dp))
-    SearchDiscoveryHint(isTv = isTv)
+    Spacer(Modifier.height(if (isTv) 18.dp else if (compactHeight) 8.dp else 13.dp))
+    SearchDiscoveryHint(isTv = isTv, compactHeight = compactHeight)
 }
 
 @Composable
-private fun SearchDiscoveryHint(isTv: Boolean) {
+private fun SearchDiscoveryHint(isTv: Boolean, compactHeight: Boolean) {
     val colors = LocalHulkColors.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        SearchTypePill("قنوات", Icons.Rounded.LiveTv, Modifier.weight(1f), isTv)
-        SearchTypePill("افلام", Icons.Rounded.Movie, Modifier.weight(1f), isTv)
-        SearchTypePill("مسلسلات", Icons.Rounded.Tv, Modifier.weight(1f), isTv)
+        SearchTypePill("قنوات", Icons.Rounded.LiveTv, Modifier.weight(1f), isTv, compactHeight)
+        SearchTypePill("افلام", Icons.Rounded.Movie, Modifier.weight(1f), isTv, compactHeight)
+        SearchTypePill("مسلسلات", Icons.Rounded.Tv, Modifier.weight(1f), isTv, compactHeight)
     }
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = "نتائج البحث تعرض كل المصادر المتاحة في حسابك",
-        color = colors.textMuted.copy(alpha = .7f),
-        fontSize = if (isTv) 9.sp else 8.sp,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    if (!compactHeight) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "نتائج البحث تعرض كل المصادر المتاحة في حسابك",
+            color = colors.textMuted.copy(alpha = .7f),
+            fontSize = if (isTv) 9.sp else 8.sp,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable
@@ -728,6 +745,7 @@ private fun SearchTypePill(
     icon: ImageVector,
     modifier: Modifier,
     isTv: Boolean,
+    compactHeight: Boolean,
 ) {
     val colors = LocalHulkColors.current
     Row(
@@ -735,7 +753,10 @@ private fun SearchTypePill(
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF10120E))
             .border(1.dp, Color.White.copy(alpha = .06f), RoundedCornerShape(12.dp))
-            .padding(horizontal = if (isTv) 14.dp else 10.dp, vertical = if (isTv) 11.dp else 9.dp),
+            .padding(
+                horizontal = if (isTv) 14.dp else 10.dp,
+                vertical = if (isTv) 11.dp else if (compactHeight) 6.dp else 9.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -743,13 +764,13 @@ private fun SearchTypePill(
             imageVector = icon,
             contentDescription = null,
             tint = colors.goldBright,
-            modifier = Modifier.size(if (isTv) 18.dp else 16.dp),
+            modifier = Modifier.size(if (isTv) 18.dp else if (compactHeight) 14.dp else 16.dp),
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(if (compactHeight) 4.dp else 6.dp))
         Text(
             text = text,
             color = colors.text,
-            fontSize = if (isTv) 12.sp else 10.sp,
+            fontSize = if (isTv) 12.sp else if (compactHeight) 9.sp else 10.sp,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -761,6 +782,7 @@ private fun SearchResultsSection(
     query: String,
     results: List<ContentItem>,
     isTv: Boolean,
+    compactHeight: Boolean,
     loading: Boolean,
     firstResultRequester: FocusRequester,
     searchFieldRequester: FocusRequester,
@@ -777,7 +799,7 @@ private fun SearchResultsSection(
             Text(
                 text = "نتائج البحث",
                 color = colors.text,
-                fontSize = if (isTv) 18.sp else 15.sp,
+                fontSize = if (isTv) 18.sp else if (compactHeight) 13.sp else 15.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.width(8.dp))
@@ -799,7 +821,7 @@ private fun SearchResultsSection(
             )
         }
 
-        Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
+        Spacer(Modifier.height(if (isTv) 12.dp else if (compactHeight) 6.dp else 9.dp))
 
         when {
             loading -> {
@@ -813,14 +835,17 @@ private fun SearchResultsSection(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(colors.surfaceRaised.copy(alpha = .56f))
-                        .padding(vertical = if (isTv) 34.dp else 28.dp, horizontal = 18.dp),
+                        .padding(
+                            vertical = if (isTv) 34.dp else if (compactHeight) 16.dp else 28.dp,
+                            horizontal = 18.dp,
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "لا توجد نتائج مطابقة",
                             color = colors.text,
-                            fontSize = if (isTv) 19.sp else 16.sp,
+                            fontSize = if (isTv) 19.sp else if (compactHeight) 14.sp else 16.sp,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(Modifier.height(5.dp))
@@ -834,11 +859,17 @@ private fun SearchResultsSection(
             }
             else -> {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = if (isTv) 146.dp else 112.dp),
+                    columns = GridCells.Adaptive(
+                        minSize = when {
+                            isTv -> 146.dp
+                            compactHeight -> 104.dp
+                            else -> 112.dp
+                        },
+                    ),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = if (isTv) 24.dp else 18.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else if (compactHeight) 8.dp else 12.dp),
                 ) {
                     itemsIndexed(
                         items = results,
