@@ -24,12 +24,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.item
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,9 +48,11 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,6 +80,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.ProfileContentSearchHistoryEntry
@@ -99,6 +104,11 @@ private data class SmartSearchDestination(
     val destination: MainDestination,
     val icon: ImageVector,
     val label: String,
+)
+
+private data class SmartSearchSnapshot(
+    val query: String = "",
+    val results: List<ContentItem> = emptyList(),
 )
 
 private val smartSearchDestinations = listOf(
@@ -133,27 +143,43 @@ internal fun ProfileSmartSearchLayer(
     val activeProfileId = profileStore.activeProfileId()
     var historyRevision by remember(activeProfileId) { mutableIntStateOf(0) }
     val recentEntries = remember(activeProfileId, historyRevision) { historyStore.recent() }
+
     val normalizedQuery = state.searchQuery.trim()
-    val allResults = remember(state.catalogs, normalizedQuery) {
-        if (normalizedQuery.isBlank()) {
-            emptyList()
+    var settledQuery by remember { mutableStateOf("") }
+    LaunchedEffect(normalizedQuery) {
+        if (normalizedQuery.length < MIN_QUERY_LENGTH) {
+            settledQuery = ""
         } else {
-            state.catalogs.values
-                .asSequence()
-                .flatMap { it.items.asSequence() }
-                .filter { it.smartSearchMatches(normalizedQuery) }
-                .distinctBy { "${it.type}:${it.id}" }
-                .sortedWith(
-                    compareBy<ContentItem> { it.smartSearchRank(normalizedQuery) }
-                        .thenByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
-                        .thenBy { it.name.length },
-                )
-                .toList()
+            delay(SEARCH_DEBOUNCE_MS)
+            settledQuery = normalizedQuery
         }
     }
-    val suggestions = remember(allResults) { allResults.take(MAX_SUGGESTIONS) }
-    val loading = normalizedQuery.isNotBlank() && state.loadingTypes.isNotEmpty() && allResults.isEmpty()
+
+    val searchSnapshot by produceState(
+        initialValue = SmartSearchSnapshot(),
+        key1 = state.catalogs,
+        key2 = settledQuery,
+    ) {
+        value = if (settledQuery.length < MIN_QUERY_LENGTH) {
+            SmartSearchSnapshot()
+        } else {
+            withContext(Dispatchers.Default) {
+                SmartSearchSnapshot(
+                    query = settledQuery,
+                    results = boundedSmartSearch(state, settledQuery),
+                )
+            }
+        }
+    }
+
+    val results = if (searchSnapshot.query == settledQuery) searchSnapshot.results else emptyList()
     val imeVisible = !isTv && WindowInsets.isImeVisible
+    val suggestionLimit = if (isTv) MAX_TV_SUGGESTIONS else MAX_PHONE_SUGGESTIONS
+    val suggestions = remember(results, suggestionLimit) { results.take(suggestionLimit) }
+    val searchPending = normalizedQuery.length >= MIN_QUERY_LENGTH &&
+        (settledQuery != normalizedQuery || searchSnapshot.query != settledQuery)
+    val loadingCatalogs = normalizedQuery.length >= MIN_QUERY_LENGTH &&
+        state.loadingTypes.isNotEmpty() && results.isEmpty()
     val useRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
 
     val searchFieldRequester = remember { FocusRequester() }
@@ -203,8 +229,9 @@ internal fun ProfileSmartSearchLayer(
                     isTv = isTv,
                     recentEntries = recentEntries,
                     suggestions = suggestions,
-                    results = allResults,
-                    loading = loading,
+                    results = results,
+                    searchPending = searchPending,
+                    loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
                     searchFieldRequester = searchFieldRequester,
                     firstSuggestionRequester = firstSuggestionRequester,
@@ -238,8 +265,9 @@ internal fun ProfileSmartSearchLayer(
                     isTv = false,
                     recentEntries = recentEntries,
                     suggestions = suggestions,
-                    results = allResults,
-                    loading = loading,
+                    results = results,
+                    searchPending = searchPending,
+                    loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
                     searchFieldRequester = searchFieldRequester,
                     firstSuggestionRequester = firstSuggestionRequester,
@@ -280,7 +308,8 @@ private fun SmartSearchContent(
     recentEntries: List<ProfileContentSearchHistoryEntry>,
     suggestions: List<ContentItem>,
     results: List<ContentItem>,
-    loading: Boolean,
+    searchPending: Boolean,
+    loadingCatalogs: Boolean,
     imeVisible: Boolean,
     searchFieldRequester: FocusRequester,
     firstSuggestionRequester: FocusRequester,
@@ -355,7 +384,7 @@ private fun SmartSearchContent(
                 )
                 if (!compactHeight && !imeVisible) {
                     Text(
-                        text = "اقتراحات فورية من القنوات والافلام والمسلسلات",
+                        text = "اقتراحات سريعة من القنوات والافلام والمسلسلات",
                         color = colors.textMuted,
                         fontSize = if (isTv) 13.sp else 11.sp,
                         maxLines = 1,
@@ -401,42 +430,31 @@ private fun SmartSearchContent(
                     onClear = onClearRecent,
                 )
             }
-            loading -> {
+
+            state.searchQuery.trim().length < MIN_QUERY_LENGTH -> {
+                SearchMessage(
+                    modifier = Modifier.weight(1f),
+                    isTv = isTv,
+                    title = "اكتب حرفين على الاقل",
+                    subtitle = "لن يبدأ فحص المكتبة من حرف واحد حتى يبقى البحث سريع ومستقر",
+                )
+            }
+
+            searchPending || loadingCatalogs -> {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    LoadingRing(label = "جاري تجهيز البحث…")
+                    LoadingRing(label = "جاري تجهيز الاقتراحات…")
                 }
             }
-            suggestions.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(colors.surfaceRaised.copy(alpha = .55f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = null,
-                            tint = colors.goldBright,
-                            modifier = Modifier.size(34.dp),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "لا توجد اقتراحات مطابقة",
-                            color = colors.text,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = if (isTv) 18.sp else 15.sp,
-                        )
-                        Text(
-                            text = "جرب كتابة جزء من اسم الفيلم او المسلسل او القناة",
-                            color = colors.textMuted,
-                            fontSize = if (isTv) 11.sp else 10.sp,
-                        )
-                    }
-                }
+
+            results.isEmpty() -> {
+                SearchMessage(
+                    modifier = Modifier.weight(1f),
+                    isTv = isTv,
+                    title = "لا توجد نتائج مطابقة",
+                    subtitle = "جرب كتابة جزء آخر من اسم الفيلم او المسلسل او القناة",
+                )
             }
+
             else -> {
                 SmartSuggestionsAndResults(
                     modifier = Modifier.weight(1f),
@@ -444,7 +462,6 @@ private fun SmartSearchContent(
                     suggestions = suggestions,
                     results = results,
                     isTv = isTv,
-                    imeVisible = imeVisible,
                     firstSuggestionRequester = firstSuggestionRequester,
                     firstResultRequester = firstResultRequester,
                     searchFieldRequester = searchFieldRequester,
@@ -454,6 +471,44 @@ private fun SmartSearchContent(
                     onToggleFavorite = onToggleFavorite,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchMessage(
+    modifier: Modifier,
+    isTv: Boolean,
+    title: String,
+    subtitle: String,
+) {
+    val colors = LocalHulkColors.current
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surfaceRaised.copy(alpha = .55f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = Icons.Rounded.Search,
+                contentDescription = null,
+                tint = colors.goldBright,
+                modifier = Modifier.size(34.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = title,
+                color = colors.text,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (isTv) 18.sp else 15.sp,
+            )
+            Text(
+                text = subtitle,
+                color = colors.textMuted,
+                fontSize = if (isTv) 11.sp else 10.sp,
+            )
         }
     }
 }
@@ -480,11 +535,13 @@ private fun SmartSearchInput(
                 keyboardController?.hide()
                 runCatching { firstSuggestionRequester.requestFocus() }.isSuccess
             }
+
             hasResults -> {
                 tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstResultRequester.requestFocus() }.isSuccess
             }
+
             else -> false
         }
     }
@@ -548,16 +605,16 @@ private fun SmartRecentSection(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = if (entries.isEmpty()) "ابدأ البحث" else "شاهدت او بحثت مؤخرا",
+                    text = if (entries.isEmpty()) "ابدأ البحث" else "المحتوى الذي بحثت عنه مؤخرا",
                     color = colors.text,
                     fontSize = if (isTv) 20.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     text = if (entries.isEmpty()) {
-                        "لن نحفظ الكلمات العشوائية؛ السجل يضاف فقط عند اختيار محتوى حقيقي"
+                        "السجل يحفظ فقط المحتوى الحقيقي الذي تختاره"
                     } else {
-                        "سجل مستقل لهذا المستخدم، بدون كلمات ناقصة او مكررة"
+                        "سجل مستقل لهذا المستخدم، بدون كلمات عشوائية او تكرار"
                     },
                     color = colors.textMuted,
                     fontSize = if (isTv) 11.sp else 10.sp,
@@ -683,7 +740,6 @@ private fun SmartSuggestionsAndResults(
     suggestions: List<ContentItem>,
     results: List<ContentItem>,
     isTv: Boolean,
-    imeVisible: Boolean,
     firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
     searchFieldRequester: FocusRequester,
@@ -693,38 +749,37 @@ private fun SmartSuggestionsAndResults(
     onToggleFavorite: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "اقتراحات",
-                color = colors.text,
-                fontSize = if (isTv) 19.sp else 15.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "\"$query\"",
-                color = colors.goldBright,
-                fontSize = if (isTv) 11.sp else 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = if (isTv) 146.dp else 112.dp),
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(bottom = if (isTv) 24.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "اقتراحات",
+                    color = colors.text,
+                    fontSize = if (isTv) 19.sp else 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "\"$query\"",
+                    color = colors.goldBright,
+                    fontSize = if (isTv) 11.sp else 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        Spacer(Modifier.height(7.dp))
 
-        LazyColumn(
-            modifier = if (imeVisible && !isTv) {
-                Modifier.weight(1f).fillMaxWidth()
-            } else {
-                Modifier.weight(if (isTv) 0.46f else 0.42f).fillMaxWidth()
-            },
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-            contentPadding = PaddingValues(bottom = 6.dp),
-        ) {
-            itemsIndexed(
-                items = suggestions,
-                key = { _, item -> "suggestion:${item.type}:${item.id}" },
-            ) { index, item ->
+        suggestions.forEachIndexed { index, item ->
+            item(
+                key = "suggestion:${item.type}:${item.id}",
+                span = { GridItemSpan(maxLineSpan) },
+            ) {
                 SmartSuggestionRow(
                     item = item,
                     isTv = isTv,
@@ -742,9 +797,11 @@ private fun SmartSuggestionsAndResults(
             }
         }
 
-        if (!imeVisible || isTv) {
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     text = "كل النتائج",
                     color = colors.text,
@@ -758,37 +815,29 @@ private fun SmartSuggestionsAndResults(
                     fontSize = if (isTv) 11.sp else 10.sp,
                 )
             }
-            Spacer(Modifier.height(7.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = if (isTv) 146.dp else 112.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(bottom = if (isTv) 24.dp else 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-                verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 11.dp),
-            ) {
-                itemsIndexed(
-                    items = results,
-                    key = { _, item -> "result:${item.type}:${item.id}" },
-                ) { index, item ->
-                    UniversalPosterCard(
-                        item = item,
-                        isFavorite = isFavorite(item),
-                        onClick = { onOpenResult(item) },
-                        onLongClick = { onToggleFavorite(item) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (index == 0) {
-                                    Modifier
-                                        .focusRequester(firstResultRequester)
-                                        .focusProperties { up = firstSuggestionRequester }
-                                } else {
-                                    Modifier
-                                },
-                            ),
-                    )
-                }
-            }
+        }
+
+        itemsIndexed(
+            items = results,
+            key = { _, item -> "result:${item.type}:${item.id}" },
+        ) { index, item ->
+            UniversalPosterCard(
+                item = item,
+                isFavorite = isFavorite(item),
+                onClick = { onOpenResult(item) },
+                onLongClick = { onToggleFavorite(item) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (index == 0) {
+                            Modifier
+                                .focusRequester(firstResultRequester)
+                                .focusProperties { up = firstSuggestionRequester }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            )
         }
     }
 }
@@ -1051,33 +1100,68 @@ private fun SmartSearchBottomNavigation(
     }
 }
 
-private fun ContentItem.smartSearchMatches(rawQuery: String): Boolean {
-    val query = rawQuery.trim()
-    if (query.isBlank()) return false
-    val typeLabel = type.smartLabel()
-    return sequenceOf(
-        name,
-        year.orEmpty(),
-        genre.orEmpty(),
-        plot.orEmpty(),
-        nowPlaying.orEmpty(),
-        typeLabel,
-    ).any { value -> value.contains(query, ignoreCase = true) }
-}
+private fun boundedSmartSearch(
+    state: HulkUiState,
+    rawQuery: String,
+): List<ContentItem> {
+    val query = normalizeSearchText(rawQuery)
+    if (query.length < MIN_QUERY_LENGTH) return emptyList()
 
-private fun ContentItem.smartSearchRank(rawQuery: String): Int {
-    val query = rawQuery.trim()
-    val cleanName = name.trim()
-    return when {
-        cleanName.equals(query, ignoreCase = true) -> 0
-        cleanName.startsWith(query, ignoreCase = true) -> 1
-        cleanName.split(Regex("\\s+")).any { it.startsWith(query, ignoreCase = true) } -> 2
-        cleanName.contains(query, ignoreCase = true) -> 3
-        year?.equals(query, ignoreCase = true) == true -> 4
-        genre?.contains(query, ignoreCase = true) == true -> 5
-        else -> 6
+    val buckets = Array(SEARCH_RANK_COUNT) { mutableListOf<ContentItem>() }
+    val seen = HashSet<String>()
+
+    state.catalogs.values.forEach { catalog ->
+        catalog.items.forEach { item ->
+            val rank = item.smartSearchRankOrNull(query) ?: return@forEach
+            val key = "${item.type}:${item.id}"
+            if (!seen.add(key)) return@forEach
+            val bucket = buckets[rank]
+            if (bucket.size < MAX_RESULTS_PER_RANK) {
+                bucket += item
+            }
+        }
+    }
+
+    val withinRank = compareByDescending<ContentItem> { it.rating?.toDoubleOrNull() ?: 0.0 }
+        .thenBy { it.name.length }
+        .thenBy { it.name }
+
+    return buildList {
+        buckets.forEach { bucket ->
+            bucket.sortWith(withinRank)
+            bucket.forEach { item ->
+                if (size >= MAX_SEARCH_RESULTS) return@buildList
+                add(item)
+            }
+        }
     }
 }
+
+private fun ContentItem.smartSearchRankOrNull(normalizedQuery: String): Int? {
+    val cleanName = normalizeSearchText(name)
+    val normalizedYear = normalizeSearchText(year.orEmpty())
+    val normalizedGenre = normalizeSearchText(genre.orEmpty())
+    return when {
+        cleanName == normalizedQuery -> 0
+        cleanName.startsWith(normalizedQuery) -> 1
+        cleanName.split(' ').any { it.startsWith(normalizedQuery) } -> 2
+        cleanName.contains(normalizedQuery) -> 3
+        normalizedYear == normalizedQuery -> 4
+        normalizedGenre.contains(normalizedQuery) -> 5
+        else -> null
+    }
+}
+
+private fun normalizeSearchText(raw: String): String = raw
+    .trim()
+    .lowercase()
+    .replace('أ', 'ا')
+    .replace('إ', 'ا')
+    .replace('آ', 'ا')
+    .replace('ى', 'ي')
+    .replace("ـ", "")
+    .replace(ARABIC_DIACRITICS_REGEX, "")
+    .replace(WHITESPACE_REGEX, " ")
 
 private fun ContentType.smartLabel(): String = when (this) {
     ContentType.LIVE -> "قناة"
@@ -1085,4 +1169,12 @@ private fun ContentType.smartLabel(): String = when (this) {
     ContentType.SERIES -> "مسلسل"
 }
 
-private const val MAX_SUGGESTIONS = 8
+private const val MIN_QUERY_LENGTH = 2
+private const val SEARCH_DEBOUNCE_MS = 140L
+private const val MAX_PHONE_SUGGESTIONS = 4
+private const val MAX_TV_SUGGESTIONS = 5
+private const val SEARCH_RANK_COUNT = 6
+private const val MAX_RESULTS_PER_RANK = 48
+private const val MAX_SEARCH_RESULTS = 120
+private val WHITESPACE_REGEX = Regex("\\s+")
+private val ARABIC_DIACRITICS_REGEX = Regex("[\\u064B-\\u065F\\u0670]")
