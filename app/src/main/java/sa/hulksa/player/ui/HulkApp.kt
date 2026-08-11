@@ -253,6 +253,17 @@ fun HulkApp(
                         }
                     }
                 }
+
+                if (
+                    state.screen == HulkScreen.MAIN &&
+                    state.destination == MainDestination.SEARCH
+                ) {
+                    ProfileSearchHistoryLayer(
+                        query = state.searchQuery,
+                        isTv = isTv,
+                        onSearch = viewModel::updateSearch,
+                    )
+                }
             }
         }
     }
