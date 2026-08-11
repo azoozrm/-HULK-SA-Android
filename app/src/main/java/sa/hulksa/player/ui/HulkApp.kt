@@ -99,7 +99,7 @@ fun HulkApp(
 
                     HulkScreen.MAIN -> {
                         if (state.destination == MainDestination.SEARCH) {
-                            ProfileSearchHistoryLayer(
+                            ProfileSmartSearchLayer(
                                 state = state,
                                 isTv = isTv,
                                 isFavorite = viewModel::isFavorite,
