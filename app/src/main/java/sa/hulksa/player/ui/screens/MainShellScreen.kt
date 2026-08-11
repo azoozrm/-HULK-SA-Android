@@ -423,6 +423,7 @@ fun MainShellScreen(
     val colors = LocalHulkColors.current
     val context = LocalContext.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
     val queryMemory = remember { mutableStateMapOf<MainDestination, String>() }
     val categoryMemory = remember { mutableStateMapOf<MainDestination, String?>() }
@@ -484,6 +485,7 @@ fun MainShellScreen(
                 CinematicNavigationRail(
                     selected = state.destination,
                     onSelect = rememberingSelectDestination,
+                    onSwitchProfile = requestProfileSwitch,
                     destinationFocusRequesters = tvRailFocusRequesters,
                 )
                 Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -550,6 +552,7 @@ fun MainShellScreen(
 private fun CinematicNavigationRail(
     selected: MainDestination,
     onSelect: (MainDestination) -> Unit,
+    onSwitchProfile: () -> Unit,
     destinationFocusRequesters: Map<MainDestination, FocusRequester>,
 ) {
     var railHasFocus by remember { mutableStateOf(false) }
@@ -602,6 +605,18 @@ private fun CinematicNavigationRail(
             )
             Spacer(Modifier.height(metrics.itemGapDp.dp))
         }
+        NavigationItem(
+            entry = DestinationEntry(
+                MainDestination.SETTINGS,
+                Icons.Rounded.Person,
+                "تغيير المستخدم",
+            ),
+            selected = false,
+            expanded = expanded,
+            metrics = metrics,
+            onClick = onSwitchProfile,
+        )
+        Spacer(Modifier.height(metrics.itemGapDp.dp))
         Spacer(Modifier.weight(1f))
         destinations.first { it.destination == MainDestination.SETTINGS }.let { entry ->
             NavigationItem(
@@ -2396,6 +2411,16 @@ private fun SettingsScreen(
                     WebsiteCard(Icons.Rounded.SupportAgent, "الدعم الفني", "واتساب الرسمي", { open(SUPPORT_URL) }, Modifier.weight(1f))
                     WebsiteCard(Icons.Rounded.Apps, "مركز التطبيقات", "كل اجهزتك", { open(APPS_URL) }, Modifier.weight(1f))
                 }
+            }
+        }
+        item {
+            SettingsStrip("الملفات الشخصية") {
+                FocusButton(
+                    "تغيير المستخدم",
+                    sa.hulksa.player.ui.LocalProfileSwitchRequester.current,
+                    primary = false,
+                    compact = true,
+                )
             }
         }
         item {
