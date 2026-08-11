@@ -52,6 +52,7 @@ fun ProfileManagementScreen(
     profiles: List<UserProfile>,
     activeProfileId: String,
     isTv: Boolean,
+    startCreating: Boolean = false,
     onCreate: (name: String, avatarKey: String) -> Boolean,
     onUpdate: (profileId: String, name: String, avatarKey: String) -> Boolean,
     onDelete: (profileId: String) -> Boolean,
@@ -60,7 +61,7 @@ fun ProfileManagementScreen(
 ) {
     val colors = LocalHulkColors.current
     var editingProfile by remember { mutableStateOf<UserProfile?>(null) }
-    var creating by remember { mutableStateOf(false) }
+    var creating by remember(startCreating) { mutableStateOf(startCreating) }
     var name by remember { mutableStateOf("") }
     var avatarKey by remember { mutableStateOf(PROFILE_AVATARS.first()) }
     var error by remember { mutableStateOf<String?>(null) }

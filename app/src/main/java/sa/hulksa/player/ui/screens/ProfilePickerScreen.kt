@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import sa.hulksa.player.R
 import sa.hulksa.player.data.ProfilePreferencesStore
+import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.components.ProfileAvatar
@@ -66,6 +67,7 @@ fun ProfilePickerScreen(
     isSwitching: Boolean,
     errorMessage: String?,
     onSelectProfile: (UserProfile) -> Unit,
+    onCreateProfile: () -> Unit = {},
     onManageProfiles: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
@@ -200,6 +202,15 @@ fun ProfilePickerScreen(
                         focusRequester = focusRequesters.getValue(profile.id),
                         onClick = { onSelectProfile(profile) },
                     )
+                }
+                if (profiles.size < ProfileStore.MAX_PROFILES) {
+                    item(key = "add-profile") {
+                        AddProfileCard(
+                            isTv = isTv,
+                            enabled = !isSwitching,
+                            onClick = onCreateProfile,
+                        )
+                    }
                 }
             }
 
@@ -533,6 +544,100 @@ private fun ProfileFooterButton(
 }
 
 @Composable
+private fun AddProfileCard(
+    isTv: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused && isTv) 1.055f else 1f,
+        label = "addProfileScale",
+    )
+    val cardWidth = if (isTv) 180.dp else 140.dp
+    val avatarSize = if (isTv) 98.dp else 76.dp
+    val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
+
+    Column(
+        modifier = Modifier
+            .width(cardWidth)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = if (focused && isTv) 22.dp.toPx() else 4.dp.toPx()
+            }
+            .clip(shape)
+            .background(if (focused) colors.surfaceRaised else colors.surface.copy(alpha = .94f))
+            .border(
+                width = if (focused) 3.dp else 1.dp,
+                color = if (focused) colors.goldBright else Color.White.copy(alpha = .10f),
+                shape = shape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                if (!isTv || !remoteSelect) {
+                    false
+                } else if (!enabled) {
+                    true
+                } else {
+                    when (event.type) {
+                        KeyEventType.KeyDown -> true
+                        KeyEventType.KeyUp -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(
+                horizontal = if (isTv) 16.dp else 12.dp,
+                vertical = if (isTv) 18.dp else 14.dp,
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(avatarSize)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = if (focused) .08f else .04f))
+                .border(
+                    if (focused) 2.dp else 1.dp,
+                    if (focused) colors.goldBright else Color.White.copy(alpha = .22f),
+                    RoundedCornerShape(50),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "+",
+                color = if (focused) colors.goldBright else colors.textMuted,
+                fontSize = if (isTv) 46.sp else 38.sp,
+                lineHeight = if (isTv) 50.sp else 42.sp,
+                fontWeight = FontWeight.Light,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
+
+        Text(
+            text = "إضافة ملف",
+            color = if (focused) colors.text else colors.textMuted,
+            fontSize = if (isTv) 17.sp else 15.sp,
+            lineHeight = if (isTv) 21.sp else 19.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+        )
+
+        Spacer(Modifier.height(if (isTv) 24.dp else 22.dp))
+    }
+}
+
+@Composable
 private fun ProfilePickerCard(
     profile: UserProfile,
     isActive: Boolean,
@@ -562,7 +667,7 @@ private fun ProfilePickerCard(
             .clip(shape)
             .background(
                 when {
-                    focused -> colors.gold.copy(alpha = .12f)
+                    focused -> colors.surfaceRaised
                     isActive -> colors.surfaceRaised
                     else -> colors.surface.copy(alpha = .94f)
                 },

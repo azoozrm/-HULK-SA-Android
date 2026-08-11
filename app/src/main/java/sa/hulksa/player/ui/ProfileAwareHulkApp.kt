@@ -40,6 +40,7 @@ fun ProfileAwareHulkApp(
     var switching by rememberSaveable { mutableStateOf(false) }
     var switchError by rememberSaveable { mutableStateOf<String?>(null) }
     var managingProfiles by rememberSaveable { mutableStateOf(false) }
+    var createProfileRequested by rememberSaveable { mutableStateOf(false) }
     var pickerRequestedFromApp by rememberSaveable { mutableStateOf(false) }
     var profileRevision by rememberSaveable { mutableStateOf(0) }
 
@@ -84,12 +85,14 @@ fun ProfileAwareHulkApp(
             switchError = null
             resolvedForSession = true
             managingProfiles = false
+            createProfileRequested = false
             pickerRequestedFromApp = false
             return
         }
 
         switching = true
         managingProfiles = false
+        createProfileRequested = false
         switchError = null
 
         // Capture the current profile's top-level location before changing the
@@ -153,6 +156,7 @@ fun ProfileAwareHulkApp(
         ) {
             resolvedForSession = false
             managingProfiles = false
+            createProfileRequested = false
             switching = false
             switchError = null
             pickerRequestedFromApp = false
@@ -163,6 +167,7 @@ fun ProfileAwareHulkApp(
 
     BackHandler(enabled = managingProfiles) {
         managingProfiles = false
+        createProfileRequested = false
     }
 
     BackHandler(
@@ -177,10 +182,14 @@ fun ProfileAwareHulkApp(
             profiles = profiles,
             activeProfileId = activeProfileId,
             isTv = isTelevisionDevice,
+            startCreating = createProfileRequested,
             onCreate = { name, avatarKey ->
                 val created = profileStore.createProfile(name, avatarKey = avatarKey)
                 val createdSuccessfully = created != null
-                if (createdSuccessfully) profileRevision++
+                if (createdSuccessfully) {
+                    createProfileRequested = false
+                    profileRevision++
+                }
                 createdSuccessfully
             },
             onUpdate = { profileId, name, avatarKey ->
@@ -201,6 +210,7 @@ fun ProfileAwareHulkApp(
             onSelect = ::switchProfile,
             onClose = {
                 managingProfiles = false
+                createProfileRequested = false
                 if (profiles.size <= 1) resolvedForSession = true
             },
         )
@@ -212,7 +222,16 @@ fun ProfileAwareHulkApp(
             isSwitching = switching,
             errorMessage = switchError,
             onSelectProfile = ::switchProfile,
-            onManageProfiles = { managingProfiles = true },
+            onCreateProfile = {
+                if (!switching && profiles.size < ProfileStore.MAX_PROFILES) {
+                    createProfileRequested = true
+                    managingProfiles = true
+                }
+            },
+            onManageProfiles = {
+                createProfileRequested = false
+                managingProfiles = true
+            },
         )
 
         else -> CompositionLocalProvider(
@@ -220,6 +239,7 @@ fun ProfileAwareHulkApp(
                 if (!switching) {
                     switchError = null
                     managingProfiles = false
+                    createProfileRequested = false
                     pickerRequestedFromApp = true
                 }
             },
