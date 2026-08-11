@@ -849,12 +849,28 @@ private fun SmartSuggestionRow(
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val shape = RoundedCornerShape(14.dp)
+    var focused by remember(item.type, item.id) { mutableStateOf(false) }
+    val showFocused = isTv && focused && adaptiveUi.showFocusHighlights
+
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.surfaceRaised.copy(alpha = .78f))
-            .border(1.dp, Color.White.copy(alpha = .07f), RoundedCornerShape(14.dp))
+            .onFocusChanged { focused = it.isFocused }
+            .clip(shape)
+            .background(
+                if (showFocused) {
+                    colors.gold.copy(alpha = .18f)
+                } else {
+                    colors.surfaceRaised.copy(alpha = .78f)
+                },
+            )
+            .border(
+                width = if (showFocused) 2.dp else 1.dp,
+                color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .07f),
+                shape = shape,
+            )
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
