@@ -13,14 +13,7 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 
@@ -76,25 +69,23 @@ internal fun restoreOrientationRequest(prePlayerOrientation: Int): Int =
 internal fun releaseOrientationRequest(prePlayerRequestedOrientation: Int): Int =
     prePlayerRequestedOrientation
 
+/**
+ * Applies only window chrome/system-bar presentation.
+ *
+ * Orientation is deliberately owned by the hosting Activity. MainActivity applies the
+ * small-phone policy (portrait outside PLAYER, sensor-landscape in PLAYER, adaptive on
+ * >=600dp windows) and TvMainActivity owns TV orientation. Keeping orientation writes out
+ * of Compose prevents competing requests during PLAYER disposal/recomposition, which could
+ * otherwise produce portrait -> landscape -> portrait flicker when leaving playback.
+ */
 @Composable
 fun ApplyAdaptiveWindowPresentation(
     isTelevisionDevice: Boolean,
     isPlayer: Boolean,
 ) {
     val context = LocalContext.current
-    val currentOrientation = LocalConfiguration.current.orientation
     val activity = remember(context) { context.findActivity() }
     val policy = resolveWindowPresentationPolicy(isTelevisionDevice, isPlayer)
-    var wasPlayer by rememberSaveable { mutableStateOf(false) }
-    var prePlayerOrientation by rememberSaveable {
-        mutableIntStateOf(Configuration.ORIENTATION_UNDEFINED)
-    }
-    var prePlayerRequestedOrientation by rememberSaveable {
-        mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
-    }
-    var pendingRestoreRequest by rememberSaveable {
-        mutableStateOf<Int?>(null)
-    }
 
     DisposableEffect(activity, policy, isTelevisionDevice) {
         if (activity == null) return@DisposableEffect onDispose { }
@@ -109,47 +100,6 @@ fun ApplyAdaptiveWindowPresentation(
                     isPlayer = false,
                 ).systemBarsMode,
             )
-        }
-    }
-
-    LaunchedEffect(activity, isTelevisionDevice, isPlayer, currentOrientation) {
-        if (activity == null) return@LaunchedEffect
-
-        if (isTelevisionDevice) {
-            pendingRestoreRequest = null
-            wasPlayer = isPlayer
-            return@LaunchedEffect
-        }
-
-        when {
-            isPlayer && !wasPlayer -> {
-                prePlayerOrientation = currentOrientation
-                prePlayerRequestedOrientation = activity.requestedOrientation
-                pendingRestoreRequest = null
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            }
-
-            !isPlayer && wasPlayer -> {
-                pendingRestoreRequest = prePlayerRequestedOrientation
-                activity.requestedOrientation = restoreOrientationRequest(prePlayerOrientation)
-            }
-        }
-        wasPlayer = isPlayer
-    }
-
-    LaunchedEffect(
-        activity,
-        isTelevisionDevice,
-        isPlayer,
-        currentOrientation,
-        prePlayerOrientation,
-        pendingRestoreRequest,
-    ) {
-        if (activity == null || isTelevisionDevice || isPlayer) return@LaunchedEffect
-        val pendingRequest = pendingRestoreRequest ?: return@LaunchedEffect
-        if (currentOrientation == restoredConfigurationOrientation(prePlayerOrientation)) {
-            activity.requestedOrientation = releaseOrientationRequest(pendingRequest)
-            pendingRestoreRequest = null
         }
     }
 }
