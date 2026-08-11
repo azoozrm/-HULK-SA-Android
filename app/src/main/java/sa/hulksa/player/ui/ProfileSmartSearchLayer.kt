@@ -736,6 +736,7 @@ private fun SmartSuggestionsAndResults(
                         } else {
                             Modifier
                         },
+                    ),
                     onClick = { onOpenSuggestion(item) },
                 )
             }
