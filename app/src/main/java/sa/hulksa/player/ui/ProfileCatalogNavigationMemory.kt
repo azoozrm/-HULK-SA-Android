@@ -9,7 +9,7 @@ import sa.hulksa.player.MainDestination
  * written to disk and it does not become Search History. Movies, Series and Live
  * each keep an independent category and in-page query for the active app session.
  */
-internal class ProfileCatalogNavigationMemory {
+class ProfileCatalogNavigationMemory {
     private val categoryByDestination = mutableMapOf<MainDestination, String?>()
     private val queryByDestination = mutableMapOf<MainDestination, String>()
 
