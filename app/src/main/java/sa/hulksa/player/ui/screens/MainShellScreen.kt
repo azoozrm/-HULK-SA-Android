@@ -2399,6 +2399,16 @@ private fun SettingsScreen(
             }
         }
         item {
+            SettingsStrip("الملفات الشخصية") {
+                FocusButton(
+                    "تغيير المستخدم",
+                    sa.hulksa.player.ui.LocalProfileSwitchRequester.current,
+                    primary = false,
+                    compact = true,
+                )
+            }
+        }
+        item {
             SettingsStrip("المحتوى والبيانات") {
                 FocusButton("تحديث المكتبة", onRefreshAll, compact = true)
                 FocusButton("مسح سجل المشاهدة", onClearHistory, primary = false, compact = true, enabled = state.history.isNotEmpty())
