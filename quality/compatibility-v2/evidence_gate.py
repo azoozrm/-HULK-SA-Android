@@ -97,6 +97,35 @@ def requested_dimensions(path: Path) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def evidence_value(path: Path, key: str) -> str | None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    prefix = f"{key}="
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return None
+
+
+def expects_phone_launcher_portrait_rotation(profile_path: Path, classification_path: Path) -> bool:
+    """Return true when a small-phone landscape lab profile must relaunch the non-player app in portrait.
+
+    Compatibility V2 configures some phone emulators in landscape so instrumentation can qualify
+    short/large-font landscape behavior. After instrumentation, the collector deliberately relaunches
+    MainActivity to capture foreground evidence. MainActivity's production policy forces small phones
+    back to portrait outside PLAYER, so the final PNG/XML are a strict 90-degree rotation of the
+    configured landscape profile. Tablets and TVs must continue to match their configured geometry.
+    """
+    profile_id = evidence_value(profile_path, "profile")
+    device_class = evidence_value(classification_path, "actual_device_class")
+    orientation = evidence_value(classification_path, "orientation")
+    return bool(
+        profile_id
+        and profile_id.startswith("phone-")
+        and device_class == "MOBILE"
+        and orientation == "LANDSCAPE"
+    )
+
+
 def window_manager_application_dimensions(path: Path) -> tuple[int, int]:
     text = path.read_text(encoding="utf-8", errors="replace")
     match = APP_SIZE_PATTERN.search(text)
@@ -125,30 +154,35 @@ def application_bounds(path: Path) -> tuple[int, int]:
 
 def check_runtime_window_geometry(evidence_root: Path) -> EvidenceCheck:
     profile = evidence_root / "PROFILE-CONFIG.txt"
+    classification = evidence_root / "WINDOW-CLASSIFICATION.txt"
     metrics = evidence_root / "WINDOW-METRICS.txt"
     screenshot = evidence_root / "full-window.png"
     hierarchy = evidence_root / "window.xml"
-    evidence = [str(profile), str(metrics), str(screenshot), str(hierarchy)]
+    evidence = [str(profile), str(classification), str(metrics), str(screenshot), str(hierarchy)]
     try:
         display_size = requested_dimensions(profile)
         app_size = window_manager_application_dimensions(metrics)
         png_size = png_dimensions(screenshot)
         xml_size = application_bounds(hierarchy)
+        portrait_relaunch = expects_phone_launcher_portrait_rotation(profile, classification)
     except (OSError, ValueError, struct.error, ET.ParseError) as exc:
         return EvidenceCheck("runtime-window-geometry", "FAIL", f"Unable to verify runtime geometry: {exc}", evidence)
 
+    expected_display_size = (display_size[1], display_size[0]) if portrait_relaunch else display_size
+    expected_app_size = (app_size[1], app_size[0]) if portrait_relaunch else app_size
+
     mismatches: list[str] = []
-    if png_size != display_size:
+    if png_size != expected_display_size:
         mismatches.append(
-            f"full-window PNG={png_size[0]}x{png_size[1]} expected display={display_size[0]}x{display_size[1]}"
+            f"full-window PNG={png_size[0]}x{png_size[1]} expected display={expected_display_size[0]}x{expected_display_size[1]}"
         )
-    if app_size[0] > display_size[0] or app_size[1] > display_size[1]:
+    if expected_app_size[0] > expected_display_size[0] or expected_app_size[1] > expected_display_size[1]:
         mismatches.append(
-            f"WindowManager app={app_size[0]}x{app_size[1]} exceeds display={display_size[0]}x{display_size[1]}"
+            f"WindowManager app={expected_app_size[0]}x{expected_app_size[1]} exceeds display={expected_display_size[0]}x{expected_display_size[1]}"
         )
-    if xml_size != app_size:
+    if xml_size != expected_app_size:
         mismatches.append(
-            f"XML={xml_size[0]}x{xml_size[1]} expected app window={app_size[0]}x{app_size[1]}"
+            f"XML={xml_size[0]}x{xml_size[1]} expected app window={expected_app_size[0]}x{expected_app_size[1]}"
         )
     if mismatches:
         return EvidenceCheck(
@@ -157,13 +191,22 @@ def check_runtime_window_geometry(evidence_root: Path) -> EvidenceCheck:
             "; ".join(mismatches),
             evidence,
         )
+
+    if portrait_relaunch:
+        message = (
+            f"Landscape phone profile {display_size[0]}x{display_size[1]} correctly relaunches the non-player app in "
+            f"portrait {expected_display_size[0]}x{expected_display_size[1]}, and the application hierarchy matches "
+            f"the rotated WindowManager app window {expected_app_size[0]}x{expected_app_size[1]}"
+        )
+    else:
+        message = (
+            f"Full-window PNG matches display {display_size[0]}x{display_size[1]} and application hierarchy "
+            f"matches WindowManager app window {app_size[0]}x{app_size[1]}"
+        )
     return EvidenceCheck(
         "runtime-window-geometry",
         "PASS",
-        (
-            f"Full-window PNG matches display {display_size[0]}x{display_size[1]} and application hierarchy "
-            f"matches WindowManager app window {app_size[0]}x{app_size[1]}"
-        ),
+        message,
         evidence,
     )
 
