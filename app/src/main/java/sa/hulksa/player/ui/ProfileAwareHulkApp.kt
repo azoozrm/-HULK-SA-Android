@@ -14,6 +14,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
+import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.screens.ProfileManagementScreen
@@ -29,6 +30,7 @@ fun ProfileAwareHulkApp(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val profileStore = remember(context) { ProfileStore(context) }
+    val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
 
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
     var switching by rememberSaveable { mutableStateOf(false) }
@@ -39,13 +41,32 @@ fun ProfileAwareHulkApp(
 
     val profiles = remember(profileRevision) { profileStore.profiles() }
     val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
+    val routingPreferences = profilePreferencesStore.routing()
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
+    val directEntryTarget = if (
+        authenticated &&
+        !resolvedForSession &&
+        !switching &&
+        !pickerRequestedFromApp &&
+        !managingProfiles &&
+        routingPreferences.directEntryEnabled
+    ) {
+        routingPreferences.defaultProfileId
+            ?.let { defaultId -> profiles.firstOrNull { it.id == defaultId } }
+            ?: profiles.firstOrNull { it.id == activeProfileId }
+    } else {
+        null
+    }
     val singleProfileNeedsResolution =
-        profiles.size == 1 && authenticated && !resolvedForSession
-    val showPicker = pickerRequestedFromApp || switching || singleProfileNeedsResolution || shouldShowProfilePicker(
-        profileCount = profiles.size,
-        authenticated = authenticated,
-        resolvedForSession = resolvedForSession,
+        profiles.size == 1 && authenticated && !resolvedForSession && directEntryTarget == null
+    val showPicker = pickerRequestedFromApp || switching || (
+        directEntryTarget == null && (
+            singleProfileNeedsResolution || shouldShowProfilePicker(
+                profileCount = profiles.size,
+                authenticated = authenticated,
+                resolvedForSession = resolvedForSession,
+            )
+        )
     )
 
     fun switchProfile(profile: UserProfile) {
@@ -72,12 +93,27 @@ fun ProfileAwareHulkApp(
 
         // Profiles are local viewing contexts only. Keep the authenticated IPTV
         // session intact, but refresh the profile-scoped library snapshot so
-        // favorites and continue-watching immediately belong to the new profile.
+        // favorites, history, recommendations and profile-owned downloads move
+        // to the selected viewing context without creating a new IPTV session.
         viewModel.refreshProfileLibrary()
         profileRevision++
         switching = false
         resolvedForSession = true
         pickerRequestedFromApp = false
+    }
+
+    LaunchedEffect(
+        authenticated,
+        resolvedForSession,
+        routingPreferences.directEntryEnabled,
+        routingPreferences.defaultProfileId,
+        activeProfileId,
+        profiles,
+        pickerRequestedFromApp,
+        managingProfiles,
+    ) {
+        val target = directEntryTarget ?: return@LaunchedEffect
+        switchProfile(target)
     }
 
     LaunchedEffect(
