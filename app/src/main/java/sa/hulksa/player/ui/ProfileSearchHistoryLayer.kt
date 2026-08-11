@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -287,15 +288,19 @@ private fun SearchExperienceContent(
     val adaptiveUi = LocalAdaptiveUi.current
     val screenWidth = adaptiveUi.screenWidthDp
     val screenHeight = adaptiveUi.screenHeightDp
+    val mobileLandscape = !isTv && screenWidth > screenHeight
     val compactHeight = !isTv && screenHeight < 560
+    val compactLandscape = mobileLandscape && screenHeight < 520
     val horizontalPadding = when {
         isTv -> (screenWidth / 46f).coerceIn(18f, 34f).dp
+        compactLandscape -> 12.dp
         screenWidth >= 840 -> 28.dp
         screenWidth >= 600 -> 22.dp
         else -> 14.dp
     }
     val verticalPadding = when {
         isTv -> (screenHeight / 42f).coerceIn(14f, 24f).dp
+        compactLandscape -> 6.dp
         compactHeight -> 8.dp
         else -> 14.dp
     }
@@ -331,7 +336,7 @@ private fun SearchExperienceContent(
         ) {
             Box(
                 modifier = Modifier
-                    .size(if (isTv) 52.dp else if (compactHeight) 38.dp else 44.dp)
+                    .size(if (isTv) 52.dp else if (compactLandscape) 34.dp else if (compactHeight) 38.dp else 44.dp)
                     .clip(CircleShape)
                     .background(colors.gold.copy(alpha = .14f))
                     .border(1.dp, colors.gold.copy(alpha = .34f), CircleShape),
@@ -341,7 +346,7 @@ private fun SearchExperienceContent(
                     imageVector = Icons.Rounded.Search,
                     contentDescription = null,
                     tint = colors.goldBright,
-                    modifier = Modifier.size(if (isTv) 27.dp else if (compactHeight) 20.dp else 23.dp),
+                    modifier = Modifier.size(if (isTv) 27.dp else if (compactLandscape) 18.dp else if (compactHeight) 20.dp else 23.dp),
                 )
             }
 
@@ -349,7 +354,7 @@ private fun SearchExperienceContent(
                 Text(
                     text = "البحث",
                     color = colors.text,
-                    fontSize = if (compactHeight) 20.sp else titleSize,
+                    fontSize = if (compactLandscape) 18.sp else if (compactHeight) 20.sp else titleSize,
                     fontWeight = FontWeight.Black,
                 )
                 if (!compactHeight) {
@@ -374,7 +379,7 @@ private fun SearchExperienceContent(
             }
         }
 
-        Spacer(Modifier.height(if (isTv) 18.dp else if (compactHeight) 8.dp else 14.dp))
+        Spacer(Modifier.height(if (isTv) 18.dp else if (compactLandscape) 6.dp else if (compactHeight) 8.dp else 14.dp))
 
         SearchInput(
             value = state.searchQuery,
@@ -388,7 +393,7 @@ private fun SearchExperienceContent(
             railSearchRequester = railSearchRequester,
         )
 
-        Spacer(Modifier.height(if (isTv) 16.dp else if (compactHeight) 8.dp else 12.dp))
+        Spacer(Modifier.height(if (isTv) 16.dp else if (compactLandscape) 6.dp else if (compactHeight) 8.dp else 12.dp))
 
         if (queryBlank) {
             Column(
@@ -402,6 +407,7 @@ private fun SearchExperienceContent(
                         recentQueries = recentQueries,
                         isTv = isTv,
                         compactHeight = compactHeight,
+                        compactLandscape = compactLandscape,
                         screenWidthDp = screenWidth,
                         firstRecentRequester = firstRecentRequester,
                         searchFieldRequester = searchFieldRequester,
@@ -537,6 +543,7 @@ private fun RecentSearchesSection(
     recentQueries: List<String>,
     isTv: Boolean,
     compactHeight: Boolean,
+    compactLandscape: Boolean,
     screenWidthDp: Int,
     firstRecentRequester: FocusRequester,
     searchFieldRequester: FocusRequester,
@@ -561,7 +568,7 @@ private fun RecentSearchesSection(
                 colors.gold.copy(alpha = .22f),
                 RoundedCornerShape(if (isTv) 20.dp else 16.dp),
             )
-            .padding(if (isTv) 18.dp else if (compactHeight) 10.dp else 13.dp),
+            .padding(if (isTv) 18.dp else if (compactLandscape) 8.dp else if (compactHeight) 10.dp else 13.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -572,7 +579,7 @@ private fun RecentSearchesSection(
                 Text(
                     text = "عمليات البحث الاخيرة",
                     color = colors.text,
-                    fontSize = if (isTv) 19.sp else if (compactHeight) 14.sp else 16.sp,
+                    fontSize = if (isTv) 19.sp else if (compactLandscape) 13.sp else if (compactHeight) 14.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 if (!compactHeight) {
@@ -592,52 +599,49 @@ private fun RecentSearchesSection(
             )
         }
 
-        Spacer(Modifier.height(if (isTv) 14.dp else if (compactHeight) 7.dp else 10.dp))
+        Spacer(Modifier.height(if (isTv) 14.dp else if (compactLandscape) 5.dp else if (compactHeight) 7.dp else 10.dp))
 
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
-        ) {
-            itemsIndexed(
-                items = recentQueries,
-                key = { _, query -> query.lowercase() },
-            ) { index, recentQuery ->
-                Column(
-                    modifier = Modifier
-                        .width(tileWidth)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF11130F))
-                        .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(14.dp))
-                        .padding(if (compactHeight) 8.dp else 11.dp),
-                ) {
-                    Text(
-                        text = recentQuery,
-                        color = colors.text,
-                        fontSize = if (isTv) 15.sp else 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(if (compactHeight) 6.dp else 9.dp))
+        if (compactLandscape) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(vertical = 2.dp),
+            ) {
+                itemsIndexed(
+                    items = recentQueries,
+                    key = { _, query -> query.lowercase() },
+                ) { index, recentQuery ->
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF11130F))
+                            .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
+                        Text(
+                            text = recentQuery,
+                            color = colors.text,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
                         FocusButton(
                             text = "بحث",
                             onClick = { onUseRecent(recentQuery) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .then(
-                                    if (index == 0) {
-                                        Modifier
-                                            .focusRequester(firstRecentRequester)
-                                            .focusProperties { up = searchFieldRequester }
-                                    } else {
-                                        Modifier
-                                    },
-                                ),
+                            modifier = Modifier.then(
+                                if (index == 0) {
+                                    Modifier
+                                        .focusRequester(firstRecentRequester)
+                                        .focusProperties { up = searchFieldRequester }
+                                } else {
+                                    Modifier
+                                },
+                            ),
                             compact = true,
                         )
                         FocusButton(
@@ -647,6 +651,64 @@ private fun RecentSearchesSection(
                             compact = true,
                             outlined = true,
                         )
+                    }
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
+            ) {
+                itemsIndexed(
+                    items = recentQueries,
+                    key = { _, query -> query.lowercase() },
+                ) { index, recentQuery ->
+                    Column(
+                        modifier = Modifier
+                            .width(tileWidth)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF11130F))
+                            .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(14.dp))
+                            .padding(if (compactHeight) 8.dp else 11.dp),
+                    ) {
+                        Text(
+                            text = recentQuery,
+                            color = colors.text,
+                            fontSize = if (isTv) 15.sp else 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(if (compactHeight) 6.dp else 9.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            FocusButton(
+                                text = "بحث",
+                                onClick = { onUseRecent(recentQuery) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .then(
+                                        if (index == 0) {
+                                            Modifier
+                                                .focusRequester(firstRecentRequester)
+                                                .focusProperties { up = searchFieldRequester }
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                                compact = true,
+                            )
+                            FocusButton(
+                                text = "حذف",
+                                onClick = { onRemoveRecent(recentQuery) },
+                                primary = false,
+                                compact = true,
+                                outlined = true,
+                            )
+                        }
                     }
                 }
             }
@@ -668,8 +730,10 @@ private fun RecentSearchesSection(
         }
     }
 
-    Spacer(Modifier.height(if (isTv) 18.dp else if (compactHeight) 8.dp else 13.dp))
-    SearchDiscoveryHint(isTv = isTv, compactHeight = compactHeight)
+    Spacer(Modifier.height(if (isTv) 18.dp else if (compactLandscape) 6.dp else if (compactHeight) 8.dp else 13.dp))
+    if (!compactLandscape || screenWidthDp >= 720) {
+        SearchDiscoveryHint(isTv = isTv, compactHeight = compactHeight)
+    }
 }
 
 @Composable
