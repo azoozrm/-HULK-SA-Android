@@ -43,6 +43,7 @@ fun HulkApp(
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
     val colors = LocalHulkColors.current
+    val requestProfileSwitch = LocalProfileSwitchRequester.current
     val windowBackground =
         if (state.screen == HulkScreen.LOGIN || state.screen == HulkScreen.PLAYER) {
             colors.background
@@ -96,47 +97,72 @@ fun HulkApp(
                         onLogin = viewModel::login,
                     )
 
-                    HulkScreen.MAIN -> MainShellScreen(
-                        state = if (state.destination == MainDestination.HOME) {
-                            state.copy(favorites = homeRecommendationFavorites)
+                    HulkScreen.MAIN -> {
+                        if (state.destination == MainDestination.SEARCH) {
+                            ProfileSearchHistoryLayer(
+                                state = state,
+                                isTv = isTv,
+                                isFavorite = viewModel::isFavorite,
+                                onSelectDestination = viewModel::selectDestination,
+                                onSearch = viewModel::updateSearch,
+                                onOpen = viewModel::open,
+                                onToggleFavorite = { item ->
+                                    val wasFavorite = viewModel.isFavorite(item)
+                                    viewModel.toggleFavorite(item)
+                                    notify(
+                                        if (wasFavorite) {
+                                            "تمت ازالة ${item.name} من المفضلة"
+                                        } else {
+                                            "تمت اضافة ${item.name} الى المفضلة"
+                                        },
+                                    )
+                                },
+                                onSwitchProfile = requestProfileSwitch,
+                            )
                         } else {
-                            state
-                        },
-                        isTv = isTv,
-                        navigationMemory = navigationMemory,
-                        isFavorite = viewModel::isFavorite,
-                        onSelectDestination = viewModel::selectDestination,
-                        onSelectCategory = viewModel::selectCategory,
-                        onSearch = viewModel::updateSearch,
-                        onOpen = viewModel::open,
-                        onOpenHistory = { entry ->
-                            val localDownload = state.downloads.firstOrNull { download ->
-                                download.historyKey == entry.key &&
-                                    download.status == OfflineStatus.COMPLETED &&
-                                    !download.localUri.isNullOrBlank()
-                            }
-                            if (localDownload != null) {
-                                viewModel.playDownload(localDownload)
-                            } else {
-                                viewModel.openHistory(entry)
-                            }
-                        },
-                        onToggleFavorite = viewModel::toggleFavorite,
-                        onRefresh = viewModel::refresh,
-                        onClearHistory = viewModel::clearHistory,
-                        onPlayDownload = viewModel::playDownload,
-                        onDeleteDownload = { item ->
-                            viewModel.deleteDownload(item)
-                            notify("تم حذف التحميل.")
-                        },
-                        onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
-                        onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
-                        onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
-                        onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
-                        onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
-                        onRunDiagnostics = viewModel::runDiagnostics,
-                        onLogout = viewModel::logout,
-                    )
+                            MainShellScreen(
+                                state = if (state.destination == MainDestination.HOME) {
+                                    state.copy(favorites = homeRecommendationFavorites)
+                                } else {
+                                    state
+                                },
+                                isTv = isTv,
+                                navigationMemory = navigationMemory,
+                                isFavorite = viewModel::isFavorite,
+                                onSelectDestination = viewModel::selectDestination,
+                                onSelectCategory = viewModel::selectCategory,
+                                onSearch = viewModel::updateSearch,
+                                onOpen = viewModel::open,
+                                onOpenHistory = { entry ->
+                                    val localDownload = state.downloads.firstOrNull { download ->
+                                        download.historyKey == entry.key &&
+                                            download.status == OfflineStatus.COMPLETED &&
+                                            !download.localUri.isNullOrBlank()
+                                    }
+                                    if (localDownload != null) {
+                                        viewModel.playDownload(localDownload)
+                                    } else {
+                                        viewModel.openHistory(entry)
+                                    }
+                                },
+                                onToggleFavorite = viewModel::toggleFavorite,
+                                onRefresh = viewModel::refresh,
+                                onClearHistory = viewModel::clearHistory,
+                                onPlayDownload = viewModel::playDownload,
+                                onDeleteDownload = { item ->
+                                    viewModel.deleteDownload(item)
+                                    notify("تم حذف التحميل.")
+                                },
+                                onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
+                                onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
+                                onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
+                                onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
+                                onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
+                                onRunDiagnostics = viewModel::runDiagnostics,
+                                onLogout = viewModel::logout,
+                            )
+                        }
+                    }
 
                     HulkScreen.MOVIE_DETAILS -> {
                         val item = state.selectedItem
@@ -252,17 +278,6 @@ fun HulkApp(
                             LaunchedEffect(state.screen) { viewModel.back() }
                         }
                     }
-                }
-
-                if (
-                    state.screen == HulkScreen.MAIN &&
-                    state.destination == MainDestination.SEARCH
-                ) {
-                    ProfileSearchHistoryLayer(
-                        query = state.searchQuery,
-                        isTv = isTv,
-                        onSearch = viewModel::updateSearch,
-                    )
                 }
             }
         }
