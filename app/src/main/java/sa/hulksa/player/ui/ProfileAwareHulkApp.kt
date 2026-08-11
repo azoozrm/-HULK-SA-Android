@@ -14,6 +14,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
+import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
@@ -33,6 +34,7 @@ fun ProfileAwareHulkApp(
     val profileStore = remember(context) { ProfileStore(context) }
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
     val navigationMemoryByProfile = remember { mutableMapOf<String, NavigationMemoryStore>() }
+    val destinationMemoryByProfile = remember { mutableMapOf<String, MainDestination>() }
 
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
     var switching by rememberSaveable { mutableStateOf(false) }
@@ -90,6 +92,11 @@ fun ProfileAwareHulkApp(
         managingProfiles = false
         switchError = null
 
+        // Capture the current profile's top-level location before changing the
+        // active profile. A profile with no prior location always starts at Home.
+        destinationMemoryByProfile[currentProfileId] = state.destination
+        val targetDestination = destinationMemoryByProfile[profile.id] ?: MainDestination.HOME
+
         if (!profileStore.setActiveProfile(profile.id)) {
             switching = false
             switchError = "تعذر اختيار الملف الشخصي. حاول مرة اخرى."
@@ -97,14 +104,27 @@ fun ProfileAwareHulkApp(
         }
 
         // Profiles are local viewing contexts only. Keep the authenticated IPTV
-        // session intact, but refresh the profile-scoped library snapshot so
-        // favorites, history, recommendations and profile-owned downloads move
-        // to the selected viewing context without creating a new IPTV session.
+        // session intact, but restore the target profile's own top-level location
+        // and refresh its profile-scoped library snapshot without creating a new
+        // IPTV session.
+        viewModel.selectDestination(targetDestination)
         viewModel.refreshProfileLibrary()
         profileRevision++
         switching = false
         resolvedForSession = true
         pickerRequestedFromApp = false
+    }
+
+    LaunchedEffect(
+        authenticated,
+        activeProfileId,
+        state.screen,
+        state.destination,
+        switching,
+    ) {
+        if (authenticated && state.screen == HulkScreen.MAIN && !switching) {
+            destinationMemoryByProfile[activeProfileId] = state.destination
+        }
     }
 
     LaunchedEffect(
@@ -137,6 +157,7 @@ fun ProfileAwareHulkApp(
             switchError = null
             pickerRequestedFromApp = false
             navigationMemoryByProfile.clear()
+            destinationMemoryByProfile.clear()
         }
     }
 
@@ -172,6 +193,7 @@ fun ProfileAwareHulkApp(
                 val deleted = profileStore.deleteProfile(profileId)
                 if (deleted) {
                     navigationMemoryByProfile.remove(profileId)
+                    destinationMemoryByProfile.remove(profileId)
                     profileRevision++
                 }
                 deleted
