@@ -687,9 +687,43 @@ private fun NavigationItem(
 private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
     val colors = LocalHulkColors.current
     val navigationState = rememberLazyListState()
+    val navigationScope = rememberCoroutineScope()
+    val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val isWide = configuration.screenWidthDp >= 600
+    val mobileEntries = remember {
+        buildList {
+            destinations.forEach { entry ->
+                add(entry to false)
+                if (entry.destination == MainDestination.SEARCH) {
+                    add(
+                        DestinationEntry(
+                            MainDestination.SEARCH,
+                            Icons.Rounded.Person,
+                            "تغيير المستخدم",
+                        ) to true,
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectEntry(index: Int, entry: DestinationEntry, profileSwitch: Boolean) {
+        if (profileSwitch) {
+            requestProfileSwitch()
+            return
+        }
+        onSelect(entry.destination)
+        if (!isLandscape && !isWide) {
+            val lastVisibleIndex = navigationState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
+            if (lastVisibleIndex == index && index < mobileEntries.lastIndex) {
+                navigationScope.launch {
+                    navigationState.animateScrollToItem(index + 1)
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -704,8 +738,8 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                destinations.forEach { entry ->
-                    val active = selected == entry.destination
+                mobileEntries.forEachIndexed { index, (entry, profileSwitch) ->
+                    val active = !profileSwitch && selected == entry.destination
                     val iconScale by animateFloatAsState(
                         targetValue = if (active) 1.08f else 1f,
                         label = "mobileNavIconScaleWide",
@@ -723,7 +757,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         modifier = Modifier
                             .weight(1f)
                             .height(54.dp)
-                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .clickable(role = Role.Button) { selectEntry(index, entry, profileSwitch) }
                             .padding(horizontal = 2.dp, vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
@@ -774,8 +808,14 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                items(destinations, key = { it.destination.name }) { entry ->
-                    val active = selected == entry.destination
+                itemsIndexed(
+                    items = mobileEntries,
+                    key = { _, item ->
+                        val (entry, profileSwitch) = item
+                        if (profileSwitch) "switch-profile" else entry.destination.name
+                    },
+                ) { index, (entry, profileSwitch) ->
+                    val active = !profileSwitch && selected == entry.destination
                     val iconScale by animateFloatAsState(
                         targetValue = if (active) 1.08f else 1f,
                         label = "mobileNavIconScalePortrait",
@@ -793,7 +833,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         modifier = Modifier
                             .widthIn(min = 52.dp)
                             .height(54.dp)
-                            .clickable(role = Role.Button) { onSelect(entry.destination) }
+                            .clickable(role = Role.Button) { selectEntry(index, entry, profileSwitch) }
                             .padding(horizontal = 3.dp, vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
