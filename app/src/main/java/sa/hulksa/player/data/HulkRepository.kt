@@ -19,6 +19,7 @@ class HulkRepository(context: Context) {
     private val portalResolver = PortalResolver(context)
     private val client = XtreamClient()
     private val kidsCatalogClient = KidsServerCatalogClient()
+    private val kidsContentFilterStore = KidsContentFilterStore(context)
     private val movieCardMetadataClient = MovieCardMetadataClient()
     private val seriesCardMetadataClient = SeriesCardMetadataClient()
     private val vault = CredentialVault(context)
@@ -96,6 +97,14 @@ class HulkRepository(context: Context) {
             snapshot = kidsCatalogClient.loadVerified(session)
             retryIndex++
         }
+        if (!kidsContentFilterStore.replace(snapshot)) {
+            return VerifiedKidsCatalogSnapshot(
+                catalogs = emptyMap(),
+                blockedTypes = ContentType.entries.associateWith {
+                    "تعذر تثبيت فلترة الأطفال محليا بأمان"
+                },
+            )
+        }
         return snapshot
     }
 
@@ -127,10 +136,12 @@ class HulkRepository(context: Context) {
         session: AuthenticatedSession,
         series: ContentItem,
         episode: Episode,
-    ): PlaybackRequest = client.playback(session, series, episode)
+    ): PlaybackRequest = client.playback(session, series, episode).copy(
+        parentContentId = series.id,
+    )
 
     fun playback(session: AuthenticatedSession, entry: HistoryEntry): PlaybackRequest =
-        client.playback(session, entry)
+        client.playback(session, entry).copy(parentContentId = entry.parentContentId)
 
     suspend fun diagnose(
         session: AuthenticatedSession,

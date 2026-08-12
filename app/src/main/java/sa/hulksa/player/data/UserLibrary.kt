@@ -7,6 +7,7 @@ import org.json.JSONObject
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.model.ProfileKind
 
 class UserLibrary(context: Context) {
     private val appContext = context.applicationContext
@@ -14,17 +15,24 @@ class UserLibrary(context: Context) {
     private val preferences: SharedPreferences
         get() = accountScope.preferences(PREFERENCES_NAME)
     private val profileStore = ProfileStore(appContext)
+    private val kidsContentFilterStore = KidsContentFilterStore(appContext)
 
     init {
         migrateLegacyLibraryIfNeeded()
     }
 
-    fun favorites(): Set<String> = preferences
-        .getStringSet(activeKey(KEY_FAVORITES), emptySet())
-        .orEmpty()
-        .toSet()
+    fun favorites(): Set<String> {
+        val stored = preferences
+            .getStringSet(activeKey(KEY_FAVORITES), emptySet())
+            .orEmpty()
+            .toSet()
+        if (!isActiveKidsProfile()) return stored
+        val allowed = kidsContentFilterStore.allowedKeys()
+        return stored.filterTo(linkedSetOf()) { it in allowed }
+    }
 
     fun toggle(item: ContentItem): Set<String> {
+        if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(item)) return favorites()
         val key = keyFor(item)
         val updated = favorites().toMutableSet().apply {
             if (!add(key)) remove(key)
@@ -34,7 +42,13 @@ class UserLibrary(context: Context) {
     }
 
     fun replaceFavorites(favorites: Set<String>) {
-        preferences.edit().putStringSet(activeKey(KEY_FAVORITES), favorites.toSet()).apply()
+        val safeFavorites = if (isActiveKidsProfile()) {
+            val allowed = kidsContentFilterStore.allowedKeys()
+            favorites.filterTo(linkedSetOf()) { it in allowed }
+        } else {
+            favorites.toSet()
+        }
+        preferences.edit().putStringSet(activeKey(KEY_FAVORITES), safeFavorites).apply()
     }
 
     fun isFavorite(item: ContentItem, favorites: Set<String>): Boolean = keyFor(item) in favorites
@@ -44,7 +58,7 @@ class UserLibrary(context: Context) {
     fun history(): List<HistoryEntry> = runCatching {
         val raw = preferences.getString(activeKey(KEY_HISTORY), null) ?: return emptyList()
         val array = JSONArray(raw)
-        buildList {
+        val decoded = buildList {
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
                 add(
@@ -65,13 +79,20 @@ class UserLibrary(context: Context) {
                             item.has("episodeNumber") && !item.isNull("episodeNumber")
                         },
                         episodeTitle = item.optString("episodeTitle").takeUnless { it.isBlank() },
+                        parentContentId = item.optInt("parentContentId").takeIf {
+                            item.has("parentContentId") && !item.isNull("parentContentId") && it > 0
+                        },
                     ),
                 )
             }
         }.sortedByDescending(HistoryEntry::updatedAtEpochMs)
+        if (!isActiveKidsProfile()) return decoded
+        val allowed = kidsContentFilterStore.allowedKeys()
+        decoded.filter { entry -> isAllowedKidsHistoryEntry(allowed, entry) }
     }.getOrDefault(emptyList())
 
     fun recordStart(request: PlaybackRequest): List<HistoryEntry> {
+        if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(request)) return history()
         val previous = history().firstOrNull { it.key == request.historyKey }
         val entry = HistoryEntry(
             key = request.historyKey,
@@ -88,11 +109,13 @@ class UserLibrary(context: Context) {
             season = request.season ?: previous?.season,
             episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
             episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
+            parentContentId = request.parentContentId ?: previous?.parentContentId,
         )
         return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
     }
 
     fun updateProgress(request: PlaybackRequest, positionMs: Long, durationMs: Long): List<HistoryEntry> {
+        if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(request)) return history()
         val previous = history().firstOrNull { it.key == request.historyKey }
         val entry = HistoryEntry(
             key = request.historyKey,
@@ -109,6 +132,7 @@ class UserLibrary(context: Context) {
             season = request.season ?: previous?.season,
             episodeNumber = request.episodeNumber ?: previous?.episodeNumber,
             episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
+            parentContentId = request.parentContentId ?: previous?.parentContentId,
         )
         return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
     }
@@ -131,7 +155,13 @@ class UserLibrary(context: Context) {
     }
 
     private fun saveHistory(entries: List<HistoryEntry>): List<HistoryEntry> {
-        val normalized = entries
+        val scopedEntries = if (isActiveKidsProfile()) {
+            val allowed = kidsContentFilterStore.allowedKeys()
+            entries.filter { entry -> isAllowedKidsHistoryEntry(allowed, entry) }
+        } else {
+            entries
+        }
+        val normalized = scopedEntries
             .distinctBy(HistoryEntry::key)
             .sortedByDescending(HistoryEntry::updatedAtEpochMs)
             .take(MAX_HISTORY)
@@ -154,12 +184,16 @@ class UserLibrary(context: Context) {
                         entry.season?.let { put("season", it) }
                         entry.episodeNumber?.let { put("episodeNumber", it) }
                         entry.episodeTitle?.let { put("episodeTitle", it) }
+                        entry.parentContentId?.let { put("parentContentId", it) }
                     },
             )
         }
         preferences.edit().putString(activeKey(KEY_HISTORY), array.toString()).apply()
         return normalized
     }
+
+    private fun isActiveKidsProfile(): Boolean =
+        profileStore.activeProfile().kind == ProfileKind.KIDS
 
     private fun activeKey(baseKey: String): String =
         profileKey(profileStore.activeProfileId(), baseKey)
