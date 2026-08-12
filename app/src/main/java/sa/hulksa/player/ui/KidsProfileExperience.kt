@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +77,8 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.components.HulkTextField
+import sa.hulksa.player.ui.screens.KidsMobileMovieDetailsScreen
+import sa.hulksa.player.ui.screens.KidsMobileSeriesDetailsScreen
 import sa.hulksa.player.ui.screens.MovieDetailsScreen
 import sa.hulksa.player.ui.screens.PlayerScreen
 import sa.hulksa.player.ui.screens.ProfileAvatarArtwork
@@ -108,6 +112,17 @@ fun KidsProfileExperience(
             viewModel.open(item)
         }
     }
+    var selectedKidsSectionName by rememberSaveable(profile.id) {
+        mutableStateOf(KidsSection.HOME.name)
+    }
+    val selectedKidsSection = KidsSection.entries
+        .firstOrNull { it.name == selectedKidsSectionName }
+        ?: KidsSection.HOME
+
+    BackHandler(
+        enabled = state.screen == HulkScreen.MOVIE_DETAILS || state.screen == HulkScreen.SERIES,
+        onBack = viewModel::back,
+    )
 
     CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
         Box(
@@ -129,6 +144,8 @@ fun KidsProfileExperience(
                     profile = profile,
                     snapshot = safeSnapshot,
                     isTv = isTv,
+                    selectedSection = selectedKidsSection,
+                    onSelectedSectionChange = { selectedKidsSectionName = it.name },
                     onOpen = safeOpen,
                     onSwitchProfile = onSwitchProfile,
                 )
@@ -144,27 +161,50 @@ fun KidsProfileExperience(
                             .take(10)
                             .toList()
                         val download = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
-                        MovieDetailsScreen(
-                            item = item,
-                            details = state.selectedDetails,
-                            isLoading = state.isLoading,
-                            errorMessage = state.errorMessage,
-                            isTv = isTv,
-                            isFavorite = viewModel.isFavorite(item),
-                            download = download,
-                            historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
-                            relatedItems = related,
-                            isRelatedFavorite = viewModel::isFavorite,
-                            onBack = viewModel::back,
-                            onPlay = viewModel::playSelectedMovie,
-                            onDownload = {
-                                if (download == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(download)
-                            },
-                            onCancelDownload = { download?.let(viewModel::deleteDownload) },
-                            onToggleFavorite = { viewModel.toggleFavorite(item) },
-                            onToggleRelatedFavorite = viewModel::toggleFavorite,
-                            onOpenRelated = safeOpen,
-                        )
+                        if (isTv) {
+                            MovieDetailsScreen(
+                                item = item,
+                                details = state.selectedDetails,
+                                isLoading = state.isLoading,
+                                errorMessage = state.errorMessage,
+                                isTv = true,
+                                isFavorite = viewModel.isFavorite(item),
+                                download = download,
+                                historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
+                                relatedItems = related,
+                                isRelatedFavorite = viewModel::isFavorite,
+                                onBack = viewModel::back,
+                                onPlay = viewModel::playSelectedMovie,
+                                onDownload = {
+                                    if (download == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(download)
+                                },
+                                onCancelDownload = { download?.let(viewModel::deleteDownload) },
+                                onToggleFavorite = { viewModel.toggleFavorite(item) },
+                                onToggleRelatedFavorite = viewModel::toggleFavorite,
+                                onOpenRelated = safeOpen,
+                            )
+                        } else {
+                            KidsMobileMovieDetailsScreen(
+                                item = item,
+                                details = state.selectedDetails,
+                                isLoading = state.isLoading,
+                                errorMessage = state.errorMessage,
+                                isFavorite = viewModel.isFavorite(item),
+                                download = download,
+                                historyEntry = state.history.firstOrNull { it.key == "MOVIE:${item.id}" },
+                                relatedItems = related,
+                                isRelatedFavorite = viewModel::isFavorite,
+                                onBack = viewModel::back,
+                                onPlay = viewModel::playSelectedMovie,
+                                onDownload = {
+                                    if (download == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(download)
+                                },
+                                onCancelDownload = { download?.let(viewModel::deleteDownload) },
+                                onToggleFavorite = { viewModel.toggleFavorite(item) },
+                                onToggleRelatedFavorite = viewModel::toggleFavorite,
+                                onOpenRelated = safeOpen,
+                            )
+                        }
                     }
                 }
 
@@ -178,32 +218,60 @@ fun KidsProfileExperience(
                             .filter { it.id != series.id && it.categoryId == series.categoryId }
                             .take(10)
                             .toList()
-                        SeriesDetailsScreenV2(
-                            series = series,
-                            details = state.selectedDetails,
-                            episodes = state.episodes,
-                            isLoading = state.isLoading,
-                            errorMessage = state.errorMessage,
-                            isTv = isTv,
-                            isFavorite = viewModel.isFavorite(series),
-                            downloads = state.downloads,
-                            history = state.history,
-                            relatedItems = related,
-                            isRelatedFavorite = viewModel::isFavorite,
-                            onBack = viewModel::back,
-                            onPlay = viewModel::playEpisode,
-                            onDownload = { episode ->
-                                val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing)
-                            },
-                            onCancelDownload = { episode ->
-                                state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                    ?.let(viewModel::deleteDownload)
-                            },
-                            onToggleFavorite = { viewModel.toggleFavorite(series) },
-                            onToggleRelatedFavorite = viewModel::toggleFavorite,
-                            onOpenRelated = safeOpen,
-                        )
+                        if (isTv) {
+                            SeriesDetailsScreenV2(
+                                series = series,
+                                details = state.selectedDetails,
+                                episodes = state.episodes,
+                                isLoading = state.isLoading,
+                                errorMessage = state.errorMessage,
+                                isTv = true,
+                                isFavorite = viewModel.isFavorite(series),
+                                downloads = state.downloads,
+                                history = state.history,
+                                relatedItems = related,
+                                isRelatedFavorite = viewModel::isFavorite,
+                                onBack = viewModel::back,
+                                onPlay = viewModel::playEpisode,
+                                onDownload = { episode ->
+                                    val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+                                    if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing)
+                                },
+                                onCancelDownload = { episode ->
+                                    state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+                                        ?.let(viewModel::deleteDownload)
+                                },
+                                onToggleFavorite = { viewModel.toggleFavorite(series) },
+                                onToggleRelatedFavorite = viewModel::toggleFavorite,
+                                onOpenRelated = safeOpen,
+                            )
+                        } else {
+                            KidsMobileSeriesDetailsScreen(
+                                series = series,
+                                details = state.selectedDetails,
+                                episodes = state.episodes,
+                                isLoading = state.isLoading,
+                                errorMessage = state.errorMessage,
+                                isFavorite = viewModel.isFavorite(series),
+                                downloads = state.downloads,
+                                history = state.history,
+                                relatedItems = related,
+                                isRelatedFavorite = viewModel::isFavorite,
+                                onBack = viewModel::back,
+                                onPlay = viewModel::playEpisode,
+                                onDownload = { episode ->
+                                    val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+                                    if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing)
+                                },
+                                onCancelDownload = { episode ->
+                                    state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
+                                        ?.let(viewModel::deleteDownload)
+                                },
+                                onToggleFavorite = { viewModel.toggleFavorite(series) },
+                                onToggleRelatedFavorite = viewModel::toggleFavorite,
+                                onOpenRelated = safeOpen,
+                            )
+                        }
                     }
                 }
 
@@ -309,15 +377,19 @@ private fun KidsMainScreen(
     profile: UserProfile,
     snapshot: VerifiedKidsCatalogSnapshot,
     isTv: Boolean,
+    selectedSection: KidsSection,
+    onSelectedSectionChange: (KidsSection) -> Unit,
     onOpen: (ContentItem) -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val sections = remember(snapshot) { availableKidsSections(snapshot) }
-    var selected by remember(snapshot) { mutableStateOf(KidsSection.HOME) }
-    var query by remember { mutableStateOf("") }
+    val selected = selectedSection.takeIf { it in sections } ?: KidsSection.HOME
+    var query by remember(selected) { mutableStateOf("") }
     var categoryId by remember(selected) { mutableStateOf<String?>(null) }
-    if (selected !in sections) selected = KidsSection.HOME
+    LaunchedEffect(sections, selectedSection) {
+        if (selectedSection !in sections) onSelectedSectionChange(KidsSection.HOME)
+    }
 
     val entries = remember(sections) {
         sections.map { section ->
@@ -361,7 +433,7 @@ private fun KidsMainScreen(
                     entries = entries,
                     selected = selected,
                     isTv = isTv,
-                    onSelect = { selected = it; query = ""; categoryId = null },
+                    onSelect = { onSelectedSectionChange(it); query = ""; categoryId = null },
                     onSwitchProfile = onSwitchProfile,
                 )
                 Spacer(Modifier.width(if (isTv) 14.dp else 10.dp))
@@ -397,7 +469,7 @@ private fun KidsMainScreen(
                 KidsBottomBar(
                     entries = entries,
                     selected = selected,
-                    onSelect = { selected = it; query = ""; categoryId = null },
+                    onSelect = { onSelectedSectionChange(it); query = ""; categoryId = null },
                     onSwitchProfile = onSwitchProfile,
                 )
             }
