@@ -739,10 +739,10 @@ private fun NumberPad(
                     val up = if (row > 0) requester(index - 3) else self
                     val down = when {
                         row < 2 -> requester(index + 3)
-                        column == 0 -> cancelFocusRequester
+                        column == 0 -> self
                         column == 1 -> requester(9)
                         backspaceEnabled -> requester(10)
-                        else -> cancelFocusRequester
+                        else -> self
                     }
                     PinKey(
                         text = digit,
@@ -769,7 +769,7 @@ private fun NumberPad(
                 leftRequester = if (backspaceEnabled) requester(10) else requester(9),
                 rightRequester = requester(9),
                 upRequester = requester(7),
-                downRequester = cancelFocusRequester,
+                downRequester = requester(9),
                 onClick = { onDigit("0") },
             )
             PinKey(
@@ -781,7 +781,7 @@ private fun NumberPad(
                 leftRequester = requester(10),
                 rightRequester = requester(9),
                 upRequester = requester(8),
-                downRequester = cancelFocusRequester,
+                downRequester = requester(10),
                 onClick = onBackspace,
             )
         }
