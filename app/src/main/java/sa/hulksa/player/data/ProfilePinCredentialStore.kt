@@ -1,9 +1,9 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -66,8 +66,8 @@ class ProfilePinCredentialStore(context: Context) {
         return preferences.edit()
             .putInt(key(id, KEY_VERSION), CURRENT_CREDENTIAL_VERSION)
             .putInt(key(id, KEY_ITERATIONS), DEFAULT_ITERATIONS)
-            .putString(key(id, KEY_SALT), Base64.getEncoder().encodeToString(salt))
-            .putString(key(id, KEY_VERIFIER), Base64.getEncoder().encodeToString(verifier))
+            .putString(key(id, KEY_SALT), Base64.encodeToString(salt, Base64.NO_WRAP))
+            .putString(key(id, KEY_VERIFIER), Base64.encodeToString(verifier, Base64.NO_WRAP))
             .commit()
     }
 
@@ -100,11 +100,11 @@ class ProfilePinCredentialStore(context: Context) {
         if (iterations <= 0) return null
 
         val salt = preferences.getString(key(id, KEY_SALT), null)
-            ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
             ?.takeIf { it.isNotEmpty() }
             ?: return null
         val verifier = preferences.getString(key(id, KEY_VERIFIER), null)
-            ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
             ?.takeIf { it.isNotEmpty() }
             ?: return null
 
