@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.model.ContentItem
@@ -9,7 +10,9 @@ import sa.hulksa.player.model.PlaybackRequest
 
 class UserLibrary(context: Context) {
     private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences("hulk_user_library", Context.MODE_PRIVATE)
+    private val accountScope = AccountScopeStore(appContext)
+    private val preferences: SharedPreferences
+        get() = accountScope.preferences(PREFERENCES_NAME)
     private val profileStore = ProfileStore(appContext)
 
     init {
@@ -193,6 +196,7 @@ class UserLibrary(context: Context) {
     }
 
     private companion object {
+        const val PREFERENCES_NAME = "hulk_user_library"
         const val KEY_FAVORITES = "favorites"
         const val KEY_HISTORY = "history"
         const val KEY_PROFILE_SCOPE_MIGRATION_V1 = "profile_scope_migration_v1"

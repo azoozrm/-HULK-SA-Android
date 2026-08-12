@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -40,15 +41,14 @@ internal fun deriveProfilePinVerifier(
  * Local credential store for profile PIN protection.
  *
  * Raw PIN values are never persisted. Each profile receives an independent random salt and a
- * PBKDF2-HMAC-SHA256 verifier. ProfilePreferencesStore only keeps capability metadata; the actual
- * verifier remains in this dedicated store so profile-owned viewing preferences never contain
- * credential material.
+ * PBKDF2-HMAC-SHA256 verifier. AccountScopeStore additionally isolates credentials belonging to
+ * profiles that share the same local profile id across different accounts.
  */
 class ProfilePinCredentialStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
-        Context.MODE_PRIVATE,
-    )
+    private val appContext = context.applicationContext
+    private val accountScope = AccountScopeStore(appContext)
+    private val preferences: SharedPreferences
+        get() = accountScope.preferences(PREFERENCES_NAME)
     private val secureRandom = SecureRandom()
 
     fun hasPin(profileId: String): Boolean = load(profileId) != null

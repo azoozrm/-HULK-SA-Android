@@ -54,8 +54,11 @@ fun ProfileAwareHulkApp(
     var profileRevision by rememberSaveable { mutableStateOf(0) }
     var pinRevision by rememberSaveable { mutableStateOf(0) }
 
-    val profiles = remember(profileRevision) { profileStore.profiles() }
-    val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
+    val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
+    val profiles = remember(profileRevision, authenticated) { profileStore.profiles() }
+    val activeProfileId = remember(profileRevision, switching, authenticated) {
+        profileStore.activeProfileId()
+    }
     val protectedProfileIds = remember(profiles, pinRevision) {
         profiles
             .filter { profilePinCredentialStore.hasPin(it.id) }
@@ -70,7 +73,6 @@ fun ProfileAwareHulkApp(
         }
     }
     val routingPreferences = profilePreferencesStore.routing()
-    val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
     val directEntryTarget = if (
         authenticated &&
         !resolvedForSession &&
@@ -104,6 +106,7 @@ fun ProfileAwareHulkApp(
 
         val currentProfileId = profileStore.activeProfileId()
         if (profile.id == currentProfileId) {
+            viewModel.refreshProfileLibrary()
             switchError = null
             resolvedForSession = true
             managingProfiles = false

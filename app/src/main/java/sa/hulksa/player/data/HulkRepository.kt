@@ -20,18 +20,42 @@ class HulkRepository(context: Context) {
     private val movieCardMetadataClient = MovieCardMetadataClient()
     private val seriesCardMetadataClient = SeriesCardMetadataClient()
     private val vault = CredentialVault(context)
+    private val accountSessionStore = AccountSessionStore(context)
     private val diagnostics = ServerDiagnosticsEngine(context)
 
     suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession {
         val portal = portalResolver.resolve()
         val session = client.authenticate(portal, credentials)
-        if (remember) vault.save(credentials) else vault.clear()
+        try {
+            accountSessionStore.recordAuthenticated(session)
+            if (remember) vault.save(credentials) else vault.clear()
+        } catch (error: Throwable) {
+            vault.clear()
+            accountSessionStore.clearActiveSession()
+            throw error
+        }
         return session
     }
 
-    fun savedCredentials(): Credentials? = vault.load()
+    suspend fun reauthenticate(session: AuthenticatedSession): AuthenticatedSession {
+        val portal = portalResolver.resolve()
+        val refreshed = client.authenticate(portal, session.credentials)
+        accountSessionStore.recordAuthenticated(refreshed)
+        return refreshed
+    }
 
-    fun logout() = vault.clear()
+    fun savedCredentials(): Credentials? {
+        val credentials = vault.load()
+        if (credentials == null) accountSessionStore.clearActiveSession()
+        return credentials
+    }
+
+    fun activeAccountSession(): AccountSessionMetadata? = accountSessionStore.metadata()
+
+    fun logout() {
+        vault.clear()
+        accountSessionStore.clearActiveSession()
+    }
 
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         client.catalog(session, type)
