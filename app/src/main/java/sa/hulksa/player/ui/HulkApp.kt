@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
@@ -23,6 +24,7 @@ import sa.hulksa.player.MainDestination
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation
+import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
@@ -314,6 +316,19 @@ fun HulkApp(
                             LaunchedEffect(state.screen) { viewModel.back() }
                         }
                     }
+                }
+
+                if (
+                    state.screen == HulkScreen.MAIN &&
+                    !isTv &&
+                    adaptiveUi.navigationType != HulkNavigationType.RAIL
+                ) {
+                    StableMobileBottomNavigation(
+                        selected = state.destination,
+                        onSelectDestination = selectDestinationWithProfileContext,
+                        onSwitchProfile = requestProfileSwitch,
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
                 }
             }
         }
