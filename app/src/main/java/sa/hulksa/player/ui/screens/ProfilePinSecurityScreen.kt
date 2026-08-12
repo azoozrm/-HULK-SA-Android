@@ -402,40 +402,35 @@ private fun ProfilePinEntryScaffold(
     onComplete: (String) -> Unit,
     onCancel: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-
     ProfileSecurityBackdrop(isTv = isTv) { useTwoColumns, shortLandscape, compactHeight ->
         if (isTv) {
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 28.dp, vertical = 22.dp),
+                    .padding(horizontal = 32.dp, vertical = 24.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 val compactTv = maxHeight < 620.dp || maxWidth < 900.dp
-                val shellShape = RoundedCornerShape(if (compactTv) 24.dp else 28.dp)
+                val compositionWidth = if (compactTv) 360.dp else 420.dp
+                val panelWidth = if (compactTv) 340.dp else 380.dp
 
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth(if (compactTv) .94f else .86f)
-                        .widthIn(max = if (compactTv) 700.dp else 820.dp)
-                        .clip(shellShape)
-                        .background(colors.surface.copy(alpha = .78f))
-                        .border(1.dp, colors.gold.copy(alpha = .24f), shellShape)
-                        .padding(
-                            horizontal = if (compactTv) 20.dp else 28.dp,
-                            vertical = if (compactTv) 18.dp else 24.dp,
-                        ),
-                    horizontalArrangement = Arrangement.spacedBy(if (compactTv) 18.dp else 24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .widthIn(max = compositionWidth)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     ProfileSecurityIdentity(
                         profile = profile,
                         isTv = true,
                         shortLandscape = false,
                         compact = compactTv,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                     )
+
+                    Spacer(Modifier.height(if (compactTv) 12.dp else 18.dp))
+
                     PinPanel(
                         profile = profile,
                         isTv = true,
@@ -448,10 +443,9 @@ private fun ProfilePinEntryScaffold(
                         resetToken = resetToken,
                         onComplete = onComplete,
                         onCancel = onCancel,
-                        modifier = Modifier.widthIn(
-                            min = if (compactTv) 280.dp else 300.dp,
-                            max = if (compactTv) 310.dp else 340.dp,
-                        ),
+                        modifier = Modifier
+                            .widthIn(max = panelWidth)
+                            .fillMaxWidth(),
                     )
                 }
             }
@@ -577,8 +571,8 @@ private fun ProfileSecurityIdentity(
     val colors = LocalHulkColors.current
     val avatarSize = when {
         shortLandscape -> 64.dp
-        isTv && compact -> 72.dp
-        isTv -> 88.dp
+        isTv && compact -> 78.dp
+        isTv -> 96.dp
         compact -> 58.dp
         else -> 88.dp
     }
@@ -601,7 +595,7 @@ private fun ProfileSecurityIdentity(
             fontSize = when {
                 shortLandscape -> 20.sp
                 isTv && compact -> 22.sp
-                isTv -> 24.sp
+                isTv -> 25.sp
                 compact -> 19.sp
                 else -> 24.sp
             },
@@ -640,8 +634,8 @@ private fun PinPanel(
     val cancelFocusRequester = remember(title, resetToken) { FocusRequester() }
     val keySize = when {
         shortLandscape -> 46.dp
-        isTv && tvCompact -> 48.dp
-        isTv -> 54.dp
+        isTv && tvCompact -> 50.dp
+        isTv -> 56.dp
         compactHeight -> 48.dp
         else -> 54.dp
     }
@@ -670,21 +664,21 @@ private fun PinPanel(
 
     Column(
         modifier = modifier
-            .widthIn(max = if (isTv) 340.dp else 360.dp)
+            .widthIn(max = if (isTv) 380.dp else 360.dp)
             .clip(shape)
             .background(colors.surface.copy(alpha = .97f))
             .border(1.dp, colors.gold.copy(alpha = .30f), shape)
             .padding(
                 horizontal = when {
                     shortLandscape -> 12.dp
-                    isTv && tvCompact -> 14.dp
-                    isTv -> 18.dp
+                    isTv && tvCompact -> 16.dp
+                    isTv -> 20.dp
                     else -> 16.dp
                 },
                 vertical = when {
                     shortLandscape -> 8.dp
-                    isTv && tvCompact -> 10.dp
-                    isTv -> 13.dp
+                    isTv && tvCompact -> 11.dp
+                    isTv -> 14.dp
                     compactHeight -> 10.dp
                     else -> 14.dp
                 },
@@ -696,8 +690,8 @@ private fun PinPanel(
             color = colors.text,
             fontSize = when {
                 shortLandscape -> 18.sp
-                isTv && tvCompact -> 20.sp
-                isTv -> 23.sp
+                isTv && tvCompact -> 21.sp
+                isTv -> 24.sp
                 compactHeight -> 19.sp
                 else -> 22.sp
             },
@@ -710,7 +704,7 @@ private fun PinPanel(
             color = colors.textMuted,
             fontSize = when {
                 isTv && tvCompact -> 10.sp
-                isTv -> 11.sp
+                isTv -> 12.sp
                 else -> 10.sp
             },
             textAlign = TextAlign.Center,
@@ -780,7 +774,7 @@ private fun PinPanel(
             focusRequester = cancelFocusRequester,
             onClick = onCancel,
             modifier = if (isTv) {
-                Modifier.widthIn(min = 128.dp, max = 176.dp)
+                Modifier.widthIn(min = 148.dp, max = 184.dp)
             } else {
                 Modifier.fillMaxWidth()
             },
