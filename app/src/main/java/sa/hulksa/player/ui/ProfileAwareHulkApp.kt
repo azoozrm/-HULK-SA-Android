@@ -120,6 +120,8 @@ fun ProfileAwareHulkApp(
             createProfileRequested ||
             profiles.any { it.kind == ProfileKind.KIDS }
         )
+    val kidsSourcePending =
+        needsKidsSource && kidsSnapshot == null && kidsSourceError == null
 
     LaunchedEffect(
         authenticated,
@@ -405,7 +407,7 @@ fun ProfileAwareHulkApp(
             startCreating = createProfileRequested,
             protectedProfileIds = protectedProfileIds,
             kidsSourceAvailable = kidsSnapshot?.isAvailable == true,
-            kidsSourceLoading = kidsSourceLoading,
+            kidsSourceLoading = kidsSourceLoading || kidsSourcePending,
             kidsSourceMessage = kidsSourceError,
             onRetryKidsSource = ::requestKidsSourceReload,
             onCreate = { name, avatarKey, kind ->
@@ -480,7 +482,7 @@ fun ProfileAwareHulkApp(
             isTelevisionDevice = isTelevisionDevice,
             profile = activeProfile,
             snapshot = kidsSnapshot,
-            sourceLoading = kidsSourceLoading,
+            sourceLoading = kidsSourceLoading || kidsSourcePending,
             sourceError = kidsSourceError,
             onRetrySource = ::requestKidsSourceReload,
             onSwitchProfile = ::openProfilePickerFromApp,
