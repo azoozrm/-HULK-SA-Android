@@ -29,10 +29,12 @@ class HulkRepository(context: Context) {
         val session = client.authenticate(portal, credentials)
         try {
             accountSessionStore.recordAuthenticated(session)
+            AuthenticatedSessionRegistry.update(session)
             if (remember) vault.save(credentials) else vault.clear()
         } catch (error: Throwable) {
             vault.clear()
             accountSessionStore.clearActiveSession()
+            AuthenticatedSessionRegistry.clear()
             throw error
         }
         return session
@@ -42,20 +44,27 @@ class HulkRepository(context: Context) {
         val portal = portalResolver.resolve()
         val refreshed = client.authenticate(portal, session.credentials)
         accountSessionStore.recordAuthenticated(refreshed)
+        AuthenticatedSessionRegistry.update(refreshed)
         return refreshed
     }
 
     fun savedCredentials(): Credentials? {
         val credentials = vault.load()
-        if (credentials == null) accountSessionStore.clearActiveSession()
+        if (credentials == null) {
+            accountSessionStore.clearActiveSession()
+            AuthenticatedSessionRegistry.clear()
+        }
         return credentials
     }
 
     fun activeAccountSession(): AccountSessionMetadata? = accountSessionStore.metadata()
 
+    fun currentAuthenticatedSession(): AuthenticatedSession? = AuthenticatedSessionRegistry.current()
+
     fun logout() {
         vault.clear()
         accountSessionStore.clearActiveSession()
+        AuthenticatedSessionRegistry.clear()
     }
 
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =

@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -15,12 +16,15 @@ import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.ProfilePinCredentialStore
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
+import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
+import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.screens.AdaptiveProfileManagementScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
-import sa.hulksa.player.ui.screens.ProfileManagementScreen
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
@@ -37,6 +41,7 @@ fun ProfileAwareHulkApp(
     val profileStore = remember(context) { ProfileStore(context) }
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
     val profilePinCredentialStore = remember(context) { ProfilePinCredentialStore(context) }
+    val hulkRepository = remember(context) { HulkRepository(context) }
     val navigationMemoryByProfile = remember { mutableMapOf<String, NavigationMemoryStore>() }
     val destinationMemoryByProfile = remember { mutableMapOf<String, MainDestination>() }
     val catalogNavigationMemoryByProfile = remember {
@@ -51,13 +56,22 @@ fun ProfileAwareHulkApp(
     var pickerRequestedFromApp by rememberSaveable { mutableStateOf(false) }
     var pinUnlockTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     var pinSecurityProfileId by rememberSaveable { mutableStateOf<String?>(null) }
-    var profileRevision by rememberSaveable { mutableStateOf(0) }
-    var pinRevision by rememberSaveable { mutableStateOf(0) }
+    var profileRevision by rememberSaveable { mutableIntStateOf(0) }
+    var pinRevision by rememberSaveable { mutableIntStateOf(0) }
+    var kidsSourceRequest by rememberSaveable { mutableIntStateOf(0) }
+    var kidsSnapshot by remember { mutableStateOf<VerifiedKidsCatalogSnapshot?>(null) }
+    var kidsSourceLoading by remember { mutableStateOf(false) }
+    var kidsSourceError by remember { mutableStateOf<String?>(null) }
+    var kidsSnapshotAccount by remember { mutableStateOf<String?>(null) }
 
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
     val profiles = remember(profileRevision, authenticated) { profileStore.profiles() }
     val activeProfileId = remember(profileRevision, switching, authenticated) {
         profileStore.activeProfileId()
+    }
+    val activeProfile = remember(profiles, activeProfileId) {
+        profiles.firstOrNull { it.id == activeProfileId }
+            ?: profiles.firstOrNull()
     }
     val protectedProfileIds = remember(profiles, pinRevision) {
         profiles
@@ -100,12 +114,80 @@ fun ProfileAwareHulkApp(
             )
         )
     )
+    val needsKidsSource = authenticated && (
+        activeProfile?.kind == ProfileKind.KIDS ||
+            managingProfiles ||
+            createProfileRequested ||
+            profiles.any { it.kind == ProfileKind.KIDS }
+        )
+
+    LaunchedEffect(
+        authenticated,
+        state.account?.username,
+        needsKidsSource,
+        kidsSourceRequest,
+    ) {
+        val accountKey = state.account?.username
+        if (!authenticated || accountKey == null) {
+            kidsSnapshot = null
+            kidsSourceLoading = false
+            kidsSourceError = null
+            kidsSnapshotAccount = null
+            return@LaunchedEffect
+        }
+        if (kidsSnapshotAccount != accountKey) {
+            kidsSnapshot = null
+            kidsSourceError = null
+            kidsSnapshotAccount = accountKey
+        }
+        if (!needsKidsSource) return@LaunchedEffect
+
+        val activeSession = hulkRepository.currentAuthenticatedSession()
+        if (activeSession == null) {
+            kidsSnapshot = null
+            kidsSourceLoading = false
+            kidsSourceError = "تعذر الوصول إلى الجلسة الموثّقة. أعد تسجيل الدخول ثم حاول مرة أخرى."
+            return@LaunchedEffect
+        }
+
+        kidsSourceLoading = true
+        kidsSourceError = null
+        try {
+            val verified = hulkRepository.verifiedKidsCatalog(activeSession)
+            kidsSnapshot = verified
+            kidsSourceError = when {
+                verified.isAvailable -> null
+                verified.blockedTypes.isNotEmpty() ->
+                    "لم يعتمد التطبيق مصدر الأطفال لأن فلترة السيرفر لم تُثبت بأمان."
+                else -> "لا توجد فئات أطفال صريحة متاحة لهذا الحساب."
+            }
+        } catch (_: Exception) {
+            kidsSnapshot = null
+            kidsSourceError = "تعذر التحقق من مصدر الأطفال. لم يتم عرض أي محتوى عام كبديل."
+        } finally {
+            kidsSourceLoading = false
+        }
+    }
+
+    fun requestKidsSourceReload() {
+        kidsSourceRequest++
+    }
+
+    fun openProfilePickerFromApp() {
+        if (!switching) {
+            switchError = null
+            managingProfiles = false
+            createProfileRequested = false
+            pickerRequestedFromApp = true
+        }
+    }
 
     fun switchProfileUnlocked(profile: UserProfile) {
         if (switching) return
 
         val currentProfileId = profileStore.activeProfileId()
         if (profile.id == currentProfileId) {
+            if (profile.kind == ProfileKind.KIDS) viewModel.selectDestination(MainDestination.HOME)
             viewModel.refreshProfileLibrary()
             switchError = null
             resolvedForSession = true
@@ -129,7 +211,11 @@ fun ProfileAwareHulkApp(
                 query = state.searchQuery,
             )
 
-        val targetDestination = destinationMemoryByProfile[profile.id] ?: MainDestination.HOME
+        val targetDestination = if (profile.kind == ProfileKind.KIDS) {
+            MainDestination.HOME
+        } else {
+            destinationMemoryByProfile[profile.id] ?: MainDestination.HOME
+        }
         val targetCatalogMemory = catalogNavigationMemoryByProfile
             .getOrPut(profile.id) { ProfileCatalogNavigationMemory() }
 
@@ -140,9 +226,12 @@ fun ProfileAwareHulkApp(
         }
 
         viewModel.selectDestination(targetDestination)
-        if (targetDestination.isProfileCatalogDestination()) {
+        if (profile.kind != ProfileKind.KIDS && targetDestination.isProfileCatalogDestination()) {
             viewModel.updateSearch(targetCatalogMemory.query(targetDestination))
             viewModel.selectCategory(targetCatalogMemory.category(targetDestination))
+        } else if (profile.kind == ProfileKind.KIDS) {
+            viewModel.updateSearch("")
+            viewModel.selectCategory(null)
         }
         viewModel.refreshProfileLibrary()
         profileRevision++
@@ -223,6 +312,10 @@ fun ProfileAwareHulkApp(
             pickerRequestedFromApp = false
             pinUnlockTargetId = null
             pinSecurityProfileId = null
+            kidsSnapshot = null
+            kidsSourceLoading = false
+            kidsSourceError = null
+            kidsSnapshotAccount = null
             navigationMemoryByProfile.clear()
             destinationMemoryByProfile.clear()
             catalogNavigationMemoryByProfile.clear()
@@ -305,26 +398,35 @@ fun ProfileAwareHulkApp(
             },
         )
 
-        managingProfiles -> ProfileManagementScreen(
+        managingProfiles -> AdaptiveProfileManagementScreen(
             profiles = profiles,
             activeProfileId = activeProfileId,
             isTv = isTelevisionDevice,
             startCreating = createProfileRequested,
             protectedProfileIds = protectedProfileIds,
-            onCreate = { name, avatarKey ->
-                val created = profileStore.createProfile(name, avatarKey = avatarKey)
-                val createdSuccessfully = created != null
-                if (createdSuccessfully) {
+            kidsSourceAvailable = kidsSnapshot?.isAvailable == true,
+            kidsSourceLoading = kidsSourceLoading,
+            kidsSourceMessage = kidsSourceError,
+            onRetryKidsSource = ::requestKidsSourceReload,
+            onCreate = { name, avatarKey, kind ->
+                val kidsAllowed = kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true
+                val created = if (kidsAllowed) {
+                    profileStore.createProfile(name, avatarKey = avatarKey, kind = kind)
+                } else {
+                    null
+                }
+                val success = created != null
+                if (success) {
                     createProfileRequested = false
                     profileRevision++
                 }
-                createdSuccessfully
+                success
             },
             onUpdate = { profileId, name, avatarKey ->
                 val updated = profileStore.updateProfile(profileId, name, avatarKey)
-                val updatedSuccessfully = updated != null
-                if (updatedSuccessfully) profileRevision++
-                updatedSuccessfully
+                val success = updated != null
+                if (success) profileRevision++
+                success
             },
             onDelete = { profileId ->
                 val deleted = profileStore.deleteProfile(profileId)
@@ -373,15 +475,19 @@ fun ProfileAwareHulkApp(
             },
         )
 
+        activeProfile?.kind == ProfileKind.KIDS -> KidsProfileExperience(
+            viewModel = viewModel,
+            isTelevisionDevice = isTelevisionDevice,
+            profile = activeProfile,
+            snapshot = kidsSnapshot,
+            sourceLoading = kidsSourceLoading,
+            sourceError = kidsSourceError,
+            onRetrySource = ::requestKidsSourceReload,
+            onSwitchProfile = ::openProfilePickerFromApp,
+        )
+
         else -> CompositionLocalProvider(
-            LocalProfileSwitchRequester provides {
-                if (!switching) {
-                    switchError = null
-                    managingProfiles = false
-                    createProfileRequested = false
-                    pickerRequestedFromApp = true
-                }
-            },
+            LocalProfileSwitchRequester provides ::openProfilePickerFromApp,
         ) {
             HulkApp(
                 viewModel = viewModel,
