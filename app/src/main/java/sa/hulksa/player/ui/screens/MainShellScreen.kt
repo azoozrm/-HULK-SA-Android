@@ -703,6 +703,7 @@ private fun MobileNavigation(
         initialFirstVisibleItemIndex = rememberedPosition.first,
         initialFirstVisibleItemScrollOffset = rememberedPosition.second,
     )
+    val navigationScope = rememberCoroutineScope()
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
@@ -723,6 +724,31 @@ private fun MobileNavigation(
             }
         }
     }
+    val searchIndex = mobileEntries.indexOfFirst { (entry, profileSwitch) ->
+        !profileSwitch && entry.destination == MainDestination.SEARCH
+    }
+
+    suspend fun revealNavigationContext(index: Int, includeNext: Boolean) {
+        if (isLandscape || isWide || index < 0) return
+        delay(50L)
+        val layoutInfo = navigationState.layoutInfo
+        val fullyVisible = layoutInfo.visibleItemsInfo.filter { item ->
+            item.offset >= layoutInfo.viewportStartOffset &&
+                item.offset + item.size <= layoutInfo.viewportEndOffset
+        }
+        val requiredIndex = if (includeNext) {
+            (index + 1).coerceAtMost(mobileEntries.lastIndex)
+        } else {
+            index
+        }
+        val fullyVisibleIndices = fullyVisible.mapTo(hashSetOf()) { it.index }
+        if (index in fullyVisibleIndices && requiredIndex in fullyVisibleIndices) return
+
+        val visibleCapacity = fullyVisible.size.coerceAtLeast(1)
+        val anchorIndex = (requiredIndex - (visibleCapacity - 1))
+            .coerceIn(0, mobileEntries.lastIndex)
+        navigationState.animateScrollToItem(anchorIndex)
+    }
 
     LaunchedEffect(navigationState, isLandscape, isWide) {
         if (isLandscape || isWide) return@LaunchedEffect
@@ -735,37 +761,27 @@ private fun MobileNavigation(
 
     LaunchedEffect(selected, isLandscape, isWide) {
         if (isLandscape || isWide) return@LaunchedEffect
-        delay(60L)
         val selectedIndex = mobileEntries.indexOfFirst { (entry, profileSwitch) ->
             !profileSwitch && entry.destination == selected
         }
-        if (selectedIndex < 0) return@LaunchedEffect
-
-        val visibleItems = navigationState.layoutInfo.visibleItemsInfo
-        if (visibleItems.isEmpty()) return@LaunchedEffect
-        val selectedVisible = visibleItems.firstOrNull { it.index == selectedIndex }
-        val lastVisibleIndex = visibleItems.maxOf { it.index }
-
-        when {
-            selectedVisible == null -> {
-                navigationState.animateScrollToItem((selectedIndex - 1).coerceAtLeast(0))
-            }
-            selectedIndex == lastVisibleIndex && selectedIndex < mobileEntries.lastIndex -> {
-                val targetFirst = (navigationState.firstVisibleItemIndex + 1)
-                    .coerceAtMost(mobileEntries.lastIndex)
-                if (targetFirst != navigationState.firstVisibleItemIndex) {
-                    navigationState.animateScrollToItem(targetFirst)
-                }
-            }
-        }
+        revealNavigationContext(
+            index = selectedIndex,
+            includeNext = selectedIndex >= searchIndex && selectedIndex < mobileEntries.lastIndex,
+        )
     }
 
-    fun selectEntry(entry: DestinationEntry, profileSwitch: Boolean) {
+    fun selectEntry(index: Int, entry: DestinationEntry, profileSwitch: Boolean) {
         if (!isLandscape && !isWide) {
             navigationMemory.saveMobileNavigationPosition(
                 navigationState.firstVisibleItemIndex,
                 navigationState.firstVisibleItemScrollOffset,
             )
+            navigationScope.launch {
+                revealNavigationContext(
+                    index = index,
+                    includeNext = index >= searchIndex && index < mobileEntries.lastIndex,
+                )
+            }
         }
         if (profileSwitch) {
             requestProfileSwitch()
@@ -787,7 +803,7 @@ private fun MobileNavigation(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                mobileEntries.forEach { (entry, profileSwitch) ->
+                mobileEntries.forEachIndexed { index, (entry, profileSwitch) ->
                     val active = !profileSwitch && selected == entry.destination
                     val iconScale by animateFloatAsState(
                         targetValue = if (active) 1.08f else 1f,
@@ -798,7 +814,7 @@ private fun MobileNavigation(
                         label = "mobileNavLabelAlphaWide",
                     )
                     val indicatorWidth by animateDpAsState(
-                        targetValue = if (active) 30.dp else 0.dp,
+                        targetValue = if (active) 36.dp else 0.dp,
                         label = "mobileNavIndicatorWidthWide",
                     )
 
@@ -807,22 +823,25 @@ private fun MobileNavigation(
                             .weight(1f)
                             .height(54.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (active) colors.gold.copy(alpha = .10f) else Color.Transparent)
-                            .clickable(role = Role.Button) { selectEntry(entry, profileSwitch) }
+                            .background(if (active) colors.gold.copy(alpha = .12f) else Color.Transparent)
+                            .border(
+                                if (active) 1.dp else 0.dp,
+                                if (active) colors.goldBright.copy(alpha = .45f) else Color.Transparent,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .clickable(role = Role.Button) { selectEntry(index, entry, profileSwitch) }
                             .padding(horizontal = 2.dp, vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Box(
                             modifier = Modifier
-                                .height(3.dp)
+                                .height(4.dp)
                                 .width(indicatorWidth)
                                 .clip(RoundedCornerShape(99.dp))
                                 .background(if (active) colors.goldBright else Color.Transparent),
                         )
-
-                        Spacer(Modifier.height(2.dp))
-
+                        Spacer(Modifier.height(1.dp))
                         Icon(
                             imageVector = entry.icon,
                             contentDescription = entry.label,
@@ -834,16 +853,10 @@ private fun MobileNavigation(
                                     scaleY = iconScale
                                 },
                         )
-
                         Spacer(Modifier.height(2.dp))
-
                         Text(
                             text = entry.label,
-                            color = if (active) {
-                                colors.text.copy(alpha = labelAlpha)
-                            } else {
-                                colors.textMuted.copy(alpha = labelAlpha)
-                            },
+                            color = if (active) colors.text.copy(alpha = labelAlpha) else colors.textMuted.copy(alpha = labelAlpha),
                             fontSize = 9.sp,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1,
@@ -865,7 +878,7 @@ private fun MobileNavigation(
                         val (entry, profileSwitch) = item
                         if (profileSwitch) "switch-profile" else entry.destination.name
                     },
-                ) { _, (entry, profileSwitch) ->
+                ) { index, (entry, profileSwitch) ->
                     val active = !profileSwitch && selected == entry.destination
                     val iconScale by animateFloatAsState(
                         targetValue = if (active) 1.08f else 1f,
@@ -876,7 +889,7 @@ private fun MobileNavigation(
                         label = "mobileNavLabelAlphaPortrait",
                     )
                     val indicatorWidth by animateDpAsState(
-                        targetValue = if (active) 30.dp else 0.dp,
+                        targetValue = if (active) 36.dp else 0.dp,
                         label = "mobileNavIndicatorWidthPortrait",
                     )
 
@@ -885,22 +898,25 @@ private fun MobileNavigation(
                             .widthIn(min = 52.dp)
                             .height(54.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (active) colors.gold.copy(alpha = .10f) else Color.Transparent)
-                            .clickable(role = Role.Button) { selectEntry(entry, profileSwitch) }
+                            .background(if (active) colors.gold.copy(alpha = .12f) else Color.Transparent)
+                            .border(
+                                if (active) 1.dp else 0.dp,
+                                if (active) colors.goldBright.copy(alpha = .45f) else Color.Transparent,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .clickable(role = Role.Button) { selectEntry(index, entry, profileSwitch) }
                             .padding(horizontal = 3.dp, vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Box(
                             modifier = Modifier
-                                .height(3.dp)
+                                .height(4.dp)
                                 .width(indicatorWidth)
                                 .clip(RoundedCornerShape(99.dp))
                                 .background(if (active) colors.goldBright else Color.Transparent),
                         )
-
-                        Spacer(Modifier.height(2.dp))
-
+                        Spacer(Modifier.height(1.dp))
                         Icon(
                             imageVector = entry.icon,
                             contentDescription = entry.label,
@@ -912,16 +928,10 @@ private fun MobileNavigation(
                                     scaleY = iconScale
                                 },
                         )
-
                         Spacer(Modifier.height(1.dp))
-
                         Text(
                             text = entry.label,
-                            color = if (active) {
-                                colors.text.copy(alpha = labelAlpha)
-                            } else {
-                                colors.textMuted.copy(alpha = labelAlpha)
-                            },
+                            color = if (active) colors.text.copy(alpha = labelAlpha) else colors.textMuted.copy(alpha = labelAlpha),
                             fontSize = 9.sp,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1,
