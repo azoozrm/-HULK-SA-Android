@@ -69,7 +69,7 @@ fun ProfilePinUnlockScreen(
         profile = profile,
         isTv = isTv,
         title = "أدخل رمز PIN",
-        subtitle = "هذا الملف محمي. أدخل الرمز المكوّن من 4 أرقام للمتابعة.",
+        subtitle = "أدخل رمز PIN المكوّن من 4 أرقام للمتابعة",
         errorMessage = error,
         resetToken = resetToken,
         onComplete = { pin ->
@@ -77,7 +77,7 @@ fun ProfilePinUnlockScreen(
                 error = null
                 onUnlocked()
             } else {
-                error = "رمز PIN غير صحيح. حاول مرة أخرى."
+                error = "رمز PIN غير صحيح"
                 resetToken++
             }
         },
@@ -172,14 +172,14 @@ fun ProfilePinProtectionScreen(
                         resetToken++
                         step = PinProtectionStep.NEW_PIN
                     } else {
-                        error = "رمز PIN الحالي غير صحيح."
+                        error = "رمز PIN الحالي غير صحيح"
                         resetToken++
                     }
                 }
 
                 PinProtectionStep.VERIFY_REMOVE -> {
                     if (!onVerify(pin)) {
-                        error = "رمز PIN الحالي غير صحيح."
+                        error = "رمز PIN الحالي غير صحيح"
                         resetToken++
                     } else if (onClearPin()) {
                         error = null
@@ -236,37 +236,44 @@ private fun ProfilePinOverview(
 ) {
     ProfileSecurityBackdrop(isTv = isTv) { useTwoColumns, shortLandscape, compactHeight ->
         val contentPadding = when {
-            isTv -> 38.dp
+            isTv -> 32.dp
             shortLandscape -> 10.dp
             useTwoColumns -> 28.dp
             else -> 20.dp
         }
 
         if (useTwoColumns) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(contentPadding),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 48.dp else 28.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.Center,
             ) {
-                ProfileSecurityIdentity(
-                    profile = profile,
-                    isTv = isTv,
-                    shortLandscape = shortLandscape,
-                    modifier = Modifier.weight(1f),
-                )
-                SecurityActionPanel(
-                    title = "حماية الملف مفعّلة",
-                    subtitle = "يمكنك تغيير رمز PIN أو إلغاء الحماية بعد التحقق من الرمز الحالي.",
-                    isTv = isTv,
-                    shortLandscape = shortLandscape,
-                    compactHeight = compactHeight,
-                    onChangePin = onChangePin,
-                    onRemovePin = onRemovePin,
-                    onClose = onClose,
-                    modifier = Modifier.weight(1f),
-                )
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = if (isTv) 980.dp else 880.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 30.dp else 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ProfileSecurityIdentity(
+                        profile = profile,
+                        isTv = isTv,
+                        shortLandscape = shortLandscape,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SecurityActionPanel(
+                        title = "حماية الملف مفعّلة",
+                        subtitle = "يمكنك تغيير رمز PIN أو إلغاء الحماية بعد التحقق من الرمز الحالي.",
+                        isTv = isTv,
+                        shortLandscape = shortLandscape,
+                        compactHeight = compactHeight,
+                        onChangePin = onChangePin,
+                        onRemovePin = onRemovePin,
+                        onClose = onClose,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         } else {
             Column(
@@ -283,7 +290,7 @@ private fun ProfilePinOverview(
                     compact = compactHeight,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(if (isTv) 28.dp else if (compactHeight) 10.dp else 18.dp))
+                Spacer(Modifier.height(if (isTv) 24.dp else if (compactHeight) 10.dp else 16.dp))
                 SecurityActionPanel(
                     title = "حماية الملف مفعّلة",
                     subtitle = "يمكنك تغيير رمز PIN أو إلغاء الحماية بعد التحقق من الرمز الحالي.",
@@ -314,18 +321,25 @@ private fun SecurityActionPanel(
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(if (isTv) 26.dp else 20.dp)
+    val firstActionFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isTv) {
+        if (!isTv) return@LaunchedEffect
+        delay(120L)
+        runCatching { firstActionFocusRequester.requestFocus() }
+    }
 
     Column(
         modifier = modifier
-            .widthIn(max = if (isTv) 560.dp else 500.dp)
+            .widthIn(max = if (isTv) 520.dp else 500.dp)
             .clip(shape)
             .background(colors.surface.copy(alpha = .97f))
             .border(1.dp, colors.gold.copy(alpha = .30f), shape)
             .padding(
-                horizontal = if (isTv) 32.dp else 22.dp,
+                horizontal = if (isTv) 30.dp else 22.dp,
                 vertical = when {
                     shortLandscape -> 18.dp
-                    isTv -> 30.dp
+                    isTv -> 28.dp
                     compactHeight -> 18.dp
                     else -> 24.dp
                 },
@@ -354,6 +368,7 @@ private fun SecurityActionPanel(
         SecurityButton(
             text = "تغيير رمز PIN",
             isTv = isTv,
+            focusRequester = firstActionFocusRequester,
             onClick = onChangePin,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -389,39 +404,46 @@ private fun ProfilePinEntryScaffold(
 ) {
     ProfileSecurityBackdrop(isTv = isTv) { useTwoColumns, shortLandscape, compactHeight ->
         val padding = when {
-            isTv -> 36.dp
+            isTv -> 30.dp
             shortLandscape -> 8.dp
-            useTwoColumns -> 24.dp
-            else -> 18.dp
+            useTwoColumns -> 22.dp
+            else -> 16.dp
         }
 
         if (useTwoColumns) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 46.dp else 24.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.Center,
             ) {
-                ProfileSecurityIdentity(
-                    profile = profile,
-                    isTv = isTv,
-                    shortLandscape = shortLandscape,
-                    modifier = Modifier.weight(1f),
-                )
-                PinPanel(
-                    profile = profile,
-                    isTv = isTv,
-                    shortLandscape = shortLandscape,
-                    compactHeight = compactHeight,
-                    title = title,
-                    subtitle = subtitle,
-                    errorMessage = errorMessage,
-                    resetToken = resetToken,
-                    onComplete = onComplete,
-                    onCancel = onCancel,
-                    modifier = Modifier.weight(1f),
-                )
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = if (isTv) 980.dp else 880.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 30.dp else 22.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ProfileSecurityIdentity(
+                        profile = profile,
+                        isTv = isTv,
+                        shortLandscape = shortLandscape,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PinPanel(
+                        profile = profile,
+                        isTv = isTv,
+                        shortLandscape = shortLandscape,
+                        compactHeight = compactHeight,
+                        title = title,
+                        subtitle = subtitle,
+                        errorMessage = errorMessage,
+                        resetToken = resetToken,
+                        onComplete = onComplete,
+                        onCancel = onCancel,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         } else {
             Column(
@@ -438,7 +460,7 @@ private fun ProfilePinEntryScaffold(
                     compact = compactHeight,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(if (isTv) 22.dp else if (compactHeight) 8.dp else 12.dp))
+                Spacer(Modifier.height(if (isTv) 20.dp else if (compactHeight) 6.dp else 9.dp))
                 PinPanel(
                     profile = profile,
                     isTv = isTv,
@@ -560,10 +582,15 @@ private fun PinPanel(
     var pin by rememberSaveable(profile.id, title, resetToken) { mutableStateOf("") }
     val firstFocusRequester = remember(title, resetToken) { FocusRequester() }
     val keySize = when {
-        shortLandscape -> 54.dp
+        shortLandscape -> 50.dp
         isTv -> 78.dp
-        compactHeight -> 56.dp
-        else -> 66.dp
+        compactHeight -> 52.dp
+        else -> 60.dp
+    }
+    val indicatorSize = when {
+        isTv -> 17.dp
+        shortLandscape || compactHeight -> 12.dp
+        else -> 13.dp
     }
     val shape = RoundedCornerShape(if (isTv) 26.dp else 20.dp)
 
@@ -584,17 +611,17 @@ private fun PinPanel(
 
     Column(
         modifier = modifier
-            .widthIn(max = if (isTv) 520.dp else 430.dp)
+            .widthIn(max = if (isTv) 500.dp else 430.dp)
             .clip(shape)
             .background(colors.surface.copy(alpha = .97f))
             .border(1.dp, colors.gold.copy(alpha = .30f), shape)
             .padding(
-                horizontal = if (shortLandscape) 16.dp else if (isTv) 30.dp else 22.dp,
+                horizontal = if (shortLandscape) 14.dp else if (isTv) 28.dp else 20.dp,
                 vertical = when {
-                    shortLandscape -> 12.dp
-                    isTv -> 26.dp
-                    compactHeight -> 14.dp
-                    else -> 20.dp
+                    shortLandscape -> 10.dp
+                    isTv -> 24.dp
+                    compactHeight -> 12.dp
+                    else -> 16.dp
                 },
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -611,31 +638,31 @@ private fun PinPanel(
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(if (shortLandscape || compactHeight) 4.dp else 7.dp))
+        Spacer(Modifier.height(if (shortLandscape || compactHeight) 4.dp else 6.dp))
         Text(
             text = subtitle,
             color = colors.textMuted,
             fontSize = if (isTv) 13.sp else 11.sp,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(if (shortLandscape || compactHeight) 8.dp else 15.dp))
+        Spacer(Modifier.height(if (shortLandscape || compactHeight) 7.dp else if (isTv) 13.dp else 10.dp))
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             repeat(PROFILE_PIN_LENGTH) { index ->
                 Box(
                     modifier = Modifier
-                        .size(if (isTv) 15.dp else 13.dp)
+                        .size(indicatorSize)
                         .clip(RoundedCornerShape(50))
                         .background(
                             if (index < pin.length) colors.goldBright
                             else colors.surfaceRaised,
                         )
                         .border(
-                            1.dp,
-                            if (index < pin.length) colors.gold else Color.White.copy(alpha = .16f),
+                            if (index < pin.length) 1.5.dp else 1.dp,
+                            if (index < pin.length) colors.gold else Color.White.copy(alpha = .18f),
                             RoundedCornerShape(50),
                         ),
                 )
@@ -643,7 +670,7 @@ private fun PinPanel(
         }
 
         if (!errorMessage.isNullOrBlank()) {
-            Spacer(Modifier.height(if (shortLandscape || compactHeight) 6.dp else 10.dp))
+            Spacer(Modifier.height(if (shortLandscape || compactHeight) 5.dp else 8.dp))
             Text(
                 text = errorMessage,
                 color = colors.danger,
@@ -653,7 +680,7 @@ private fun PinPanel(
             )
         }
 
-        Spacer(Modifier.height(if (shortLandscape || compactHeight) 7.dp else 14.dp))
+        Spacer(Modifier.height(if (shortLandscape || compactHeight) 6.dp else if (isTv) 13.dp else 10.dp))
 
         NumberPad(
             isTv = isTv,
@@ -664,12 +691,13 @@ private fun PinPanel(
             onBackspace = { if (pin.isNotEmpty()) pin = pin.dropLast(1) },
         )
 
-        Spacer(Modifier.height(if (shortLandscape || compactHeight) 6.dp else 12.dp))
+        Spacer(Modifier.height(if (shortLandscape || compactHeight) 5.dp else if (isTv) 11.dp else 8.dp))
 
         SecurityButton(
             text = "رجوع",
             isTv = isTv,
             secondary = true,
+            compact = !isTv,
             onClick = onCancel,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -690,13 +718,14 @@ private fun NumberPad(
         listOf("4", "5", "6"),
         listOf("7", "8", "9"),
     )
+    val keySpacing = if (isTv) 10.dp else 6.dp
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp),
+        verticalArrangement = Arrangement.spacedBy(keySpacing),
     ) {
         rows.forEachIndexed { rowIndex, row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
                 row.forEachIndexed { columnIndex, digit ->
                     PinKey(
                         text = digit,
@@ -709,7 +738,7 @@ private fun NumberPad(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
             Spacer(Modifier.size(keySize))
             PinKey(
                 text = "0",
@@ -811,6 +840,8 @@ private fun SecurityButton(
     isTv: Boolean,
     secondary: Boolean = false,
     danger: Boolean = false,
+    compact: Boolean = false,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -838,6 +869,10 @@ private fun SecurityButton(
                 scaleX = scale
                 scaleY = scale
             }
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier,
+            )
             .clip(shape)
             .background(background)
             .border(
@@ -869,7 +904,11 @@ private fun SecurityButton(
             .clickable(onClick = onClick)
             .padding(
                 horizontal = if (isTv) 18.dp else 15.dp,
-                vertical = if (isTv) 12.dp else 10.dp,
+                vertical = when {
+                    compact -> 8.dp
+                    isTv -> 12.dp
+                    else -> 10.dp
+                },
             ),
         contentAlignment = Alignment.Center,
     ) {

@@ -20,9 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -44,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.components.HulkTextField
@@ -69,6 +74,8 @@ fun ProfileManagementScreen(
     var name by remember { mutableStateOf("") }
     var avatarKey by remember { mutableStateOf(PROFILE_AVATARS.first()) }
     var error by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    val activeProfileFocusRequester = remember(activeProfileId) { FocusRequester() }
 
     fun normalizedAvatarKey(raw: String): String =
         raw.takeIf { it in PROFILE_AVATARS } ?: PROFILE_AVATARS.first()
@@ -87,6 +94,16 @@ fun ProfileManagementScreen(
         name = profile.displayName
         avatarKey = normalizedAvatarKey(profile.avatarKey)
         error = null
+    }
+
+    LaunchedEffect(isTv, activeProfileId, profiles, creating, editingProfile) {
+        if (!isTv || creating || editingProfile != null) return@LaunchedEffect
+        val activeIndex = profiles.indexOfFirst { it.id == activeProfileId }
+        if (activeIndex < 0) return@LaunchedEffect
+        delay(80L)
+        listState.scrollToItem(activeIndex)
+        delay(100L)
+        runCatching { activeProfileFocusRequester.requestFocus() }
     }
 
     BackHandler(enabled = creating || editingProfile != null) {
@@ -227,6 +244,7 @@ fun ProfileManagementScreen(
                 Spacer(Modifier.height(if (isTv) 28.dp else 18.dp))
 
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .widthIn(max = if (isTv) 1120.dp else 900.dp),
@@ -240,6 +258,7 @@ fun ProfileManagementScreen(
                             protected = profile.id in protectedProfileIds,
                             profilesCount = profiles.size,
                             isTv = isTv,
+                            initialFocusRequester = if (active) activeProfileFocusRequester else null,
                             onSelect = { onSelect(profile) },
                             onEdit = { openEdit(profile) },
                             onManagePin = { onManagePin(profile) },
@@ -289,6 +308,13 @@ private fun ProfileEditor(
     onCancel: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val nameFocusRequester = remember(creating) { FocusRequester() }
+
+    LaunchedEffect(isTv, creating) {
+        if (!isTv || !creating) return@LaunchedEffect
+        delay(140L)
+        runCatching { nameFocusRequester.requestFocus() }
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -350,7 +376,9 @@ private fun ProfileEditor(
                 value = name,
                 onValueChange = onNameChange,
                 label = "اسم الملف الشخصي",
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(nameFocusRequester),
             )
 
             Spacer(Modifier.height(if (shortLandscape) 12.dp else if (isTv) 24.dp else 16.dp))
@@ -416,6 +444,7 @@ private fun ProfileManagementCard(
     protected: Boolean,
     profilesCount: Int,
     isTv: Boolean,
+    initialFocusRequester: FocusRequester? = null,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
     onManagePin: () -> Unit,
@@ -469,6 +498,7 @@ private fun ProfileManagementCard(
                         secondary = true,
                         isTv = false,
                         compact = true,
+                        focusRequester = initialFocusRequester,
                         onClick = onManagePin,
                     )
                     ActionButton(
@@ -518,6 +548,7 @@ private fun ProfileManagementCard(
                         text = if (protected) "PIN مفعّل" else "حماية",
                         secondary = true,
                         isTv = isTv,
+                        focusRequester = initialFocusRequester,
                         onClick = onManagePin,
                     )
                     ActionButton(
@@ -650,6 +681,7 @@ private fun ActionButton(
     danger: Boolean = false,
     isTv: Boolean,
     compact: Boolean = false,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -677,6 +709,10 @@ private fun ActionButton(
                 scaleX = scale
                 scaleY = scale
             }
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier,
+            )
             .clip(shape)
             .background(background)
             .border(

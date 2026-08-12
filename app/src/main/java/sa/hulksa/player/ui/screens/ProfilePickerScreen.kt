@@ -161,7 +161,7 @@ fun ProfilePickerScreen(
             Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
 
             Text(
-                text = "من يشاهد الآن؟",
+                text = "من يشاهد الآن ؟",
                 color = colors.text,
                 fontSize = if (isTv) 32.sp else 26.sp,
                 lineHeight = if (isTv) 39.sp else 32.sp,
