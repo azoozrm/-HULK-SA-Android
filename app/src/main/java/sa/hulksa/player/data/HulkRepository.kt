@@ -17,6 +17,7 @@ import sa.hulksa.player.security.CredentialVault
 class HulkRepository(context: Context) {
     private val portalResolver = PortalResolver(context)
     private val client = XtreamClient()
+    private val kidsCatalogClient = KidsServerCatalogClient()
     private val movieCardMetadataClient = MovieCardMetadataClient()
     private val seriesCardMetadataClient = SeriesCardMetadataClient()
     private val vault = CredentialVault(context)
@@ -60,6 +61,9 @@ class HulkRepository(context: Context) {
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         client.catalog(session, type)
 
+    suspend fun verifiedKidsCatalog(session: AuthenticatedSession): VerifiedKidsCatalogSnapshot =
+        kidsCatalogClient.loadVerified(session)
+
     suspend fun episodes(session: AuthenticatedSession, seriesId: Int): List<Episode> =
         client.episodes(session, seriesId)
 
@@ -96,5 +100,20 @@ class HulkRepository(context: Context) {
     suspend fun diagnose(
         session: AuthenticatedSession,
         onProgress: (progress: Int, stage: String) -> Unit,
-    ): ServerDiagnosticsReport = diagnostics.run(session, onProgress)
+    ): ServerDiagnosticsReport {
+        val baseReport = diagnostics.run(session, onProgress)
+        val kidsSnapshot = kidsCatalogClient.loadVerified(session)
+        val capabilities = baseReport.capabilities
+            .filterNot { it.id == KIDS_SERVER_CATALOG_CAPABILITY_ID } +
+            kidsSnapshot.capabilityFinding()
+        val recommendations = (
+            baseReport.recommendations
+                .filterNot { it.title == LEGACY_PARENTAL_RECOMMENDATION_TITLE } +
+                kidsSnapshot.recommendation()
+            ).sortedWith(compareBy({ it.priority }, { it.title }))
+        return baseReport.copy(
+            capabilities = capabilities,
+            recommendations = recommendations,
+        )
+    }
 }
