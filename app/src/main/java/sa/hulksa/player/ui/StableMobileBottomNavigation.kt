@@ -4,10 +4,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,30 +48,31 @@ import androidx.compose.ui.unit.sp
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
-private data class StableMobileDestination(
-    val destination: MainDestination,
+private data class StableMobileEntry(
+    val destination: MainDestination?,
     val icon: ImageVector,
     val label: String,
+    val switchesProfile: Boolean = false,
 )
 
-private val stableMobileDestinations = listOf(
-    StableMobileDestination(MainDestination.HOME, Icons.Rounded.Home, "الرئيسية"),
-    StableMobileDestination(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
-    StableMobileDestination(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
-    StableMobileDestination(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
-    StableMobileDestination(MainDestination.FAVORITES, Icons.Rounded.Favorite, "قائمتي"),
-    StableMobileDestination(MainDestination.SEARCH, Icons.Rounded.Search, "البحث"),
-    StableMobileDestination(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
-    StableMobileDestination(MainDestination.SETTINGS, Icons.Rounded.Settings, "الاعدادات"),
+private val stableMobileEntries = listOf(
+    StableMobileEntry(MainDestination.HOME, Icons.Rounded.Home, "الرئيسية"),
+    StableMobileEntry(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
+    StableMobileEntry(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
+    StableMobileEntry(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
+    StableMobileEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "قائمتي"),
+    StableMobileEntry(MainDestination.SEARCH, Icons.Rounded.Search, "البحث"),
+    StableMobileEntry(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
+    StableMobileEntry(null, Icons.Rounded.Person, "تغيير المستخدم", switchesProfile = true),
+    StableMobileEntry(MainDestination.SETTINGS, Icons.Rounded.Settings, "الاعدادات"),
 )
 
 /**
- * One stable phone navigation surface shared by the normal shell and Smart Search.
+ * Stable phone navigation shared by the normal shell and Smart Search.
  *
- * The destination strip never auto-scrolls when a section is selected. The user can swipe it
- * manually and its LazyListState survives destination recomposition. Profile switching is pinned
- * outside the scrollable strip so it never disappears. Active state uses a soft gold surface only
- * (no top indicator line), keeping selection clear without moving any item.
+ * All actions live in one scrollable strip in a fixed order. Selection never auto-scrolls or
+ * reorders the strip; users can swipe it manually. The active destination uses a restrained gold
+ * surface/icon treatment without a top indicator line or any geometry change.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -85,54 +84,37 @@ internal fun StableMobileBottomNavigation(
 ) {
     if (WindowInsets.isImeVisible) return
 
-    val colors = LocalHulkColors.current
     val listState = rememberLazyListState()
 
-    Row(
+    LazyRow(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF090A07))
             .navigationBarsPadding()
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+            .padding(vertical = 6.dp),
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LazyRow(
-            modifier = Modifier.weight(1f),
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items(
-                items = stableMobileDestinations,
-                key = { it.destination.name },
-            ) { entry ->
-                StableMobileNavItem(
-                    icon = entry.icon,
-                    label = entry.label,
-                    active = selected == entry.destination,
-                    onClick = { onSelectDestination(entry.destination) },
-                )
-            }
+        items(
+            items = stableMobileEntries,
+            key = { entry -> entry.destination?.name ?: "profile-switch" },
+        ) { entry ->
+            val active = entry.destination != null && selected == entry.destination
+            StableMobileNavItem(
+                icon = entry.icon,
+                label = entry.label,
+                active = active,
+                onClick = {
+                    if (entry.switchesProfile) {
+                        onSwitchProfile()
+                    } else {
+                        entry.destination?.let(onSelectDestination)
+                    }
+                },
+            )
         }
-
-        Spacer(Modifier.width(5.dp))
-
-        Box(
-            modifier = Modifier
-                .width(1.dp)
-                .height(38.dp)
-                .background(Color.White.copy(alpha = .07f)),
-        )
-
-        Spacer(Modifier.width(5.dp))
-
-        StableMobileNavItem(
-            icon = Icons.Rounded.Person,
-            label = "تغيير المستخدم",
-            active = false,
-            pinned = true,
-            onClick = onSwitchProfile,
-        )
     }
 }
 
@@ -141,27 +123,23 @@ private fun StableMobileNavItem(
     icon: ImageVector,
     label: String,
     active: Boolean,
-    pinned: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val scale by animateFloatAsState(
-        targetValue = if (active) 1.08f else 1f,
+        targetValue = if (active) 1.07f else 1f,
         label = "stableMobileNavScale",
     )
-    val shape = RoundedCornerShape(11.dp)
+    val shape = RoundedCornerShape(12.dp)
 
     Column(
         modifier = Modifier
-            .width(if (pinned) 58.dp else 54.dp)
-            .height(54.dp)
+            .width(58.dp)
+            .height(56.dp)
             .clip(shape)
             .background(
-                when {
-                    active -> colors.gold.copy(alpha = .18f)
-                    pinned -> colors.surfaceRaised.copy(alpha = .42f)
-                    else -> Color.Transparent
-                },
+                if (active) colors.gold.copy(alpha = .16f)
+                else Color.Transparent,
             )
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 3.dp, vertical = 4.dp),
@@ -171,29 +149,22 @@ private fun StableMobileNavItem(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = when {
-                active -> colors.goldBright
-                pinned -> colors.goldBright.copy(alpha = .90f)
-                else -> colors.textMuted
-            },
+            tint = if (active) colors.goldBright else colors.textMuted,
             modifier = Modifier
                 .size(22.dp)
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
+                    shadowElevation = if (active) 5.dp.toPx() else 0f
                 },
         )
         Spacer(Modifier.height(2.dp))
         Text(
             text = label,
-            color = when {
-                active -> colors.text
-                pinned -> colors.text.copy(alpha = .92f)
-                else -> colors.textMuted
-            },
-            fontSize = if (pinned) 7.sp else 8.sp,
-            fontWeight = if (active || pinned) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = if (pinned) 2 else 1,
+            color = if (active) colors.text else colors.textMuted,
+            fontSize = 8.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 2,
             lineHeight = 8.sp,
             textAlign = TextAlign.Center,
         )
