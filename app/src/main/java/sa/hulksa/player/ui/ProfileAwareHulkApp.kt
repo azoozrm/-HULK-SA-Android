@@ -15,12 +15,15 @@ import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.ProfilePinCredentialStore
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.ProfileManagementScreen
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
+import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
+import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
 
@@ -33,6 +36,7 @@ fun ProfileAwareHulkApp(
     val context = LocalContext.current
     val profileStore = remember(context) { ProfileStore(context) }
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
+    val profilePinCredentialStore = remember(context) { ProfilePinCredentialStore(context) }
     val navigationMemoryByProfile = remember { mutableMapOf<String, NavigationMemoryStore>() }
     val destinationMemoryByProfile = remember { mutableMapOf<String, MainDestination>() }
     val catalogNavigationMemoryByProfile = remember {
@@ -45,10 +49,18 @@ fun ProfileAwareHulkApp(
     var managingProfiles by rememberSaveable { mutableStateOf(false) }
     var createProfileRequested by rememberSaveable { mutableStateOf(false) }
     var pickerRequestedFromApp by rememberSaveable { mutableStateOf(false) }
+    var pinUnlockTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pinSecurityProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     var profileRevision by rememberSaveable { mutableStateOf(0) }
+    var pinRevision by rememberSaveable { mutableStateOf(0) }
 
     val profiles = remember(profileRevision) { profileStore.profiles() }
     val activeProfileId = remember(profileRevision, switching) { profileStore.activeProfileId() }
+    val protectedProfileIds = remember(profiles, pinRevision) {
+        profiles
+            .filter { profilePinCredentialStore.hasPin(it.id) }
+            .mapTo(linkedSetOf(), UserProfile::id)
+    }
     val activeNavigationMemory = remember(activeProfileId) {
         navigationMemoryByProfile.getOrPut(activeProfileId) { NavigationMemoryStore() }
     }
@@ -63,6 +75,8 @@ fun ProfileAwareHulkApp(
         authenticated &&
         !resolvedForSession &&
         !switching &&
+        pinUnlockTargetId == null &&
+        pinSecurityProfileId == null &&
         !pickerRequestedFromApp &&
         !managingProfiles &&
         routingPreferences.directEntryEnabled
@@ -85,7 +99,7 @@ fun ProfileAwareHulkApp(
         )
     )
 
-    fun switchProfile(profile: UserProfile) {
+    fun switchProfileUnlocked(profile: UserProfile) {
         if (switching) return
 
         val currentProfileId = profileStore.activeProfileId()
@@ -103,9 +117,6 @@ fun ProfileAwareHulkApp(
         createProfileRequested = false
         switchError = null
 
-        // Capture both the top-level destination and the active catalog context
-        // before changing profiles. Catalog context is transient and stays local
-        // to each stable profile ID for this authenticated app session.
         destinationMemoryByProfile[currentProfileId] = state.destination
         catalogNavigationMemoryByProfile
             .getOrPut(currentProfileId) { ProfileCatalogNavigationMemory() }
@@ -125,9 +136,6 @@ fun ProfileAwareHulkApp(
             return
         }
 
-        // Profiles are local viewing contexts only. Keep the authenticated IPTV
-        // session intact, restore the target profile's own destination and catalog
-        // category/query, then refresh profile-scoped library data.
         viewModel.selectDestination(targetDestination)
         if (targetDestination.isProfileCatalogDestination()) {
             viewModel.updateSearch(targetCatalogMemory.query(targetDestination))
@@ -138,6 +146,24 @@ fun ProfileAwareHulkApp(
         switching = false
         resolvedForSession = true
         pickerRequestedFromApp = false
+    }
+
+    fun requestProfileSwitch(profile: UserProfile) {
+        if (switching || pinUnlockTargetId != null) return
+        val currentProfileId = profileStore.activeProfileId()
+        val needsPin =
+            profile.id in protectedProfileIds &&
+                (profile.id != currentProfileId || !resolvedForSession)
+
+        if (needsPin) {
+            switchError = null
+            managingProfiles = false
+            createProfileRequested = false
+            pinUnlockTargetId = profile.id
+            return
+        }
+
+        switchProfileUnlocked(profile)
     }
 
     LaunchedEffect(
@@ -170,9 +196,10 @@ fun ProfileAwareHulkApp(
         profiles,
         pickerRequestedFromApp,
         managingProfiles,
+        pinUnlockTargetId,
     ) {
         val target = directEntryTarget ?: return@LaunchedEffect
-        switchProfile(target)
+        requestProfileSwitch(target)
     }
 
     LaunchedEffect(
@@ -191,30 +218,96 @@ fun ProfileAwareHulkApp(
             switching = false
             switchError = null
             pickerRequestedFromApp = false
+            pinUnlockTargetId = null
+            pinSecurityProfileId = null
             navigationMemoryByProfile.clear()
             destinationMemoryByProfile.clear()
             catalogNavigationMemoryByProfile.clear()
         }
     }
 
-    BackHandler(enabled = managingProfiles) {
+    BackHandler(enabled = managingProfiles && pinSecurityProfileId == null) {
         managingProfiles = false
         createProfileRequested = false
     }
 
     BackHandler(
-        enabled = pickerRequestedFromApp && showPicker && !managingProfiles && !switching,
+        enabled = pickerRequestedFromApp &&
+            showPicker &&
+            !managingProfiles &&
+            !switching &&
+            pinUnlockTargetId == null,
     ) {
         pickerRequestedFromApp = false
         switchError = null
     }
 
+    val unlockProfile = pinUnlockTargetId
+        ?.let { targetId -> profiles.firstOrNull { it.id == targetId } }
+    val securityProfile = pinSecurityProfileId
+        ?.let { profileId -> profiles.firstOrNull { it.id == profileId } }
+
     when {
+        unlockProfile != null -> ProfilePinUnlockScreen(
+            profile = unlockProfile,
+            isTv = isTelevisionDevice,
+            onVerify = { pin -> profilePinCredentialStore.verifyPin(unlockProfile.id, pin) },
+            onUnlocked = {
+                pinUnlockTargetId = null
+                switchProfileUnlocked(unlockProfile)
+            },
+            onCancel = {
+                pinUnlockTargetId = null
+                switchError = null
+            },
+        )
+
+        managingProfiles && securityProfile != null -> ProfilePinProtectionScreen(
+            profile = securityProfile,
+            isTv = isTelevisionDevice,
+            isProtected = securityProfile.id in protectedProfileIds,
+            onVerify = { pin -> profilePinCredentialStore.verifyPin(securityProfile.id, pin) },
+            onSetPin = { pin ->
+                val stored = profilePinCredentialStore.setPin(securityProfile.id, pin)
+                if (!stored) {
+                    false
+                } else {
+                    val metadata = profilePreferencesStore.setPinFoundation(
+                        profileId = securityProfile.id,
+                        enabled = true,
+                        credentialVersion = ProfilePinCredentialStore.CURRENT_CREDENTIAL_VERSION,
+                    )
+                    if (metadata == null) {
+                        profilePinCredentialStore.clearPin(securityProfile.id)
+                        false
+                    } else {
+                        pinRevision++
+                        true
+                    }
+                }
+            },
+            onClearPin = {
+                val cleared = profilePinCredentialStore.clearPin(securityProfile.id)
+                val metadata = profilePreferencesStore.setPinFoundation(
+                    profileId = securityProfile.id,
+                    enabled = false,
+                    credentialVersion = 0,
+                )
+                val success = cleared && metadata != null
+                if (success) pinRevision++
+                success
+            },
+            onClose = {
+                pinSecurityProfileId = null
+            },
+        )
+
         managingProfiles -> ProfileManagementScreen(
             profiles = profiles,
             activeProfileId = activeProfileId,
             isTv = isTelevisionDevice,
             startCreating = createProfileRequested,
+            protectedProfileIds = protectedProfileIds,
             onCreate = { name, avatarKey ->
                 val created = profileStore.createProfile(name, avatarKey = avatarKey)
                 val createdSuccessfully = created != null
@@ -233,17 +326,26 @@ fun ProfileAwareHulkApp(
             onDelete = { profileId ->
                 val deleted = profileStore.deleteProfile(profileId)
                 if (deleted) {
+                    profilePinCredentialStore.clearPin(profileId)
+                    profilePreferencesStore.removeProfilePreferences(profileId)
                     navigationMemoryByProfile.remove(profileId)
                     destinationMemoryByProfile.remove(profileId)
                     catalogNavigationMemoryByProfile.remove(profileId)
+                    if (pinSecurityProfileId == profileId) pinSecurityProfileId = null
                     profileRevision++
+                    pinRevision++
                 }
                 deleted
             },
-            onSelect = ::switchProfile,
+            onSelect = ::requestProfileSwitch,
+            onManagePin = { profile ->
+                createProfileRequested = false
+                pinSecurityProfileId = profile.id
+            },
             onClose = {
                 managingProfiles = false
                 createProfileRequested = false
+                pinSecurityProfileId = null
                 if (profiles.size <= 1) resolvedForSession = true
             },
         )
@@ -254,7 +356,7 @@ fun ProfileAwareHulkApp(
             isTv = isTelevisionDevice,
             isSwitching = switching,
             errorMessage = switchError,
-            onSelectProfile = ::switchProfile,
+            onSelectProfile = ::requestProfileSwitch,
             onCreateProfile = {
                 if (!switching && profiles.size < ProfileStore.MAX_PROFILES) {
                     createProfileRequested = true
@@ -263,6 +365,7 @@ fun ProfileAwareHulkApp(
             },
             onManageProfiles = {
                 createProfileRequested = false
+                pinSecurityProfileId = null
                 managingProfiles = true
             },
         )
