@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.model.ProfileKind
@@ -17,10 +18,10 @@ internal fun canDeleteProfile(isPrimary: Boolean, profileCount: Int): Boolean =
     !isPrimary && profileCount > 1
 
 class ProfileStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
-        Context.MODE_PRIVATE,
-    )
+    private val appContext = context.applicationContext
+    private val accountScope = AccountScopeStore(appContext)
+    private val preferences: SharedPreferences
+        get() = accountScope.preferences(PREFERENCES_NAME)
 
     init {
         ensureInitialized()
@@ -28,6 +29,7 @@ class ProfileStore(context: Context) {
 
     @Synchronized
     fun profiles(): List<UserProfile> {
+        ensureInitialized()
         val decoded = decodeProfiles(preferences.getString(KEY_PROFILES, null))
         return if (decoded.isNotEmpty()) decoded else listOf(createPrimaryProfile())
     }
@@ -112,29 +114,33 @@ class ProfileStore(context: Context) {
         return editor.commit()
     }
 
-    fun schemaVersion(): Int = preferences.getInt(KEY_SCHEMA_VERSION, 0)
+    fun schemaVersion(): Int {
+        ensureInitialized()
+        return preferences.getInt(KEY_SCHEMA_VERSION, 0)
+    }
 
     @Synchronized
     private fun ensureInitialized() {
-        val storedProfiles = decodeProfiles(preferences.getString(KEY_PROFILES, null))
+        val scopedPreferences = preferences
+        val storedProfiles = decodeProfiles(scopedPreferences.getString(KEY_PROFILES, null))
         val profiles = if (storedProfiles.isEmpty()) {
             listOf(createPrimaryProfile())
         } else {
             storedProfiles
         }
-        val activeId = preferences.getString(KEY_ACTIVE_PROFILE_ID, null)
+        val activeId = scopedPreferences.getString(KEY_ACTIVE_PROFILE_ID, null)
         val resolvedActive = profiles.firstOrNull { it.id == activeId }
             ?: profiles.firstOrNull(UserProfile::isPrimary)
             ?: profiles.first()
 
-        val editor = preferences.edit()
+        val editor = scopedPreferences.edit()
         if (storedProfiles.isEmpty()) {
             editor.putString(KEY_PROFILES, encodeProfiles(profiles))
         }
         if (activeId != resolvedActive.id) {
             editor.putString(KEY_ACTIVE_PROFILE_ID, resolvedActive.id)
         }
-        if (preferences.getInt(KEY_SCHEMA_VERSION, 0) < CURRENT_SCHEMA_VERSION) {
+        if (scopedPreferences.getInt(KEY_SCHEMA_VERSION, 0) < CURRENT_SCHEMA_VERSION) {
             editor.putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
         }
         editor.commit()
@@ -201,7 +207,7 @@ class ProfileStore(context: Context) {
         const val MAX_DISPLAY_NAME_LENGTH = 24
 
         private const val PRIMARY_PROFILE_NAME = "الرئيسي"
-        private const val PREFERENCES_NAME = "hulk_profiles_v1"
+        internal const val PREFERENCES_NAME = "hulk_profiles_v1"
         private const val KEY_SCHEMA_VERSION = "schema_version"
         private const val KEY_PROFILES = "profiles"
         private const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"

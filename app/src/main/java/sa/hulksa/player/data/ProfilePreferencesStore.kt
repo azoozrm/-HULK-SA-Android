@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import android.content.SharedPreferences
 
 /**
  * Account/profile routing preferences used by the Multi Profile entry flow.
@@ -42,19 +43,15 @@ data class ProfilePinFoundation(
  * Persistence foundation for profile routing, future viewing preferences and
  * PIN capability metadata.
  *
- * This class deliberately contains no Kids filtering, playback behavior or UI.
+ * AccountScopeStore keeps each account's profile metadata isolated while the
+ * existing profile-level keys remain unchanged inside that account scope.
  */
 class ProfilePreferencesStore(context: Context) {
     private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences(
-        PREFERENCES_NAME,
-        Context.MODE_PRIVATE,
-    )
+    private val accountScope = AccountScopeStore(appContext)
+    private val preferences: SharedPreferences
+        get() = accountScope.preferences(PREFERENCES_NAME).also(::ensureSchema)
     private val profileStore = ProfileStore(appContext)
-
-    init {
-        ensureSchema()
-    }
 
     fun routing(): ProfileRoutingPreferences {
         val storedDefault = preferences.getString(KEY_DEFAULT_PROFILE_ID, null)
@@ -178,7 +175,7 @@ class ProfilePreferencesStore(context: Context) {
     private fun nullableBoolean(key: String): Boolean? =
         if (preferences.contains(key)) preferences.getBoolean(key, false) else null
 
-    private fun android.content.SharedPreferences.Editor.putNullableString(
+    private fun SharedPreferences.Editor.putNullableString(
         key: String,
         value: String?,
     ) {
@@ -186,7 +183,7 @@ class ProfilePreferencesStore(context: Context) {
         if (normalized == null) remove(key) else putString(key, normalized)
     }
 
-    private fun android.content.SharedPreferences.Editor.putNullableBoolean(
+    private fun SharedPreferences.Editor.putNullableBoolean(
         key: String,
         value: Boolean?,
     ) {
@@ -194,9 +191,9 @@ class ProfilePreferencesStore(context: Context) {
     }
 
     @Synchronized
-    private fun ensureSchema() {
-        if (preferences.getInt(KEY_SCHEMA_VERSION, 0) >= CURRENT_SCHEMA_VERSION) return
-        preferences.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).commit()
+    private fun ensureSchema(scopedPreferences: SharedPreferences) {
+        if (scopedPreferences.getInt(KEY_SCHEMA_VERSION, 0) >= CURRENT_SCHEMA_VERSION) return
+        scopedPreferences.edit().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).commit()
     }
 
     companion object {
