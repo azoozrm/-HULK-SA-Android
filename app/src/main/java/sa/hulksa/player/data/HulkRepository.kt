@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import kotlinx.coroutines.delay
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
@@ -59,7 +60,24 @@ class HulkRepository(context: Context) {
 
     fun activeAccountSession(): AccountSessionMetadata? = accountSessionStore.metadata()
 
-    fun currentAuthenticatedSession(): AuthenticatedSession? = AuthenticatedSessionRegistry.current()
+    suspend fun currentAuthenticatedSession(): AuthenticatedSession? {
+        AuthenticatedSessionRegistry.current()?.let { return it }
+        val credentials = vault.load() ?: return null
+
+        repeat(2) { attempt ->
+            val restored = runCatching {
+                val portal = portalResolver.resolve()
+                client.authenticate(portal, credentials)
+            }.getOrNull()
+            if (restored != null) {
+                accountSessionStore.recordAuthenticated(restored)
+                AuthenticatedSessionRegistry.update(restored)
+                return restored
+            }
+            if (attempt == 0) delay(350L)
+        }
+        return null
+    }
 
     fun logout() {
         vault.clear()
@@ -70,8 +88,16 @@ class HulkRepository(context: Context) {
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
         client.catalog(session, type)
 
-    suspend fun verifiedKidsCatalog(session: AuthenticatedSession): VerifiedKidsCatalogSnapshot =
-        kidsCatalogClient.loadVerified(session)
+    suspend fun verifiedKidsCatalog(session: AuthenticatedSession): VerifiedKidsCatalogSnapshot {
+        var snapshot = kidsCatalogClient.loadVerified(session)
+        var retryIndex = 0
+        while (snapshot.hasOnlyTransientKidsFailures() && retryIndex < 2) {
+            delay(if (retryIndex == 0) 450L else 900L)
+            snapshot = kidsCatalogClient.loadVerified(session)
+            retryIndex++
+        }
+        return snapshot
+    }
 
     suspend fun episodes(session: AuthenticatedSession, seriesId: Int): List<Episode> =
         client.episodes(session, seriesId)
@@ -125,4 +151,16 @@ class HulkRepository(context: Context) {
             recommendations = recommendations,
         )
     }
+}
+
+private fun VerifiedKidsCatalogSnapshot.hasOnlyTransientKidsFailures(): Boolean {
+    if (isAvailable || blockedTypes.isEmpty()) return false
+    return blockedTypes.values.all(::isTransientKidsFailure)
+}
+
+private fun isTransientKidsFailure(reason: String): Boolean {
+    if (reason == "تعذر الاتصال بالسيرفر" || reason == "استجابة الفئات غير صالحة") return true
+    val httpCode = reason.removePrefix("فشل API بكود ").takeIf { it != reason }?.toIntOrNull()
+        ?: return false
+    return httpCode == 408 || httpCode == 425 || httpCode == 429 || httpCode in 500..599
 }
