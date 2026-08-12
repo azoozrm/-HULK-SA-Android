@@ -75,6 +75,7 @@ data class PlaybackRequest(
     val season: Int? = null,
     val episodeNumber: Int? = null,
     val episodeTitle: String? = null,
+    val parentContentId: Int? = null,
 )
 
 data class HistoryEntry(
@@ -92,6 +93,7 @@ data class HistoryEntry(
     val season: Int? = null,
     val episodeNumber: Int? = null,
     val episodeTitle: String? = null,
+    val parentContentId: Int? = null,
 )
 
 enum class OfflineStatus {
