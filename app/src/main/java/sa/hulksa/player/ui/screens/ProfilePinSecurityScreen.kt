@@ -581,6 +581,7 @@ private fun PinPanel(
     val colors = LocalHulkColors.current
     var pin by rememberSaveable(profile.id, title, resetToken) { mutableStateOf("") }
     val firstFocusRequester = remember(title, resetToken) { FocusRequester() }
+    val cancelFocusRequester = remember(title, resetToken) { FocusRequester() }
     val keySize = when {
         shortLandscape -> 50.dp
         isTv -> 78.dp
@@ -686,6 +687,7 @@ private fun PinPanel(
             isTv = isTv,
             keySize = keySize,
             firstFocusRequester = firstFocusRequester,
+            cancelFocusRequester = cancelFocusRequester,
             backspaceEnabled = pin.isNotEmpty(),
             onDigit = ::appendDigit,
             onBackspace = { if (pin.isNotEmpty()) pin = pin.dropLast(1) },
@@ -698,6 +700,7 @@ private fun PinPanel(
             isTv = isTv,
             secondary = true,
             compact = !isTv,
+            focusRequester = cancelFocusRequester,
             onClick = onCancel,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -709,29 +712,47 @@ private fun NumberPad(
     isTv: Boolean,
     keySize: Dp,
     firstFocusRequester: FocusRequester,
+    cancelFocusRequester: FocusRequester,
     backspaceEnabled: Boolean,
     onDigit: (String) -> Unit,
     onBackspace: () -> Unit,
 ) {
-    val rows = listOf(
-        listOf("1", "2", "3"),
-        listOf("4", "5", "6"),
-        listOf("7", "8", "9"),
-    )
     val keySpacing = if (isTv) 10.dp else 6.dp
+    val requesters = remember(firstFocusRequester) {
+        listOf(firstFocusRequester) + List(10) { FocusRequester() }
+    }
+
+    fun requester(index: Int): FocusRequester = requesters[index]
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(keySpacing),
     ) {
-        rows.forEachIndexed { rowIndex, row ->
+        repeat(3) { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(keySpacing)) {
-                row.forEachIndexed { columnIndex, digit ->
+                repeat(3) { column ->
+                    val index = row * 3 + column
+                    val digit = (index + 1).toString()
+                    val self = requester(index)
+                    val left = if (column < 2) requester(index + 1) else self
+                    val right = if (column > 0) requester(index - 1) else self
+                    val up = if (row > 0) requester(index - 3) else self
+                    val down = when {
+                        row < 2 -> requester(index + 3)
+                        column == 0 -> cancelFocusRequester
+                        column == 1 -> requester(9)
+                        backspaceEnabled -> requester(10)
+                        else -> cancelFocusRequester
+                    }
                     PinKey(
                         text = digit,
                         isTv = isTv,
                         keySize = keySize,
-                        focusRequester = if (rowIndex == 0 && columnIndex == 0) firstFocusRequester else null,
+                        focusRequester = self,
+                        leftRequester = left,
+                        rightRequester = right,
+                        upRequester = up,
+                        downRequester = down,
                         onClick = { onDigit(digit) },
                     )
                 }
@@ -744,6 +765,11 @@ private fun NumberPad(
                 text = "0",
                 isTv = isTv,
                 keySize = keySize,
+                focusRequester = requester(9),
+                leftRequester = if (backspaceEnabled) requester(10) else requester(9),
+                rightRequester = requester(9),
+                upRequester = requester(7),
+                downRequester = cancelFocusRequester,
                 onClick = { onDigit("0") },
             )
             PinKey(
@@ -751,6 +777,11 @@ private fun NumberPad(
                 isTv = isTv,
                 keySize = keySize,
                 enabled = backspaceEnabled,
+                focusRequester = requester(10),
+                leftRequester = requester(10),
+                rightRequester = requester(9),
+                upRequester = requester(8),
+                downRequester = cancelFocusRequester,
                 onClick = onBackspace,
             )
         }
@@ -764,6 +795,10 @@ private fun PinKey(
     keySize: Dp,
     enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
+    leftRequester: FocusRequester? = null,
+    rightRequester: FocusRequester? = null,
+    upRequester: FocusRequester? = null,
+    downRequester: FocusRequester? = null,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -802,20 +837,30 @@ private fun PinKey(
             )
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { event ->
-                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
+                if (!isTv) {
                     false
-                } else if (!enabled) {
+                } else if (event.type == KeyEventType.KeyDown) {
+                    val target = when (event.key) {
+                        Key.DirectionLeft -> leftRequester
+                        Key.DirectionRight -> rightRequester
+                        Key.DirectionUp -> upRequester
+                        Key.DirectionDown -> downRequester
+                        else -> null
+                    }
+                    if (target != null) {
+                        runCatching { target.requestFocus() }
+                        true
+                    } else {
+                        val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                        if (!remoteSelect) false else true
+                    }
+                } else if (event.type == KeyEventType.KeyUp &&
+                    (event.key == Key.Enter || event.key == Key.DirectionCenter)
+                ) {
+                    if (enabled) onClick()
                     true
                 } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> {
-                            onClick()
-                            true
-                        }
-                        else -> false
-                    }
+                    false
                 }
             }
             .clickable(enabled = enabled, onClick = onClick),

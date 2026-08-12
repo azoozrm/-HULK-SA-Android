@@ -226,6 +226,8 @@ class NavigationMemoryStore {
     private var homeHistory: Any? = null
     private var homeFavorites: Any? = null
     private var cachedHome: HomeContentSnapshot? = null
+    private var mobileNavigationFirstVisibleIndex: Int = 0
+    private var mobileNavigationFirstVisibleOffset: Int = 0
 
     fun position(destination: MainDestination): NavigationPosition =
         positions[destination] ?: NavigationPosition()
@@ -238,6 +240,14 @@ class NavigationMemoryStore {
         rowIndex: Int = 0,
     ) {
         positions[destination] = NavigationPosition(rowKey, rowIndex, itemKey, itemIndex)
+    }
+
+    fun mobileNavigationPosition(): Pair<Int, Int> =
+        mobileNavigationFirstVisibleIndex to mobileNavigationFirstVisibleOffset
+
+    fun saveMobileNavigationPosition(firstVisibleIndex: Int, firstVisibleOffset: Int) {
+        mobileNavigationFirstVisibleIndex = firstVisibleIndex.coerceAtLeast(0)
+        mobileNavigationFirstVisibleOffset = firstVisibleOffset.coerceAtLeast(0)
     }
 
     internal fun homeContent(state: HulkUiState): HomeContentSnapshot {
@@ -395,7 +405,6 @@ private fun Modifier.applyDownloadFocusPolicy(
     nextDownloadFocus(rowCount, current, DownloadFocusMove.DOWN)?.let(resolve)?.let { down = it }
 }
 
-
 @Composable
 fun MainShellScreen(
     state: HulkUiState,
@@ -491,7 +500,6 @@ fun MainShellScreen(
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     DestinationContent(
                         state = state,
-                        // A rail is a layout choice; only an actual TV uses TV interaction semantics.
                         isTv = isTv,
                         navigationMemory = navigationMemory,
                         isFavorite = resolvedIsFavorite,
@@ -542,7 +550,7 @@ fun MainShellScreen(
                         onLogout = onLogout,
                     )
                 }
-                MobileNavigation(state.destination, rememberingSelectDestination)
+                MobileNavigation(state.destination, rememberingSelectDestination, navigationMemory)
             }
         }
     }
@@ -684,10 +692,17 @@ private fun NavigationItem(
 }
 
 @Composable
-private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestination) -> Unit) {
+private fun MobileNavigation(
+    selected: MainDestination,
+    onSelect: (MainDestination) -> Unit,
+    navigationMemory: NavigationMemoryStore,
+) {
     val colors = LocalHulkColors.current
-    val navigationState = rememberLazyListState()
-    val navigationScope = rememberCoroutineScope()
+    val rememberedPosition = remember(navigationMemory) { navigationMemory.mobileNavigationPosition() }
+    val navigationState = rememberLazyListState(
+        initialFirstVisibleItemIndex = rememberedPosition.first,
+        initialFirstVisibleItemScrollOffset = rememberedPosition.second,
+    )
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
@@ -709,19 +724,53 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
         }
     }
 
-    fun selectEntry(index: Int, entry: DestinationEntry, profileSwitch: Boolean) {
-        if (profileSwitch) {
-            requestProfileSwitch()
-            return
+    LaunchedEffect(navigationState, isLandscape, isWide) {
+        if (isLandscape || isWide) return@LaunchedEffect
+        snapshotFlow {
+            navigationState.firstVisibleItemIndex to navigationState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            navigationMemory.saveMobileNavigationPosition(index, offset)
         }
-        onSelect(entry.destination)
-        if (!isLandscape && !isWide) {
-            val lastVisibleIndex = navigationState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index }
-            if (lastVisibleIndex == index && index < mobileEntries.lastIndex) {
-                navigationScope.launch {
-                    navigationState.animateScrollToItem(index + 1)
+    }
+
+    LaunchedEffect(selected, isLandscape, isWide) {
+        if (isLandscape || isWide) return@LaunchedEffect
+        delay(60L)
+        val selectedIndex = mobileEntries.indexOfFirst { (entry, profileSwitch) ->
+            !profileSwitch && entry.destination == selected
+        }
+        if (selectedIndex < 0) return@LaunchedEffect
+
+        val visibleItems = navigationState.layoutInfo.visibleItemsInfo
+        if (visibleItems.isEmpty()) return@LaunchedEffect
+        val selectedVisible = visibleItems.firstOrNull { it.index == selectedIndex }
+        val lastVisibleIndex = visibleItems.maxOf { it.index }
+
+        when {
+            selectedVisible == null -> {
+                navigationState.animateScrollToItem((selectedIndex - 1).coerceAtLeast(0))
+            }
+            selectedIndex == lastVisibleIndex && selectedIndex < mobileEntries.lastIndex -> {
+                val targetFirst = (navigationState.firstVisibleItemIndex + 1)
+                    .coerceAtMost(mobileEntries.lastIndex)
+                if (targetFirst != navigationState.firstVisibleItemIndex) {
+                    navigationState.animateScrollToItem(targetFirst)
                 }
             }
+        }
+    }
+
+    fun selectEntry(entry: DestinationEntry, profileSwitch: Boolean) {
+        if (!isLandscape && !isWide) {
+            navigationMemory.saveMobileNavigationPosition(
+                navigationState.firstVisibleItemIndex,
+                navigationState.firstVisibleItemScrollOffset,
+            )
+        }
+        if (profileSwitch) {
+            requestProfileSwitch()
+        } else {
+            onSelect(entry.destination)
         }
     }
 
@@ -738,7 +787,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                mobileEntries.forEachIndexed { index, (entry, profileSwitch) ->
+                mobileEntries.forEach { (entry, profileSwitch) ->
                     val active = !profileSwitch && selected == entry.destination
                     val iconScale by animateFloatAsState(
                         targetValue = if (active) 1.08f else 1f,
@@ -749,7 +798,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         label = "mobileNavLabelAlphaWide",
                     )
                     val indicatorWidth by animateDpAsState(
-                        targetValue = if (active) 26.dp else 0.dp,
+                        targetValue = if (active) 30.dp else 0.dp,
                         label = "mobileNavIndicatorWidthWide",
                     )
 
@@ -757,20 +806,22 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         modifier = Modifier
                             .weight(1f)
                             .height(54.dp)
-                            .clickable(role = Role.Button) { selectEntry(index, entry, profileSwitch) }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (active) colors.gold.copy(alpha = .10f) else Color.Transparent)
+                            .clickable(role = Role.Button) { selectEntry(entry, profileSwitch) }
                             .padding(horizontal = 2.dp, vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Box(
                             modifier = Modifier
-                                .height(2.dp)
+                                .height(3.dp)
                                 .width(indicatorWidth)
                                 .clip(RoundedCornerShape(99.dp))
                                 .background(if (active) colors.goldBright else Color.Transparent),
                         )
 
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(2.dp))
 
                         Icon(
                             imageVector = entry.icon,
@@ -814,7 +865,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         val (entry, profileSwitch) = item
                         if (profileSwitch) "switch-profile" else entry.destination.name
                     },
-                ) { index, (entry, profileSwitch) ->
+                ) { _, (entry, profileSwitch) ->
                     val active = !profileSwitch && selected == entry.destination
                     val iconScale by animateFloatAsState(
                         targetValue = if (active) 1.08f else 1f,
@@ -825,7 +876,7 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         label = "mobileNavLabelAlphaPortrait",
                     )
                     val indicatorWidth by animateDpAsState(
-                        targetValue = if (active) 26.dp else 0.dp,
+                        targetValue = if (active) 30.dp else 0.dp,
                         label = "mobileNavIndicatorWidthPortrait",
                     )
 
@@ -833,20 +884,22 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                         modifier = Modifier
                             .widthIn(min = 52.dp)
                             .height(54.dp)
-                            .clickable(role = Role.Button) { selectEntry(index, entry, profileSwitch) }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (active) colors.gold.copy(alpha = .10f) else Color.Transparent)
+                            .clickable(role = Role.Button) { selectEntry(entry, profileSwitch) }
                             .padding(horizontal = 3.dp, vertical = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Box(
                             modifier = Modifier
-                                .height(2.dp)
+                                .height(3.dp)
                                 .width(indicatorWidth)
                                 .clip(RoundedCornerShape(99.dp))
                                 .background(if (active) colors.goldBright else Color.Transparent),
                         )
 
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(2.dp))
 
                         Icon(
                             imageVector = entry.icon,
@@ -877,7 +930,6 @@ private fun MobileNavigation(selected: MainDestination, onSelect: (MainDestinati
                 }
             }
         }
-
     }
 }
 
@@ -1911,9 +1963,6 @@ private fun DownloadsScreen(
                             if (isTv) {
                                 downloadsFocusJob?.cancel()
                                 downloadsFocusJob = downloadsFocusScope.launch {
-                                    // Compose's TV focus relocation can pivot a focused action
-                                    // above the LazyColumn viewport. Re-anchor the owning card
-                                    // after that relocation so its top edge is never clipped.
                                     delay(120)
                                     runCatching {
                                         downloadsState.scrollToItem(index, scrollOffset = 0)
@@ -2478,7 +2527,6 @@ private fun SettingsScreen(
         }
     }
 }
-
 
 @Composable
 private fun DiagnosticsCenter(

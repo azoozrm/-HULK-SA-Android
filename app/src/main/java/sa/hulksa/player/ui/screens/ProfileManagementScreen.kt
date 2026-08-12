@@ -424,12 +424,14 @@ private fun ProfileEditor(
                 ActionButton(
                     text = "حفظ",
                     isTv = isTv,
+                    blockRightEdge = true,
                     onClick = onSave,
                 )
                 ActionButton(
                     text = "إلغاء",
                     secondary = true,
                     isTv = isTv,
+                    blockLeftEdge = true,
                     onClick = onCancel,
                 )
             }
@@ -465,6 +467,7 @@ private fun ProfileManagementCard(
             horizontal = if (isTv) 20.dp else 14.dp,
             vertical = if (isTv) 16.dp else 13.dp,
         )
+    val hasDelete = !profile.isPrimary && profilesCount > 1
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val compactActions = !isTv && maxWidth < 700.dp
@@ -490,6 +493,7 @@ private fun ProfileManagementCard(
                             secondary = true,
                             isTv = false,
                             compact = true,
+                            blockRightEdge = true,
                             onClick = onSelect,
                         )
                     }
@@ -499,6 +503,7 @@ private fun ProfileManagementCard(
                         isTv = false,
                         compact = true,
                         focusRequester = initialFocusRequester,
+                        blockRightEdge = active,
                         onClick = onManagePin,
                     )
                     ActionButton(
@@ -506,14 +511,16 @@ private fun ProfileManagementCard(
                         secondary = true,
                         isTv = false,
                         compact = true,
+                        blockLeftEdge = !hasDelete,
                         onClick = onEdit,
                     )
-                    if (!profile.isPrimary && profilesCount > 1) {
+                    if (hasDelete) {
                         ActionButton(
                             text = "حذف",
                             danger = true,
                             isTv = false,
                             compact = true,
+                            blockLeftEdge = true,
                             onClick = onDelete,
                         )
                     }
@@ -541,6 +548,7 @@ private fun ProfileManagementCard(
                             text = "اختيار",
                             secondary = true,
                             isTv = isTv,
+                            blockRightEdge = true,
                             onClick = onSelect,
                         )
                     }
@@ -549,19 +557,22 @@ private fun ProfileManagementCard(
                         secondary = true,
                         isTv = isTv,
                         focusRequester = initialFocusRequester,
+                        blockRightEdge = active,
                         onClick = onManagePin,
                     )
                     ActionButton(
                         text = "تعديل",
                         secondary = true,
                         isTv = isTv,
+                        blockLeftEdge = !hasDelete,
                         onClick = onEdit,
                     )
-                    if (!profile.isPrimary && profilesCount > 1) {
+                    if (hasDelete) {
                         ActionButton(
                             text = "حذف",
                             danger = true,
                             isTv = isTv,
+                            blockLeftEdge = true,
                             onClick = onDelete,
                         )
                     }
@@ -682,6 +693,8 @@ private fun ActionButton(
     isTv: Boolean,
     compact: Boolean = false,
     focusRequester: FocusRequester? = null,
+    blockLeftEdge: Boolean = false,
+    blockRightEdge: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -727,17 +740,27 @@ private fun ActionButton(
             )
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { event ->
-                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
+                if (!isTv) {
                     false
+                } else if (
+                    event.type == KeyEventType.KeyDown &&
+                    ((blockLeftEdge && event.key == Key.DirectionLeft) ||
+                        (blockRightEdge && event.key == Key.DirectionRight))
+                ) {
+                    true
                 } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> {
-                            onClick()
-                            true
+                    val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+                    if (!remoteSelect) {
+                        false
+                    } else {
+                        when (event.type) {
+                            KeyEventType.KeyDown -> true
+                            KeyEventType.KeyUp -> {
+                                onClick()
+                                true
+                            }
+                            else -> false
                         }
-                        else -> false
                     }
                 }
             }
