@@ -130,7 +130,7 @@ fun AdaptiveProfileManagementScreen(
                 .fillMaxSize()
                 .background(
                     Brush.radialGradient(
-                        listOf(colors.goldDeep.copy(alpha = .11f), Color.Transparent),
+                        listOf(colors.goldDeep.copy(alpha = .10f), Color.Transparent),
                         radius = if (isTv) 1100f else 720f,
                     ),
                 ),
@@ -146,7 +146,6 @@ fun AdaptiveProfileManagementScreen(
                 isTv = isTv,
                 kidsSourceAvailable = kidsSourceAvailable,
                 kidsSourceLoading = kidsSourceLoading,
-                kidsSourceMessage = kidsSourceMessage,
                 error = error,
                 onNameChange = { name = it.take(ProfileStore.MAX_DISPLAY_NAME_LENGTH) },
                 onAvatarChange = { avatarKey = it },
@@ -169,7 +168,7 @@ fun AdaptiveProfileManagementScreen(
                         error = null
                     } else {
                         error = if (profileKind == ProfileKind.KIDS && !kidsSourceAvailable) {
-                            "لا يمكن إنشاء ملف أطفال قبل التحقق من مصدر الأطفال من السيرفر."
+                            "وضع الأطفال غير متاح حاليًا. حاول مرة أخرى بعد قليل."
                         } else {
                             "تعذر الحفظ. تأكد من الاسم وعدد الملفات الشخصية."
                         }
@@ -192,18 +191,18 @@ fun AdaptiveProfileManagementScreen(
             val phone = !isTv && maxWidth < 600.dp
             val tablet = !isTv && maxWidth >= 600.dp
             val horizontal = when {
-                isTv -> 56.dp
+                isTv -> 48.dp
                 phone -> 14.dp
-                else -> 28.dp
+                else -> 26.dp
             }
             val vertical = when {
-                isTv -> 34.dp
+                isTv -> 30.dp
                 phone -> 16.dp
-                else -> 24.dp
+                else -> 22.dp
             }
             val maxContentWidth = when {
-                isTv -> 1120.dp
-                tablet -> 920.dp
+                isTv -> 1060.dp
+                tablet -> 900.dp
                 else -> 760.dp
             }
 
@@ -216,7 +215,7 @@ fun AdaptiveProfileManagementScreen(
                 if (phone) {
                     Column(Modifier.fillMaxWidth().widthIn(max = maxContentWidth)) {
                         ManagementHeading(isTv = false)
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(13.dp))
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
@@ -243,23 +242,24 @@ fun AdaptiveProfileManagementScreen(
                     }
                 }
 
-                Spacer(Modifier.height(if (isTv) 22.dp else 16.dp))
+                Spacer(Modifier.height(if (isTv) 20.dp else 15.dp))
 
-                if (profiles.any { it.kind == ProfileKind.KIDS }) {
-                    KidsSourceBanner(
+                if (
+                    profiles.any { it.kind == ProfileKind.KIDS } &&
+                    (kidsSourceLoading || !kidsSourceAvailable)
+                ) {
+                    KidsStatusNotice(
                         isTv = isTv,
-                        available = kidsSourceAvailable,
                         loading = kidsSourceLoading,
-                        message = kidsSourceMessage,
                         onRetry = onRetryKidsSource,
                     )
-                    Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
+                    Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
                 }
 
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxWidth().widthIn(max = maxContentWidth),
-                    verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (isTv) 13.dp else 10.dp),
                 ) {
                     items(profiles, key = UserProfile::id) { profile ->
                         ManagementProfileCard(
@@ -288,12 +288,12 @@ private fun ManagementHeading(isTv: Boolean) {
         Text(
             "الملفات الشخصية",
             color = colors.text,
-            fontSize = if (isTv) 32.sp else 25.sp,
+            fontSize = if (isTv) 31.sp else 25.sp,
             fontWeight = FontWeight.Black,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "ملفات مستقلة للبالغين والأطفال مع محتوى أطفال موثّق من السيرفر",
+            "أنشئ ملفًا مناسبًا لكل فرد من العائلة",
             color = colors.textMuted,
             fontSize = if (isTv) 14.sp else 12.sp,
         )
@@ -301,40 +301,33 @@ private fun ManagementHeading(isTv: Boolean) {
 }
 
 @Composable
-private fun KidsSourceBanner(
+private fun KidsStatusNotice(
     isTv: Boolean,
-    available: Boolean,
     loading: Boolean,
-    message: String?,
     onRetry: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 16.dp else 14.dp)
-    val text = when {
-        loading -> "جار التحقق من فئات الأطفال الموثّقة على السيرفر…"
-        available -> "مصدر الأطفال موثّق · لن يظهر لملف الأطفال إلا المحتوى القادم من فئات Kids المؤكدة."
-        else -> message ?: "مصدر الأطفال غير متاح حاليًا. ملفات الأطفال ستبقى مقفلة Fail-Closed."
-    }
+    val shape = RoundedCornerShape(if (isTv) 15.dp else 13.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(colors.surfaceRaised.copy(alpha = .9f))
-            .border(1.dp, if (available) colors.gold.copy(alpha = .34f) else Color.White.copy(alpha = .1f), shape)
-            .padding(horizontal = if (isTv) 18.dp else 14.dp, vertical = if (isTv) 13.dp else 11.dp),
+            .background(colors.surfaceRaised.copy(alpha = .88f))
+            .border(1.dp, Color.White.copy(alpha = .08f), shape)
+            .padding(horizontal = if (isTv) 17.dp else 13.dp, vertical = if (isTv) 12.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
-            text,
+            if (loading) "جار تجهيز وضع الأطفال…" else "وضع الأطفال غير متاح حاليًا",
             modifier = Modifier.weight(1f),
-            color = if (available) colors.goldBright else colors.textMuted,
+            color = colors.textMuted,
             fontSize = if (isTv) 13.sp else 11.sp,
-            fontWeight = if (available) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = FontWeight.Medium,
         )
-        if (!available && !loading) {
+        if (!loading) {
             Spacer(Modifier.width(10.dp))
-            ManagementAction("إعادة التحقق", isTv, secondary = true, compact = true, onClick = onRetry)
+            ManagementAction("إعادة المحاولة", isTv, secondary = true, compact = true, onClick = onRetry)
         }
     }
 }
@@ -349,7 +342,6 @@ private fun AdaptiveProfileEditor(
     isTv: Boolean,
     kidsSourceAvailable: Boolean,
     kidsSourceLoading: Boolean,
-    kidsSourceMessage: String?,
     error: String?,
     onNameChange: (String) -> Unit,
     onAvatarChange: (String) -> Unit,
@@ -371,23 +363,27 @@ private fun AdaptiveProfileEditor(
         Modifier
             .fillMaxSize()
             .safeDrawingPadding()
-            .padding(horizontal = if (isTv) 58.dp else 14.dp, vertical = if (isTv) 34.dp else 14.dp),
+            .padding(horizontal = if (isTv) 48.dp else 14.dp, vertical = if (isTv) 28.dp else 14.dp),
         contentAlignment = Alignment.Center,
     ) {
         val phoneLandscape = !isTv && maxWidth > maxHeight && maxHeight < 520.dp
         val compactPhone = !isTv && maxWidth < 600.dp
-        val cardMax = if (isTv) 780.dp else if (compactPhone) 620.dp else 720.dp
+        val cardMax = when {
+            isTv -> 720.dp
+            compactPhone -> 620.dp
+            else -> 700.dp
+        }
 
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = cardMax)
-                .clip(RoundedCornerShape(if (isTv) 26.dp else 20.dp))
+                .clip(RoundedCornerShape(if (isTv) 24.dp else 20.dp))
                 .background(colors.surface.copy(alpha = .98f))
-                .border(1.dp, colors.gold.copy(alpha = .30f), RoundedCornerShape(if (isTv) 26.dp else 20.dp))
+                .border(1.dp, colors.gold.copy(alpha = .26f), RoundedCornerShape(if (isTv) 24.dp else 20.dp))
                 .padding(
-                    horizontal = if (isTv) 40.dp else 20.dp,
-                    vertical = if (phoneLandscape) 14.dp else if (isTv) 28.dp else 20.dp,
+                    horizontal = if (isTv) 34.dp else 20.dp,
+                    vertical = if (phoneLandscape) 14.dp else if (isTv) 25.dp else 20.dp,
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -395,18 +391,18 @@ private fun AdaptiveProfileEditor(
                 Text(
                     if (creating) "إضافة ملف شخصي" else "تعديل الملف الشخصي",
                     color = colors.text,
-                    fontSize = if (isTv) 30.sp else 23.sp,
+                    fontSize = if (isTv) 29.sp else 23.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    if (creating) "اختر نوع الملف ثم الاسم والشخصية" else "نوع الملف ثابت بعد إنشائه لحماية سياسة المحتوى",
+                    if (creating) "اختر نوع الملف ثم الاسم والصورة" else "يمكنك تعديل الاسم والصورة",
                     color = colors.textMuted,
-                    fontSize = if (isTv) 14.sp else 12.sp,
+                    fontSize = if (isTv) 13.sp else 12.sp,
                     textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(if (phoneLandscape) 10.dp else 18.dp))
+                Spacer(Modifier.height(if (phoneLandscape) 10.dp else 17.dp))
 
                 if (creating) {
                     Row(
@@ -416,7 +412,7 @@ private fun AdaptiveProfileEditor(
                         ProfileKindChoice(
                             modifier = Modifier.weight(1f),
                             title = "عادي",
-                            subtitle = "كل محتوى الحساب",
+                            subtitle = "التجربة الكاملة",
                             selected = selectedKind == ProfileKind.STANDARD,
                             enabled = true,
                             isTv = isTv,
@@ -426,9 +422,9 @@ private fun AdaptiveProfileEditor(
                             modifier = Modifier.weight(1f),
                             title = "أطفال",
                             subtitle = when {
-                                kidsSourceLoading -> "جار التحقق…"
-                                kidsSourceAvailable -> "فئات Kids من السيرفر فقط"
-                                else -> "غير متاح حتى ينجح التحقق"
+                                kidsSourceLoading -> "جار التجهيز…"
+                                kidsSourceAvailable -> "واجهة مخصصة للأطفال"
+                                else -> "غير متاح حاليًا"
                             },
                             selected = selectedKind == ProfileKind.KIDS,
                             enabled = kidsSourceAvailable,
@@ -444,14 +440,14 @@ private fun AdaptiveProfileEditor(
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
-                                kidsSourceMessage ?: if (kidsSourceLoading) "التحقق من مصدر الأطفال جارٍ الآن." else "لا يوجد مصدر أطفال موثّق حاليًا.",
+                                if (kidsSourceLoading) "جار تجهيز وضع الأطفال…" else "وضع الأطفال غير متاح حاليًا.",
                                 modifier = Modifier.weight(1f),
                                 color = colors.textMuted,
                                 fontSize = if (isTv) 12.sp else 10.sp,
                             )
                             if (!kidsSourceLoading) {
                                 Spacer(Modifier.width(8.dp))
-                                ManagementAction("تحقق", isTv, secondary = true, compact = true, onClick = onRetryKidsSource)
+                                ManagementAction("إعادة المحاولة", isTv, secondary = true, compact = true, onClick = onRetryKidsSource)
                             }
                         }
                     }
@@ -461,11 +457,15 @@ private fun AdaptiveProfileEditor(
                         Modifier
                             .clip(RoundedCornerShape(50))
                             .background(if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .14f) else colors.surfaceRaised)
-                            .border(1.dp, if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .38f) else Color.White.copy(alpha = .09f), RoundedCornerShape(50))
+                            .border(
+                                1.dp,
+                                if (kind == ProfileKind.KIDS) colors.gold.copy(alpha = .34f) else Color.White.copy(alpha = .09f),
+                                RoundedCornerShape(50),
+                            )
                             .padding(horizontal = 14.dp, vertical = 7.dp),
                     ) {
                         Text(
-                            if (kind == ProfileKind.KIDS) "ملف أطفال · محتوى مقيد" else "ملف عادي",
+                            if (kind == ProfileKind.KIDS) "ملف أطفال" else "ملف عادي",
                             color = if (kind == ProfileKind.KIDS) colors.goldBright else colors.textMuted,
                             fontSize = if (isTv) 13.sp else 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -473,23 +473,23 @@ private fun AdaptiveProfileEditor(
                     }
                 }
 
-                Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 20.dp else 15.dp))
+                Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 19.dp else 15.dp))
                 HulkTextField(
                     value = name,
                     onValueChange = onNameChange,
                     label = "اسم الملف الشخصي",
                     modifier = Modifier.fillMaxWidth().focusRequester(nameFocus),
                 )
-                Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 20.dp else 15.dp))
+                Spacer(Modifier.height(if (phoneLandscape) 10.dp else if (isTv) 18.dp else 15.dp))
                 Text(
-                    "اختر شخصية الملف",
+                    "اختر صورة الملف",
                     color = colors.text,
                     fontSize = if (isTv) 16.sp else 14.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(10.dp))
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (isTv) 13.dp else 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PROFILE_AVATARS.forEach { key ->
@@ -505,10 +505,15 @@ private fun AdaptiveProfileEditor(
 
                 if (!error.isNullOrBlank()) {
                     Spacer(Modifier.height(10.dp))
-                    Text(error, color = colors.danger, fontSize = if (isTv) 13.sp else 11.sp, textAlign = TextAlign.Center)
+                    Text(
+                        error,
+                        color = colors.danger,
+                        fontSize = if (isTv) 13.sp else 11.sp,
+                        textAlign = TextAlign.Center,
+                    )
                 }
 
-                Spacer(Modifier.height(if (phoneLandscape) 12.dp else if (isTv) 22.dp else 18.dp))
+                Spacer(Modifier.height(if (phoneLandscape) 12.dp else if (isTv) 20.dp else 18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ManagementAction("حفظ", isTv, onClick = onSave)
                     ManagementAction("إلغاء", isTv, secondary = true, onClick = onCancel)
@@ -530,7 +535,7 @@ private fun ProfileKindChoice(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(title) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.035f else 1f, label = "kindScale")
+    val scale by animateFloatAsState(if (focused && isTv) 1.025f else 1f, label = "kindScale")
     val shape = RoundedCornerShape(if (isTv) 16.dp else 13.dp)
     Column(
         modifier
@@ -541,7 +546,7 @@ private fun ProfileKindChoice(
                 if (focused) 2.dp else 1.dp,
                 when {
                     focused -> colors.goldBright
-                    selected -> colors.gold.copy(alpha = .55f)
+                    selected -> colors.gold.copy(alpha = .50f)
                     else -> Color.White.copy(alpha = .09f)
                 },
                 shape,
@@ -549,7 +554,7 @@ private fun ProfileKindChoice(
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, onClick = onClick)
             .focusable(enabled)
-            .padding(horizontal = if (isTv) 18.dp else 13.dp, vertical = if (isTv) 14.dp else 11.dp),
+            .padding(horizontal = if (isTv) 17.dp else 13.dp, vertical = if (isTv) 13.dp else 11.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -583,7 +588,7 @@ private fun ManagementProfileCard(
     onDelete: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 20.dp else 16.dp)
+    val shape = RoundedCornerShape(if (isTv) 19.dp else 16.dp)
     val canDelete = !profile.isPrimary && profileCount > 1
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -592,8 +597,8 @@ private fun ManagementProfileCard(
             .fillMaxWidth()
             .clip(shape)
             .background(if (active) colors.gold.copy(alpha = .07f) else colors.surface.copy(alpha = .97f))
-            .border(1.dp, if (active) colors.gold.copy(alpha = .50f) else Color.White.copy(alpha = .09f), shape)
-            .padding(horizontal = if (isTv) 20.dp else 14.dp, vertical = if (isTv) 15.dp else 13.dp)
+            .border(1.dp, if (active) colors.gold.copy(alpha = .46f) else Color.White.copy(alpha = .09f), shape)
+            .padding(horizontal = if (isTv) 19.dp else 14.dp, vertical = if (isTv) 14.dp else 13.dp)
 
         if (compact) {
             Column(card) {
@@ -649,10 +654,10 @@ private fun ManagementIdentity(
         ProfileAvatarArtwork(
             avatarKey = profile.avatarKey,
             displayName = profile.displayName,
-            size = if (isTv) 66.dp else 56.dp,
+            size = if (isTv) 64.dp else 56.dp,
             highlighted = active || profile.kind == ProfileKind.KIDS,
         )
-        Spacer(Modifier.width(if (isTv) 18.dp else 12.dp))
+        Spacer(Modifier.width(if (isTv) 17.dp else 12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -671,7 +676,12 @@ private fun ManagementIdentity(
                             .background(colors.gold.copy(alpha = .14f))
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
-                        Text("أطفال", color = colors.goldBright, fontSize = if (isTv) 10.sp else 9.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "أطفال",
+                            color = colors.goldBright,
+                            fontSize = if (isTv) 10.sp else 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }
@@ -681,7 +691,7 @@ private fun ManagementIdentity(
                     when {
                         active -> "الملف المستخدم الآن"
                         profile.isPrimary -> "الملف الأساسي"
-                        profile.kind == ProfileKind.KIDS -> "محتوى أطفال من السيرفر فقط"
+                        profile.kind == ProfileKind.KIDS -> "ملف أطفال"
                         else -> "ملف شخصي مستقل"
                     },
                 )
@@ -708,10 +718,10 @@ private fun ManagementAvatarChoice(
     onClick: () -> Unit,
 ) {
     var focused by remember(key) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.10f else 1f, label = "managementAvatarScale")
+    val scale by animateFloatAsState(if (focused && isTv) 1.08f else 1f, label = "managementAvatarScale")
     val size = when {
         compact -> 44.dp
-        isTv -> 70.dp
+        isTv -> 68.dp
         else -> 54.dp
     }
     Box(
@@ -746,7 +756,7 @@ private fun ManagementAction(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(text) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.04f else 1f, label = "managementActionScale")
+    val scale by animateFloatAsState(if (focused && isTv) 1.03f else 1f, label = "managementActionScale")
     val shape = RoundedCornerShape(if (isTv) 13.dp else 11.dp)
     val background = when {
         danger -> colors.danger.copy(alpha = if (focused) .24f else .14f)
@@ -787,8 +797,8 @@ private fun ManagementAction(
             .clickable(onClick = onClick)
             .focusable()
             .padding(
-                horizontal = when { compact -> 9.dp; isTv -> 17.dp; else -> 14.dp },
-                vertical = when { compact -> 8.dp; isTv -> 11.dp; else -> 9.dp },
+                horizontal = when { compact -> 9.dp; isTv -> 16.dp; else -> 14.dp },
+                vertical = when { compact -> 8.dp; isTv -> 10.dp; else -> 9.dp },
             ),
         contentAlignment = Alignment.Center,
     ) {

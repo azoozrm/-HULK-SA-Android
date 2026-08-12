@@ -1,7 +1,5 @@
 package sa.hulksa.player.ui
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,11 +15,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -51,7 +51,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -70,7 +69,6 @@ import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
-import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
@@ -123,7 +121,6 @@ fun KidsProfileExperience(
                     profile = profile,
                     isTv = isTv,
                     loading = sourceLoading,
-                    message = sourceError,
                     onRetry = onRetrySource,
                     onSwitchProfile = onSwitchProfile,
                 )
@@ -255,7 +252,6 @@ private fun KidsSourceGate(
     profile: UserProfile,
     isTv: Boolean,
     loading: Boolean,
-    message: String?,
     onRetry: () -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
@@ -264,41 +260,38 @@ private fun KidsSourceGate(
         Modifier
             .fillMaxSize()
             .safeDrawingPadding()
-            .padding(horizontal = if (isTv) 64.dp else 20.dp, vertical = if (isTv) 42.dp else 24.dp),
+            .padding(horizontal = if (isTv) 48.dp else 18.dp, vertical = if (isTv) 32.dp else 20.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             Modifier
-                .fillMaxWidth(.92f)
-                .clip(RoundedCornerShape(if (isTv) 26.dp else 20.dp))
+                .fillMaxWidth()
+                .widthIn(max = if (isTv) 620.dp else 480.dp)
+                .clip(RoundedCornerShape(if (isTv) 24.dp else 20.dp))
                 .background(colors.surface.copy(alpha = .97f))
-                .border(1.dp, colors.gold.copy(alpha = .28f), RoundedCornerShape(if (isTv) 26.dp else 20.dp))
-                .padding(horizontal = if (isTv) 42.dp else 24.dp, vertical = if (isTv) 34.dp else 28.dp),
+                .border(1.dp, colors.gold.copy(alpha = .24f), RoundedCornerShape(if (isTv) 24.dp else 20.dp))
+                .padding(horizontal = if (isTv) 38.dp else 22.dp, vertical = if (isTv) 30.dp else 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            ProfileAvatarArtwork(profile.avatarKey, profile.displayName, if (isTv) 82.dp else 68.dp, true)
+            ProfileAvatarArtwork(profile.avatarKey, profile.displayName, if (isTv) 78.dp else 64.dp, true)
             Spacer(Modifier.height(14.dp))
             Text(
-                if (loading) "جار تجهيز مساحة الأطفال" else "مساحة الأطفال مقفلة بأمان",
+                if (loading) "جار تجهيز مساحة الأطفال" else "تعذر فتح مساحة الأطفال",
                 color = colors.text,
-                fontSize = if (isTv) 28.sp else 22.sp,
+                fontSize = if (isTv) 27.sp else 22.sp,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(7.dp))
             Text(
-                if (loading) {
-                    "نتحقق الآن من فئات الأطفال الموثّقة على السيرفر. لن نعرض أي محتوى عام أثناء التحقق."
-                } else {
-                    message ?: "لم نتمكن من اعتماد مصدر الأطفال. لن يتم عرض محتوى غير موثّق."
-                },
+                if (loading) "قد يستغرق ذلك لحظات." else "حاول مرة أخرى، أو اختر ملفًا شخصيًا آخر.",
                 color = colors.textMuted,
                 fontSize = if (isTv) 14.sp else 12.sp,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(if (isTv) 24.dp else 18.dp))
+            Spacer(Modifier.height(if (isTv) 22.dp else 18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (!loading) KidsTextButton("إعادة التحقق", isTv, primary = true, onClick = onRetry)
+                if (!loading) KidsTextButton("إعادة المحاولة", isTv, primary = true, onClick = onRetry)
                 KidsTextButton("تغيير المستخدم", isTv, primary = false, onClick = onSwitchProfile)
             }
         }
@@ -343,28 +336,35 @@ private fun KidsMainScreen(
             .fillMaxSize()
             .background(
                 Brush.radialGradient(
-                    listOf(colors.goldDeep.copy(alpha = .11f), colors.background),
-                    radius = if (isTv) 1250f else 780f,
+                    listOf(colors.goldDeep.copy(alpha = .10f), colors.background),
+                    radius = if (isTv) 1260f else 780f,
                 ),
             )
             .safeDrawingPadding(),
     ) {
         val wide = isTv || maxWidth >= 840.dp
+        val edgePadding = if (isTv) 14.dp else 0.dp
         val contentPadding = when {
-            isTv -> 26.dp
-            maxWidth >= 600.dp -> 22.dp
+            isTv -> 18.dp
+            maxWidth >= 600.dp -> 20.dp
             else -> 14.dp
         }
 
         if (wide) {
-            Row(Modifier.fillMaxSize()) {
+            Row(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = edgePadding, vertical = if (isTv) 10.dp else 0.dp),
+            ) {
                 KidsSideRail(
+                    profile = profile,
                     entries = entries,
                     selected = selected,
                     isTv = isTv,
                     onSelect = { selected = it; query = ""; categoryId = null },
                     onSwitchProfile = onSwitchProfile,
                 )
+                Spacer(Modifier.width(if (isTv) 14.dp else 10.dp))
                 KidsContentPane(
                     modifier = Modifier.weight(1f).fillMaxHeight().padding(contentPadding),
                     profile = profile,
@@ -373,6 +373,7 @@ private fun KidsMainScreen(
                     query = query,
                     categoryId = categoryId,
                     isTv = isTv,
+                    showProfileAvatar = false,
                     onQueryChange = { query = it },
                     onCategoryChange = { categoryId = it },
                     onOpen = onOpen,
@@ -388,6 +389,7 @@ private fun KidsMainScreen(
                     query = query,
                     categoryId = categoryId,
                     isTv = false,
+                    showProfileAvatar = true,
                     onQueryChange = { query = it },
                     onCategoryChange = { categoryId = it },
                     onOpen = onOpen,
@@ -412,6 +414,7 @@ private fun KidsContentPane(
     query: String,
     categoryId: String?,
     isTv: Boolean,
+    showProfileAvatar: Boolean,
     onQueryChange: (String) -> Unit,
     onCategoryChange: (String?) -> Unit,
     onOpen: (ContentItem) -> Unit,
@@ -427,49 +430,45 @@ private fun KidsContentPane(
     val items = remember(snapshot, selected, categoryId, query) {
         kidsItemsForSection(snapshot, selected, categoryId, query)
     }
+    val title = when (selected) {
+        KidsSection.HOME -> "أهلًا ${profile.displayName}"
+        KidsSection.LIVE -> "قنوات الأطفال"
+        KidsSection.MOVIES -> "أفلام الأطفال"
+        KidsSection.SERIES -> "مسلسلات الأطفال"
+        KidsSection.SEARCH -> "البحث"
+    }
 
     Column(modifier) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = if (showProfileAvatar) Arrangement.SpaceBetween else Arrangement.Start,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    when (selected) {
-                        KidsSection.HOME -> "أهلًا ${profile.displayName}"
-                        KidsSection.LIVE -> "قنوات الأطفال"
-                        KidsSection.MOVIES -> "أفلام الأطفال"
-                        KidsSection.SERIES -> "مسلسلات الأطفال"
-                        KidsSection.SEARCH -> "ابحث في مساحة الأطفال"
-                    },
-                    color = colors.text,
-                    fontSize = if (isTv) 29.sp else 22.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    "محتوى موثّق من فئات الأطفال على السيرفر فقط",
-                    color = colors.goldBright,
-                    fontSize = if (isTv) 12.sp else 10.sp,
-                    fontWeight = FontWeight.Bold,
-                )
+            Text(
+                title,
+                modifier = if (showProfileAvatar) Modifier.weight(1f) else Modifier,
+                color = colors.text,
+                fontSize = if (isTv) 30.sp else 22.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (showProfileAvatar) {
+                Spacer(Modifier.width(12.dp))
+                ProfileAvatarArtwork(profile.avatarKey, profile.displayName, 44.dp, true)
             }
-            ProfileAvatarArtwork(profile.avatarKey, profile.displayName, if (isTv) 54.dp else 44.dp, true)
         }
 
-        Spacer(Modifier.height(if (isTv) 18.dp else 13.dp))
+        Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
 
         if (selected == KidsSection.SEARCH) {
             HulkTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                label = "ابحث عن فيلم أو مسلسل أو قناة أطفال",
+                label = "ابحث عن فيلم أو مسلسل أو قناة",
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
+            Spacer(Modifier.height(if (isTv) 15.dp else 11.dp))
         }
 
         if (categories.isNotEmpty()) {
@@ -486,13 +485,17 @@ private fun KidsContentPane(
                     }
                 }
             }
-            Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
+            Spacer(Modifier.height(if (isTv) 15.dp else 11.dp))
         }
 
         if (items.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (selected == KidsSection.SEARCH && query.isBlank()) "اكتب كلمة للبحث داخل محتوى الأطفال فقط" else "لا توجد عناصر مطابقة",
+                    if (selected == KidsSection.SEARCH && query.isBlank()) {
+                        "اكتب اسم الفيلم أو المسلسل أو القناة"
+                    } else {
+                        "لا توجد نتائج"
+                    },
                     color = colors.textMuted,
                     fontSize = if (isTv) 16.sp else 13.sp,
                     textAlign = TextAlign.Center,
@@ -500,11 +503,11 @@ private fun KidsContentPane(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = if (isTv) 150.dp else 128.dp),
+                columns = GridCells.Adaptive(minSize = if (isTv) 154.dp else 126.dp),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = if (isTv) 20.dp else 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-                verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+                contentPadding = PaddingValues(bottom = if (isTv) 22.dp else 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 13.dp else 10.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 11.dp),
             ) {
                 items(items, key = { "${it.type.name}:${it.id}" }) { item ->
                     KidsContentCard(item = item, isTv = isTv, onClick = { onOpen(item) })
@@ -522,18 +525,16 @@ private fun KidsContentCard(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(item.id, item.type) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.045f else 1f, label = "kidsCardScale")
-    val shape = RoundedCornerShape(if (isTv) 16.dp else 13.dp)
+    val shape = RoundedCornerShape(if (isTv) 15.dp else 13.dp)
     Column(
         Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                shadowElevation = if (focused && isTv) 18.dp.toPx() else 0f
-            }
             .clip(shape)
             .background(colors.surface.copy(alpha = .96f))
-            .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else Color.White.copy(alpha = .09f), shape)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) colors.goldBright else Color.White.copy(alpha = .09f),
+                shape,
+            )
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 val select = event.key == Key.Enter || event.key == Key.DirectionCenter
@@ -545,25 +546,25 @@ private fun KidsContentCard(
             }
             .clickable(onClick = onClick)
             .focusable()
-            .padding(8.dp),
+            .padding(if (isTv) 7.dp else 6.dp),
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (isTv) 188.dp else 164.dp)
-                .clip(RoundedCornerShape(if (isTv) 12.dp else 10.dp))
+                .height(if (isTv) 180.dp else 158.dp)
+                .clip(RoundedCornerShape(if (isTv) 11.dp else 10.dp))
                 .background(colors.surfaceRaised),
         ) {
             AsyncImage(
                 model = item.posterUrl,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+                contentScale = if (item.type == ContentType.LIVE) ContentScale.Fit else ContentScale.Crop,
             )
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
-                    .padding(7.dp)
+                    .padding(6.dp)
                     .clip(RoundedCornerShape(50))
                     .background(Color.Black.copy(alpha = .70f))
                     .padding(horizontal = 7.dp, vertical = 3.dp),
@@ -580,7 +581,7 @@ private fun KidsContentCard(
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(7.dp))
         Text(
             item.name,
             color = if (focused) colors.goldBright else colors.text,
@@ -605,12 +606,16 @@ private fun KidsCategoryChip(
     Box(
         Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (selected) colors.gold else if (focused) colors.gold.copy(alpha = .16f) else colors.surfaceRaised)
-            .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else Color.White.copy(alpha = .08f), RoundedCornerShape(50))
+            .background(if (selected) colors.gold else if (focused) colors.gold.copy(alpha = .15f) else colors.surfaceRaised)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
+                RoundedCornerShape(50),
+            )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .focusable()
-            .padding(horizontal = if (isTv) 16.dp else 13.dp, vertical = if (isTv) 9.dp else 8.dp),
+            .padding(horizontal = if (isTv) 15.dp else 13.dp, vertical = if (isTv) 8.dp else 8.dp),
     ) {
         Text(
             text,
@@ -624,6 +629,7 @@ private fun KidsCategoryChip(
 
 @Composable
 private fun KidsSideRail(
+    profile: UserProfile,
     entries: List<KidsNavEntry>,
     selected: KidsSection,
     isTv: Boolean,
@@ -631,22 +637,39 @@ private fun KidsSideRail(
     onSwitchProfile: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val railShape = RoundedCornerShape(if (isTv) 20.dp else 17.dp)
     Column(
         Modifier
-            .width(if (isTv) 112.dp else 104.dp)
+            .width(if (isTv) 126.dp else 114.dp)
             .fillMaxHeight()
+            .clip(railShape)
             .background(Color(0xF6090A07))
-            .padding(horizontal = 10.dp, vertical = if (isTv) 28.dp else 18.dp),
+            .border(1.dp, Color.White.copy(alpha = .06f), railShape)
+            .padding(horizontal = if (isTv) 9.dp else 8.dp, vertical = if (isTv) 16.dp else 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("KIDS", color = colors.goldBright, fontSize = if (isTv) 15.sp else 13.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(if (isTv) 24.dp else 16.dp))
+        ProfileAvatarArtwork(profile.avatarKey, profile.displayName, if (isTv) 46.dp else 42.dp, true)
+        Spacer(Modifier.height(5.dp))
+        Text("KIDS", color = colors.goldBright, fontSize = if (isTv) 13.sp else 12.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(if (isTv) 13.dp else 10.dp))
         entries.forEach { entry ->
-            KidsNavButton(entry, selected == entry.section, isTv) { onSelect(entry.section) }
-            Spacer(Modifier.height(8.dp))
+            KidsNavButton(
+                entry = entry,
+                selected = selected == entry.section,
+                isTv = isTv,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onSelect(entry.section) },
+            )
+            Spacer(Modifier.height(if (isTv) 4.dp else 3.dp))
         }
         Spacer(Modifier.weight(1f))
-        KidsNavButton(KidsNavEntry(KidsSection.HOME, "تغيير", Icons.Rounded.Person), false, isTv, onSwitchProfile)
+        KidsNavButton(
+            entry = KidsNavEntry(KidsSection.HOME, "تغيير المستخدم", Icons.Rounded.Person),
+            selected = false,
+            isTv = isTv,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onSwitchProfile,
+        )
     }
 }
 
@@ -657,7 +680,6 @@ private fun KidsBottomBar(
     onSelect: (KidsSection) -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
     LazyRow(
         Modifier
             .fillMaxWidth()
@@ -671,7 +693,12 @@ private fun KidsBottomBar(
             KidsNavButton(entry, selected == entry.section, false) { onSelect(entry.section) }
         }
         item(key = "switch-profile") {
-            KidsNavButton(KidsNavEntry(KidsSection.HOME, "تغيير", Icons.Rounded.Person), false, false, onSwitchProfile)
+            KidsNavButton(
+                KidsNavEntry(KidsSection.HOME, "تغيير المستخدم", Icons.Rounded.Person),
+                false,
+                false,
+                onClick = onSwitchProfile,
+            )
         }
     }
 }
@@ -681,38 +708,64 @@ private fun KidsNavButton(
     entry: KidsNavEntry,
     selected: Boolean,
     isTv: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(entry.label) { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused && isTv) 1.06f else 1f, label = "kidsNavScale")
-    val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
+    val shape = RoundedCornerShape(if (isTv) 13.dp else 12.dp)
     Column(
-        Modifier
-            .width(if (isTv) 88.dp else 78.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+        modifier
+            .then(if (isTv) Modifier else Modifier.width(82.dp))
+            .heightIn(min = if (isTv) 54.dp else 52.dp)
             .clip(shape)
-            .background(if (selected) colors.gold.copy(alpha = .16f) else if (focused) colors.surfaceRaised else Color.Transparent)
-            .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else Color.Transparent, shape)
+            .background(
+                when {
+                    selected -> colors.gold.copy(alpha = .18f)
+                    focused -> colors.surfaceRaised
+                    else -> Color.Transparent
+                },
+            )
+            .border(
+                if (focused) 2.dp else 1.dp,
+                when {
+                    focused -> colors.goldBright
+                    selected -> colors.gold.copy(alpha = .34f)
+                    else -> Color.Transparent
+                },
+                shape,
+            )
             .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                val select = event.key == Key.Enter || event.key == Key.DirectionCenter
+                if (!isTv || !select) false else when (event.type) {
+                    KeyEventType.KeyDown -> true
+                    KeyEventType.KeyUp -> { onClick(); true }
+                    else -> false
+                }
+            }
             .clickable(onClick = onClick)
             .focusable()
-            .padding(vertical = if (isTv) 10.dp else 8.dp),
+            .padding(horizontal = 4.dp, vertical = if (isTv) 7.dp else 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         Icon(
             entry.icon,
             contentDescription = entry.label,
             tint = if (selected || focused) colors.goldBright else colors.textMuted,
-            modifier = Modifier.size(if (isTv) 24.dp else 21.dp),
+            modifier = Modifier.size(if (isTv) 22.dp else 20.dp),
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(3.dp))
         Text(
             entry.label,
             color = if (selected || focused) colors.text else colors.textMuted,
-            fontSize = if (isTv) 11.sp else 10.sp,
+            fontSize = if (isTv) 10.sp else 9.sp,
+            lineHeight = if (isTv) 12.sp else 11.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -726,11 +779,16 @@ private fun KidsTextButton(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember(text) { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
     Box(
         Modifier
-            .clip(RoundedCornerShape(if (isTv) 14.dp else 12.dp))
+            .clip(shape)
             .background(if (primary) colors.gold else if (focused) colors.gold.copy(alpha = .15f) else colors.surfaceRaised)
-            .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else Color.White.copy(alpha = .08f), RoundedCornerShape(if (isTv) 14.dp else 12.dp))
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
+                shape,
+            )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .focusable()
