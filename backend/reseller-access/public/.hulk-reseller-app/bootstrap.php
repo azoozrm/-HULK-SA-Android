@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 const HULK_ACCESS_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const HULK_ACCESS_CODE_PAYLOAD_LENGTH = 16;
+const HULK_ACCESS_CODE_PAYLOAD_LENGTH = 8;
+const HULK_CUSTOM_ACCESS_CODE_MAX_LENGTH = 12;
+const HULK_LEGACY_ACCESS_CODE_PAYLOAD_LENGTH = 16;
 const HULK_ACTIVE_STATUS = 'active';
 
 function hulk_config(): array
@@ -67,14 +69,20 @@ function hulk_security_headers(): void
     header('Referrer-Policy: no-referrer');
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: DENY');
-    header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    header('Cross-Origin-Opener-Policy: same-origin');
+    header('Cross-Origin-Resource-Policy: same-origin');
+    header(
+        "Content-Security-Policy: default-src 'none'; "
+        . "script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
+        . "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+    );
     header('Permissions-Policy: camera=(), geolocation=(), microphone=()');
     if (hulk_is_https()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
     }
 }
 
-function hulk_start_session(): void
+function hulk_start_session(string $area = 'reseller'): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
@@ -87,10 +95,12 @@ function hulk_start_session(): void
     ini_set('session.gc_maxlifetime', (string) $lifetime);
     ini_set('session.cookie_httponly', '1');
     ini_set('session.cookie_samesite', 'Strict');
-    session_name('HULK_RESELLER_SESSION');
+    $isAdmin = $area === 'admin';
+    $sessionPath = $isAdmin ? '/hulk-reseller-admin/' : '/reseller/';
+    session_name($isAdmin ? 'HULK_ADMIN_SESSION' : 'HULK_RESELLER_SESSION');
     session_set_cookie_params([
         'lifetime' => $lifetime,
-        'path' => '/reseller/',
+        'path' => $sessionPath,
         'secure' => hulk_is_https(),
         'httponly' => true,
         'samesite' => 'Strict',
@@ -150,7 +160,7 @@ function hulk_generate_access_code(): string
     for ($index = 0; $index < HULK_ACCESS_CODE_PAYLOAD_LENGTH; $index++) {
         $payload .= HULK_ACCESS_CODE_ALPHABET[random_int(0, $maximum)];
     }
-    return 'HULK-' . implode('-', str_split($payload, 4));
+    return hulk_format_access_code($payload);
 }
 
 function hulk_normalize_access_code(string $value): ?string
@@ -160,18 +170,73 @@ function hulk_normalize_access_code(string $value): ?string
         return null;
     }
     $payload = substr($compact, 4);
-    if (strlen($payload) !== HULK_ACCESS_CODE_PAYLOAD_LENGTH) {
+    $payloadLength = strlen($payload);
+    $isCurrentLength = $payloadLength >= HULK_ACCESS_CODE_PAYLOAD_LENGTH
+        && $payloadLength <= HULK_CUSTOM_ACCESS_CODE_MAX_LENGTH;
+    if (!$isCurrentLength && $payloadLength !== HULK_LEGACY_ACCESS_CODE_PAYLOAD_LENGTH) {
         return null;
     }
-    if (!preg_match('/^[' . HULK_ACCESS_CODE_ALPHABET . ']{16}$/D', $payload)) {
+    if (!preg_match('/^[A-Z0-9]+$/D', $payload)) {
         return null;
     }
+    return hulk_format_access_code($payload);
+}
+
+function hulk_normalize_custom_access_code(string $value): ?string
+{
+    $compact = (string) preg_replace('/[\s-]+/', '', trim($value));
+    if (str_starts_with(strtoupper($compact), 'HULK')) {
+        $compact = substr($compact, 4);
+    }
+    $payloadLength = strlen($compact);
+    if ($payloadLength < HULK_ACCESS_CODE_PAYLOAD_LENGTH || $payloadLength > HULK_CUSTOM_ACCESS_CODE_MAX_LENGTH) {
+        return null;
+    }
+    if (!preg_match('/^[A-Za-z0-9]+$/D', $compact) || !preg_match('/[A-Z]/', $compact)) {
+        return null;
+    }
+    return hulk_format_access_code(strtoupper($compact));
+}
+
+function hulk_format_access_code(string $payload): string
+{
     return 'HULK-' . implode('-', str_split($payload, 4));
 }
 
 function hulk_access_code_hash(string $code): string
 {
     return hash('sha256', $code);
+}
+
+function hulk_enforce_resolver_rate_limit(): void
+{
+    $clientAddress = trim((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+    $clientHash = hash('sha256', $clientAddress);
+    $database = hulk_db();
+    $statement = $database->prepare(
+        'INSERT INTO resolver_rate_limits (client_hash, window_started_at, attempts) '
+        . 'VALUES (:client_hash, UTC_TIMESTAMP(), 1) '
+        . 'ON DUPLICATE KEY UPDATE '
+        . 'attempts = IF(window_started_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE), 1, LEAST(attempts + 1, 31)), '
+        . 'window_started_at = IF(window_started_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE), '
+        . 'UTC_TIMESTAMP(), window_started_at)'
+    );
+    $statement->execute(['client_hash' => $clientHash]);
+
+    $lookup = $database->prepare(
+        'SELECT attempts FROM resolver_rate_limits WHERE client_hash = :client_hash LIMIT 1'
+    );
+    $lookup->execute(['client_hash' => $clientHash]);
+    $attempts = (int) ($lookup->fetchColumn() ?: 0);
+    if ($attempts > 30) {
+        hulk_api_error('RATE_LIMITED', 'محاولات كثيرة. حاول مرة أخرى بعد خمس دقائق.', 429);
+    }
+
+    if (random_int(1, 100) === 1) {
+        $database->exec(
+            'DELETE FROM resolver_rate_limits WHERE window_started_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)'
+        );
+    }
 }
 
 function hulk_normalize_host(string $value): ?string
@@ -230,7 +295,8 @@ function hulk_current_reseller(): ?array
         return null;
     }
     $statement = hulk_db()->prepare(
-        'SELECT reseller_id, reseller_name, host, access_code, status FROM resellers WHERE reseller_id = :id LIMIT 1'
+        'SELECT reseller_id, reseller_name, host, access_code, status, created_at, updated_at '
+        . 'FROM resellers WHERE reseller_id = :id LIMIT 1'
     );
     $statement->execute(['id' => $resellerId]);
     $reseller = $statement->fetch();
@@ -239,4 +305,22 @@ function hulk_current_reseller(): ?array
         return null;
     }
     return $reseller;
+}
+
+function hulk_current_admin(): ?array
+{
+    $adminId = filter_var($_SESSION['admin_id'] ?? null, FILTER_VALIDATE_INT);
+    if (!$adminId) {
+        return null;
+    }
+    $statement = hulk_db()->prepare(
+        'SELECT admin_id, username, status FROM admins WHERE admin_id = :id LIMIT 1'
+    );
+    $statement->execute(['id' => $adminId]);
+    $admin = $statement->fetch();
+    if (!is_array($admin) || ($admin['status'] ?? '') !== HULK_ACTIVE_STATUS) {
+        unset($_SESSION['admin_id']);
+        return null;
+    }
+    return $admin;
 }
