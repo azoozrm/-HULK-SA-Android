@@ -105,8 +105,22 @@ private data class SmartSearchDestination(
     val label: String,
 )
 
+private enum class SmartSearchFilter(
+    val contentType: ContentType?,
+    val label: String,
+) {
+    ALL(null, "الكل"),
+    LIVE(ContentType.LIVE, "القنوات"),
+    MOVIES(ContentType.MOVIE, "الأفلام"),
+    SERIES(ContentType.SERIES, "المسلسلات"),
+    ;
+
+    fun accepts(type: ContentType): Boolean = contentType == null || contentType == type
+}
+
 private data class SmartSearchSnapshot(
     val query: String = "",
+    val filter: SmartSearchFilter = SmartSearchFilter.ALL,
     val results: List<ContentItem> = emptyList(),
 )
 
@@ -141,12 +155,16 @@ internal fun ProfileSmartSearchLayer(
     val profileStore = remember(context) { ProfileStore(context) }
     val activeProfileId = profileStore.activeProfileId()
     var historyRevision by remember(activeProfileId) { mutableIntStateOf(0) }
+    var selectedFilter by remember(activeProfileId) { mutableStateOf(SmartSearchFilter.ALL) }
     val recentEntries = remember(activeProfileId, historyRevision) { historyStore.recent() }
+    val visibleRecentEntries = remember(recentEntries, selectedFilter) {
+        recentEntries.filter { selectedFilter.accepts(it.contentType) }
+    }
 
     val normalizedQuery = state.searchQuery.trim()
     var settledQuery by remember { mutableStateOf("") }
     LaunchedEffect(normalizedQuery) {
-        if (normalizedQuery.length < MIN_QUERY_LENGTH) {
+        if (normalizedQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
             settledQuery = ""
         } else {
             delay(SEARCH_DEBOUNCE_MS)
@@ -155,30 +173,42 @@ internal fun ProfileSmartSearchLayer(
     }
 
     val searchSnapshot by produceState(
-        initialValue = SmartSearchSnapshot(),
+        initialValue = SmartSearchSnapshot(filter = selectedFilter),
         key1 = state.catalogs,
-        key2 = settledQuery,
+        key2 = settledQuery to selectedFilter,
     ) {
-        value = if (settledQuery.length < MIN_QUERY_LENGTH) {
-            SmartSearchSnapshot()
+        value = if (settledQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
+            SmartSearchSnapshot(filter = selectedFilter)
         } else {
             withContext(Dispatchers.Default) {
                 SmartSearchSnapshot(
                     query = settledQuery,
-                    results = boundedSmartSearch(state, settledQuery),
+                    filter = selectedFilter,
+                    results = boundedSmartSearch(state, settledQuery, selectedFilter),
                 )
             }
         }
     }
 
-    val results = if (searchSnapshot.query == settledQuery) searchSnapshot.results else emptyList()
+    val results = if (
+        searchSnapshot.query == settledQuery && searchSnapshot.filter == selectedFilter
+    ) {
+        searchSnapshot.results
+    } else {
+        emptyList()
+    }
     val imeVisible = !isTv && WindowInsets.isImeVisible
     val suggestionLimit = if (isTv) MAX_TV_SUGGESTIONS else MAX_PHONE_SUGGESTIONS
     val suggestions = remember(results, suggestionLimit) { results.take(suggestionLimit) }
-    val searchPending = normalizedQuery.length >= MIN_QUERY_LENGTH &&
-        (settledQuery != normalizedQuery || searchSnapshot.query != settledQuery)
-    val loadingCatalogs = normalizedQuery.length >= MIN_QUERY_LENGTH &&
-        state.loadingTypes.isNotEmpty() && results.isEmpty()
+    val searchPending = normalizedQuery.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
+        (settledQuery != normalizedQuery ||
+            searchSnapshot.query != settledQuery ||
+            searchSnapshot.filter != selectedFilter)
+    val relevantCatalogLoading = selectedFilter.contentType
+        ?.let { it in state.loadingTypes }
+        ?: state.loadingTypes.isNotEmpty()
+    val loadingCatalogs = normalizedQuery.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
+        relevantCatalogLoading && results.isEmpty()
     val useRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
 
     val searchFieldRequester = remember { FocusRequester() }
@@ -186,6 +216,9 @@ internal fun ProfileSmartSearchLayer(
     val firstResultRequester = remember { FocusRequester() }
     val firstRecentRequester = remember { FocusRequester() }
     val railSearchRequester = remember { FocusRequester() }
+    val filterRequesters = remember {
+        SmartSearchFilter.entries.associateWith { FocusRequester() }
+    }
 
     val recordAndOpen: (ContentItem) -> Unit = { item ->
         historyStore.record(item)
@@ -227,9 +260,11 @@ internal fun ProfileSmartSearchLayer(
                         .fillMaxHeight(),
                     state = state,
                     isTv = isTv,
-                    recentEntries = recentEntries,
+                    recentEntries = visibleRecentEntries,
                     suggestions = suggestions,
                     results = results,
+                    selectedFilter = selectedFilter,
+                    filterRequesters = filterRequesters,
                     searchPending = searchPending,
                     loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
@@ -240,6 +275,7 @@ internal fun ProfileSmartSearchLayer(
                     railSearchRequester = if (isTv) railSearchRequester else null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
+                    onFilterSelected = { selectedFilter = it },
                     onOpenSuggestion = recordAndOpen,
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -264,9 +300,11 @@ internal fun ProfileSmartSearchLayer(
                         .imePadding(),
                     state = state,
                     isTv = false,
-                    recentEntries = recentEntries,
+                    recentEntries = visibleRecentEntries,
                     suggestions = suggestions,
                     results = results,
+                    selectedFilter = selectedFilter,
+                    filterRequesters = filterRequesters,
                     searchPending = searchPending,
                     loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
@@ -277,6 +315,7 @@ internal fun ProfileSmartSearchLayer(
                     railSearchRequester = null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
+                    onFilterSelected = { selectedFilter = it },
                     onOpenSuggestion = recordAndOpen,
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -310,6 +349,8 @@ private fun SmartSearchContent(
     recentEntries: List<ProfileContentSearchHistoryEntry>,
     suggestions: List<ContentItem>,
     results: List<ContentItem>,
+    selectedFilter: SmartSearchFilter,
+    filterRequesters: Map<SmartSearchFilter, FocusRequester>,
     searchPending: Boolean,
     loadingCatalogs: Boolean,
     imeVisible: Boolean,
@@ -320,6 +361,7 @@ private fun SmartSearchContent(
     railSearchRequester: FocusRequester?,
     isFavorite: (ContentItem) -> Boolean,
     onSearch: (String) -> Unit,
+    onFilterSelected: (SmartSearchFilter) -> Unit,
     onOpenSuggestion: (ContentItem) -> Unit,
     onOpenResult: (ContentItem) -> Unit,
     onOpenRecent: (ProfileContentSearchHistoryEntry) -> Unit,
@@ -343,6 +385,13 @@ private fun SmartSearchContent(
         isTv -> (screenHeight / 42f).coerceIn(14f, 24f).dp
         compactHeight -> 8.dp
         else -> 14.dp
+    }
+    val selectedFilterRequester = filterRequesters.getValue(selectedFilter)
+    val firstContentRequester = when {
+        suggestions.isNotEmpty() -> firstSuggestionRequester
+        results.isNotEmpty() -> firstResultRequester
+        state.searchQuery.isBlank() && recentEntries.isNotEmpty() -> firstRecentRequester
+        else -> null
     }
 
     Column(
@@ -387,7 +436,7 @@ private fun SmartSearchContent(
                 )
                 if (!compactHeight && !imeVisible) {
                     Text(
-                        text = "اقتراحات سريعة من القنوات والافلام والمسلسلات",
+                        text = "بحث سريع مع تصفية القنوات والافلام والمسلسلات",
                         color = colors.textMuted,
                         fontSize = if (isTv) 13.sp else 11.sp,
                         maxLines = 1,
@@ -416,13 +465,25 @@ private fun SmartSearchContent(
             hasResults = results.isNotEmpty(),
             hasRecent = state.searchQuery.isBlank() && recentEntries.isNotEmpty(),
             searchFieldRequester = searchFieldRequester,
+            firstFilterRequester = if (isTv) selectedFilterRequester else null,
             firstSuggestionRequester = firstSuggestionRequester,
             firstResultRequester = firstResultRequester,
             firstRecentRequester = firstRecentRequester,
             railSearchRequester = railSearchRequester,
         )
 
-        Spacer(Modifier.height(if (compactHeight || imeVisible) 8.dp else 12.dp))
+        Spacer(Modifier.height(if (compactHeight || imeVisible) 7.dp else 10.dp))
+
+        SmartSearchFilterBar(
+            selected = selectedFilter,
+            isTv = isTv,
+            requesters = filterRequesters,
+            searchFieldRequester = searchFieldRequester,
+            downRequester = firstContentRequester,
+            onSelect = onFilterSelected,
+        )
+
+        Spacer(Modifier.height(if (compactHeight || imeVisible) 7.dp else 10.dp))
 
         when {
             state.searchQuery.isBlank() -> {
@@ -431,14 +492,14 @@ private fun SmartSearchContent(
                     entries = recentEntries,
                     isTv = isTv,
                     firstRecentRequester = firstRecentRequester,
-                    searchFieldRequester = searchFieldRequester,
+                    topRequester = selectedFilterRequester,
                     onOpen = onOpenRecent,
                     onRemove = onRemoveRecent,
                     onClear = onClearRecent,
                 )
             }
 
-            state.searchQuery.trim().length < MIN_QUERY_LENGTH -> {
+            state.searchQuery.trim().length < SMART_SEARCH_MIN_QUERY_LENGTH -> {
                 SearchMessage(
                     modifier = Modifier.weight(1f),
                     isTv = isTv,
@@ -457,8 +518,12 @@ private fun SmartSearchContent(
                 SearchMessage(
                     modifier = Modifier.weight(1f),
                     isTv = isTv,
-                    title = "لا توجد نتائج مطابقة",
-                    subtitle = "جرب كتابة جزء آخر من اسم الفيلم او المسلسل او القناة",
+                    title = if (selectedFilter == SmartSearchFilter.ALL) {
+                        "لا توجد نتائج مطابقة"
+                    } else {
+                        "لا توجد نتائج في ${selectedFilter.label}"
+                    },
+                    subtitle = "جرب كتابة جزء آخر من الاسم او اختر نوع محتوى مختلف",
                 )
             }
 
@@ -471,7 +536,7 @@ private fun SmartSearchContent(
                     isTv = isTv,
                     firstSuggestionRequester = firstSuggestionRequester,
                     firstResultRequester = firstResultRequester,
-                    searchFieldRequester = searchFieldRequester,
+                    topRequester = selectedFilterRequester,
                     isFavorite = isFavorite,
                     onOpenSuggestion = onOpenSuggestion,
                     onOpenResult = onOpenResult,
@@ -529,6 +594,7 @@ private fun SmartSearchInput(
     hasResults: Boolean,
     hasRecent: Boolean,
     searchFieldRequester: FocusRequester,
+    firstFilterRequester: FocusRequester?,
     firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
     firstRecentRequester: FocusRequester,
@@ -539,6 +605,12 @@ private fun SmartSearchInput(
 
     val moveDown: () -> Boolean = {
         when {
+            firstFilterRequester != null -> {
+                tvEditing = false
+                keyboardController?.hide()
+                runCatching { firstFilterRequester.requestFocus() }.isSuccess
+            }
+
             hasSuggestions -> {
                 tvEditing = false
                 keyboardController?.hide()
@@ -604,12 +676,61 @@ private fun SmartSearchInput(
 }
 
 @Composable
+private fun SmartSearchFilterBar(
+    selected: SmartSearchFilter,
+    isTv: Boolean,
+    requesters: Map<SmartSearchFilter, FocusRequester>,
+    searchFieldRequester: FocusRequester,
+    downRequester: FocusRequester?,
+    onSelect: (SmartSearchFilter) -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp),
+    ) {
+        Text(
+            text = "عرض",
+            color = colors.textMuted,
+            fontSize = if (isTv) 12.sp else 10.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp),
+        ) {
+            items(
+                items = SmartSearchFilter.entries,
+                key = SmartSearchFilter::name,
+            ) { filter ->
+                val active = selected == filter
+                FocusButton(
+                    text = filter.label,
+                    onClick = { onSelect(filter) },
+                    modifier = Modifier
+                        .focusRequester(requesters.getValue(filter))
+                        .focusProperties {
+                            up = searchFieldRequester
+                            downRequester?.let { down = it }
+                        },
+                    primary = active,
+                    compact = true,
+                    outlined = !active,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SmartRecentSection(
     modifier: Modifier,
     entries: List<ProfileContentSearchHistoryEntry>,
     isTv: Boolean,
     firstRecentRequester: FocusRequester,
-    searchFieldRequester: FocusRequester,
+    topRequester: FocusRequester,
     onOpen: (ProfileContentSearchHistoryEntry) -> Unit,
     onRemove: (ProfileContentSearchHistoryEntry) -> Unit,
     onClear: () -> Unit,
@@ -684,7 +805,7 @@ private fun SmartRecentSection(
                         openButtonModifier = if (isTv && isFirstEntry) {
                             Modifier
                                 .focusRequester(firstRecentRequester)
-                                .focusProperties { up = searchFieldRequester }
+                                .focusProperties { up = topRequester }
                         } else {
                             Modifier
                         },
@@ -777,7 +898,7 @@ private fun SmartSuggestionsAndResults(
     isTv: Boolean,
     firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
-    searchFieldRequester: FocusRequester,
+    topRequester: FocusRequester,
     isFavorite: (ContentItem) -> Boolean,
     onOpenSuggestion: (ContentItem) -> Unit,
     onOpenResult: (ContentItem) -> Unit,
@@ -822,7 +943,7 @@ private fun SmartSuggestionsAndResults(
                         if (index == 0) {
                             Modifier
                                 .focusRequester(firstSuggestionRequester)
-                                .focusProperties { up = searchFieldRequester }
+                                .focusProperties { up = topRequester }
                         } else {
                             Modifier
                         },
@@ -1154,18 +1275,21 @@ private fun SmartSearchBottomNavigation(
 private fun boundedSmartSearch(
     state: HulkUiState,
     rawQuery: String,
+    filter: SmartSearchFilter,
 ): List<ContentItem> {
     val query = normalizeSearchText(rawQuery)
-    if (query.length < MIN_QUERY_LENGTH) return emptyList()
+    if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) return emptyList()
+    val queryTokens = query.split(' ').filter(String::isNotBlank)
 
     val buckets = Array(SEARCH_RANK_COUNT) { mutableListOf<ContentItem>() }
     val seen = HashSet<String>()
 
-    state.catalogs.values.forEach { catalog ->
-        catalog.items.forEach { item ->
-            val rank = item.smartSearchRankOrNull(query) ?: return@forEach
+    for (catalog in state.catalogs.values) {
+        for (item in catalog.items) {
+            if (!filter.accepts(item.type)) continue
+            val rank = item.smartSearchRankOrNull(query, queryTokens) ?: continue
             val key = "${item.type}:${item.id}"
-            if (!seen.add(key)) return@forEach
+            if (!seen.add(key)) continue
             val bucket = buckets[rank]
             if (bucket.size < MAX_RESULTS_PER_RANK) {
                 bucket += item
@@ -1174,6 +1298,7 @@ private fun boundedSmartSearch(
     }
 
     val withinRank = compareByDescending<ContentItem> { it.rating?.toDoubleOrNull() ?: 0.0 }
+        .thenByDescending { it.addedAtEpochSeconds ?: 0L }
         .thenBy { it.name.length }
         .thenBy { it.name }
 
@@ -1188,31 +1313,55 @@ private fun boundedSmartSearch(
     }
 }
 
-private fun ContentItem.smartSearchRankOrNull(normalizedQuery: String): Int? {
+private fun ContentItem.smartSearchRankOrNull(
+    normalizedQuery: String,
+    queryTokens: List<String>,
+): Int? {
     val cleanName = normalizeSearchText(name)
+    val titleTokens = cleanName.split(' ').filter(String::isNotBlank)
     val normalizedYear = normalizeSearchText(year.orEmpty())
     val normalizedGenre = normalizeSearchText(genre.orEmpty())
     return when {
         cleanName == normalizedQuery -> 0
         cleanName.startsWith(normalizedQuery) -> 1
-        cleanName.split(' ').any { it.startsWith(normalizedQuery) } -> 2
+        titleTokens.any { it.startsWith(normalizedQuery) } -> 2
         cleanName.contains(normalizedQuery) -> 3
-        normalizedYear == normalizedQuery -> 4
-        normalizedGenre.contains(normalizedQuery) -> 5
+        queryTokens.size > 1 && queryTokens.all { token ->
+            titleTokens.any { word -> word.startsWith(token) || word.contains(token) }
+        } -> 4
+        normalizedYear == normalizedQuery -> 5
+        normalizedGenre.contains(normalizedQuery) -> 6
+        queryTokens.size > 1 && queryTokens.all(normalizedGenre::contains) -> 7
         else -> null
     }
 }
 
-private fun normalizeSearchText(raw: String): String = raw
+private fun normalizeSearchText(raw: String): String = normalizeSearchDigits(raw)
     .trim()
     .lowercase()
     .replace('أ', 'ا')
     .replace('إ', 'ا')
     .replace('آ', 'ا')
     .replace('ى', 'ي')
+    .replace('ؤ', 'و')
+    .replace('ئ', 'ي')
     .replace("ـ", "")
     .replace(ARABIC_DIACRITICS_REGEX, "")
+    .replace(NON_ALPHANUMERIC_REGEX, " ")
     .replace(WHITESPACE_REGEX, " ")
+    .trim()
+
+private fun normalizeSearchDigits(raw: String): String = buildString(raw.length) {
+    raw.forEach { char ->
+        append(
+            when (char) {
+                in '٠'..'٩' -> ('0'.code + char.code - '٠'.code).toChar()
+                in '۰'..'۹' -> ('0'.code + char.code - '۰'.code).toChar()
+                else -> char
+            },
+        )
+    }
+}
 
 private fun ContentType.smartLabel(): String = when (this) {
     ContentType.LIVE -> "قناة"
@@ -1220,12 +1369,13 @@ private fun ContentType.smartLabel(): String = when (this) {
     ContentType.SERIES -> "مسلسل"
 }
 
-private const val MIN_QUERY_LENGTH = 2
+private const val SMART_SEARCH_MIN_QUERY_LENGTH = 2
 private const val SEARCH_DEBOUNCE_MS = 140L
 private const val MAX_PHONE_SUGGESTIONS = 4
 private const val MAX_TV_SUGGESTIONS = 5
-private const val SEARCH_RANK_COUNT = 6
+private const val SEARCH_RANK_COUNT = 8
 private const val MAX_RESULTS_PER_RANK = 48
 private const val MAX_SEARCH_RESULTS = 120
 private val WHITESPACE_REGEX = Regex("\\s+")
 private val ARABIC_DIACRITICS_REGEX = Regex("[\\u064B-\\u065F\\u0670]")
+private val NON_ALPHANUMERIC_REGEX = Regex("[^\\p{L}\\p{N}]+")
