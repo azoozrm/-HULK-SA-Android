@@ -107,12 +107,14 @@ internal fun normalizeResellerAccessCode(value: String): String? {
         .uppercase(Locale.US)
         .replace(Regex("\\s+"), "")
         .replace("-", "")
-    if (!compact.startsWith(ACCESS_CODE_PREFIX) || compact.length != ACCESS_CODE_COMPACT_LENGTH) {
+    if (!compact.startsWith(ACCESS_CODE_PREFIX)) {
         return null
     }
 
     val payload = compact.removePrefix(ACCESS_CODE_PREFIX)
-    if (!payload.matches(Regex("[$ACCESS_CODE_ALPHABET]{$ACCESS_CODE_PAYLOAD_LENGTH}"))) {
+    val supportedLength = payload.length in ACCESS_CODE_MIN_PAYLOAD_LENGTH..ACCESS_CODE_MAX_PAYLOAD_LENGTH ||
+        payload.length == ACCESS_CODE_LEGACY_PAYLOAD_LENGTH
+    if (!supportedLength || !payload.matches(Regex("[A-Z0-9]+"))) {
         return null
     }
     return ACCESS_CODE_PREFIX + "-" + payload.chunked(4).joinToString("-")
@@ -133,9 +135,9 @@ internal fun String?.normalizeIptvHost(): String? {
 }
 
 private const val ACCESS_CODE_PREFIX = "HULK"
-private const val ACCESS_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-private const val ACCESS_CODE_PAYLOAD_LENGTH = 16
-private const val ACCESS_CODE_COMPACT_LENGTH = ACCESS_CODE_PREFIX.length + ACCESS_CODE_PAYLOAD_LENGTH
+private const val ACCESS_CODE_MIN_PAYLOAD_LENGTH = 8
+private const val ACCESS_CODE_MAX_PAYLOAD_LENGTH = 12
+private const val ACCESS_CODE_LEGACY_PAYLOAD_LENGTH = 16
 
 sealed class PortalException(message: String) : Exception(message) {
     data object ConfigurationMissing : PortalException("تعذر الاتصال بخدمة HULK. تواصل مع الدعم.")

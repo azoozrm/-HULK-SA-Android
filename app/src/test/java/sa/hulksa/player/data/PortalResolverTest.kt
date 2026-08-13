@@ -49,10 +49,10 @@ class PortalResolverTest {
     }
 
     @Test
-    fun validCodeResolvesCurrentResellerHostOverHttps() = runBlocking {
+    fun validCustomCodeResolvesCurrentResellerHostOverHttps() = runBlocking {
         server.enqueue(jsonResponse(200, """{"host":"http://reseller.example:8080/"}"""))
 
-        val portal = resolver().resolve(" hulkabcd-efgh-jkmn-pqrs ")
+        val portal = resolver().resolve(" hulkab12-cd34 ")
 
         assertEquals("http://reseller.example:8080", portal.baseUrl)
         assertEquals(PortalConfig.Source.ACCESS_CODE, portal.source)
@@ -60,8 +60,21 @@ class PortalResolverTest {
         assertEquals("/api/reseller/resolve", request.path)
         assertEquals("POST", request.method)
         assertEquals(
-            "HULK-ABCD-EFGH-JKMN-PQRS",
+            VALID_CODE,
             JSONObject(request.body.readUtf8()).getString("code"),
+        )
+    }
+
+    @Test
+    fun legacyGeneratedCodeRemainsSupported() = runBlocking {
+        server.enqueue(jsonResponse(200, """{"host":"https://legacy.example"}"""))
+
+        val portal = resolver().resolve(LEGACY_CODE)
+
+        assertEquals("https://legacy.example", portal.baseUrl)
+        assertEquals(
+            LEGACY_CODE,
+            JSONObject(server.takeRequest().body.readUtf8()).getString("code"),
         )
     }
 
@@ -152,7 +165,8 @@ class PortalResolverTest {
         .setBody(body)
 
     private companion object {
-        const val VALID_CODE = "HULK-ABCD-EFGH-JKMN-PQRS"
-        const val ROTATED_CODE = "HULK-TUVW-XYZ2-3456-789A"
+        const val VALID_CODE = "HULK-AB12-CD34"
+        const val ROTATED_CODE = "HULK-TUVW-XYZ2-3456"
+        const val LEGACY_CODE = "HULK-ABCD-EFGH-JKMN-PQRS"
     }
 }
