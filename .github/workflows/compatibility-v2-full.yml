@@ -22,9 +22,6 @@ jobs:
     outputs:
       runtime_matrix: ${{ steps.runtime-matrix.outputs.runtime_matrix }}
     timeout-minutes: 70
-    env:
-      HULK_PORTAL_URL: http://3162356.xyz:8080
-      HULK_CONFIG_URL: ''
     steps:
       - uses: actions/checkout@v7
       - name: Publish Full Matrix run locator
@@ -51,6 +48,8 @@ jobs:
           selectors = {
               'phone-small-api29': ','.join([
                   compatibility_class + '#phoneLauncherStartsRealApplicationAndSurvivesRecreation',
+                  compatibility_class + '#phonePortraitLoginFieldsAcceptTypingWithoutCrash',
+                  compatibility_class + '#loginFieldsAppearInRequiredResellerOrder',
                   compatibility_class + '#phonePortraitOrientationRestoresAfterLandscapePlayback',
                   compatibility_class + '#explicitManifestComponentStartsInstalledDebugPackage',
                   compatibility_class + '#phoneWindowUsesTransparentEdgeToEdgeSystemBars',
@@ -59,6 +58,7 @@ jobs:
               ]),
               'phone-short-landscape-api35': ','.join([
                   compatibility_class + '#phoneLauncherStartsRealApplicationAndSurvivesRecreation',
+                  compatibility_class + '#loginFieldsAppearInRequiredResellerOrder',
                   compatibility_class + '#explicitManifestComponentStartsInstalledDebugPackage',
                   compatibility_class + '#shortLandscapePhoneCanScrollToPrimaryLoginActions',
                   compatibility_class + '#visibleApplicationNodesHaveNonZeroBoundsInsideDisplay',
@@ -116,8 +116,7 @@ jobs:
           bash -n quality/compatibility-v2/run_runtime_profile.sh
           bash -n quality/compatibility-v2/run_stable_emulator_profile.sh
           ./gradlew --no-daemon --console=plain \
-            clean :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+            clean :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
           mkdir -p build/compatibility-v2/binaries
           cp app/build/outputs/apk/debug/app-debug.apk build/compatibility-v2/binaries/
           cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk build/compatibility-v2/binaries/

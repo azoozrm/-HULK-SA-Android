@@ -16,7 +16,7 @@ import sa.hulksa.player.model.SeriesBundle
 import sa.hulksa.player.security.CredentialVault
 
 class HulkRepository(context: Context) {
-    private val portalResolver = PortalResolver(context)
+    private val portalResolver = PortalResolver()
     private val client = XtreamClient()
     private val kidsCatalogClient = KidsServerCatalogClient()
     private val kidsContentFilterStore = KidsContentFilterStore(context)
@@ -27,7 +27,7 @@ class HulkRepository(context: Context) {
     private val diagnostics = ServerDiagnosticsEngine(context)
 
     suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession {
-        val portal = portalResolver.resolve()
+        val portal = portalResolver.resolve(credentials.accessCode)
         val session = client.authenticate(portal, credentials)
         try {
             accountSessionStore.recordAuthenticated(session)
@@ -43,7 +43,7 @@ class HulkRepository(context: Context) {
     }
 
     suspend fun reauthenticate(session: AuthenticatedSession): AuthenticatedSession {
-        val portal = portalResolver.resolve()
+        val portal = portalResolver.resolve(session.credentials.accessCode)
         val refreshed = client.authenticate(portal, session.credentials)
         accountSessionStore.recordAuthenticated(refreshed)
         AuthenticatedSessionRegistry.update(refreshed)
@@ -67,7 +67,7 @@ class HulkRepository(context: Context) {
 
         repeat(2) { attempt ->
             val restored = runCatching {
-                val portal = portalResolver.resolve()
+                val portal = portalResolver.resolve(credentials.accessCode)
                 client.authenticate(portal, credentials)
             }.getOrNull()
             if (restored != null) {

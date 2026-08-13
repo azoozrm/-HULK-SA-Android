@@ -19,6 +19,7 @@ import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.model.PortalConfig
 
 @RunWith(AndroidJUnit4::class)
 class ProductionAuthenticatedSmokeTest {
@@ -33,6 +34,7 @@ class ProductionAuthenticatedSmokeTest {
             arguments.getString(ARG_ENABLED) == "true",
         )
 
+        val accessCode = requireSecretArgument(ARG_ACCESS_CODE)
         val username = requireSecretArgument(ARG_USERNAME)
         val password = requireSecretArgument(ARG_PASSWORD)
         val repository = HulkRepository(context)
@@ -40,12 +42,17 @@ class ProductionAuthenticatedSmokeTest {
         try {
             withTimeout(180_000L) {
                 val session = repository.login(
-                    credentials = Credentials(username = username, password = password),
+                    credentials = Credentials(
+                        accessCode = accessCode,
+                        username = username,
+                        password = password,
+                    ),
                     remember = false,
                 )
 
                 assertTrue(session.account.status.equals("Active", ignoreCase = true))
-                assertEquals(BuildConfig.PORTAL_URL.trimEnd('/'), session.portal.baseUrl.trimEnd('/'))
+                assertEquals(PortalConfig.Source.ACCESS_CODE, session.portal.source)
+                assertTrue(session.portal.baseUrl.startsWith("http://") || session.portal.baseUrl.startsWith("https://"))
                 assertFalse(session.account.username.isBlank())
 
                 val liveCatalog = repository.catalog(session, ContentType.LIVE)
@@ -140,6 +147,7 @@ class ProductionAuthenticatedSmokeTest {
 
     private companion object {
         const val ARG_ENABLED = "hulkProductionE2e"
+        const val ARG_ACCESS_CODE = "hulkE2eAccessCode"
         const val ARG_USERNAME = "hulkE2eUsername"
         const val ARG_PASSWORD = "hulkE2ePassword"
         const val MAX_STREAM_PROBES = 4

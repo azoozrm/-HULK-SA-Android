@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build.log
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee ../build.log
 
       - name: Prepare APK artifact
         shell: bash

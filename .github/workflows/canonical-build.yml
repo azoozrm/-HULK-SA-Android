@@ -44,9 +44,6 @@ jobs:
     name: Build, lint, unit, release and ABI
     runs-on: ubuntu-latest
     timeout-minutes: 70
-    env:
-      HULK_PORTAL_URL: http://3162356.xyz:8080
-      HULK_CONFIG_URL: ''
 
     steps:
       - uses: actions/checkout@v7
@@ -90,17 +87,13 @@ jobs:
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
             clean :app:compileDebugKotlin :app:testDebugUnitTest \
-            :app:lintDebug :app:assembleDebug :app:bundleDebug \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
-            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+            :app:lintDebug :app:assembleDebug :app:bundleDebug
 
       - name: Build release and R8
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
-            :app:assembleRelease :app:bundleRelease \
-            -PHULK_PORTAL_URL="$HULK_PORTAL_URL" \
-            -PHULK_CONFIG_URL="$HULK_CONFIG_URL"
+            :app:assembleRelease :app:bundleRelease
 
       - name: Verify package, version and architectures
         run: |

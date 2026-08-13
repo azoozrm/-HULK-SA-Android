@@ -116,12 +116,35 @@ class CompatibilityV2InstrumentationTest {
             SystemClock.sleep(1_200L)
 
             var fields = device.findObjects(By.clazz("android.widget.EditText"))
-            if (fields.size < 2) {
+            if (fields.size < 3) {
+                val codeLabel = device.wait(Until.findObject(By.text("كود الدخول")), 6_000L)
+                assertNotNull("Access-code field was not exposed", codeLabel)
+                codeLabel?.click()
+            } else {
+                fields[0].click()
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(500L)
+            device.executeShellCommand("input text HULK-ABCD-EFGH-JKMN-PQRS")
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(700L)
+
+            scenario.onActivity { activity ->
+                assertFalse("Application finished after access-code input", activity.isFinishing)
+                assertTrue("Application window disappeared after access-code input", activity.window.decorView.isShown)
+            }
+            assertTrue(
+                "Application package left the foreground after access-code input",
+                device.hasObject(By.pkg(targetContext.packageName).depth(0)),
+            )
+
+            fields = device.findObjects(By.clazz("android.widget.EditText"))
+            if (fields.size >= 3) {
+                fields[1].click()
+            } else {
                 val usernameLabel = device.wait(Until.findObject(By.text("اسم المستخدم")), 6_000L)
                 assertNotNull("Username field was not exposed", usernameLabel)
                 usernameLabel?.click()
-            } else {
-                fields[0].click()
             }
             instrumentation.waitForIdleSync()
             SystemClock.sleep(500L)
@@ -129,18 +152,9 @@ class CompatibilityV2InstrumentationTest {
             instrumentation.waitForIdleSync()
             SystemClock.sleep(700L)
 
-            scenario.onActivity { activity ->
-                assertFalse("Application finished after username input", activity.isFinishing)
-                assertTrue("Application window disappeared after username input", activity.window.decorView.isShown)
-            }
-            assertTrue(
-                "Application package left the foreground after username input",
-                device.hasObject(By.pkg(targetContext.packageName).depth(0)),
-            )
-
             fields = device.findObjects(By.clazz("android.widget.EditText"))
-            if (fields.size >= 2) {
-                fields[1].click()
+            if (fields.size >= 3) {
+                fields[2].click()
             } else {
                 val passwordLabel = device.wait(Until.findObject(By.text("كلمة المرور")), 6_000L)
                 assertNotNull("Password field was not exposed", passwordLabel)
@@ -254,6 +268,26 @@ class CompatibilityV2InstrumentationTest {
                 assertTrue("Application window disappeared while dismissing the portrait keyboard", activity.window.decorView.isShown)
             }
         }
+    }
+
+    @Test
+    fun loginFieldsAppearInRequiredResellerOrder() {
+        assertTrue("Application package did not become visible", launchMainPackage())
+        val accessCode = device.wait(Until.findObject(By.text("كود الدخول")), 6_000L)
+        val username = device.wait(Until.findObject(By.text("اسم المستخدم")), 6_000L)
+        val password = device.wait(Until.findObject(By.text("كلمة المرور")), 6_000L)
+
+        assertNotNull("Access-code field was not exposed", accessCode)
+        assertNotNull("Username field was not exposed", username)
+        assertNotNull("Password field was not exposed", password)
+        assertTrue(
+            "Access code must appear before username",
+            requireNotNull(accessCode).visibleBounds.top < requireNotNull(username).visibleBounds.top,
+        )
+        assertTrue(
+            "Username must appear before password",
+            requireNotNull(username).visibleBounds.top < requireNotNull(password).visibleBounds.top,
+        )
     }
 
     @Test
@@ -431,6 +465,10 @@ class CompatibilityV2InstrumentationTest {
     fun televisionActivityAcceptsRapidDirectionalInputAndRetainsVisibleFocus() {
         assumeTrue("D-pad ownership test requires television UI mode", isTelevision())
         launchScenario().use { scenario ->
+            assertNotNull(
+                "TV reseller access-code field was not exposed",
+                device.wait(Until.findObject(By.text("كود الدخول")), 6_000L),
+            )
             repeat(12) { index ->
                 val keyCode = when (index % 4) {
                     0 -> KeyEvent.KEYCODE_DPAD_RIGHT

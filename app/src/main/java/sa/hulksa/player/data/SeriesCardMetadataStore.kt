@@ -8,12 +8,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import sa.hulksa.player.model.PortalConfig
 import sa.hulksa.player.security.CredentialVault
 
 class SeriesCardMetadataStore private constructor(context: Context) {
     private val appContext = context.applicationContext
-    private val portalResolver = PortalResolver(appContext)
+    private val portalResolver = PortalResolver()
     private val credentialVault = CredentialVault(appContext)
     private val client = SeriesCardMetadataClient()
     private val preferences = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -21,9 +20,6 @@ class SeriesCardMetadataStore private constructor(context: Context) {
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val inFlight = mutableMapOf<Int, Deferred<SeriesCardTechnicalMetadata>>()
     private val lastAttemptAtMs = mutableMapOf<Int, Long>()
-
-    @Volatile
-    private var resolvedPortal: PortalConfig? = null
 
     suspend fun metadata(seriesId: Int): SeriesCardTechnicalMetadata {
         val cached = readCached(seriesId)
@@ -59,9 +55,11 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         cached: SeriesCardTechnicalMetadata?,
     ): SeriesCardTechnicalMetadata {
         val credentials = credentialVault.load() ?: return cached ?: SeriesCardTechnicalMetadata()
-        val portal = resolvedPortal ?: runCatching { portalResolver.resolve() }
-            .getOrNull()
-            ?.also { resolvedPortal = it }
+        val portal = AuthenticatedSessionRegistry.current()
+            ?.takeIf { it.credentials == credentials }
+            ?.portal
+            ?: runCatching { portalResolver.resolve(credentials.accessCode) }
+                .getOrNull()
             ?: return cached ?: SeriesCardTechnicalMetadata()
 
         val fetched = runCatching {

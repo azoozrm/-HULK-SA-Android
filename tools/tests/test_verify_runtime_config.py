@@ -15,11 +15,12 @@ SPEC.loader.exec_module(MODULE)
 
 
 class RuntimeConfigVerifierTest(unittest.TestCase):
+    TEST_API_URL = MODULE.PRODUCTION_RESELLER_API_URL
+
     def write_build_config(
         self,
         directory: Path,
-        portal: str = MODULE.PRODUCTION_PORTAL_URL,
-        config: str = MODULE.PRODUCTION_CONFIG_URL,
+        reseller_api_url: str = TEST_API_URL,
     ) -> Path:
         path = directory / "BuildConfig.java"
         path.write_text(
@@ -27,8 +28,7 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
                 (
                     "package sa.hulksa.player;",
                     "public final class BuildConfig {",
-                    f'  public static final String PORTAL_URL = "{portal}";',
-                    f'  public static final String CONFIG_URL = "{config}";',
+                    f'  public static final String RESELLER_API_URL = "{reseller_api_url}";',
                     "}",
                 ),
             ),
@@ -42,28 +42,40 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
             package.writestr("classes.dex", dex_payload)
         return path
 
-    def test_accepts_exact_production_config_and_dex_marker(self) -> None:
+    def test_accepts_public_https_reseller_api_and_dex_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             build_config = self.write_build_config(directory)
             archive = self.write_archive(
                 directory,
-                b"dex\n" + MODULE.PRODUCTION_PORTAL_URL.encode("utf-8"),
+                b"dex\n" + self.TEST_API_URL.encode("utf-8"),
             )
 
             evidence = MODULE.verify(build_config, archive)
 
-            self.assertEqual(MODULE.PRODUCTION_PORTAL_URL, evidence["portal_url"])
+            self.assertEqual(self.TEST_API_URL, evidence["reseller_api_url"])
             self.assertEqual(1, evidence["dex_files"])
 
-    def test_rejects_website_as_runtime_portal(self) -> None:
+    def test_rejects_non_https_reseller_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             build_config = self.write_build_config(
                 directory,
-                portal="https://hulksa.com",
+                reseller_api_url="http://reseller-api.hulksa.com",
             )
-            archive = self.write_archive(directory, b"dex\nhttps://hulksa.com")
+            archive = self.write_archive(directory, b"dex\nhttp://reseller-api.hulksa.com")
+
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE.verify(build_config, archive)
+
+    def test_rejects_unreviewed_https_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            build_config = self.write_build_config(
+                directory,
+                reseller_api_url="https://api.example.com",
+            )
+            archive = self.write_archive(directory, b"dex\nhttps://api.example.com")
 
             with self.assertRaises(MODULE.VerificationError):
                 MODULE.verify(build_config, archive)
@@ -75,9 +87,21 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
             archive = self.write_archive(
                 directory,
                 (
-                    MODULE.PRODUCTION_PORTAL_URL.encode("utf-8")
+                    self.TEST_API_URL.encode("utf-8")
                     + b"\nhttps://example.invalid"
                 ),
+            )
+
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE.verify(build_config, archive)
+
+    def test_rejects_legacy_iptv_host_in_dex(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            build_config = self.write_build_config(directory)
+            archive = self.write_archive(
+                directory,
+                self.TEST_API_URL.encode("utf-8") + b"\nhttp://3162356.xyz:8080",
             )
 
             with self.assertRaises(MODULE.VerificationError):

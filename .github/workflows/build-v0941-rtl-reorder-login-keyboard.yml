@@ -70,7 +70,7 @@ jobs:
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/16-gradle.log
+          gradle --no-daemon --console=plain clean :app:compileDebugKotlin testDebugUnitTest :app:assembleDebug :app:bundleDebug --stacktrace 2>&1 | tee ../build-logs/16-gradle.log
 
       - name: Verify packages and behavior
         run: |

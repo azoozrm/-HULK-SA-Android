@@ -1,0 +1,151 @@
+:root {
+    color-scheme: dark;
+    --background: #050604;
+    --surface: #10120d;
+    --surface-raised: #171a12;
+    --gold: #c7a44b;
+    --gold-bright: #f0d276;
+    --text: #f7f5ec;
+    --muted: #aaa99f;
+    --danger: #ffb3ad;
+    --success: #b8e6b5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--text);
+    background:
+        radial-gradient(circle at 50% 0%, rgba(199, 164, 75, .16), transparent 38rem),
+        var(--background);
+}
+
+button, input { font: inherit; }
+
+.portal-shell {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: clamp(1rem, 4vw, 3rem);
+}
+
+.portal-card {
+    width: min(100%, 62rem);
+    padding: clamp(1.25rem, 4vw, 2.5rem);
+    border: 1px solid rgba(240, 210, 118, .18);
+    border-radius: 1.5rem;
+    background: linear-gradient(160deg, rgba(23, 26, 18, .98), rgba(8, 9, 6, .98));
+    box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, .42);
+}
+
+.brand-lockup, .dashboard-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 1rem;
+    color: #050604;
+    background: linear-gradient(145deg, var(--gold-bright), var(--gold));
+    font-weight: 900;
+    font-size: 1.5rem;
+}
+
+.eyebrow {
+    margin: 0 0 .2rem;
+    color: var(--gold-bright);
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .15em;
+}
+
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: clamp(1.45rem, 3vw, 2rem); }
+h2 { margin-bottom: .55rem; font-size: 1.15rem; }
+.intro { margin: 1.5rem 0; font-size: 1.06rem; }
+.helper-text { color: var(--muted); line-height: 1.75; }
+.logout-form { margin-inline-start: auto; }
+
+.form-stack { display: grid; gap: .75rem; }
+.field-label { color: var(--muted); font-size: .9rem; font-weight: 700; }
+
+.text-input, .code-input {
+    width: 100%;
+    min-height: 3.25rem;
+    padding: .75rem 1rem;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: .85rem;
+    outline: none;
+    color: var(--text);
+    background: #090a07;
+}
+
+.text-input:focus, .code-input:focus, button:focus-visible {
+    border-color: var(--gold-bright);
+    box-shadow: 0 0 0 .2rem rgba(240, 210, 118, .16);
+}
+
+.ltr { direction: ltr; text-align: left; }
+.code-input { color: var(--gold-bright); font-weight: 800; letter-spacing: .06em; }
+
+button {
+    min-height: 3.15rem;
+    padding: .7rem 1.15rem;
+    border: 1px solid transparent;
+    border-radius: .85rem;
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.primary-button { color: #050604; background: var(--gold); }
+.secondary-button { color: var(--text); border-color: rgba(240, 210, 118, .34); background: var(--surface-raised); }
+.link-button { min-height: 2.6rem; color: var(--gold-bright); border-color: rgba(240, 210, 118, .28); background: transparent; }
+
+.notice {
+    margin: 1.25rem 0;
+    padding: .85rem 1rem;
+    border-radius: .8rem;
+    line-height: 1.65;
+}
+.notice-error { color: var(--danger); border: 1px solid rgba(255, 179, 173, .28); background: rgba(111, 25, 20, .24); }
+.notice-success { color: var(--success); border: 1px solid rgba(184, 230, 181, .25); background: rgba(24, 87, 30, .22); }
+
+.dashboard-header { justify-content: space-between; margin: 1.5rem 0; }
+.dashboard-header .intro { margin: 0 0 .2rem; }
+.dashboard-header .helper-text { margin-bottom: 0; }
+.status-badge { padding: .45rem .8rem; border-radius: 999px; color: var(--success); background: rgba(50, 120, 54, .22); white-space: nowrap; }
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.settings-block {
+    padding: clamp(1rem, 3vw, 1.4rem);
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 1rem;
+    background: rgba(8, 9, 6, .64);
+}
+
+@media (max-width: 720px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .brand-lockup { flex-wrap: wrap; }
+    .logout-form { margin-inline-start: 0; width: 100%; }
+    .logout-form button { width: 100%; }
+    .dashboard-header { align-items: flex-start; flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    button { transition: border-color .18s ease, background-color .18s ease, transform .18s ease; }
+    button:hover { transform: translateY(-1px); }
+}
+

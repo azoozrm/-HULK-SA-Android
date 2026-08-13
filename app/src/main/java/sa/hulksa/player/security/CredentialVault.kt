@@ -21,7 +21,7 @@ class CredentialVault(context: Context) {
     fun save(credentials: Credentials) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        val plaintext = "${credentials.username}\u0000${credentials.password}".toByteArray(Charsets.UTF_8)
+        val plaintext = CredentialPayloadCodec.encode(credentials)
         val encrypted = cipher.doFinal(plaintext)
 
         preferences.edit()
@@ -31,20 +31,24 @@ class CredentialVault(context: Context) {
         plaintext.fill(0)
     }
 
-    fun load(): Credentials? = runCatching {
-        val iv = preferences.getString(KEY_IV, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
-            ?: return null
-        val payload = preferences.getString(KEY_PAYLOAD, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
-            ?: return null
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
-        val plaintext = cipher.doFinal(payload)
-        val value = plaintext.toString(Charsets.UTF_8)
-        plaintext.fill(0)
-        val separator = value.indexOf('\u0000')
-        if (separator <= 0 || separator == value.lastIndex) return null
-        Credentials(value.substring(0, separator), value.substring(separator + 1))
-    }.getOrNull()
+    fun load(): Credentials? {
+        val credentials = runCatching {
+            val iv = preferences.getString(KEY_IV, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
+                ?: return@runCatching null
+            val payload = preferences.getString(KEY_PAYLOAD, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
+                ?: return@runCatching null
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+            val plaintext = cipher.doFinal(payload)
+            try {
+                CredentialPayloadCodec.decode(plaintext)
+            } finally {
+                plaintext.fill(0)
+            }
+        }.getOrNull()
+        if (credentials == null) clear()
+        return credentials
+    }
 
     fun clear() {
         preferences.edit().clear().apply()
@@ -76,5 +80,30 @@ class CredentialVault(context: Context) {
         const val KEY_ALIAS = "hulk_sa_credentials_v1"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
+    }
+}
+
+internal object CredentialPayloadCodec {
+    private const val VERSION = "2"
+
+    fun encode(credentials: Credentials): ByteArray = listOf(
+        VERSION,
+        credentials.accessCode,
+        credentials.username,
+        credentials.password,
+    ).joinToString("\u0000").toByteArray(Charsets.UTF_8)
+
+    fun decode(payload: ByteArray): Credentials? {
+        val parts = payload.toString(Charsets.UTF_8).split('\u0000', limit = 4)
+        if (parts.size != 4 || parts[0] != VERSION) return null
+        val accessCode = parts[1]
+        val username = parts[2]
+        val password = parts[3]
+        if (accessCode.isBlank() || username.isBlank() || password.isEmpty()) return null
+        return Credentials(
+            accessCode = accessCode,
+            username = username,
+            password = password,
+        )
     }
 }
