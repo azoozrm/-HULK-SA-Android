@@ -16,10 +16,10 @@ from xml.etree import ElementTree
 
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
-DEFAULT_LOGO_SHA256 = "2704350ef016a65733ed8eb89cd2d006a8d001c7139a0a535526a780d9691b9e"
+DEFAULT_LOGO_SHA256 = "34d55e322d7196d46aaa310682869d8bd7ec66106cabbafebe909cd49afe8bcd"
 APPROVED_BRAND_ASSETS = {
-    "app/src/main/res/drawable-nodpi/hulk_sa_logo.webp": DEFAULT_LOGO_SHA256,
-    "app/src/main/res/drawable-nodpi/ic_banner.webp": DEFAULT_LOGO_SHA256,
+    "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
+    "app/src/main/res/drawable-xhdpi/tv_banner.png": "312269752bf06f1a52bc0004e10a71019c09d41d1384b76787c4d4237f08c4eb",
 }
 FORBIDDEN_PRODUCTION_MARKERS = (
     "qaMarker",
@@ -232,9 +232,9 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         checks.append(Check("manifest-present", "FAIL", "AndroidManifest.xml is missing", [str(manifest_file)]))
 
     for relative, approved_hash in APPROVED_BRAND_ASSETS.items():
-        expected_hash = expected_logo_sha256 if relative.endswith("hulk_sa_logo.webp") else approved_hash
+        expected_hash = expected_logo_sha256 if relative.endswith("hulk_sa_logo.png") else approved_hash
         asset = repo_root / relative
-        check_id = "approved-logo-sha256" if relative.endswith("hulk_sa_logo.webp") else "approved-banner-sha256"
+        check_id = "approved-logo-sha256" if relative.endswith("hulk_sa_logo.png") else "approved-banner-sha256"
         if asset.is_file():
             actual_hash = sha256(asset)
             add(

@@ -18,13 +18,14 @@ SPEC.loader.exec_module(MODULE)
 class StaticValidationTest(unittest.TestCase):
     def fixture(self, root: Path, marker: str = "", player: str | None = None) -> str:
         (root / "app/src/main/res/drawable-nodpi").mkdir(parents=True)
+        (root / "app/src/main/res/drawable-xhdpi").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/ui/components").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/ui/screens").mkdir(parents=True)
         (root / ".github/workflows").mkdir(parents=True)
         logo = b"approved-test-logo"
         logo_sha = hashlib.sha256(logo).hexdigest()
-        (root / "app/src/main/res/drawable-nodpi/hulk_sa_logo.webp").write_bytes(logo)
-        (root / "app/src/main/res/drawable-nodpi/ic_banner.webp").write_bytes(logo)
+        (root / "app/src/main/res/drawable-nodpi/hulk_sa_logo.png").write_bytes(logo)
+        (root / "app/src/main/res/drawable-xhdpi/tv_banner.png").write_bytes(logo)
         (root / "app/build.gradle.kts").write_text(
             'namespace = "sa.hulksa.player"\napplicationId = "sa.hulksa.player"\n'
             'versionCode = 64\nversionName = "0.9.3.20"\n'
@@ -82,7 +83,7 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             root = Path(temp)
             logo_sha = self.fixture(root)
             original = dict(MODULE.APPROVED_BRAND_ASSETS)
-            MODULE.APPROVED_BRAND_ASSETS["app/src/main/res/drawable-nodpi/ic_banner.webp"] = logo_sha
+            MODULE.APPROVED_BRAND_ASSETS["app/src/main/res/drawable-xhdpi/tv_banner.png"] = logo_sha
             try:
                 checks = MODULE.validate_repo(root, logo_sha)
             finally:
@@ -102,7 +103,7 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             expected = self.fixture(root)
-            (root / "app/src/main/res/drawable-nodpi/hulk_sa_logo.webp").write_bytes(b"changed")
+            (root / "app/src/main/res/drawable-nodpi/hulk_sa_logo.png").write_bytes(b"changed")
             result = next(
                 check for check in MODULE.validate_repo(root, expected)
                 if check.id == "approved-logo-sha256"
