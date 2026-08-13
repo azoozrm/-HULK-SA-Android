@@ -15,7 +15,7 @@ Every check reports one of:
 
 ## Layers
 
-1. `static_validate.py`: package/version, Manifest, assets, branding hash, production-marker absence, old-lab absence, endpoint identity, source hygiene.
+1. `static_validate.py`: package/version, Manifest, branding hashes, the complete phone/TV/banner/notification density matrix, production-marker absence, old-lab absence, endpoint identity, source hygiene.
 2. JVM unit tests: adaptive window, input, layout, focus policy, downloads, state restoration and business logic.
 3. Android instrumentation and UI Automator: real Activity launch, lifecycle, D-pad, system UI, screenshots, hierarchy and diagnostics.
 4. Runtime evidence gate: requires the exact artifacts declared by the selected scope.
@@ -41,4 +41,4 @@ python3 quality/compatibility-v2/evidence_gate.py \
 
 ## Branding rule
 
-The approved HULK SA logo is read-only. V2 verifies its SHA-256 and verifies that the production logo composable uses `ContentScale.Fit`; it never rewrites, recolors, crops, or normalizes the asset.
+The approved HULK SA logo and reviewed TV assets are read-only after approval. V2 verifies their SHA-256 values, exact Android density dimensions, distinct phone/TV launcher references, and `ContentScale.Fit`; it never rewrites, recolors, crops, or normalizes assets during validation.
