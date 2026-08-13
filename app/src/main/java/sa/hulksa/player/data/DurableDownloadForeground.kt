@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.work.ForegroundInfo
 import sa.hulksa.player.MainActivity
+import sa.hulksa.player.R
 
 internal fun durableDownloadNotificationId(downloadId: Long): Int {
     validateDurableDownloadId(downloadId)
@@ -36,7 +37,7 @@ internal class DurableDownloadForeground(
             Notification.Builder(context)
         }
         val notification = builder
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_stat_hulk)
             .setContentTitle(notificationTitle)
             .setContentText("جار التحميل وسيستمر في الخلفية.")
             .setContentIntent(openAppIntent(downloadId))
