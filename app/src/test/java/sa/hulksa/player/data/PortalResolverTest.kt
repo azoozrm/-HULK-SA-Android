@@ -57,7 +57,7 @@ class PortalResolverTest {
         assertEquals("http://reseller.example:8080", portal.baseUrl)
         assertEquals(PortalConfig.Source.ACCESS_CODE, portal.source)
         val request = server.takeRequest()
-        assertEquals("/api/reseller/resolve", request.path)
+        assertEquals("/api/reseller/resolve/", request.path)
         assertEquals("POST", request.method)
         assertEquals(
             VALID_CODE,

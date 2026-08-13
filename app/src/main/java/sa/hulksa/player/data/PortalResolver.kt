@@ -73,6 +73,7 @@ class PortalResolver internal constructor(
         }
         return parsed.newBuilder()
             .addPathSegments("api/reseller/resolve")
+            .addPathSegment("")
             .build()
     }
 
