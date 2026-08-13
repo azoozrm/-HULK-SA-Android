@@ -79,7 +79,7 @@ fun LoginScreen(
     isStarting: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
-    onLogin: (String, String, Boolean) -> Unit,
+    onLogin: (String, String, String, Boolean) -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -89,6 +89,7 @@ fun LoginScreen(
     val view = LocalView.current
     val fontScale = LocalDensity.current.fontScale
     val tvInitialFocusRequester = remember { FocusRequester() }
+    var accessCode by rememberSaveable { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
@@ -106,7 +107,7 @@ fun LoginScreen(
     }
     val submit = {
         dismissKeyboard()
-        onLogin(username.trim(), password, rememberAccount)
+        onLogin(accessCode, username.trim(), password, rememberAccount)
     }
     val openWebsite = { runCatching { uriHandler.openUri(HULK_WEBSITE) }; Unit }
 
@@ -236,6 +237,8 @@ fun LoginScreen(
                 ) {
                     if (isTv) {
                         LoginPanel(
+                            accessCode = accessCode,
+                            onAccessCodeChange = { accessCode = it },
                             username = username,
                             onUsernameChange = { username = it },
                             password = password,
@@ -287,6 +290,8 @@ fun LoginScreen(
                         )
                     } else {
                         LoginPanel(
+                            accessCode = accessCode,
+                            onAccessCodeChange = { accessCode = it },
                             username = username,
                             onUsernameChange = { username = it },
                             password = password,
@@ -372,6 +377,8 @@ fun LoginScreen(
                     ),
                 )
                 LoginPanel(
+                    accessCode = accessCode,
+                    onAccessCodeChange = { accessCode = it },
                     username = username,
                     onUsernameChange = { username = it },
                     password = password,
@@ -473,6 +480,8 @@ private fun LoginBrand(
 
 @Composable
 private fun LoginPanel(
+    accessCode: String,
+    onAccessCodeChange: (String) -> Unit,
     username: String,
     onUsernameChange: (String) -> Unit,
     password: String,
@@ -557,9 +566,9 @@ private fun LoginPanel(
         Spacer(Modifier.height(if (compact) 3.dp else 18.dp))
 
         HulkTextField(
-            value = username,
-            onValueChange = onUsernameChange,
-            label = "اسم المستخدم",
+            value = accessCode,
+            onValueChange = onAccessCodeChange,
+            label = "كود الدخول",
             modifier = Modifier
                 .then(
                     if (initialFocusRequester != null) {
@@ -568,6 +577,19 @@ private fun LoginPanel(
                         Modifier
                     },
                 )
+                .fillMaxWidth()
+                .heightIn(min = if (compact) compactFieldHeight else 55.dp),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Next,
+            ),
+        )
+        Spacer(Modifier.height(if (compact) 3.dp else 10.dp))
+        HulkTextField(
+            value = username,
+            onValueChange = onUsernameChange,
+            label = "اسم المستخدم",
+            modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = if (compact) compactFieldHeight else 55.dp),
             keyboardOptions = KeyboardOptions(

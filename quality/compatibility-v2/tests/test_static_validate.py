@@ -20,6 +20,8 @@ class StaticValidationTest(unittest.TestCase):
         (root / "app/src/main/res/drawable-nodpi").mkdir(parents=True)
         (root / "app/src/main/res/drawable-xhdpi").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/ui/components").mkdir(parents=True)
+        (root / "app/src/main/java/sa/hulksa/player/data").mkdir(parents=True)
+        (root / "app/src/main/java/sa/hulksa/player/model").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/ui/screens").mkdir(parents=True)
         (root / ".github/workflows").mkdir(parents=True)
         logo = b"approved-test-logo"
@@ -29,7 +31,9 @@ class StaticValidationTest(unittest.TestCase):
         (root / "app/build.gradle.kts").write_text(
             'namespace = "sa.hulksa.player"\napplicationId = "sa.hulksa.player"\n'
             'versionCode = 64\nversionName = "0.9.3.20"\n'
-            'val productionPortalUrl = "http://3162356.xyz:8080"\n'
+            'val resellerApiUrl = "https://hulksa.com"\n'
+            'val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig")\n'
+            'buildConfigField("String", "RESELLER_API_URL", resellerApiUrl)\n'
             'arm64-v8a armeabi-v7a x86_64\n',
             encoding="utf-8",
         )
@@ -45,6 +49,20 @@ class StaticValidationTest(unittest.TestCase):
         )
         (root / "app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt").write_text(
             f"ContentScale.Fit\n{marker}\n",
+            encoding="utf-8",
+        )
+        (root / "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt").write_text(
+            'label = "كود الدخول"\nlabel = "اسم المستخدم"\nlabel = "كلمة المرور"\n',
+            encoding="utf-8",
+        )
+        (root / "app/src/main/java/sa/hulksa/player/data/PortalResolver.kt").write_text(
+            "BuildConfig.RESELLER_API_URL\n"
+            'addPathSegments("api/reseller/resolve")\n'
+            "PortalConfig.Source.ACCESS_CODE\n",
+            encoding="utf-8",
+        )
+        (root / "app/src/main/java/sa/hulksa/player/model/Models.kt").write_text(
+            "data class Credentials(val accessCode: String)\n",
             encoding="utf-8",
         )
         valid_player = """

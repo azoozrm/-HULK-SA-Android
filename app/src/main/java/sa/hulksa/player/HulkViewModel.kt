@@ -19,8 +19,10 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.HulkRepository
+import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
+import sa.hulksa.player.data.normalizeResellerAccessCode
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
@@ -152,13 +154,25 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun login(username: String, password: String, remember: Boolean = true) {
+    fun login(accessCode: String, username: String, password: String, remember: Boolean = true) {
+        val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
+        if (normalizedAccessCode == null) {
+            mutableState.update { it.copy(errorMessage = "ادخل كود دخول صحيح.") }
+            return
+        }
         val cleanUsername = username.trim()
         if (cleanUsername.isEmpty() || password.isEmpty()) {
             mutableState.update { it.copy(errorMessage = "ادخل اسم المستخدم وكلمة المرور.") }
             return
         }
-        authenticate(Credentials(cleanUsername, password), remember)
+        authenticate(
+            Credentials(
+                accessCode = normalizedAccessCode,
+                username = cleanUsername,
+                password = password,
+            ),
+            remember,
+        )
     }
 
     fun selectDestination(destination: MainDestination) {
@@ -941,7 +955,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun showFailure(error: Throwable) {
         val invalidSession = error is XtreamException.InvalidCredentials ||
-            error is XtreamException.SubscriptionInactive
+            error is XtreamException.SubscriptionInactive ||
+            error is PortalException.InvalidAccessCode ||
+            error is PortalException.ResellerInactive
         if (invalidSession) {
             repository.logout()
             session = null

@@ -1,6 +1,7 @@
 package sa.hulksa.player.model
 
 data class Credentials(
+    val accessCode: String,
     val username: String,
     val password: String,
 )
@@ -9,7 +10,7 @@ data class PortalConfig(
     val baseUrl: String,
     val source: Source,
 ) {
-    enum class Source { REMOTE, COMPILED }
+    enum class Source { ACCESS_CODE }
 }
 
 data class AccountInfo(

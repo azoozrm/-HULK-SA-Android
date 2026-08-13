@@ -1,5 +1,6 @@
 import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.URI
 
 plugins {
     id("com.android.application")
@@ -10,23 +11,31 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val productionPortalUrl = "http://3162356.xyz:8080"
-val portalUrl = providers.gradleProperty("HULK_PORTAL_URL").orElse(productionPortalUrl)
-val configUrl = providers.gradleProperty("HULK_CONFIG_URL").orElse("")
+val resellerApiUrl = "https://hulksa.com"
 
 val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
     group = "verification"
-    description = "Fails release builds unless the canonical HULK runtime endpoint is compiled."
+    description = "Fails release builds unless the public HTTPS HULK reseller API is configured."
 
     doLast {
-        if (portalUrl.get().trim() != productionPortalUrl) {
+        val value = resellerApiUrl.trim()
+        val parsed = runCatching { URI(value) }.getOrNull()
+        if (
+            value.isEmpty() ||
+            parsed == null ||
+            !parsed.scheme.equals("https", ignoreCase = true) ||
+            parsed.host.isNullOrBlank() ||
+            parsed.userInfo != null ||
+            parsed.query != null ||
+            parsed.fragment != null
+        ) {
             throw GradleException(
-                "Release PORTAL_URL must match the canonical HULK service endpoint.",
+                "The HULK reseller API must be a public HTTPS base URL without credentials, query, or fragment.",
             )
         }
-        if (configUrl.get().trim().isNotEmpty()) {
+        if (value.contains("3162356.xyz", ignoreCase = true)) {
             throw GradleException(
-                "Release CONFIG_URL must be empty so it cannot override the canonical endpoint.",
+                "The legacy IPTV host must never be compiled as the HULK reseller API.",
             )
         }
     }
@@ -78,8 +87,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
 
-        buildConfigField("String", "PORTAL_URL", portalUrl.get().asBuildConfigString())
-        buildConfigField("String", "CONFIG_URL", configUrl.get().asBuildConfigString())
+        buildConfigField("String", "RESELLER_API_URL", resellerApiUrl.asBuildConfigString())
         vectorDrawables.useSupportLibrary = true
 
         // Phase 3.1: preserve qualified ABIs while polishing responsive mobile UI.
@@ -182,6 +190,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    testImplementation("org.json:json:20250517")
     androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")

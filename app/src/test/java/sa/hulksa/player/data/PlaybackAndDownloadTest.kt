@@ -18,8 +18,8 @@ class PlaybackAndDownloadTest {
     @Test
     fun livePlaybackUsesOnlyTheServerPreferredSource() {
         val session = AuthenticatedSession(
-            portal = PortalConfig("http://example.test:8080", PortalConfig.Source.COMPILED),
-            credentials = Credentials("demo", "secret"),
+            portal = PortalConfig("http://example.test:8080", PortalConfig.Source.ACCESS_CODE),
+            credentials = Credentials("HULK-ABCD-EFGH-JKMN-PQRS", "demo", "secret"),
             account = AccountInfo("demo", "Active", null, 0, 1, false),
         )
         val channel = ContentItem(

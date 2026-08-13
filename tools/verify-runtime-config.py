@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the production runtime endpoint in generated BuildConfig and APK/AAB DEX."""
+"""Verify the public reseller API and absence of IPTV hosts in APK/AAB DEX."""
 
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-PRODUCTION_PORTAL_URL = "http://3162356.xyz:8080"
-PRODUCTION_CONFIG_URL = ""
+PRODUCTION_RESELLER_API_URL = "https://hulksa.com"
 FORBIDDEN_DEX_MARKERS = (
+    b"http://3162356.xyz:8080",
+    b"3162356.xyz:8080",
     b"https://example.invalid",
     b"http://example.invalid",
 )
@@ -23,7 +24,7 @@ class VerificationError(RuntimeError):
     """Raised when a release runtime configuration check fails."""
 
 
-def read_build_config(path: Path) -> tuple[str, str]:
+def read_build_config(path: Path) -> str:
     text = path.read_text(encoding="utf-8")
 
     def field(name: str) -> str:
@@ -35,7 +36,7 @@ def read_build_config(path: Path) -> tuple[str, str]:
             raise VerificationError(f"Generated BuildConfig is missing {name}.")
         return match.group(1)
 
-    return field("PORTAL_URL"), field("CONFIG_URL")
+    return field("RESELLER_API_URL")
 
 
 def read_dex_entries(archive: Path) -> list[tuple[str, bytes]]:
@@ -58,42 +59,43 @@ def read_dex_entries(archive: Path) -> list[tuple[str, bytes]]:
 
 
 def verify(build_config: Path, archive: Path) -> dict[str, object]:
-    portal_url, config_url = read_build_config(build_config)
-    if portal_url != PRODUCTION_PORTAL_URL:
+    reseller_api_url = read_build_config(build_config)
+    if reseller_api_url != PRODUCTION_RESELLER_API_URL:
         raise VerificationError(
-            "Generated release PORTAL_URL does not match the canonical HULK endpoint.",
+            "Generated release RESELLER_API_URL does not match the reviewed HULK API.",
         )
-    if config_url != PRODUCTION_CONFIG_URL:
-        raise VerificationError(
-            "Generated release CONFIG_URL must be empty.",
-        )
-
-    parsed = urlparse(portal_url)
+    parsed = urlparse(reseller_api_url)
     if (
-        parsed.scheme != "http"
-        or parsed.hostname != "3162356.xyz"
-        or parsed.port != 8080
-        or parsed.path not in ("", "/")
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
         or parsed.params
         or parsed.query
         or parsed.fragment
     ):
-        raise VerificationError("Canonical endpoint structure validation failed.")
+        raise VerificationError(
+            "Release RESELLER_API_URL must be an HTTPS base URL without credentials, query, or fragment.",
+        )
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost" or hostname.endswith((".invalid", ".localhost")):
+        raise VerificationError("Release RESELLER_API_URL is not a public endpoint.")
+    if "3162356.xyz" in hostname:
+        raise VerificationError("The legacy IPTV host cannot be used as the reseller API.")
 
     dex_entries = read_dex_entries(archive)
     dex_payload = b"".join(payload for _, payload in dex_entries)
-    if PRODUCTION_PORTAL_URL.encode("utf-8") not in dex_payload:
+    if reseller_api_url.encode("utf-8") not in dex_payload:
         raise VerificationError(
-            "Canonical HULK endpoint is absent from the compiled DEX payload.",
+            "Configured HULK reseller API is absent from the compiled DEX payload.",
         )
     if any(marker in dex_payload for marker in FORBIDDEN_DEX_MARKERS):
         raise VerificationError(
-            "A forbidden placeholder endpoint is present in the compiled DEX payload.",
+            "A forbidden legacy IPTV or placeholder endpoint is present in the compiled DEX payload.",
         )
 
     return {
-        "portal_url": portal_url,
-        "config_url": config_url,
+        "reseller_api_url": reseller_api_url,
         "dex_files": len(dex_entries),
         "dex_uncompressed_bytes": sum(len(payload) for _, payload in dex_entries),
         "archive_bytes": archive.stat().st_size,
@@ -101,22 +103,20 @@ def verify(build_config: Path, archive: Path) -> dict[str, object]:
 
 
 def render_report(archive: Path, evidence: dict[str, object]) -> str:
-    config_display = evidence["config_url"] or "(empty)"
     return "\n".join(
         (
             f"# Runtime Configuration Qualification — {archive.name}",
             "",
             "- Result: PASS",
-            f"- Release `BuildConfig.PORTAL_URL`: `{evidence['portal_url']}`",
-            f"- Release `BuildConfig.CONFIG_URL`: `{config_display}`",
-            "- Canonical endpoint marker in compiled DEX: PASS",
-            "- `example.invalid` marker in compiled DEX: ABSENT",
+            f"- Release `BuildConfig.RESELLER_API_URL`: `{evidence['reseller_api_url']}`",
+            "- Public HTTPS reseller API marker in compiled DEX: PASS",
+            "- Legacy IPTV host marker in compiled DEX: ABSENT",
+            "- Placeholder endpoint marker in compiled DEX: ABSENT",
             f"- DEX files: {evidence['dex_files']}",
             f"- DEX uncompressed bytes: {evidence['dex_uncompressed_bytes']}",
             f"- Archive bytes: {evidence['archive_bytes']}",
             "",
-            "`hulksa.com` remains allowed only for store, account, app-download, or support links; "
-            "it is not the compiled service endpoint.",
+            "No reseller IPTV host is compiled into the Android artifact.",
             "",
         ),
     )

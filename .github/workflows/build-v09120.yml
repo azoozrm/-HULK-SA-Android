@@ -114,7 +114,7 @@ jobs:
         working-directory: project
         run: |
           set -o pipefail
-          gradle --no-daemon --console=plain :app:assembleDebug -PHULK_PORTAL_URL=http://3162356.xyz:8080 --stacktrace 2>&1 | tee ../build-logs/07-assemble-debug.log
+          gradle --no-daemon --console=plain :app:assembleDebug --stacktrace 2>&1 | tee ../build-logs/07-assemble-debug.log
 
       - name: Run unit tests
         shell: bash

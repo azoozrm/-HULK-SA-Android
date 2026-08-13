@@ -162,10 +162,17 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         [str(build_file)],
     )
     add(
-        "production-endpoint",
-        'val productionPortalUrl = "http://3162356.xyz:8080"' in build_text,
-        "Canonical production endpoint is preserved",
-        "Canonical production endpoint declaration changed",
+        "reseller-api-runtime-config",
+        all(
+            marker in build_text
+            for marker in (
+                'val resellerApiUrl = "https://hulksa.com"',
+                'buildConfigField("String", "RESELLER_API_URL"',
+                "verifyProductionRuntimeConfig",
+            )
+        ) and "http://3162356.xyz:8080" not in build_text,
+        "Production uses only the configurable HTTPS reseller API",
+        "Reseller API BuildConfig contract is missing or the legacy IPTV host returned",
         [str(build_file)],
     )
     add(
@@ -174,6 +181,44 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         "Qualified ABI set is present",
         "One or more qualified ABIs are missing",
         [str(build_file)],
+    )
+
+    login_file = repo_root / "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt"
+    resolver_file = repo_root / "app/src/main/java/sa/hulksa/player/data/PortalResolver.kt"
+    models_file = repo_root / "app/src/main/java/sa/hulksa/player/model/Models.kt"
+    login_text = _read(login_file) if login_file.is_file() else ""
+    resolver_text = _read(resolver_file) if resolver_file.is_file() else ""
+    models_text = _read(models_file) if models_file.is_file() else ""
+    access_code_position = login_text.find('label = "كود الدخول"')
+    username_position = login_text.find('label = "اسم المستخدم"')
+    password_position = login_text.find('label = "كلمة المرور"')
+    add(
+        "reseller-access-login-order",
+        -1 < access_code_position < username_position < password_position,
+        "Login fields are ordered access code, username, then password",
+        "Login screen does not preserve the required reseller access field order",
+        [str(login_file)],
+    )
+    add(
+        "reseller-access-resolution",
+        all(
+            marker in resolver_text
+            for marker in (
+                "BuildConfig.RESELLER_API_URL",
+                'addPathSegments("api/reseller/resolve")',
+                "PortalConfig.Source.ACCESS_CODE",
+            )
+        ) and "val accessCode: String" in models_text,
+        "Android resolves the access code through the HULK API before IPTV login",
+        "Android reseller resolution contract is incomplete",
+        [str(resolver_file), str(models_file)],
+    )
+    add(
+        "legacy-iptv-host-absent",
+        "http://3162356.xyz:8080" not in (build_text + resolver_text + models_text + login_text),
+        "Legacy IPTV host is absent from Android production source",
+        "Legacy IPTV host is still present in Android production source",
+        [str(build_file), str(resolver_file)],
     )
 
     manifest_file = repo_root / "app/src/main/AndroidManifest.xml"
