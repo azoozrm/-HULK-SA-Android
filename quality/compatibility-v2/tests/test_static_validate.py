@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import struct
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).parents[1] / "static_validate.py"
@@ -16,9 +18,23 @@ SPEC.loader.exec_module(MODULE)
 
 
 class StaticValidationTest(unittest.TestCase):
+    @staticmethod
+    def png_bytes(width: int, height: int) -> bytes:
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            checksum = zlib.crc32(kind + data) & 0xFFFFFFFF
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+
+        rows = b"".join(b"\x00" + bytes(width * 4) for _ in range(height))
+        header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(rows))
+            + chunk(b"IEND", b"")
+        )
+
     def fixture(self, root: Path, marker: str = "", player: str | None = None) -> str:
         (root / "app/src/main/res/drawable-nodpi").mkdir(parents=True)
-        (root / "app/src/main/res/drawable-xhdpi").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/ui/components").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/data").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/model").mkdir(parents=True)
@@ -27,7 +43,10 @@ class StaticValidationTest(unittest.TestCase):
         logo = b"approved-test-logo"
         logo_sha = hashlib.sha256(logo).hexdigest()
         (root / "app/src/main/res/drawable-nodpi/hulk_sa_logo.png").write_bytes(logo)
-        (root / "app/src/main/res/drawable-xhdpi/tv_banner.png").write_bytes(logo)
+        for relative, dimensions in MODULE.ICON_ASSET_DIMENSIONS.items():
+            asset = root / relative
+            asset.parent.mkdir(parents=True, exist_ok=True)
+            asset.write_bytes(self.png_bytes(*dimensions))
         (root / "app/build.gradle.kts").write_text(
             'namespace = "sa.hulksa.player"\napplicationId = "sa.hulksa.player"\n'
             'versionCode = 64\nversionName = "0.9.3.20"\n'
@@ -41,9 +60,13 @@ class StaticValidationTest(unittest.TestCase):
             '<?xml version="1.0"?><manifest xmlns:android="http://schemas.android.com/apk/res/android">'
             '<uses-feature android:name="android.software.leanback" android:required="false"/>'
             '<uses-feature android:name="android.hardware.touchscreen" android:required="false"/>'
-            '<application android:supportsRtl="true" android:banner="@drawable/tv_banner">'
-            '<activity><intent-filter><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>'
-            '<activity><intent-filter><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter></activity>'
+            '<application android:supportsRtl="true" android:icon="@mipmap/ic_launcher" '
+            'android:banner="@mipmap/tv_banner">'
+            '<activity android:name=".MainActivity"><intent-filter>'
+            '<category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>'
+            '<activity android:name=".TvMainActivity" android:icon="@mipmap/ic_launcher_tv" '
+            'android:banner="@mipmap/tv_banner"><intent-filter>'
+            '<category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter></activity>'
             '</application></manifest>',
             encoding="utf-8",
         )
@@ -101,7 +124,9 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             root = Path(temp)
             logo_sha = self.fixture(root)
             original = dict(MODULE.APPROVED_BRAND_ASSETS)
-            MODULE.APPROVED_BRAND_ASSETS["app/src/main/res/drawable-xhdpi/tv_banner.png"] = logo_sha
+            for relative in MODULE.APPROVED_BRAND_ASSETS:
+                if not relative.endswith("hulk_sa_logo.png"):
+                    MODULE.APPROVED_BRAND_ASSETS[relative] = MODULE.sha256(root / relative)
             try:
                 checks = MODULE.validate_repo(root, logo_sha)
             finally:
@@ -115,6 +140,35 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             logo_sha = self.fixture(root, marker="qaTvPageContent")
             checks = MODULE.validate_repo(root, logo_sha)
             result = next(check for check in checks if check.id == "production-test-hooks-absent")
+            self.assertEqual("FAIL", result.status)
+
+    def test_missing_tv_density_asset_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logo_sha = self.fixture(root)
+            (root / "app/src/main/res/mipmap-xxxhdpi/ic_launcher_tv.png").unlink()
+            result = next(
+                check for check in MODULE.validate_repo(root, logo_sha)
+                if check.id == "android-icon-density-matrix"
+            )
+            self.assertEqual("FAIL", result.status)
+
+    def test_tv_launcher_must_be_distinct_from_phone_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logo_sha = self.fixture(root)
+            manifest = root / "app/src/main/AndroidManifest.xml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    '@mipmap/ic_launcher_tv',
+                    '@mipmap/ic_launcher',
+                ),
+                encoding="utf-8",
+            )
+            result = next(
+                check for check in MODULE.validate_repo(root, logo_sha)
+                if check.id == "manifest-tv-banner"
+            )
             self.assertEqual("FAIL", result.status)
 
     def test_logo_byte_change_fails(self) -> None:

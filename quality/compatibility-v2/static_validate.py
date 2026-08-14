@@ -8,6 +8,7 @@ import hashlib
 import html
 import json
 import re
+import struct
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -16,11 +17,35 @@ from xml.etree import ElementTree
 
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
-DEFAULT_LOGO_SHA256 = "34d55e322d7196d46aaa310682869d8bd7ec66106cabbafebe909cd49afe8bcd"
+DEFAULT_LOGO_SHA256 = "1fd9ccde4a86b03bde02b0618747b063496f8637ef624683b309ed77d36d7c45"
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
-    "app/src/main/res/drawable-xhdpi/tv_banner.png": "312269752bf06f1a52bc0004e10a71019c09d41d1384b76787c4d4237f08c4eb",
+    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "80945e5ae70c8b672a448283d58e14487f264fe03d684dd1d1c689a320953b08",
+    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "acce7d7a2968b4cb9db7d8bdac8b57e2cad4ef44b1577c00b7f63f28f2aac234",
 }
+ICON_DENSITY_SPECS = {
+    "mdpi": {"launcher": 48, "tv_launcher": 80, "banner": (160, 90), "notification": 24},
+    "hdpi": {"launcher": 72, "tv_launcher": 120, "banner": (240, 135), "notification": 36},
+    "xhdpi": {"launcher": 96, "tv_launcher": 160, "banner": (320, 180), "notification": 48},
+    "xxhdpi": {"launcher": 144, "tv_launcher": 240, "banner": (480, 270), "notification": 72},
+    "xxxhdpi": {"launcher": 192, "tv_launcher": 320, "banner": (640, 360), "notification": 96},
+}
+ICON_ASSET_DIMENSIONS: dict[str, tuple[int, int]] = {}
+for density, sizes in ICON_DENSITY_SPECS.items():
+    launcher = int(sizes["launcher"])
+    tv_launcher = int(sizes["tv_launcher"])
+    notification = int(sizes["notification"])
+    banner = sizes["banner"]
+    assert isinstance(banner, tuple)
+    ICON_ASSET_DIMENSIONS.update(
+        {
+            f"app/src/main/res/mipmap-{density}/ic_launcher.png": (launcher, launcher),
+            f"app/src/main/res/mipmap-{density}/ic_launcher_round.png": (launcher, launcher),
+            f"app/src/main/res/mipmap-{density}/ic_launcher_tv.png": (tv_launcher, tv_launcher),
+            f"app/src/main/res/mipmap-{density}/tv_banner.png": banner,
+            f"app/src/main/res/drawable-{density}/ic_stat_hulk.png": (notification, notification),
+        }
+    )
 FORBIDDEN_PRODUCTION_MARKERS = (
     "qaMarker",
     "qaTvPageContent",
@@ -56,6 +81,20 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def png_dimensions(path: Path) -> tuple[int, int] | None:
+    """Read PNG dimensions without adding an image-library dependency to CI."""
+    try:
+        with path.open("rb") as handle:
+            if handle.read(8) != b"\x89PNG\r\n\x1a\n":
+                return None
+            length = struct.unpack(">I", handle.read(4))[0]
+            if handle.read(4) != b"IHDR" or length < 8:
+                return None
+            return struct.unpack(">II", handle.read(8))
+    except (OSError, struct.error):
+        return None
 
 
 def _read(path: Path) -> str:
@@ -230,6 +269,14 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
             touchscreen = features.get("android.hardware.touchscreen")
             app = manifest_root.find("application")
             activities = manifest_root.findall("application/activity")
+            tv_activity = next(
+                (
+                    activity
+                    for activity in activities
+                    if activity.get(ANDROID_NS + "name") == ".TvMainActivity"
+                ),
+                None,
+            )
             launcher_categories = {
                 category.get(ANDROID_NS + "name")
                 for activity in activities
@@ -266,9 +313,14 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
             )
             add(
                 "manifest-tv-banner",
-                app is not None and bool(app.get(ANDROID_NS + "banner")),
-                "TV banner is declared",
-                "TV banner is missing",
+                app is not None
+                and app.get(ANDROID_NS + "icon") == "@mipmap/ic_launcher"
+                and app.get(ANDROID_NS + "banner") == "@mipmap/tv_banner"
+                and tv_activity is not None
+                and tv_activity.get(ANDROID_NS + "icon") == "@mipmap/ic_launcher_tv"
+                and tv_activity.get(ANDROID_NS + "banner") == "@mipmap/tv_banner",
+                "Phone and TV use distinct launcher resources and the density-aware TV banner",
+                "Phone/TV launcher or TV banner resources are missing, shared, or not density-aware",
                 [str(manifest_file)],
             )
         except ElementTree.ParseError as exc:
@@ -279,7 +331,12 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
     for relative, approved_hash in APPROVED_BRAND_ASSETS.items():
         expected_hash = expected_logo_sha256 if relative.endswith("hulk_sa_logo.png") else approved_hash
         asset = repo_root / relative
-        check_id = "approved-logo-sha256" if relative.endswith("hulk_sa_logo.png") else "approved-banner-sha256"
+        if relative.endswith("hulk_sa_logo.png"):
+            check_id = "approved-logo-sha256"
+        elif relative.endswith("tv_banner.png"):
+            check_id = "approved-banner-sha256"
+        else:
+            check_id = "approved-tv-launcher-sha256"
         if asset.is_file():
             actual_hash = sha256(asset)
             add(
@@ -291,6 +348,30 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
             )
         else:
             checks.append(Check(check_id, "FAIL", f"Approved brand asset is missing: {relative}", [str(asset)]))
+
+    icon_dimension_failures: list[str] = []
+    for relative, expected_dimensions in ICON_ASSET_DIMENSIONS.items():
+        asset = repo_root / relative
+        actual_dimensions = png_dimensions(asset) if asset.is_file() else None
+        if actual_dimensions != expected_dimensions:
+            icon_dimension_failures.append(
+                f"{relative}: expected {expected_dimensions}, got {actual_dimensions}"
+            )
+    add(
+        "android-icon-density-matrix",
+        not icon_dimension_failures,
+        "Phone, round, TV, banner, and notification assets cover every required density at exact dimensions",
+        "Android icon density matrix is incomplete or dimensionally invalid: " + "; ".join(icon_dimension_failures),
+        icon_dimension_failures or list(ICON_ASSET_DIMENSIONS),
+    )
+    legacy_tv_banner = repo_root / "app/src/main/res/drawable-xhdpi/tv_banner.png"
+    add(
+        "legacy-tv-banner-resource-absent",
+        not legacy_tv_banner.exists(),
+        "The obsolete single-density TV banner resource is absent",
+        "The obsolete drawable-xhdpi TV banner would override the density-aware package",
+        [str(legacy_tv_banner)],
+    )
 
     components_file = repo_root / "app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt"
     component_text = _read(components_file) if components_file.is_file() else ""
