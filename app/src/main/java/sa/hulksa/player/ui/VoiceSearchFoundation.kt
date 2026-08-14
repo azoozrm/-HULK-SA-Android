@@ -1,9 +1,13 @@
 package sa.hulksa.player.ui
 
-import android.app.Activity
-import android.content.ActivityNotFoundException
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -52,30 +56,108 @@ internal class VoiceSearchDelegate(
     private val activity: ComponentActivity,
     private val onTranscript: (String) -> Unit,
 ) {
-    private val launcher = activity.registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
-        val transcript = firstVoiceSearchTranscript(
-            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS),
-        )
-        if (transcript == null) {
-            showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
+    private var activeRecognizer: SpeechRecognizer? = null
+    private var pendingQuery: String = ""
+
+    private val microphonePermissionLauncher = activity.registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val query = pendingQuery
+        pendingQuery = ""
+        if (granted) {
+            startRecognition(query)
         } else {
-            onTranscript(transcript)
+            showMessage("يلزم السماح بالميكروفون لاستخدام البحث الصوتي.")
         }
     }
 
     fun launch(currentQuery: String) {
+        if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
+            showMessage("البحث الصوتي غير متاح على هذا الجهاز.")
+            return
+        }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingQuery = currentQuery
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+
+        startRecognition(currentQuery)
+    }
+
+    private fun startRecognition(currentQuery: String) {
+        releaseRecognizer(cancel = true)
+
+        val recognizer = try {
+            SpeechRecognizer.createSpeechRecognizer(activity)
+        } catch (_: RuntimeException) {
+            showMessage("تعذر تشغيل خدمة البحث الصوتي على هذا الجهاز.")
+            return
+        }
+
+        activeRecognizer = recognizer
+        recognizer.setRecognitionListener(
+            object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) = Unit
+
+                override fun onBeginningOfSpeech() = Unit
+
+                override fun onRmsChanged(rmsdB: Float) = Unit
+
+                override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+                override fun onEndOfSpeech() = Unit
+
+                override fun onError(error: Int) {
+                    if (activeRecognizer !== recognizer) return
+                    releaseRecognizer(cancel = false)
+                    when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                            showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
+
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                            showMessage("تعذر استخدام الميكروفون. تحقق من صلاحية الميكروفون.")
+
+                        else -> showMessage("تعذر اكمال البحث الصوتي. حاول مرة اخرى.")
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    if (activeRecognizer !== recognizer) return
+                    val transcript = firstVoiceSearchTranscript(
+                        results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION),
+                    )
+                    releaseRecognizer(cancel = false)
+                    if (transcript == null) {
+                        showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
+                    } else {
+                        onTranscript(transcript)
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    if (activeRecognizer !== recognizer) return
+                    firstVoiceSearchTranscript(
+                        partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION),
+                    )?.let(onTranscript)
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) = Unit
+            },
+        )
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
             )
-            putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                "قل اسم الفيلم او المسلسل او القناة",
-            )
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             preferredVoiceSearchLanguageTag(
                 query = currentQuery,
@@ -86,12 +168,20 @@ internal class VoiceSearchDelegate(
         }
 
         try {
-            launcher.launch(intent)
-        } catch (_: ActivityNotFoundException) {
-            showMessage("البحث الصوتي غير متاح على هذا الجهاز.")
-        } catch (_: SecurityException) {
-            showMessage("تعذر استخدام الميكروفون. تحقق من صلاحيات خدمة البحث الصوتي.")
+            recognizer.startListening(intent)
+        } catch (_: RuntimeException) {
+            releaseRecognizer(cancel = false)
+            showMessage("تعذر تشغيل البحث الصوتي. حاول مرة اخرى.")
         }
+    }
+
+    private fun releaseRecognizer(cancel: Boolean) {
+        val recognizer = activeRecognizer ?: return
+        activeRecognizer = null
+        if (cancel) {
+            runCatching { recognizer.cancel() }
+        }
+        runCatching { recognizer.destroy() }
     }
 
     private fun showMessage(message: String) {
@@ -206,7 +296,7 @@ internal fun InlineVoiceSearchAction(
 
     Box(
         modifier = modifier
-            .size(if (isTv) 42.dp else 40.dp)
+            .size(if (isTv) 36.dp else 40.dp)
             .then(tvFocusModifier)
             .clip(CircleShape)
             .background(
@@ -225,7 +315,7 @@ internal fun InlineVoiceSearchAction(
             imageVector = Icons.Rounded.Mic,
             contentDescription = null,
             tint = if (focused) Color.Black else colors.goldBright,
-            modifier = Modifier.size(if (isTv) 23.dp else 21.dp),
+            modifier = Modifier.size(if (isTv) 19.dp else 21.dp),
         )
     }
 }
