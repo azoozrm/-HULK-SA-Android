@@ -249,11 +249,16 @@ internal fun ProfileSmartSearchLayer(
     val filterRequesters = remember {
         SmartSearchFilter.entries.associateWith { FocusRequester() }
     }
+    var searchFieldHasFocus by remember(activeProfileId) { mutableStateOf(false) }
 
     LaunchedEffect(isTv, activeProfileId) {
         if (isTv) {
-            delay(TV_INITIAL_SEARCH_FOCUS_DELAY_MS)
-            runCatching { searchFieldRequester.requestFocus() }
+            repeat(TV_INITIAL_SEARCH_FOCUS_ATTEMPTS) { attempt ->
+                delay(if (attempt == 0) TV_INITIAL_SEARCH_FOCUS_DELAY_MS else TV_INITIAL_SEARCH_FOCUS_RETRY_MS)
+                if (!searchFieldHasFocus) {
+                    runCatching { searchFieldRequester.requestFocus() }
+                }
+            }
         }
     }
 
@@ -281,7 +286,14 @@ internal fun ProfileSmartSearchLayer(
             .background(colors.background),
     ) {
         if (useRail) {
-            Row(Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusProperties {
+                        if (isTv) onEnter = { searchFieldRequester.requestFocus() }
+                    }
+                    .focusGroup(),
+            ) {
                 SmartSearchRail(
                     isTv = isTv,
                     selected = MainDestination.SEARCH,
@@ -307,6 +319,7 @@ internal fun ProfileSmartSearchLayer(
                     railSearchRequester = if (isTv) railSearchRequester else null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
+                    onSearchFieldFocusChanged = { searchFieldHasFocus = it },
                     onFilterSelected = { selectedFilter = it },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -341,6 +354,7 @@ internal fun ProfileSmartSearchLayer(
                     railSearchRequester = null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
+                    onSearchFieldFocusChanged = { searchFieldHasFocus = it },
                     onFilterSelected = { selectedFilter = it },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -384,6 +398,7 @@ private fun SmartSearchContent(
     railSearchRequester: FocusRequester?,
     isFavorite: (ContentItem) -> Boolean,
     onSearch: (String) -> Unit,
+    onSearchFieldFocusChanged: (Boolean) -> Unit,
     onFilterSelected: (SmartSearchFilter) -> Unit,
     onOpenResult: (ContentItem) -> Unit,
     onOpenRecent: (ProfileContentSearchHistoryEntry) -> Unit,
@@ -485,6 +500,7 @@ private fun SmartSearchContent(
             firstResultRequester = firstResultRequester,
             firstRecentRequester = firstRecentRequester,
             railSearchRequester = railSearchRequester,
+            onFocusStateChanged = onSearchFieldFocusChanged,
         )
 
         Spacer(Modifier.height(if (compactHeight || imeVisible) 7.dp else 10.dp))
@@ -614,6 +630,7 @@ private fun SmartSearchInput(
     firstResultRequester: FocusRequester,
     firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
+    onFocusStateChanged: (Boolean) -> Unit,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -645,9 +662,11 @@ private fun SmartSearchInput(
             .focusRequester(searchFieldRequester)
             .focusProperties {
                 firstFilterRequester?.let { down = it }
+                up = FocusRequester.Cancel
                 railSearchRequester?.let { right = it }
             }
             .onFocusChanged { state ->
+                onFocusStateChanged(state.isFocused)
                 if (!state.isFocused) {
                     tvEditing = false
                     keyboardController?.hide()
@@ -669,7 +688,7 @@ private fun SmartSearchInput(
                 }
             }
     } else {
-        Modifier
+        Modifier.onFocusChanged { onFocusStateChanged(it.isFocused) }
     }
 
     HulkTextField(
@@ -713,6 +732,9 @@ private fun SmartSearchFilterBar(
             key = SmartSearchFilter::name,
         ) { filter ->
             val active = selected == filter
+            val index = SmartSearchFilter.entries.indexOf(filter)
+            val leftNeighbor = SmartSearchFilter.entries.getOrNull(index + 1)
+            val rightNeighbor = SmartSearchFilter.entries.getOrNull(index - 1)
             FocusButton(
                 text = filter.label,
                 onClick = { onSelect(filter) },
@@ -725,6 +747,10 @@ private fun SmartSearchFilterBar(
                         } else if (isTv) {
                             down = FocusRequester.Cancel
                         }
+                        if (isTv) {
+                            left = leftNeighbor?.let(requesters::getValue) ?: FocusRequester.Cancel
+                            right = rightNeighbor?.let(requesters::getValue) ?: FocusRequester.Cancel
+                        }
                     }
                     .onPreviewKeyEvent { event ->
                         if (!isTv || event.type != KeyEventType.KeyDown) {
@@ -735,6 +761,20 @@ private fun SmartSearchFilterBar(
                                 Key.DirectionDown -> {
                                     if (downRequester != null) {
                                         runCatching { downRequester.requestFocus() }.isSuccess
+                                    } else {
+                                        true
+                                    }
+                                }
+                                Key.DirectionLeft -> {
+                                    if (leftNeighbor != null) {
+                                        runCatching { requesters.getValue(leftNeighbor).requestFocus() }.isSuccess
+                                    } else {
+                                        true
+                                    }
+                                }
+                                Key.DirectionRight -> {
+                                    if (rightNeighbor != null) {
+                                        runCatching { requesters.getValue(rightNeighbor).requestFocus() }.isSuccess
                                     } else {
                                         true
                                     }
@@ -935,39 +975,13 @@ private fun SmartResultsGrid(
 ) {
     val colors = LocalHulkColors.current
     val gridState = rememberLazyGridState()
-    var focusedResultIndex by remember(results) { mutableIntStateOf(-1) }
 
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = if (isTv) 146.dp else 112.dp),
         state = gridState,
         modifier = modifier
             .fillMaxWidth()
-            .focusGroup()
-            .onPreviewKeyEvent { event ->
-                if (!isTv || event.type != KeyEventType.KeyDown || focusedResultIndex < 0) {
-                    false
-                } else {
-                    val layoutItems = gridState.layoutInfo.visibleItemsInfo
-                    val focusedGridIndex = focusedResultIndex + 1
-                    val focusedRow = layoutItems.firstOrNull { it.index == focusedGridIndex }?.row
-                    when (event.key) {
-                        Key.DirectionUp -> {
-                            val firstResultRow = layoutItems.firstOrNull { it.index == 1 }?.row
-                            if (firstResultRow != null && focusedRow == firstResultRow) {
-                                runCatching { topRequester.requestFocus() }.isSuccess
-                            } else {
-                                false
-                            }
-                        }
-                        Key.DirectionDown -> {
-                            val lastResultGridIndex = results.size
-                            val lastResultRow = layoutItems.firstOrNull { it.index == lastResultGridIndex }?.row
-                            lastResultRow != null && focusedRow == lastResultRow
-                        }
-                        else -> false
-                    }
-                }
-            },
+            .focusGroup(),
         contentPadding = PaddingValues(bottom = if (isTv) 24.dp else 16.dp),
         horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
@@ -998,16 +1012,40 @@ private fun SmartResultsGrid(
                 isFavorite = isFavorite(item),
                 onClick = { onOpenResult(item) },
                 onLongClick = { onToggleFavorite(item) },
-                onFocused = { focusedResultIndex = index },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .then(
-                        if (index == 0) {
-                            Modifier.focusRequester(firstResultRequester)
+                    .then(if (index == 0) Modifier.focusRequester(firstResultRequester) else Modifier)
+                    .onPreviewKeyEvent { event ->
+                        if (!isTv || event.type != KeyEventType.KeyDown) {
+                            false
                         } else {
-                            Modifier
-                        },
-                    ),
+                            val columns = gridState.layoutInfo.maxSpan.coerceAtLeast(1)
+                            val currentRow = index / columns
+                            val lastRow = results.lastIndex / columns
+                            val gridItemInfo = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index + 1 }
+                            when (event.key) {
+                                Key.DirectionUp -> if (currentRow == 0) {
+                                    runCatching { topRequester.requestFocus() }.isSuccess
+                                } else false
+                                Key.DirectionDown -> currentRow == lastRow
+                                Key.DirectionLeft -> if (gridItemInfo == null) {
+                                    false
+                                } else {
+                                    !gridState.layoutInfo.visibleItemsInfo.any { candidate ->
+                                        candidate.index > 0 && candidate.row == gridItemInfo.row && candidate.offset.x < gridItemInfo.offset.x
+                                    }
+                                }
+                                Key.DirectionRight -> if (gridItemInfo == null) {
+                                    false
+                                } else {
+                                    !gridState.layoutInfo.visibleItemsInfo.any { candidate ->
+                                        candidate.index > 0 && candidate.row == gridItemInfo.row && candidate.offset.x > gridItemInfo.offset.x
+                                    }
+                                }
+                                else -> false
+                            }
+                        }
+                    },
             )
         }
     }
@@ -1032,11 +1070,7 @@ private fun SmartSearchRail(
     )
     val destinationRequesters = remember {
         smartSearchDestinations.associate { entry ->
-            entry.destination to if (entry.destination == MainDestination.SEARCH) {
-                searchRailRequester
-            } else {
-                FocusRequester()
-            }
+            entry.destination to if (entry.destination == MainDestination.SEARCH) searchRailRequester else FocusRequester()
         }
     }
     val selectedRequester = destinationRequesters.getValue(selected)
@@ -1072,9 +1106,7 @@ private fun SmartSearchRail(
                         .then(
                             if (isTv && entry.destination == MainDestination.SEARCH) {
                                 Modifier.focusProperties { left = searchFieldRequester }
-                            } else {
-                                Modifier
-                            },
+                            } else Modifier,
                         ),
                     onClick = { onSelectDestination(entry.destination) },
                 )
@@ -1215,9 +1247,7 @@ private suspend fun buildSmartSearchIndex(state: HulkUiState): SmartSearchIndex 
     for (type in orderedTypes) {
         val catalog = state.catalogs[type] ?: continue
         for (item in catalog.items) {
-            if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) {
-                currentCoroutineContext().ensureActive()
-            }
+            if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) currentCoroutineContext().ensureActive()
             val stableKey = "${item.type}:${item.id}"
             if (!seen.add(stableKey)) continue
 
@@ -1257,9 +1287,7 @@ private suspend fun boundedSmartSearch(
     var scanned = 0
 
     for (entry in index.entries) {
-        if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) {
-            currentCoroutineContext().ensureActive()
-        }
+        if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) currentCoroutineContext().ensureActive()
         val item = entry.item
         if (!filter.accepts(item.type)) continue
         val rank = entry.smartSearchRankOrNull(
@@ -1272,9 +1300,7 @@ private suspend fun boundedSmartSearch(
         val key = "${item.type}:${item.id}"
         if (!seen.add(key)) continue
         val bucket = buckets[rank]
-        if (bucket.size < MAX_RESULTS_PER_RANK) {
-            bucket += item
-        }
+        if (bucket.size < MAX_RESULTS_PER_RANK) bucket += item
     }
 
     val withinRank = compareByDescending<ContentItem> { it.rating?.toDoubleOrNull() ?: 0.0 }
@@ -1377,7 +1403,6 @@ private fun phoneticSearchWord(word: String): String = buildString(word.length) 
         when (char.lowercaseChar()) {
             'a', 'e', 'i', 'o', 'u', 'y', 'w',
             'ا', 'أ', 'إ', 'آ', 'و', 'ي', 'ى', 'ء', 'ع' -> Unit
-
             'b', 'p', 'ب', 'پ' -> append('b')
             'r', 'ر' -> append('r')
             's', 'z', 'ص', 'س', 'ز', 'ذ', 'ض', 'ظ' -> append('s')
@@ -1440,7 +1465,9 @@ private fun ContentType.smartLabel(): String = when (this) {
 
 private const val SMART_SEARCH_MIN_QUERY_LENGTH = 2
 private const val SEARCH_DEBOUNCE_MS = 90L
-private const val TV_INITIAL_SEARCH_FOCUS_DELAY_MS = 80L
+private const val TV_INITIAL_SEARCH_FOCUS_DELAY_MS = 40L
+private const val TV_INITIAL_SEARCH_FOCUS_RETRY_MS = 120L
+private const val TV_INITIAL_SEARCH_FOCUS_ATTEMPTS = 4
 private const val SEARCH_CANCELLATION_MASK = 63
 private const val SEARCH_RANK_COUNT = 11
 private const val MAX_RESULTS_PER_RANK = 48
