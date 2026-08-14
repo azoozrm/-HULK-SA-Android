@@ -253,13 +253,13 @@ internal fun ProfileSmartSearchLayer(
     val filterRequesters = remember {
         SmartSearchFilter.entries.associateWith { FocusRequester() }
     }
-    var searchFieldHasFocus by remember(activeProfileId) { mutableStateOf(false) }
+    var initialSearchFocusAcquired by remember(activeProfileId) { mutableStateOf(false) }
 
     LaunchedEffect(isTv, activeProfileId) {
         if (isTv) {
             repeat(TV_INITIAL_SEARCH_FOCUS_ATTEMPTS) { attempt ->
                 delay(if (attempt == 0) TV_INITIAL_SEARCH_FOCUS_DELAY_MS else TV_INITIAL_SEARCH_FOCUS_RETRY_MS)
-                if (!searchFieldHasFocus) {
+                if (!initialSearchFocusAcquired) {
                     runCatching { searchFieldRequester.requestFocus() }
                 }
             }
@@ -303,7 +303,7 @@ internal fun ProfileSmartSearchLayer(
                     selected = MainDestination.SEARCH,
                     searchFieldRequester = searchFieldRequester,
                     searchRailRequester = railSearchRequester,
-                    preferSearchFieldOnEnter = isTv && !searchFieldHasFocus,
+                    preferSearchFieldOnEnter = isTv && !initialSearchFocusAcquired,
                     onSelectDestination = onSelectDestination,
                     onSwitchProfile = onSwitchProfile,
                 )
@@ -324,7 +324,9 @@ internal fun ProfileSmartSearchLayer(
                     railSearchRequester = if (isTv) railSearchRequester else null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
-                    onSearchFieldFocusChanged = { searchFieldHasFocus = it },
+                    onSearchFieldFocusChanged = { focused ->
+                        if (focused) initialSearchFocusAcquired = true
+                    },
                     onFilterSelected = { selectedFilter = it },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -359,7 +361,9 @@ internal fun ProfileSmartSearchLayer(
                     railSearchRequester = null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
-                    onSearchFieldFocusChanged = { searchFieldHasFocus = it },
+                    onSearchFieldFocusChanged = { focused ->
+                        if (focused) initialSearchFocusAcquired = true
+                    },
                     onFilterSelected = { selectedFilter = it },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -516,6 +520,7 @@ private fun SmartSearchContent(
             requesters = filterRequesters,
             searchFieldRequester = searchFieldRequester,
             downRequester = firstContentRequester,
+            railSearchRequester = railSearchRequester,
             onSelect = onFilterSelected,
         )
 
@@ -551,6 +556,7 @@ private fun SmartSearchContent(
                     isTv = isTv,
                     firstResultRequester = firstResultRequester,
                     topRequester = selectedFilterRequester,
+                    railSearchRequester = railSearchRequester,
                     isFavorite = { item -> "${item.type.name}:${item.id}" in state.favorites },
                     onOpenResult = onOpenResult,
                     onToggleFavorite = onToggleFavorite,
@@ -730,6 +736,7 @@ private fun SmartSearchFilterBar(
     requesters: Map<SmartSearchFilter, FocusRequester>,
     searchFieldRequester: FocusRequester,
     downRequester: FocusRequester?,
+    railSearchRequester: FocusRequester?,
     onSelect: (SmartSearchFilter) -> Unit,
 ) {
     LazyRow(
@@ -761,7 +768,9 @@ private fun SmartSearchFilterBar(
                         }
                         if (isTv) {
                             left = leftNeighbor?.let(requesters::getValue) ?: FocusRequester.Cancel
-                            right = rightNeighbor?.let(requesters::getValue) ?: FocusRequester.Cancel
+                            right = rightNeighbor?.let(requesters::getValue)
+                                ?: railSearchRequester
+                                ?: FocusRequester.Cancel
                         }
                     }
                     .onPreviewKeyEvent { event ->
@@ -782,7 +791,11 @@ private fun SmartSearchFilterBar(
                                     true
                                 }
                                 Key.DirectionRight -> {
-                                    rightNeighbor?.let { runCatching { requesters.getValue(it).requestFocus() } }
+                                    if (rightNeighbor != null) {
+                                        runCatching { requesters.getValue(rightNeighbor).requestFocus() }
+                                    } else {
+                                        railSearchRequester?.let { runCatching { it.requestFocus() } }
+                                    }
                                     true
                                 }
                                 else -> false
@@ -1068,6 +1081,7 @@ private fun SmartResultsGrid(
     isTv: Boolean,
     firstResultRequester: FocusRequester,
     topRequester: FocusRequester,
+    railSearchRequester: FocusRequester?,
     isFavorite: (ContentItem) -> Boolean,
     onOpenResult: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
@@ -1176,6 +1190,10 @@ private fun SmartResultsGrid(
                                 Key.DirectionRight -> {
                                     if (index > rowStart) {
                                         requestResultFocus(index - 1)
+                                    } else {
+                                        navigationJob?.cancel()
+                                        navigationJob = null
+                                        railSearchRequester?.let { runCatching { it.requestFocus() } }
                                     }
                                     true
                                 }
