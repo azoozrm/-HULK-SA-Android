@@ -89,7 +89,10 @@ fun LoginScreen(
     val view = LocalView.current
     val fontScale = LocalDensity.current.fontScale
     val tvInitialFocusRequester = remember { FocusRequester() }
-    var accessCode by rememberSaveable { mutableStateOf("") }
+    val persistedAccessCode = remember(view.context) {
+        sa.hulksa.player.data.AccountSessionStore(view.context).lastAccessCode().orEmpty()
+    }
+    var accessCode by rememberSaveable(persistedAccessCode) { mutableStateOf(persistedAccessCode) }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
