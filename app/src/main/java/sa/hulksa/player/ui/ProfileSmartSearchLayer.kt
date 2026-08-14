@@ -254,6 +254,7 @@ internal fun ProfileSmartSearchLayer(
         SmartSearchFilter.entries.associateWith { FocusRequester() }
     }
     var initialSearchFocusAcquired by remember(activeProfileId) { mutableStateOf(false) }
+    var railReturnRequester by remember(activeProfileId) { mutableStateOf<FocusRequester?>(null) }
 
     LaunchedEffect(isTv, activeProfileId) {
         if (isTv) {
@@ -303,6 +304,7 @@ internal fun ProfileSmartSearchLayer(
                     selected = MainDestination.SEARCH,
                     searchFieldRequester = searchFieldRequester,
                     searchRailRequester = railSearchRequester,
+                    contentReturnRequester = railReturnRequester ?: searchFieldRequester,
                     preferSearchFieldOnEnter = isTv && !initialSearchFocusAcquired,
                     onSelectDestination = onSelectDestination,
                     onSwitchProfile = onSwitchProfile,
@@ -325,7 +327,13 @@ internal fun ProfileSmartSearchLayer(
                     isFavorite = isFavorite,
                     onSearch = onSearch,
                     onSearchFieldFocusChanged = { focused ->
-                        if (focused) initialSearchFocusAcquired = true
+                        if (focused) {
+                            initialSearchFocusAcquired = true
+                            railReturnRequester = searchFieldRequester
+                        }
+                    },
+                    onContentFocusTargetChanged = { requester ->
+                        railReturnRequester = requester
                     },
                     onFilterSelected = { selectedFilter = it },
                     onOpenResult = recordAndOpen,
@@ -364,6 +372,7 @@ internal fun ProfileSmartSearchLayer(
                     onSearchFieldFocusChanged = { focused ->
                         if (focused) initialSearchFocusAcquired = true
                     },
+                    onContentFocusTargetChanged = {},
                     onFilterSelected = { selectedFilter = it },
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
@@ -408,6 +417,7 @@ private fun SmartSearchContent(
     isFavorite: (ContentItem) -> Boolean,
     onSearch: (String) -> Unit,
     onSearchFieldFocusChanged: (Boolean) -> Unit,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
     onFilterSelected: (SmartSearchFilter) -> Unit,
     onOpenResult: (ContentItem) -> Unit,
     onOpenRecent: (ProfileContentSearchHistoryEntry) -> Unit,
@@ -521,6 +531,7 @@ private fun SmartSearchContent(
             searchFieldRequester = searchFieldRequester,
             downRequester = firstContentRequester,
             railSearchRequester = railSearchRequester,
+            onContentFocusTargetChanged = onContentFocusTargetChanged,
             onSelect = onFilterSelected,
         )
 
@@ -534,6 +545,7 @@ private fun SmartSearchContent(
                     isTv = isTv,
                     firstRecentRequester = firstRecentRequester,
                     topRequester = selectedFilterRequester,
+                    onContentFocusTargetChanged = onContentFocusTargetChanged,
                     onOpen = onOpenRecent,
                     onRemove = onRemoveRecent,
                     onClear = onClearRecent,
@@ -557,6 +569,7 @@ private fun SmartSearchContent(
                     firstResultRequester = firstResultRequester,
                     topRequester = selectedFilterRequester,
                     railSearchRequester = railSearchRequester,
+                    onContentFocusTargetChanged = onContentFocusTargetChanged,
                     isFavorite = { item -> "${item.type.name}:${item.id}" in state.favorites },
                     onOpenResult = onOpenResult,
                     onToggleFavorite = onToggleFavorite,
@@ -737,8 +750,23 @@ private fun SmartSearchFilterBar(
     searchFieldRequester: FocusRequester,
     downRequester: FocusRequester?,
     railSearchRequester: FocusRequester?,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
     onSelect: (SmartSearchFilter) -> Unit,
 ) {
+    val focusScope = rememberCoroutineScope()
+
+    fun requestDownFocus(): Boolean {
+        val target = downRequester ?: return true
+        val focused = runCatching { target.requestFocus() }.getOrDefault(false)
+        if (!focused) {
+            focusScope.launch {
+                delay(TV_GRID_FOCUS_SETTLE_MS)
+                runCatching { target.requestFocus() }
+            }
+        }
+        return true
+    }
+
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -752,13 +780,17 @@ private fun SmartSearchFilterBar(
         ) { filter ->
             val active = selected == filter
             val index = SmartSearchFilter.entries.indexOf(filter)
+            val requester = requesters.getValue(filter)
             val leftNeighbor = SmartSearchFilter.entries.getOrNull(index + 1)
             val rightNeighbor = SmartSearchFilter.entries.getOrNull(index - 1)
             FocusButton(
                 text = filter.label,
                 onClick = { onSelect(filter) },
                 modifier = Modifier
-                    .focusRequester(requesters.getValue(filter))
+                    .focusRequester(requester)
+                    .onFocusChanged { state ->
+                        if (isTv && state.isFocused) onContentFocusTargetChanged(requester)
+                    }
                     .focusProperties {
                         up = searchFieldRequester
                         if (downRequester != null) {
@@ -782,10 +814,7 @@ private fun SmartSearchFilterBar(
                                     runCatching { searchFieldRequester.requestFocus() }
                                     true
                                 }
-                                Key.DirectionDown -> {
-                                    downRequester?.let { runCatching { it.requestFocus() } }
-                                    true
-                                }
+                                Key.DirectionDown -> requestDownFocus()
                                 Key.DirectionLeft -> {
                                     leftNeighbor?.let { runCatching { requesters.getValue(it).requestFocus() } }
                                     true
@@ -794,6 +823,7 @@ private fun SmartSearchFilterBar(
                                     if (rightNeighbor != null) {
                                         runCatching { requesters.getValue(rightNeighbor).requestFocus() }
                                     } else {
+                                        onContentFocusTargetChanged(requester)
                                         railSearchRequester?.let { runCatching { it.requestFocus() } }
                                     }
                                     true
@@ -817,6 +847,7 @@ private fun SmartRecentSection(
     isTv: Boolean,
     firstRecentRequester: FocusRequester,
     topRequester: FocusRequester,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
     onOpen: (ProfileContentSearchHistoryEntry) -> Unit,
     onRemove: (ProfileContentSearchHistoryEntry) -> Unit,
     onClear: () -> Unit,
@@ -861,6 +892,9 @@ private fun SmartRecentSection(
                     onClick = onClear,
                     modifier = Modifier
                         .focusRequester(clearAllRequester)
+                        .onFocusChanged { state ->
+                            if (isTv && state.isFocused) onContentFocusTargetChanged(clearAllRequester)
+                        }
                         .focusProperties {
                             if (isTv) {
                                 up = topRequester
@@ -932,6 +966,7 @@ private fun SmartRecentSection(
                         rightCardRequester = deleteRequesters.getOrNull(index - 1),
                         leftCardRequester = openRequesters.getOrNull(index + 1) ?: clearAllRequester,
                         topRequester = topRequester,
+                        onContentFocusTargetChanged = onContentFocusTargetChanged,
                         onOpen = { onOpen(entry) },
                         onRemove = { onRemove(entry) },
                     )
@@ -950,6 +985,7 @@ private fun SmartRecentCard(
     rightCardRequester: FocusRequester?,
     leftCardRequester: FocusRequester,
     topRequester: FocusRequester,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -999,6 +1035,9 @@ private fun SmartRecentCard(
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(openRequester)
+                    .onFocusChanged { state ->
+                        if (isTv && state.isFocused) onContentFocusTargetChanged(openRequester)
+                    }
                     .focusProperties {
                         if (isTv) {
                             up = topRequester
@@ -1036,6 +1075,9 @@ private fun SmartRecentCard(
                 onClick = onRemove,
                 modifier = Modifier
                     .focusRequester(deleteRequester)
+                    .onFocusChanged { state ->
+                        if (isTv && state.isFocused) onContentFocusTargetChanged(deleteRequester)
+                    }
                     .focusProperties {
                         if (isTv) {
                             up = topRequester
@@ -1082,6 +1124,7 @@ private fun SmartResultsGrid(
     firstResultRequester: FocusRequester,
     topRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
+    onContentFocusTargetChanged: (FocusRequester) -> Unit,
     isFavorite: (ContentItem) -> Boolean,
     onOpenResult: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
@@ -1153,6 +1196,7 @@ private fun SmartResultsGrid(
                 onFocused = {
                     navigationJob?.cancel()
                     navigationJob = null
+                    if (isTv) onContentFocusTargetChanged(resultRequesters[index])
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1193,6 +1237,7 @@ private fun SmartResultsGrid(
                                     } else {
                                         navigationJob?.cancel()
                                         navigationJob = null
+                                        onContentFocusTargetChanged(resultRequesters[index])
                                         railSearchRequester?.let { runCatching { it.requestFocus() } }
                                     }
                                     true
@@ -1212,6 +1257,7 @@ private fun SmartSearchRail(
     selected: MainDestination,
     searchFieldRequester: FocusRequester,
     searchRailRequester: FocusRequester,
+    contentReturnRequester: FocusRequester,
     preferSearchFieldOnEnter: Boolean,
     onSelectDestination: (MainDestination) -> Unit,
     onSwitchProfile: () -> Unit,
@@ -1230,6 +1276,12 @@ private fun SmartSearchRail(
         }
     }
     val selectedRequester = destinationRequesters.getValue(selected)
+
+    fun returnToContent(): Boolean {
+        val restored = runCatching { contentReturnRequester.requestFocus() }.getOrDefault(false)
+        if (!restored) runCatching { searchFieldRequester.requestFocus() }
+        return true
+    }
 
     LaunchedEffect(isTv, preferSearchFieldOnEnter, railHasFocus) {
         if (isTv && preferSearchFieldOnEnter && railHasFocus) {
@@ -1276,7 +1328,15 @@ private fun SmartSearchRail(
                         .focusRequester(destinationRequesters.getValue(entry.destination))
                         .then(
                             if (isTv && entry.destination == MainDestination.SEARCH) {
-                                Modifier.focusProperties { left = searchFieldRequester }
+                                Modifier
+                                    .focusProperties { left = contentReturnRequester }
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                                            returnToContent()
+                                        } else {
+                                            false
+                                        }
+                                    }
                             } else Modifier,
                         ),
                     onClick = { onSelectDestination(entry.destination) },
