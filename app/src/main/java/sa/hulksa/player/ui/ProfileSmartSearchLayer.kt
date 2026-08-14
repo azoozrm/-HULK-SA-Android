@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +71,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -79,6 +81,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
@@ -160,30 +165,45 @@ internal fun ProfileSmartSearchLayer(
     }
 
     val query = state.searchQuery.trim()
+    var settledQuery by remember { mutableStateOf("") }
+    LaunchedEffect(query) {
+        if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
+            settledQuery = ""
+        } else {
+            delay(SEARCH_DEBOUNCE_MS)
+            settledQuery = query
+        }
+    }
     val searchSnapshot by produceState(
         initialValue = SmartSearchSnapshot(filter = selectedFilter),
         key1 = state.catalogs,
-        key2 = query to selectedFilter,
+        key2 = settledQuery to selectedFilter,
     ) {
-        value = if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
+        value = if (settledQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
             SmartSearchSnapshot(filter = selectedFilter)
         } else {
             withContext(Dispatchers.Default) {
                 SmartSearchSnapshot(
-                    query = query,
+                    query = settledQuery,
                     filter = selectedFilter,
-                    results = boundedSmartSearch(state, query, selectedFilter),
+                    results = boundedSmartSearch(state, settledQuery, selectedFilter),
                 )
             }
         }
     }
-    val results = if (searchSnapshot.query == query && searchSnapshot.filter == selectedFilter) {
+    val results = if (
+        query == settledQuery &&
+        searchSnapshot.query == settledQuery &&
+        searchSnapshot.filter == selectedFilter
+    ) {
         searchSnapshot.results
     } else {
         emptyList()
     }
     val searchPending = query.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
-        (searchSnapshot.query != query || searchSnapshot.filter != selectedFilter)
+        (settledQuery != query ||
+            searchSnapshot.query != settledQuery ||
+            searchSnapshot.filter != selectedFilter)
     val relevantCatalogLoading = selectedFilter.contentType
         ?.let { it in state.loadingTypes }
         ?: state.loadingTypes.isNotEmpty()
@@ -473,7 +493,7 @@ private fun SmartSearchContent(
                     isTv = isTv,
                     firstResultRequester = firstResultRequester,
                     topRequester = selectedFilterRequester,
-                    isFavorite = isFavorite,
+                    isFavorite = { item -> "${item.type.name}:${item.id}" in state.favorites },
                     onOpenResult = onOpenResult,
                     onToggleFavorite = onToggleFavorite,
                 )
@@ -559,6 +579,7 @@ private fun SmartSearchInput(
     railSearchRequester: FocusRequester?,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     var tvEditing by remember { mutableStateOf(false) }
 
     val moveDown: () -> Boolean = {
@@ -618,7 +639,16 @@ private fun SmartSearchInput(
         modifier = Modifier.fillMaxWidth().then(tvModifier),
         readOnly = isTv && !tvEditing,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { moveDown() }),
+        keyboardActions = KeyboardActions(
+            onSearch = {
+                keyboardController?.hide()
+                if (isTv) {
+                    moveDown()
+                } else {
+                    focusManager.clearFocus(force = true)
+                }
+            },
+        ),
     )
 }
 
@@ -1067,7 +1097,7 @@ private fun SmartSearchBottomNavigation(
     }
 }
 
-private fun boundedSmartSearch(
+private suspend fun boundedSmartSearch(
     state: HulkUiState,
     rawQuery: String,
     filter: SmartSearchFilter,
@@ -1075,14 +1105,27 @@ private fun boundedSmartSearch(
     val query = normalizeSearchText(rawQuery)
     if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) return emptyList()
     val queryTokens = query.split(' ').filter(String::isNotBlank)
+    val queryArabic = query.any(::isArabicSearchChar)
+    val queryPhoneticWords = if (queryArabic) phoneticSearchWords(query) else emptyList()
+    val queryPhoneticPhrase = queryPhoneticWords.joinToString(" ")
 
     val buckets = Array(SEARCH_RANK_COUNT) { mutableListOf<ContentItem>() }
     val seen = HashSet<String>()
+    var scanned = 0
 
     for (catalog in state.catalogs.values) {
         for (item in catalog.items) {
+            if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) {
+                currentCoroutineContext().ensureActive()
+            }
             if (!filter.accepts(item.type)) continue
-            val rank = item.smartSearchRankOrNull(query, queryTokens) ?: continue
+            val rank = item.smartSearchRankOrNull(
+                normalizedQuery = query,
+                queryTokens = queryTokens,
+                queryArabic = queryArabic,
+                queryPhoneticWords = queryPhoneticWords,
+                queryPhoneticPhrase = queryPhoneticPhrase,
+            ) ?: continue
             val key = "${item.type}:${item.id}"
             if (!seen.add(key)) continue
             val bucket = buckets[rank]
@@ -1111,22 +1154,38 @@ private fun boundedSmartSearch(
 private fun ContentItem.smartSearchRankOrNull(
     normalizedQuery: String,
     queryTokens: List<String>,
+    queryArabic: Boolean,
+    queryPhoneticWords: List<String>,
+    queryPhoneticPhrase: String,
 ): Int? {
     val cleanName = normalizeSearchText(name)
     val titleTokens = cleanName.split(' ').filter(String::isNotBlank)
-    val normalizedYear = normalizeSearchText(year.orEmpty())
-    val normalizedGenre = normalizeSearchText(genre.orEmpty())
-    val phoneticRank = crossScriptPhoneticRank(normalizedQuery, cleanName)
-    return when {
-        cleanName == normalizedQuery -> 0
-        cleanName.startsWith(normalizedQuery) -> 1
-        titleTokens.any { it.startsWith(normalizedQuery) } -> 2
-        cleanName.contains(normalizedQuery) -> 3
+
+    when {
+        cleanName == normalizedQuery -> return 0
+        cleanName.startsWith(normalizedQuery) -> return 1
+        titleTokens.any { it.startsWith(normalizedQuery) } -> return 2
+        cleanName.contains(normalizedQuery) -> return 3
         queryTokens.size > 1 && queryTokens.all { token ->
             titleTokens.any { word -> word.startsWith(token) || word.contains(token) }
-        } -> 4
-        phoneticRank != null -> 5 + phoneticRank
-        normalizedYear == normalizedQuery -> 8
+        } -> return 4
+    }
+
+    val titleArabic = cleanName.any(::isArabicSearchChar)
+    if (queryArabic != titleArabic && queryPhoneticPhrase.length >= 3) {
+        val phoneticRank = crossScriptPhoneticRankPrepared(
+            queryWords = queryPhoneticWords,
+            queryPhrase = queryPhoneticPhrase,
+            normalizedTitle = cleanName,
+        )
+        if (phoneticRank != null) return 5 + phoneticRank
+    }
+
+    val normalizedYear = normalizeSearchText(year.orEmpty())
+    if (normalizedYear == normalizedQuery) return 8
+
+    val normalizedGenre = normalizeSearchText(genre.orEmpty())
+    return when {
         normalizedGenre.contains(normalizedQuery) -> 9
         queryTokens.size > 1 && queryTokens.all(normalizedGenre::contains) -> 10
         else -> null
@@ -1134,16 +1193,27 @@ private fun ContentItem.smartSearchRankOrNull(
 }
 
 internal fun crossScriptPhoneticRank(query: String, title: String): Int? {
-    val queryArabic = query.any(::isArabicSearchChar)
-    val titleArabic = title.any(::isArabicSearchChar)
+    val normalizedQuery = normalizeSearchText(query)
+    val normalizedTitle = normalizeSearchText(title)
+    val queryArabic = normalizedQuery.any(::isArabicSearchChar)
+    val titleArabic = normalizedTitle.any(::isArabicSearchChar)
     if (queryArabic == titleArabic) return null
 
-    val queryWords = phoneticSearchWords(query)
-    val titleWords = phoneticSearchWords(title)
-    if (queryWords.isEmpty() || titleWords.isEmpty()) return null
+    val queryWords = phoneticSearchWords(normalizedQuery)
     val queryPhrase = queryWords.joinToString(" ")
-    val titlePhrase = titleWords.joinToString(" ")
     if (queryPhrase.length < 3) return null
+    return crossScriptPhoneticRankPrepared(queryWords, queryPhrase, normalizedTitle)
+}
+
+private fun crossScriptPhoneticRankPrepared(
+    queryWords: List<String>,
+    queryPhrase: String,
+    normalizedTitle: String,
+): Int? {
+    if (queryWords.isEmpty()) return null
+    val titleWords = phoneticSearchWords(normalizedTitle)
+    if (titleWords.isEmpty()) return null
+    val titlePhrase = titleWords.joinToString(" ")
 
     return when {
         queryPhrase == titlePhrase -> 0
@@ -1224,6 +1294,8 @@ private fun ContentType.smartLabel(): String = when (this) {
 }
 
 private const val SMART_SEARCH_MIN_QUERY_LENGTH = 2
+private const val SEARCH_DEBOUNCE_MS = 90L
+private const val SEARCH_CANCELLATION_MASK = 127
 private const val SEARCH_RANK_COUNT = 11
 private const val MAX_RESULTS_PER_RANK = 48
 private const val MAX_SEARCH_RESULTS = 120
