@@ -127,6 +127,21 @@ private data class SmartSearchSnapshot(
     val results: List<ContentItem> = emptyList(),
 )
 
+private data class SmartSearchIndexEntry(
+    val item: ContentItem,
+    val normalizedName: String,
+    val titleTokens: List<String>,
+    val normalizedYear: String,
+    val normalizedGenre: String,
+    val titleArabic: Boolean,
+    val phoneticWords: List<String>,
+    val phoneticPhrase: String,
+)
+
+private data class SmartSearchIndex(
+    val entries: List<SmartSearchIndexEntry> = emptyList(),
+)
+
 private val smartSearchDestinations = listOf(
     SmartSearchDestination(MainDestination.HOME, Icons.Rounded.Home, "الرئيسية"),
     SmartSearchDestination(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
@@ -164,6 +179,15 @@ internal fun ProfileSmartSearchLayer(
         recentEntries.filter { selectedFilter.accepts(it.contentType) }
     }
 
+    val searchIndex by produceState<SmartSearchIndex?>(
+        initialValue = null,
+        key1 = state.catalogs,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            buildSmartSearchIndex(state)
+        }
+    }
+
     val query = state.searchQuery.trim()
     var settledQuery by remember { mutableStateOf("") }
     LaunchedEffect(query) {
@@ -176,17 +200,21 @@ internal fun ProfileSmartSearchLayer(
     }
     val searchSnapshot by produceState(
         initialValue = SmartSearchSnapshot(filter = selectedFilter),
-        key1 = state.catalogs,
+        key1 = searchIndex,
         key2 = settledQuery to selectedFilter,
     ) {
-        value = if (settledQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
+        val preparedIndex = searchIndex
+        value = if (
+            settledQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH ||
+            preparedIndex == null
+        ) {
             SmartSearchSnapshot(filter = selectedFilter)
         } else {
             withContext(Dispatchers.Default) {
                 SmartSearchSnapshot(
                     query = settledQuery,
                     filter = selectedFilter,
-                    results = boundedSmartSearch(state, settledQuery, selectedFilter),
+                    results = boundedSmartSearch(preparedIndex, settledQuery, selectedFilter),
                 )
             }
         }
@@ -201,7 +229,8 @@ internal fun ProfileSmartSearchLayer(
         emptyList()
     }
     val searchPending = query.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
-        (settledQuery != query ||
+        (searchIndex == null ||
+            settledQuery != query ||
             searchSnapshot.query != settledQuery ||
             searchSnapshot.filter != selectedFilter)
     val relevantCatalogLoading = selectedFilter.contentType
@@ -1097,8 +1126,43 @@ private fun SmartSearchBottomNavigation(
     }
 }
 
+private suspend fun buildSmartSearchIndex(state: HulkUiState): SmartSearchIndex {
+    val expectedSize = state.catalogs.values.sumOf { it.items.size }
+    val entries = ArrayList<SmartSearchIndexEntry>(expectedSize)
+    val seen = HashSet<String>(expectedSize.coerceAtLeast(16))
+    var scanned = 0
+
+    val orderedTypes = listOf(ContentType.SERIES, ContentType.MOVIE, ContentType.LIVE)
+    for (type in orderedTypes) {
+        val catalog = state.catalogs[type] ?: continue
+        for (item in catalog.items) {
+            if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) {
+                currentCoroutineContext().ensureActive()
+            }
+            val stableKey = "${item.type}:${item.id}"
+            if (!seen.add(stableKey)) continue
+
+            val normalizedName = normalizeSearchText(item.name)
+            val titleTokens = normalizedName.split(' ').filter(String::isNotBlank)
+            val titleArabic = normalizedName.any(::isArabicSearchChar)
+            val phoneticWords = phoneticSearchWordsNormalized(normalizedName)
+            entries += SmartSearchIndexEntry(
+                item = item,
+                normalizedName = normalizedName,
+                titleTokens = titleTokens,
+                normalizedYear = normalizeSearchText(item.year.orEmpty()),
+                normalizedGenre = normalizeSearchText(item.genre.orEmpty()),
+                titleArabic = titleArabic,
+                phoneticWords = phoneticWords,
+                phoneticPhrase = phoneticWords.joinToString(" "),
+            )
+        }
+    }
+    return SmartSearchIndex(entries)
+}
+
 private suspend fun boundedSmartSearch(
-    state: HulkUiState,
+    index: SmartSearchIndex,
     rawQuery: String,
     filter: SmartSearchFilter,
 ): List<ContentItem> {
@@ -1106,32 +1170,31 @@ private suspend fun boundedSmartSearch(
     if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) return emptyList()
     val queryTokens = query.split(' ').filter(String::isNotBlank)
     val queryArabic = query.any(::isArabicSearchChar)
-    val queryPhoneticWords = if (queryArabic) phoneticSearchWords(query) else emptyList()
+    val queryPhoneticWords = phoneticSearchWordsNormalized(query)
     val queryPhoneticPhrase = queryPhoneticWords.joinToString(" ")
 
     val buckets = Array(SEARCH_RANK_COUNT) { mutableListOf<ContentItem>() }
     val seen = HashSet<String>()
     var scanned = 0
 
-    for (catalog in state.catalogs.values) {
-        for (item in catalog.items) {
-            if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) {
-                currentCoroutineContext().ensureActive()
-            }
-            if (!filter.accepts(item.type)) continue
-            val rank = item.smartSearchRankOrNull(
-                normalizedQuery = query,
-                queryTokens = queryTokens,
-                queryArabic = queryArabic,
-                queryPhoneticWords = queryPhoneticWords,
-                queryPhoneticPhrase = queryPhoneticPhrase,
-            ) ?: continue
-            val key = "${item.type}:${item.id}"
-            if (!seen.add(key)) continue
-            val bucket = buckets[rank]
-            if (bucket.size < MAX_RESULTS_PER_RANK) {
-                bucket += item
-            }
+    for (entry in index.entries) {
+        if ((scanned++ and SEARCH_CANCELLATION_MASK) == 0) {
+            currentCoroutineContext().ensureActive()
+        }
+        val item = entry.item
+        if (!filter.accepts(item.type)) continue
+        val rank = entry.smartSearchRankOrNull(
+            normalizedQuery = query,
+            queryTokens = queryTokens,
+            queryArabic = queryArabic,
+            queryPhoneticWords = queryPhoneticWords,
+            queryPhoneticPhrase = queryPhoneticPhrase,
+        ) ?: continue
+        val key = "${item.type}:${item.id}"
+        if (!seen.add(key)) continue
+        val bucket = buckets[rank]
+        if (bucket.size < MAX_RESULTS_PER_RANK) {
+            bucket += item
         }
     }
 
@@ -1151,40 +1214,35 @@ private suspend fun boundedSmartSearch(
     }
 }
 
-private fun ContentItem.smartSearchRankOrNull(
+private fun SmartSearchIndexEntry.smartSearchRankOrNull(
     normalizedQuery: String,
     queryTokens: List<String>,
     queryArabic: Boolean,
     queryPhoneticWords: List<String>,
     queryPhoneticPhrase: String,
 ): Int? {
-    val cleanName = normalizeSearchText(name)
-    val titleTokens = cleanName.split(' ').filter(String::isNotBlank)
-
     when {
-        cleanName == normalizedQuery -> return 0
-        cleanName.startsWith(normalizedQuery) -> return 1
+        normalizedName == normalizedQuery -> return 0
+        normalizedName.startsWith(normalizedQuery) -> return 1
         titleTokens.any { it.startsWith(normalizedQuery) } -> return 2
-        cleanName.contains(normalizedQuery) -> return 3
+        normalizedName.contains(normalizedQuery) -> return 3
         queryTokens.size > 1 && queryTokens.all { token ->
             titleTokens.any { word -> word.startsWith(token) || word.contains(token) }
         } -> return 4
     }
 
-    val titleArabic = cleanName.any(::isArabicSearchChar)
     if (queryArabic != titleArabic && queryPhoneticPhrase.length >= 3) {
         val phoneticRank = crossScriptPhoneticRankPrepared(
             queryWords = queryPhoneticWords,
             queryPhrase = queryPhoneticPhrase,
-            normalizedTitle = cleanName,
+            titleWords = phoneticWords,
+            titlePhrase = phoneticPhrase,
         )
         if (phoneticRank != null) return 5 + phoneticRank
     }
 
-    val normalizedYear = normalizeSearchText(year.orEmpty())
     if (normalizedYear == normalizedQuery) return 8
 
-    val normalizedGenre = normalizeSearchText(genre.orEmpty())
     return when {
         normalizedGenre.contains(normalizedQuery) -> 9
         queryTokens.size > 1 && queryTokens.all(normalizedGenre::contains) -> 10
@@ -1199,21 +1257,21 @@ internal fun crossScriptPhoneticRank(query: String, title: String): Int? {
     val titleArabic = normalizedTitle.any(::isArabicSearchChar)
     if (queryArabic == titleArabic) return null
 
-    val queryWords = phoneticSearchWords(normalizedQuery)
+    val queryWords = phoneticSearchWordsNormalized(normalizedQuery)
+    val titleWords = phoneticSearchWordsNormalized(normalizedTitle)
     val queryPhrase = queryWords.joinToString(" ")
+    val titlePhrase = titleWords.joinToString(" ")
     if (queryPhrase.length < 3) return null
-    return crossScriptPhoneticRankPrepared(queryWords, queryPhrase, normalizedTitle)
+    return crossScriptPhoneticRankPrepared(queryWords, queryPhrase, titleWords, titlePhrase)
 }
 
 private fun crossScriptPhoneticRankPrepared(
     queryWords: List<String>,
     queryPhrase: String,
-    normalizedTitle: String,
+    titleWords: List<String>,
+    titlePhrase: String,
 ): Int? {
-    if (queryWords.isEmpty()) return null
-    val titleWords = phoneticSearchWords(normalizedTitle)
-    if (titleWords.isEmpty()) return null
-    val titlePhrase = titleWords.joinToString(" ")
+    if (queryWords.isEmpty() || titleWords.isEmpty()) return null
 
     return when {
         queryPhrase == titlePhrase -> 0
@@ -1227,7 +1285,10 @@ private fun crossScriptPhoneticRankPrepared(
     }
 }
 
-internal fun phoneticSearchWords(raw: String): List<String> = normalizeSearchText(raw)
+internal fun phoneticSearchWords(raw: String): List<String> =
+    phoneticSearchWordsNormalized(normalizeSearchText(raw))
+
+private fun phoneticSearchWordsNormalized(normalized: String): List<String> = normalized
     .split(' ')
     .map(::phoneticSearchWord)
     .filter { it.length >= 2 }
@@ -1260,31 +1321,36 @@ private fun phoneticSearchWord(word: String): String = buildString(word.length) 
 
 private fun isArabicSearchChar(char: Char): Boolean = char in '\u0600'..'\u06FF'
 
-internal fun normalizeSearchText(raw: String): String = normalizeSearchDigits(raw)
-    .trim()
-    .lowercase()
-    .replace('أ', 'ا')
-    .replace('إ', 'ا')
-    .replace('آ', 'ا')
-    .replace('ى', 'ي')
-    .replace('ؤ', 'و')
-    .replace('ئ', 'ي')
-    .replace("ـ", "")
-    .replace(ARABIC_DIACRITICS_REGEX, "")
-    .replace(NON_ALPHANUMERIC_REGEX, " ")
-    .replace(WHITESPACE_REGEX, " ")
-    .trim()
+internal fun normalizeSearchText(raw: String): String {
+    val normalized = StringBuilder(raw.length)
+    var pendingSpace = false
 
-private fun normalizeSearchDigits(raw: String): String = buildString(raw.length) {
-    raw.forEach { char ->
-        append(
-            when (char) {
-                in '٠'..'٩' -> ('0'.code + char.code - '٠'.code).toChar()
-                in '۰'..'۹' -> ('0'.code + char.code - '۰'.code).toChar()
-                else -> char
-            },
-        )
+    raw.forEach { original ->
+        val lower = original.lowercaseChar()
+        val mapped: Char? = when {
+            lower in '\u064B'..'\u065F' || lower == '\u0670' || lower == 'ـ' -> null
+            lower in '٠'..'٩' -> ('0'.code + lower.code - '٠'.code).toChar()
+            lower in '۰'..'۹' -> ('0'.code + lower.code - '۰'.code).toChar()
+            else -> when (lower) {
+                'أ', 'إ', 'آ' -> 'ا'
+                'ى' -> 'ي'
+                'ؤ' -> 'و'
+                'ئ' -> 'ي'
+                else -> lower
+            }
+        }
+
+        if (mapped == null) return@forEach
+        if (mapped.isLetterOrDigit()) {
+            if (pendingSpace && normalized.isNotEmpty()) normalized.append(' ')
+            normalized.append(mapped)
+            pendingSpace = false
+        } else if (normalized.isNotEmpty()) {
+            pendingSpace = true
+        }
     }
+
+    return normalized.toString()
 }
 
 private fun ContentType.smartLabel(): String = when (this) {
@@ -1295,10 +1361,7 @@ private fun ContentType.smartLabel(): String = when (this) {
 
 private const val SMART_SEARCH_MIN_QUERY_LENGTH = 2
 private const val SEARCH_DEBOUNCE_MS = 90L
-private const val SEARCH_CANCELLATION_MASK = 127
+private const val SEARCH_CANCELLATION_MASK = 63
 private const val SEARCH_RANK_COUNT = 11
 private const val MAX_RESULTS_PER_RANK = 48
 private const val MAX_SEARCH_RESULTS = 120
-private val WHITESPACE_REGEX = Regex("\\s+")
-private val ARABIC_DIACRITICS_REGEX = Regex("[\\u064B-\\u065F\\u0670]")
-private val NON_ALPHANUMERIC_REGEX = Regex("[^\\p{L}\\p{N}]+")
