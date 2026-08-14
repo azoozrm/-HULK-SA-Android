@@ -47,7 +47,6 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -80,7 +79,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
@@ -161,58 +159,40 @@ internal fun ProfileSmartSearchLayer(
         recentEntries.filter { selectedFilter.accepts(it.contentType) }
     }
 
-    val normalizedQuery = state.searchQuery.trim()
-    var settledQuery by remember { mutableStateOf("") }
-    LaunchedEffect(normalizedQuery) {
-        if (normalizedQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
-            settledQuery = ""
-        } else {
-            delay(SEARCH_DEBOUNCE_MS)
-            settledQuery = normalizedQuery
-        }
-    }
-
+    val query = state.searchQuery.trim()
     val searchSnapshot by produceState(
         initialValue = SmartSearchSnapshot(filter = selectedFilter),
         key1 = state.catalogs,
-        key2 = settledQuery to selectedFilter,
+        key2 = query to selectedFilter,
     ) {
-        value = if (settledQuery.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
+        value = if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) {
             SmartSearchSnapshot(filter = selectedFilter)
         } else {
             withContext(Dispatchers.Default) {
                 SmartSearchSnapshot(
-                    query = settledQuery,
+                    query = query,
                     filter = selectedFilter,
-                    results = boundedSmartSearch(state, settledQuery, selectedFilter),
+                    results = boundedSmartSearch(state, query, selectedFilter),
                 )
             }
         }
     }
-
-    val results = if (
-        searchSnapshot.query == settledQuery && searchSnapshot.filter == selectedFilter
-    ) {
+    val results = if (searchSnapshot.query == query && searchSnapshot.filter == selectedFilter) {
         searchSnapshot.results
     } else {
         emptyList()
     }
-    val imeVisible = !isTv && WindowInsets.isImeVisible
-    val suggestionLimit = if (isTv) MAX_TV_SUGGESTIONS else MAX_PHONE_SUGGESTIONS
-    val suggestions = remember(results, suggestionLimit) { results.take(suggestionLimit) }
-    val searchPending = normalizedQuery.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
-        (settledQuery != normalizedQuery ||
-            searchSnapshot.query != settledQuery ||
-            searchSnapshot.filter != selectedFilter)
+    val searchPending = query.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
+        (searchSnapshot.query != query || searchSnapshot.filter != selectedFilter)
     val relevantCatalogLoading = selectedFilter.contentType
         ?.let { it in state.loadingTypes }
         ?: state.loadingTypes.isNotEmpty()
-    val loadingCatalogs = normalizedQuery.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
+    val loadingCatalogs = query.length >= SMART_SEARCH_MIN_QUERY_LENGTH &&
         relevantCatalogLoading && results.isEmpty()
+    val imeVisible = !isTv && WindowInsets.isImeVisible
     val useRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
 
     val searchFieldRequester = remember { FocusRequester() }
-    val firstSuggestionRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
     val firstRecentRequester = remember { FocusRequester() }
     val railSearchRequester = remember { FocusRequester() }
@@ -225,7 +205,6 @@ internal fun ProfileSmartSearchLayer(
         historyRevision++
         onOpen(item)
     }
-
     val openRecent: (ProfileContentSearchHistoryEntry) -> Unit = { entry ->
         val resolved = state.catalogs[entry.contentType]
             ?.items
@@ -255,13 +234,10 @@ internal fun ProfileSmartSearchLayer(
                     onSwitchProfile = onSwitchProfile,
                 )
                 SmartSearchContent(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                     state = state,
                     isTv = isTv,
                     recentEntries = visibleRecentEntries,
-                    suggestions = suggestions,
                     results = results,
                     selectedFilter = selectedFilter,
                     filterRequesters = filterRequesters,
@@ -269,14 +245,12 @@ internal fun ProfileSmartSearchLayer(
                     loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
                     searchFieldRequester = searchFieldRequester,
-                    firstSuggestionRequester = firstSuggestionRequester,
                     firstResultRequester = firstResultRequester,
                     firstRecentRequester = firstRecentRequester,
                     railSearchRequester = if (isTv) railSearchRequester else null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
                     onFilterSelected = { selectedFilter = it },
-                    onOpenSuggestion = recordAndOpen,
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
                     onRemoveRecent = { entry ->
@@ -294,14 +268,10 @@ internal fun ProfileSmartSearchLayer(
         } else {
             Column(Modifier.fillMaxSize()) {
                 SmartSearchContent(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .imePadding(),
+                    modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
                     state = state,
                     isTv = false,
                     recentEntries = visibleRecentEntries,
-                    suggestions = suggestions,
                     results = results,
                     selectedFilter = selectedFilter,
                     filterRequesters = filterRequesters,
@@ -309,14 +279,12 @@ internal fun ProfileSmartSearchLayer(
                     loadingCatalogs = loadingCatalogs,
                     imeVisible = imeVisible,
                     searchFieldRequester = searchFieldRequester,
-                    firstSuggestionRequester = firstSuggestionRequester,
                     firstResultRequester = firstResultRequester,
                     firstRecentRequester = firstRecentRequester,
                     railSearchRequester = null,
                     isFavorite = isFavorite,
                     onSearch = onSearch,
                     onFilterSelected = { selectedFilter = it },
-                    onOpenSuggestion = recordAndOpen,
                     onOpenResult = recordAndOpen,
                     onOpenRecent = openRecent,
                     onRemoveRecent = { entry ->
@@ -347,7 +315,6 @@ private fun SmartSearchContent(
     state: HulkUiState,
     isTv: Boolean,
     recentEntries: List<ProfileContentSearchHistoryEntry>,
-    suggestions: List<ContentItem>,
     results: List<ContentItem>,
     selectedFilter: SmartSearchFilter,
     filterRequesters: Map<SmartSearchFilter, FocusRequester>,
@@ -355,14 +322,12 @@ private fun SmartSearchContent(
     loadingCatalogs: Boolean,
     imeVisible: Boolean,
     searchFieldRequester: FocusRequester,
-    firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
     firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
     isFavorite: (ContentItem) -> Boolean,
     onSearch: (String) -> Unit,
     onFilterSelected: (SmartSearchFilter) -> Unit,
-    onOpenSuggestion: (ContentItem) -> Unit,
     onOpenResult: (ContentItem) -> Unit,
     onOpenRecent: (ProfileContentSearchHistoryEntry) -> Unit,
     onRemoveRecent: (ProfileContentSearchHistoryEntry) -> Unit,
@@ -388,7 +353,6 @@ private fun SmartSearchContent(
     }
     val selectedFilterRequester = filterRequesters.getValue(selectedFilter)
     val firstContentRequester = when {
-        suggestions.isNotEmpty() -> firstSuggestionRequester
         results.isNotEmpty() -> firstResultRequester
         state.searchQuery.isBlank() && recentEntries.isNotEmpty() -> firstRecentRequester
         else -> null
@@ -398,11 +362,7 @@ private fun SmartSearchContent(
         modifier = modifier
             .background(
                 Brush.verticalGradient(
-                    listOf(
-                        colors.background,
-                        colors.surface.copy(alpha = .96f),
-                        colors.background,
-                    ),
+                    listOf(colors.background, colors.surface.copy(alpha = .96f), colors.background),
                 ),
             )
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
@@ -436,7 +396,7 @@ private fun SmartSearchContent(
                 )
                 if (!compactHeight && !imeVisible) {
                     Text(
-                        text = "بحث سريع مع تصفية القنوات والافلام والمسلسلات",
+                        text = "بحث سريع في القنوات والأفلام والمسلسلات",
                         color = colors.textMuted,
                         fontSize = if (isTv) 13.sp else 11.sp,
                         maxLines = 1,
@@ -461,12 +421,10 @@ private fun SmartSearchContent(
             value = state.searchQuery,
             onValueChange = onSearch,
             isTv = isTv,
-            hasSuggestions = suggestions.isNotEmpty(),
             hasResults = results.isNotEmpty(),
             hasRecent = state.searchQuery.isBlank() && recentEntries.isNotEmpty(),
             searchFieldRequester = searchFieldRequester,
             firstFilterRequester = if (isTv) selectedFilterRequester else null,
-            firstSuggestionRequester = firstSuggestionRequester,
             firstResultRequester = firstResultRequester,
             firstRecentRequester = firstRecentRequester,
             railSearchRequester = railSearchRequester,
@@ -504,17 +462,36 @@ private fun SmartSearchContent(
                     modifier = Modifier.weight(1f),
                     isTv = isTv,
                     title = "اكتب حرفين على الاقل",
-                    subtitle = "لن يبدأ فحص المكتبة من حرف واحد حتى يبقى البحث سريع ومستقر",
+                    subtitle = "تظهر النتائج مباشرة بعد كتابة حرفين",
                 )
             }
 
-            searchPending || loadingCatalogs -> {
+            results.isNotEmpty() -> {
+                SmartResultsGrid(
+                    modifier = Modifier.weight(1f),
+                    results = results,
+                    isTv = isTv,
+                    firstResultRequester = firstResultRequester,
+                    topRequester = selectedFilterRequester,
+                    isFavorite = isFavorite,
+                    onOpenResult = onOpenResult,
+                    onToggleFavorite = onToggleFavorite,
+                )
+            }
+
+            searchPending -> {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    LoadingRing(label = "جاري تجهيز الاقتراحات…")
+                    LoadingRing(label = "جاري البحث…")
                 }
             }
 
-            results.isEmpty() -> {
+            loadingCatalogs -> {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    LoadingRing(label = "جاري تحميل بقية المحتوى…")
+                }
+            }
+
+            else -> {
                 SearchMessage(
                     modifier = Modifier.weight(1f),
                     isTv = isTv,
@@ -523,24 +500,7 @@ private fun SmartSearchContent(
                     } else {
                         "لا توجد نتائج في ${selectedFilter.label}"
                     },
-                    subtitle = "جرب كتابة جزء آخر من الاسم او اختر نوع محتوى مختلف",
-                )
-            }
-
-            else -> {
-                SmartSuggestionsAndResults(
-                    modifier = Modifier.weight(1f),
-                    query = state.searchQuery.trim(),
-                    suggestions = suggestions,
-                    results = results,
-                    isTv = isTv,
-                    firstSuggestionRequester = firstSuggestionRequester,
-                    firstResultRequester = firstResultRequester,
-                    topRequester = selectedFilterRequester,
-                    isFavorite = isFavorite,
-                    onOpenSuggestion = onOpenSuggestion,
-                    onOpenResult = onOpenResult,
-                    onToggleFavorite = onToggleFavorite,
+                    subtitle = "جرب جزءا آخر من الاسم أو اختر نوع محتوى مختلف",
                 )
             }
         }
@@ -590,12 +550,10 @@ private fun SmartSearchInput(
     value: String,
     onValueChange: (String) -> Unit,
     isTv: Boolean,
-    hasSuggestions: Boolean,
     hasResults: Boolean,
     hasRecent: Boolean,
     searchFieldRequester: FocusRequester,
     firstFilterRequester: FocusRequester?,
-    firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
     firstRecentRequester: FocusRequester,
     railSearchRequester: FocusRequester?,
@@ -610,25 +568,16 @@ private fun SmartSearchInput(
                 keyboardController?.hide()
                 runCatching { firstFilterRequester.requestFocus() }.isSuccess
             }
-
-            hasSuggestions -> {
-                tvEditing = false
-                keyboardController?.hide()
-                runCatching { firstSuggestionRequester.requestFocus() }.isSuccess
-            }
-
             hasResults -> {
                 tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstResultRequester.requestFocus() }.isSuccess
             }
-
             hasRecent -> {
                 tvEditing = false
                 keyboardController?.hide()
                 runCatching { firstRecentRequester.requestFocus() }.isSuccess
             }
-
             else -> false
         }
     }
@@ -666,9 +615,7 @@ private fun SmartSearchInput(
         value = value,
         onValueChange = onValueChange,
         label = "اكتب اسم فيلم او مسلسل او قناة…",
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(tvModifier),
+        modifier = Modifier.fillMaxWidth().then(tvModifier),
         readOnly = isTv && !tvEditing,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = { moveDown() }),
@@ -684,42 +631,29 @@ private fun SmartSearchFilterBar(
     downRequester: FocusRequester?,
     onSelect: (SmartSearchFilter) -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-    Row(
+    LazyRow(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp),
     ) {
-        Text(
-            text = "عرض",
-            color = colors.textMuted,
-            fontSize = if (isTv) 12.sp else 10.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        LazyRow(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp),
-        ) {
-            items(
-                items = SmartSearchFilter.entries,
-                key = SmartSearchFilter::name,
-            ) { filter ->
-                val active = selected == filter
-                FocusButton(
-                    text = filter.label,
-                    onClick = { onSelect(filter) },
-                    modifier = Modifier
-                        .focusRequester(requesters.getValue(filter))
-                        .focusProperties {
-                            up = searchFieldRequester
-                            downRequester?.let { down = it }
-                        },
-                    primary = active,
-                    compact = true,
-                    outlined = !active,
-                )
-            }
+        items(
+            items = SmartSearchFilter.entries,
+            key = SmartSearchFilter::name,
+        ) { filter ->
+            val active = selected == filter
+            FocusButton(
+                text = filter.label,
+                onClick = { onSelect(filter) },
+                modifier = Modifier
+                    .focusRequester(requesters.getValue(filter))
+                    .focusProperties {
+                        up = searchFieldRequester
+                        downRequester?.let { down = it }
+                    },
+                primary = active,
+                compact = true,
+                outlined = !active,
+            )
         }
     }
 }
@@ -794,10 +728,7 @@ private fun SmartRecentSection(
                 contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
             ) {
-                items(
-                    items = entries,
-                    key = { it.stableKey },
-                ) { entry ->
+                items(items = entries, key = { it.stableKey }) { entry ->
                     val isFirstEntry = entries.firstOrNull()?.stableKey == entry.stableKey
                     SmartRecentCard(
                         entry = entry,
@@ -833,13 +764,7 @@ private fun SmartRecentCard(
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF11130F))
             .border(1.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(16.dp))
-            .then(
-                if (isTv) {
-                    Modifier
-                } else {
-                    Modifier.clickable(role = Role.Button, onClick = onOpen)
-                },
-            )
+            .then(if (isTv) Modifier else Modifier.clickable(role = Role.Button, onClick = onOpen))
             .padding(10.dp),
     ) {
         AsyncImage(
@@ -890,17 +815,13 @@ private fun SmartRecentCard(
 }
 
 @Composable
-private fun SmartSuggestionsAndResults(
+private fun SmartResultsGrid(
     modifier: Modifier,
-    query: String,
-    suggestions: List<ContentItem>,
     results: List<ContentItem>,
     isTv: Boolean,
-    firstSuggestionRequester: FocusRequester,
     firstResultRequester: FocusRequester,
     topRequester: FocusRequester,
     isFavorite: (ContentItem) -> Boolean,
-    onOpenSuggestion: (ContentItem) -> Unit,
     onOpenResult: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
 ) {
@@ -915,51 +836,7 @@ private fun SmartSuggestionsAndResults(
         item(span = { GridItemSpan(maxLineSpan) }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "اقتراحات",
-                    color = colors.text,
-                    fontSize = if (isTv) 19.sp else 15.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "\"$query\"",
-                    color = colors.goldBright,
-                    fontSize = if (isTv) 11.sp else 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-
-        suggestions.forEachIndexed { index, item ->
-            item(
-                key = "suggestion:${item.type}:${item.id}",
-                span = { GridItemSpan(maxLineSpan) },
-            ) {
-                SmartSuggestionRow(
-                    item = item,
-                    isTv = isTv,
-                    modifier = Modifier.then(
-                        if (index == 0) {
-                            Modifier
-                                .focusRequester(firstSuggestionRequester)
-                                .focusProperties { up = topRequester }
-                        } else {
-                            Modifier
-                        },
-                    ),
-                    onClick = { onOpenSuggestion(item) },
-                )
-            }
-        }
-
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(
-                modifier = Modifier.padding(top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "كل النتائج",
+                    text = "النتائج",
                     color = colors.text,
                     fontSize = if (isTv) 18.sp else 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -988,92 +865,13 @@ private fun SmartSuggestionsAndResults(
                         if (index == 0) {
                             Modifier
                                 .focusRequester(firstResultRequester)
-                                .focusProperties { up = firstSuggestionRequester }
+                                .focusProperties { up = topRequester }
                         } else {
                             Modifier
                         },
                     ),
             )
         }
-    }
-}
-
-@Composable
-private fun SmartSuggestionRow(
-    item: ContentItem,
-    isTv: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val shape = RoundedCornerShape(14.dp)
-    var focused by remember(item.type, item.id) { mutableStateOf(false) }
-    val showFocused = isTv && focused && adaptiveUi.showFocusHighlights
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .onFocusChanged { focused = it.isFocused }
-            .clip(shape)
-            .background(
-                if (showFocused) {
-                    colors.gold.copy(alpha = .18f)
-                } else {
-                    colors.surfaceRaised.copy(alpha = .78f)
-                },
-            )
-            .border(
-                width = if (showFocused) 2.dp else 1.dp,
-                color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .07f),
-                shape = shape,
-            )
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        AsyncImage(
-            model = item.posterUrl,
-            contentDescription = item.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .width(if (isTv) 58.dp else 48.dp)
-                .height(if (isTv) 72.dp else 58.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(colors.surface),
-        )
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = item.name,
-                color = colors.text,
-                fontSize = if (isTv) 15.sp else 13.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOfNotNull(item.type.smartLabel(), item.year?.takeIf(String::isNotBlank)).joinToString(" • "),
-                color = colors.textMuted,
-                fontSize = if (isTv) 11.sp else 10.sp,
-                maxLines = 1,
-            )
-            item.genre?.takeIf(String::isNotBlank)?.let { genre ->
-                Text(
-                    text = genre,
-                    color = colors.textMuted.copy(alpha = .75f),
-                    fontSize = if (isTv) 10.sp else 9.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Text(
-            text = "فتح",
-            color = colors.goldBright,
-            fontSize = if (isTv) 12.sp else 10.sp,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 
@@ -1238,10 +1036,7 @@ private fun SmartSearchBottomNavigation(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            items(
-                items = smartSearchDestinations,
-                key = { it.destination.name },
-            ) { entry ->
+            items(items = smartSearchDestinations, key = { it.destination.name }) { entry ->
                 val active = selected == entry.destination
                 Column(
                     modifier = Modifier
@@ -1321,6 +1116,7 @@ private fun ContentItem.smartSearchRankOrNull(
     val titleTokens = cleanName.split(' ').filter(String::isNotBlank)
     val normalizedYear = normalizeSearchText(year.orEmpty())
     val normalizedGenre = normalizeSearchText(genre.orEmpty())
+    val phoneticRank = crossScriptPhoneticRank(normalizedQuery, cleanName)
     return when {
         cleanName == normalizedQuery -> 0
         cleanName.startsWith(normalizedQuery) -> 1
@@ -1329,14 +1125,72 @@ private fun ContentItem.smartSearchRankOrNull(
         queryTokens.size > 1 && queryTokens.all { token ->
             titleTokens.any { word -> word.startsWith(token) || word.contains(token) }
         } -> 4
-        normalizedYear == normalizedQuery -> 5
-        normalizedGenre.contains(normalizedQuery) -> 6
-        queryTokens.size > 1 && queryTokens.all(normalizedGenre::contains) -> 7
+        phoneticRank != null -> 5 + phoneticRank
+        normalizedYear == normalizedQuery -> 8
+        normalizedGenre.contains(normalizedQuery) -> 9
+        queryTokens.size > 1 && queryTokens.all(normalizedGenre::contains) -> 10
         else -> null
     }
 }
 
-private fun normalizeSearchText(raw: String): String = normalizeSearchDigits(raw)
+internal fun crossScriptPhoneticRank(query: String, title: String): Int? {
+    val queryArabic = query.any(::isArabicSearchChar)
+    val titleArabic = title.any(::isArabicSearchChar)
+    if (queryArabic == titleArabic) return null
+
+    val queryWords = phoneticSearchWords(query)
+    val titleWords = phoneticSearchWords(title)
+    if (queryWords.isEmpty() || titleWords.isEmpty()) return null
+    val queryPhrase = queryWords.joinToString(" ")
+    val titlePhrase = titleWords.joinToString(" ")
+    if (queryPhrase.length < 3) return null
+
+    return when {
+        queryPhrase == titlePhrase -> 0
+        titlePhrase.startsWith(queryPhrase) -> 1
+        queryWords.all { queryWord ->
+            queryWord.length >= 2 && titleWords.any { titleWord ->
+                titleWord.startsWith(queryWord) || titleWord.contains(queryWord)
+            }
+        } -> 2
+        else -> null
+    }
+}
+
+internal fun phoneticSearchWords(raw: String): List<String> = normalizeSearchText(raw)
+    .split(' ')
+    .map(::phoneticSearchWord)
+    .filter { it.length >= 2 }
+
+private fun phoneticSearchWord(word: String): String = buildString(word.length) {
+    word.forEach { char ->
+        when (char.lowercaseChar()) {
+            'a', 'e', 'i', 'o', 'u', 'y', 'w',
+            'ا', 'أ', 'إ', 'آ', 'و', 'ي', 'ى', 'ء', 'ع' -> Unit
+
+            'b', 'p', 'ب', 'پ' -> append('b')
+            'r', 'ر' -> append('r')
+            's', 'z', 'ص', 'س', 'ز', 'ذ', 'ض', 'ظ' -> append('s')
+            'n', 'ن' -> append('n')
+            'k', 'q', 'c', 'g', 'ك', 'ق', 'غ' -> append('k')
+            'f', 'v', 'ف', 'ڤ' -> append('f')
+            'm', 'م' -> append('m')
+            'l', 'ل' -> append('l')
+            't', 'd', 'ت', 'ط', 'د' -> append('t')
+            'h', 'ه', 'ح' -> append('h')
+            'j', 'ج' -> append('j')
+            'خ' -> append("kh")
+            'ش' -> append("sh")
+            'ث' -> append("th")
+            'x' -> append("ks")
+            else -> if (char.isLetterOrDigit()) append(char.lowercaseChar())
+        }
+    }
+}
+
+private fun isArabicSearchChar(char: Char): Boolean = char in '\u0600'..'\u06FF'
+
+internal fun normalizeSearchText(raw: String): String = normalizeSearchDigits(raw)
     .trim()
     .lowercase()
     .replace('أ', 'ا')
@@ -1370,10 +1224,7 @@ private fun ContentType.smartLabel(): String = when (this) {
 }
 
 private const val SMART_SEARCH_MIN_QUERY_LENGTH = 2
-private const val SEARCH_DEBOUNCE_MS = 140L
-private const val MAX_PHONE_SUGGESTIONS = 4
-private const val MAX_TV_SUGGESTIONS = 5
-private const val SEARCH_RANK_COUNT = 8
+private const val SEARCH_RANK_COUNT = 11
 private const val MAX_RESULTS_PER_RANK = 48
 private const val MAX_SEARCH_RESULTS = 120
 private val WHITESPACE_REGEX = Regex("\\s+")
