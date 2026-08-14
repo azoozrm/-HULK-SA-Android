@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -247,6 +248,13 @@ internal fun ProfileSmartSearchLayer(
     val railSearchRequester = remember { FocusRequester() }
     val filterRequesters = remember {
         SmartSearchFilter.entries.associateWith { FocusRequester() }
+    }
+
+    LaunchedEffect(isTv, activeProfileId) {
+        if (isTv) {
+            delay(TV_INITIAL_SEARCH_FOCUS_DELAY_MS)
+            runCatching { searchFieldRequester.requestFocus() }
+        }
     }
 
     val recordAndOpen: (ContentItem) -> Unit = { item ->
@@ -636,6 +644,7 @@ private fun SmartSearchInput(
         Modifier
             .focusRequester(searchFieldRequester)
             .focusProperties {
+                firstFilterRequester?.let { down = it }
                 railSearchRequester?.let { right = it }
             }
             .onFocusChanged { state ->
@@ -653,6 +662,8 @@ private fun SmartSearchInput(
                     true
                 } else if (event.key == Key.DirectionDown) {
                     moveDown()
+                } else if (event.key == Key.DirectionUp) {
+                    true
                 } else {
                     false
                 }
@@ -691,7 +702,9 @@ private fun SmartSearchFilterBar(
     onSelect: (SmartSearchFilter) -> Unit,
 ) {
     LazyRow(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusGroup(),
         contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 7.dp),
     ) {
@@ -707,7 +720,28 @@ private fun SmartSearchFilterBar(
                     .focusRequester(requesters.getValue(filter))
                     .focusProperties {
                         up = searchFieldRequester
-                        downRequester?.let { down = it }
+                        if (downRequester != null) {
+                            down = downRequester
+                        } else if (isTv) {
+                            down = FocusRequester.Cancel
+                        }
+                    }
+                    .onPreviewKeyEvent { event ->
+                        if (!isTv || event.type != KeyEventType.KeyDown) {
+                            false
+                        } else {
+                            when (event.key) {
+                                Key.DirectionUp -> runCatching { searchFieldRequester.requestFocus() }.isSuccess
+                                Key.DirectionDown -> {
+                                    if (downRequester != null) {
+                                        runCatching { downRequester.requestFocus() }.isSuccess
+                                    } else {
+                                        true
+                                    }
+                                }
+                                else -> false
+                            }
+                        }
                     },
                 primary = active,
                 compact = true,
@@ -783,7 +817,9 @@ private fun SmartRecentSection(
             }
         } else {
             LazyRow(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusGroup(),
                 contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
             ) {
@@ -793,12 +829,11 @@ private fun SmartRecentSection(
                         entry = entry,
                         isTv = isTv,
                         openButtonModifier = if (isTv && isFirstEntry) {
-                            Modifier
-                                .focusRequester(firstRecentRequester)
-                                .focusProperties { up = topRequester }
+                            Modifier.focusRequester(firstRecentRequester)
                         } else {
                             Modifier
                         },
+                        topRequester = topRequester,
                         onOpen = { onOpen(entry) },
                         onRemove = { onRemove(entry) },
                     )
@@ -813,6 +848,7 @@ private fun SmartRecentCard(
     entry: ProfileContentSearchHistoryEntry,
     isTv: Boolean,
     openButtonModifier: Modifier = Modifier,
+    topRequester: FocusRequester,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -859,12 +895,25 @@ private fun SmartRecentCard(
             FocusButton(
                 text = "فتح",
                 onClick = onOpen,
-                modifier = openButtonModifier.weight(1f),
+                modifier = openButtonModifier
+                    .weight(1f)
+                    .focusProperties {
+                        if (isTv) {
+                            up = topRequester
+                            down = FocusRequester.Cancel
+                        }
+                    },
                 compact = true,
             )
             FocusButton(
                 text = "حذف",
                 onClick = onRemove,
+                modifier = Modifier.focusProperties {
+                    if (isTv) {
+                        up = topRequester
+                        down = FocusRequester.Cancel
+                    }
+                },
                 primary = false,
                 compact = true,
                 outlined = true,
@@ -885,9 +934,40 @@ private fun SmartResultsGrid(
     onToggleFavorite: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val gridState = rememberLazyGridState()
+    var focusedResultIndex by remember(results) { mutableIntStateOf(-1) }
+
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = if (isTv) 146.dp else 112.dp),
-        modifier = modifier.fillMaxWidth(),
+        state = gridState,
+        modifier = modifier
+            .fillMaxWidth()
+            .focusGroup()
+            .onPreviewKeyEvent { event ->
+                if (!isTv || event.type != KeyEventType.KeyDown || focusedResultIndex < 0) {
+                    false
+                } else {
+                    val layoutItems = gridState.layoutInfo.visibleItemsInfo
+                    val focusedGridIndex = focusedResultIndex + 1
+                    val focusedRow = layoutItems.firstOrNull { it.index == focusedGridIndex }?.row
+                    when (event.key) {
+                        Key.DirectionUp -> {
+                            val firstResultRow = layoutItems.firstOrNull { it.index == 1 }?.row
+                            if (firstResultRow != null && focusedRow == firstResultRow) {
+                                runCatching { topRequester.requestFocus() }.isSuccess
+                            } else {
+                                false
+                            }
+                        }
+                        Key.DirectionDown -> {
+                            val lastResultGridIndex = results.size
+                            val lastResultRow = layoutItems.firstOrNull { it.index == lastResultGridIndex }?.row
+                            lastResultRow != null && focusedRow == lastResultRow
+                        }
+                        else -> false
+                    }
+                }
+            },
         contentPadding = PaddingValues(bottom = if (isTv) 24.dp else 16.dp),
         horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
@@ -918,13 +998,12 @@ private fun SmartResultsGrid(
                 isFavorite = isFavorite(item),
                 onClick = { onOpenResult(item) },
                 onLongClick = { onToggleFavorite(item) },
+                onFocused = { focusedResultIndex = index },
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(
                         if (index == 0) {
-                            Modifier
-                                .focusRequester(firstResultRequester)
-                                .focusProperties { up = topRequester }
+                            Modifier.focusRequester(firstResultRequester)
                         } else {
                             Modifier
                         },
@@ -1361,6 +1440,7 @@ private fun ContentType.smartLabel(): String = when (this) {
 
 private const val SMART_SEARCH_MIN_QUERY_LENGTH = 2
 private const val SEARCH_DEBOUNCE_MS = 90L
+private const val TV_INITIAL_SEARCH_FOCUS_DELAY_MS = 80L
 private const val SEARCH_CANCELLATION_MASK = 63
 private const val SEARCH_RANK_COUNT = 11
 private const val MAX_RESULTS_PER_RANK = 48
