@@ -27,6 +27,50 @@ class AccountFoundationTest {
     }
 
     @Test
+    fun authenticationIdentityKeepsSameSubscriberScopeAcrossPortalChanges() {
+        val existingAccountId = stableAccountId("http://first.example.test:8080", "subscriber")
+
+        val resolved = resolveAccountIdForAuthentication(
+            portalBaseUrl = "http://second.example.test:8080",
+            username = "subscriber",
+            aliasedAccountId = null,
+            currentAccountId = null,
+            currentUsername = null,
+            lastAccountId = existingAccountId,
+            lastUsername = "subscriber",
+        )
+
+        assertEquals(existingAccountId, resolved)
+    }
+
+    @Test
+    fun authenticationIdentityDoesNotReuseDifferentUsernameScope() {
+        val existingAccountId = stableAccountId("http://first.example.test:8080", "subscriber")
+        val expected = stableAccountId("http://second.example.test:8080", "another-user")
+
+        val resolved = resolveAccountIdForAuthentication(
+            portalBaseUrl = "http://second.example.test:8080",
+            username = "another-user",
+            aliasedAccountId = null,
+            currentAccountId = null,
+            currentUsername = null,
+            lastAccountId = existingAccountId,
+            lastUsername = "subscriber",
+        )
+
+        assertEquals(expected, resolved)
+        assertNotEquals(existingAccountId, resolved)
+    }
+
+    @Test
+    fun usernameAliasIsCaseSensitive() {
+        assertNotEquals(
+            accountIdentityAliasKey("Subscriber"),
+            accountIdentityAliasKey("subscriber"),
+        )
+    }
+
+    @Test
     fun scopedPreferencesNameKeepsAccountStorageSeparate() {
         val accountA = stableAccountId("http://example.test:8080", "alpha")
         val accountB = stableAccountId("http://example.test:8080", "beta")

@@ -7,9 +7,9 @@ import sa.hulksa.player.model.Credentials
 
 class CredentialPayloadCodecTest {
     @Test
-    fun rememberAccountPayloadIncludesAccessCodeAndCredentials() {
+    fun rememberAccountPayloadPreservesCaseSensitiveAccessCodeAndCredentials() {
         val credentials = Credentials(
-            accessCode = "HULK-ABCD-EFGH-JKMN-PQRS",
+            accessCode = "VUKqm6Z6ZZ",
             username = "subscriber",
             password = "secret",
         )

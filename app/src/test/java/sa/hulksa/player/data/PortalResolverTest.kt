@@ -49,10 +49,10 @@ class PortalResolverTest {
     }
 
     @Test
-    fun validCustomCodeResolvesCurrentResellerHostOverHttps() = runBlocking {
+    fun generatedCaseSensitiveCodeIsSentExactlyAsEntered() = runBlocking {
         server.enqueue(jsonResponse(200, """{"host":"http://reseller.example:8080/"}"""))
 
-        val portal = resolver().resolve(" hulkab12-cd34 ")
+        val portal = resolver().resolve(GENERATED_CODE)
 
         assertEquals("http://reseller.example:8080", portal.baseUrl)
         assertEquals(PortalConfig.Source.ACCESS_CODE, portal.source)
@@ -60,13 +60,50 @@ class PortalResolverTest {
         assertEquals("/api/reseller/resolve/", request.path)
         assertEquals("POST", request.method)
         assertEquals(
-            VALID_CODE,
+            GENERATED_CODE,
             JSONObject(request.body.readUtf8()).getString("code"),
         )
     }
 
     @Test
-    fun legacyGeneratedCodeRemainsSupported() = runBlocking {
+    fun mixedCaseCodeRemainsCaseSensitiveEndToEnd() = runBlocking {
+        server.enqueue(jsonResponse(200, """{"host":"https://reseller.example"}"""))
+
+        resolver().resolve(MIXED_CASE_CODE)
+
+        assertEquals(
+            MIXED_CASE_CODE,
+            JSONObject(server.takeRequest().body.readUtf8()).getString("code"),
+        )
+    }
+
+    @Test
+    fun customAdminCodeOutsideLegacyFormatIsForwardedToApi() = runBlocking {
+        server.enqueue(jsonResponse(200, """{"host":"https://custom.example"}"""))
+
+        resolver().resolve(CUSTOM_ADMIN_CODE)
+
+        assertEquals(
+            CUSTOM_ADMIN_CODE,
+            JSONObject(server.takeRequest().body.readUtf8()).getString("code"),
+        )
+    }
+
+    @Test
+    fun accessCodeCharactersAndWhitespaceAreNotModified() = runBlocking {
+        server.enqueue(jsonResponse(200, """{"host":"https://custom.example"}"""))
+        val exactInput = "  Ab-12_cd!  "
+
+        resolver().resolve(exactInput)
+
+        assertEquals(
+            exactInput,
+            JSONObject(server.takeRequest().body.readUtf8()).getString("code"),
+        )
+    }
+
+    @Test
+    fun legacyGeneratedCodeRemainsSupportedWithoutReformatting() = runBlocking {
         server.enqueue(jsonResponse(200, """{"host":"https://legacy.example"}"""))
 
         val portal = resolver().resolve(LEGACY_CODE)
@@ -79,11 +116,11 @@ class PortalResolverTest {
     }
 
     @Test
-    fun invalidCodeReturnsClearFailure() {
+    fun invalidCodeReturnsClearFailureFromApi() {
         server.enqueue(apiError(404, "INVALID_CODE"))
 
         assertThrows(PortalException.InvalidAccessCode::class.java) {
-            runBlocking { resolver().resolve(VALID_CODE) }
+            runBlocking { resolver().resolve(GENERATED_CODE) }
         }
     }
 
@@ -92,7 +129,7 @@ class PortalResolverTest {
         server.enqueue(apiError(403, "RESELLER_INACTIVE"))
 
         assertThrows(PortalException.ResellerInactive::class.java) {
-            runBlocking { resolver().resolve(VALID_CODE) }
+            runBlocking { resolver().resolve(GENERATED_CODE) }
         }
     }
 
@@ -101,7 +138,7 @@ class PortalResolverTest {
         server.enqueue(jsonResponse(200, """{"host":"javascript:alert(1)"}"""))
 
         assertThrows(PortalException.InvalidHost::class.java) {
-            runBlocking { resolver().resolve(VALID_CODE) }
+            runBlocking { resolver().resolve(GENERATED_CODE) }
         }
     }
 
@@ -111,8 +148,8 @@ class PortalResolverTest {
         server.enqueue(jsonResponse(200, """{"host":"https://second.example"}"""))
 
         val resolver = resolver()
-        assertEquals("http://first.example:8080", resolver.resolve(VALID_CODE).baseUrl)
-        assertEquals("https://second.example", resolver.resolve(VALID_CODE).baseUrl)
+        assertEquals("http://first.example:8080", resolver.resolve(GENERATED_CODE).baseUrl)
+        assertEquals("https://second.example", resolver.resolve(GENERATED_CODE).baseUrl)
         assertEquals(2, server.requestCount)
     }
 
@@ -122,7 +159,7 @@ class PortalResolverTest {
         server.enqueue(jsonResponse(200, """{"host":"http://reseller.example:8080"}"""))
 
         assertThrows(PortalException.InvalidAccessCode::class.java) {
-            runBlocking { resolver().resolve(VALID_CODE) }
+            runBlocking { resolver().resolve(GENERATED_CODE) }
         }
         val portal = runBlocking { resolver().resolve(ROTATED_CODE) }
         assertEquals("http://reseller.example:8080", portal.baseUrl)
@@ -136,15 +173,15 @@ class PortalResolverTest {
         )
 
         assertThrows(PortalException.ConfigurationMissing::class.java) {
-            runBlocking { insecureResolver.resolve(VALID_CODE) }
+            runBlocking { insecureResolver.resolve(GENERATED_CODE) }
         }
         assertEquals(0, server.requestCount)
     }
 
     @Test
-    fun malformedAccessCodeIsRejectedBeforeNetworkRequest() {
+    fun blankAccessCodeIsRejectedBeforeNetworkRequest() {
         assertThrows(PortalException.InvalidAccessCode::class.java) {
-            runBlocking { resolver().resolve("HULK-8K4P") }
+            runBlocking { resolver().resolve("   ") }
         }
         assertEquals(0, server.requestCount)
     }
@@ -165,8 +202,10 @@ class PortalResolverTest {
         .setBody(body)
 
     private companion object {
-        const val VALID_CODE = "HULK-AB12-CD34"
-        const val ROTATED_CODE = "HULK-TUVW-XYZ2-3456"
+        const val GENERATED_CODE = "VUKqm6Z6ZZ"
+        const val MIXED_CASE_CODE = "aB12Cd34Ef"
+        const val CUSTOM_ADMIN_CODE = "Admin-Code_v2!"
+        const val ROTATED_CODE = "zY98xW76vU"
         const val LEGACY_CODE = "HULK-ABCD-EFGH-JKMN-PQRS"
     }
 }

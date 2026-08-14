@@ -17,6 +17,42 @@ internal fun stableAccountId(portalBaseUrl: String, username: String): String {
     return digest.joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }
 
+/**
+ * Persistent local alias for a subscriber username. Access codes and reseller
+ * hosts may rotate, so they must not redefine the account that owns profiles,
+ * favorites, history, downloads or other account-scoped preferences.
+ */
+internal fun accountIdentityAliasKey(username: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest(username.trim().toByteArray(Charsets.UTF_8))
+        .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    return "account_alias_$digest"
+}
+
+internal fun resolveAccountIdForAuthentication(
+    portalBaseUrl: String,
+    username: String,
+    aliasedAccountId: String?,
+    currentAccountId: String?,
+    currentUsername: String?,
+    lastAccountId: String?,
+    lastUsername: String?,
+): String {
+    val normalizedUsername = username.trim()
+    fun validAccountId(value: String?): String? = value
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
+    validAccountId(aliasedAccountId)?.let { return it }
+    if (currentUsername?.trim() == normalizedUsername) {
+        validAccountId(currentAccountId)?.let { return it }
+    }
+    if (lastUsername?.trim() == normalizedUsername) {
+        validAccountId(lastAccountId)?.let { return it }
+    }
+    return stableAccountId(portalBaseUrl, normalizedUsername)
+}
+
 internal fun accountScopedPreferencesName(baseName: String, accountId: String): String =
     "$baseName.account.${accountId.trim()}"
 
@@ -136,7 +172,17 @@ class AccountSessionStore(context: Context) {
 
     @Synchronized
     fun recordAuthenticated(session: AuthenticatedSession): AccountSessionMetadata {
-        val accountId = stableAccountId(session.portal.baseUrl, session.credentials.username)
+        val username = session.credentials.username.trim()
+        val aliasKey = accountIdentityAliasKey(username)
+        val accountId = resolveAccountIdForAuthentication(
+            portalBaseUrl = session.portal.baseUrl,
+            username = username,
+            aliasedAccountId = preferences.getString(aliasKey, null),
+            currentAccountId = preferences.getString(KEY_ACCOUNT_ID, null),
+            currentUsername = preferences.getString(KEY_USERNAME, null),
+            lastAccountId = preferences.getString(KEY_LAST_ACCOUNT_ID, null),
+            lastUsername = preferences.getString(KEY_LAST_USERNAME, null),
+        )
         check(accountScope.bind(accountId)) { "Unable to bind authenticated account scope" }
 
         val installationId = preferences.getString(KEY_INSTALLATION_ID, null)
@@ -144,7 +190,7 @@ class AccountSessionStore(context: Context) {
             ?: UUID.randomUUID().toString()
         val metadata = AccountSessionMetadata(
             accountId = accountId,
-            username = session.credentials.username.trim(),
+            username = username,
             portalBaseUrl = session.portal.baseUrl.trim().trimEnd('/'),
             authenticatedAtEpochMs = System.currentTimeMillis(),
             expiresAtEpochSeconds = session.account.expiresAtEpochSeconds,
@@ -155,6 +201,7 @@ class AccountSessionStore(context: Context) {
 
         preferences.edit()
             .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+            .putString(aliasKey, metadata.accountId)
             .putString(KEY_ACCOUNT_ID, metadata.accountId)
             .putString(KEY_USERNAME, metadata.username)
             .putString(KEY_PORTAL_BASE_URL, metadata.portalBaseUrl)
@@ -163,6 +210,9 @@ class AccountSessionStore(context: Context) {
             .putString(KEY_STATUS, metadata.status)
             .putString(KEY_INSTALLATION_ID, metadata.installationId)
             .putString(KEY_SESSION_ID, metadata.sessionId)
+            .putString(KEY_LAST_ACCOUNT_ID, metadata.accountId)
+            .putString(KEY_LAST_USERNAME, metadata.username)
+            .putString(KEY_LAST_ACCESS_CODE, session.credentials.accessCode)
             .commit()
         return metadata
     }
@@ -202,9 +252,25 @@ class AccountSessionStore(context: Context) {
 
     fun activeAccountId(): String? = accountScope.activeAccountId()
 
+    fun lastAccessCode(): String? = preferences.getString(KEY_LAST_ACCESS_CODE, null)
+        ?.takeIf { it.isNotBlank() }
+
     @Synchronized
     fun clearActiveSession() {
-        preferences.edit()
+        val currentAccountId = preferences.getString(KEY_ACCOUNT_ID, null)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val currentUsername = preferences.getString(KEY_USERNAME, null)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        val editor = preferences.edit()
+        if (currentAccountId != null && currentUsername != null) {
+            editor
+                .putString(KEY_LAST_ACCOUNT_ID, currentAccountId)
+                .putString(KEY_LAST_USERNAME, currentUsername)
+                .putString(accountIdentityAliasKey(currentUsername), currentAccountId)
+        }
+        editor
             .remove(KEY_ACCOUNT_ID)
             .remove(KEY_USERNAME)
             .remove(KEY_PORTAL_BASE_URL)
@@ -229,5 +295,8 @@ class AccountSessionStore(context: Context) {
         private const val KEY_STATUS = "status"
         private const val KEY_INSTALLATION_ID = "installation_id"
         private const val KEY_SESSION_ID = "session_id"
+        private const val KEY_LAST_ACCOUNT_ID = "last_account_id"
+        private const val KEY_LAST_USERNAME = "last_username"
+        private const val KEY_LAST_ACCESS_CODE = "last_access_code"
     }
 }

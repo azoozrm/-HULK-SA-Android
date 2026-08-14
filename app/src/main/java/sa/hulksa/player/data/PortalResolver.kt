@@ -1,7 +1,6 @@
 package sa.hulksa.player.data
 
 import java.io.IOException
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -21,11 +20,11 @@ class PortalResolver internal constructor(
     private val client: OkHttpClient = defaultClient(),
 ) {
     suspend fun resolve(accessCode: String): PortalConfig = withContext(Dispatchers.IO) {
-        val normalizedCode = normalizeResellerAccessCode(accessCode)
+        val validatedCode = normalizeResellerAccessCode(accessCode)
             ?: throw PortalException.InvalidAccessCode
         val endpoint = resolveEndpoint()
         val requestBody = JSONObject()
-            .put("code", normalizedCode)
+            .put("code", validatedCode)
             .toString()
             .toRequestBody(JSON_MEDIA_TYPE)
         val request = Request.Builder()
@@ -102,24 +101,14 @@ class PortalResolver internal constructor(
     }
 }
 
-internal fun normalizeResellerAccessCode(value: String): String? {
-    val compact = value
-        .trim()
-        .uppercase(Locale.US)
-        .replace(Regex("\\s+"), "")
-        .replace("-", "")
-    if (!compact.startsWith(ACCESS_CODE_PREFIX)) {
-        return null
-    }
-
-    val payload = compact.removePrefix(ACCESS_CODE_PREFIX)
-    val supportedLength = payload.length in ACCESS_CODE_MIN_PAYLOAD_LENGTH..ACCESS_CODE_MAX_PAYLOAD_LENGTH ||
-        payload.length == ACCESS_CODE_LEGACY_PAYLOAD_LENGTH
-    if (!supportedLength || !payload.matches(Regex("[A-Z0-9]+"))) {
-        return null
-    }
-    return ACCESS_CODE_PREFIX + "-" + payload.chunked(4).joinToString("-")
-}
+/**
+ * Access codes are opaque, case-sensitive identifiers owned by the reseller API.
+ * Android only rejects an empty/blank field and otherwise forwards the exact text
+ * entered by the user without trimming, case conversion, prefixing, grouping, or
+ * character/length validation.
+ */
+internal fun normalizeResellerAccessCode(value: String): String? =
+    value.takeUnless(String::isBlank)
 
 internal fun String?.normalizeIptvHost(): String? {
     val parsed = this?.trim()?.trimEnd('/')?.toHttpUrlOrNull() ?: return null
@@ -135,16 +124,11 @@ internal fun String?.normalizeIptvHost(): String? {
     return parsed.toString().trimEnd('/')
 }
 
-private const val ACCESS_CODE_PREFIX = "HULK"
-private const val ACCESS_CODE_MIN_PAYLOAD_LENGTH = 8
-private const val ACCESS_CODE_MAX_PAYLOAD_LENGTH = 12
-private const val ACCESS_CODE_LEGACY_PAYLOAD_LENGTH = 16
-
 sealed class PortalException(message: String) : Exception(message) {
     data object ConfigurationMissing : PortalException("تعذر الاتصال بخدمة HULK. تواصل مع الدعم.")
     data object InvalidAccessCode : PortalException("كود الدخول غير صحيح.")
     data object ResellerInactive : PortalException("حساب الموزع متوقف. تواصل مع الدعم.")
-    data object InvalidHost : PortalException("مضيف الموزع غير صالح. تواصل مع الموزع.")
+    data object InvalidHost : PortalException("هوست الموزع غير صالح. تواصل مع الموزع.")
     data object ServiceUnavailable : PortalException("تعذر الاتصال بخدمة HULK. حاول مرة اخرى.")
     data object InvalidResponse : PortalException("استجابة خدمة HULK غير صالحة. حاول مرة اخرى.")
 }

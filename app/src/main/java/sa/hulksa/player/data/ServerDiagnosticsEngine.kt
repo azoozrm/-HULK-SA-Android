@@ -352,7 +352,7 @@ class ServerDiagnosticsEngine(context: Context) {
             } else {
                 "البوابة تعمل عبر HTTP، وهو الوضع الشائع في مزودي IPTV ولا يخصم من التقييم."
             },
-            evidence = "${base.scheme.uppercase(Locale.US)} • المضيف: ${base.host}",
+            evidence = "${base.scheme.uppercase(Locale.US)} • الهوست: ${base.host}",
         )
 
         val recommendations = buildRecommendations(capabilities)

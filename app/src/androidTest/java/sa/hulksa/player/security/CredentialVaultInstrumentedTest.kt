@@ -27,9 +27,9 @@ class CredentialVaultInstrumentedTest {
     }
 
     @Test
-    fun rememberAccountPersistsAccessCodeWithUsernameAndPassword() {
+    fun rememberAccountPersistsCaseSensitiveAccessCodeWithUsernameAndPassword() {
         val credentials = Credentials(
-            accessCode = "HULK-ABCD-EFGH-JKMN-PQRS",
+            accessCode = "VUKqm6Z6ZZ",
             username = "subscriber",
             password = "secret",
         )
@@ -43,7 +43,7 @@ class CredentialVaultInstrumentedTest {
     fun clearingRememberedAccountRemovesAccessCodeAndCredentials() {
         vault.save(
             Credentials(
-                accessCode = "HULK-ABCD-EFGH-JKMN-PQRS",
+                accessCode = "aB12Cd34Ef",
                 username = "subscriber",
                 password = "secret",
             ),

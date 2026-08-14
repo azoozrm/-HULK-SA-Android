@@ -5,10 +5,18 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import sa.hulksa.player.model.AccountInfo
+import sa.hulksa.player.model.AuthenticatedSession
+import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
+import sa.hulksa.player.model.Credentials
+import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.model.PortalConfig
 
 @RunWith(AndroidJUnit4::class)
 class ProfileFoundationInstrumentedTest {
@@ -69,15 +77,111 @@ class ProfileFoundationInstrumentedTest {
         assertEquals(legacyFavorites, libraryPreferences.getStringSet(LEGACY_FAVORITES_KEY, emptySet()))
     }
 
+    @Test
+    fun logoutKeepsAccessCodeAndRotatedCodeKeepsSameSubscriberLibrary() {
+        val sessionStore = AccountSessionStore(context)
+        val firstMetadata = sessionStore.recordAuthenticated(
+            session(host = HOST_A, accessCode = FIRST_ACCESS_CODE),
+        )
+        val profileStore = ProfileStore(context)
+        val createdProfile = requireNotNull(profileStore.createProfile("متابع"))
+        val library = UserLibrary(context)
+        val movie = ContentItem(
+            id = 7,
+            name = "فيلم محفوظ",
+            categoryId = "movies",
+            type = ContentType.MOVIE,
+            posterUrl = null,
+            rating = null,
+            year = null,
+            containerExtension = "mp4",
+        )
+        library.toggle(movie)
+        library.recordStart(
+            PlaybackRequest(
+                title = movie.name,
+                posterUrl = movie.posterUrl,
+                candidates = listOf("http://stream.example/movie/7.mp4"),
+                isLive = false,
+                historyKey = "MOVIE:7",
+                streamKind = "movie",
+                streamId = movie.id,
+                extension = "mp4",
+            ),
+        )
+
+        assertEquals(FIRST_ACCESS_CODE, sessionStore.lastAccessCode())
+
+        sessionStore.clearActiveSession()
+
+        assertNull(sessionStore.activeAccountId())
+        assertEquals(FIRST_ACCESS_CODE, sessionStore.lastAccessCode())
+
+        val secondMetadata = sessionStore.recordAuthenticated(
+            session(host = HOST_B, accessCode = SECOND_ACCESS_CODE),
+        )
+
+        assertEquals(firstMetadata.accountId, secondMetadata.accountId)
+        assertEquals(SECOND_ACCESS_CODE, sessionStore.lastAccessCode())
+        assertTrue(ProfileStore(context).profiles().any { it.id == createdProfile.id })
+
+        val restoredLibrary = UserLibrary(context)
+        assertTrue("MOVIE:7" in restoredLibrary.favorites())
+        assertEquals("MOVIE:7", restoredLibrary.history().single().key)
+    }
+
+    private fun session(
+        host: String,
+        accessCode: String,
+        username: String = USERNAME,
+    ): AuthenticatedSession = AuthenticatedSession(
+        portal = PortalConfig(host, PortalConfig.Source.ACCESS_CODE),
+        credentials = Credentials(
+            accessCode = accessCode,
+            username = username,
+            password = "secret",
+        ),
+        account = AccountInfo(
+            username = username,
+            status = "Active",
+            expiresAtEpochSeconds = null,
+            activeConnections = 0,
+            maxConnections = 1,
+            isTrial = false,
+        ),
+    )
+
     private fun clearTestState() {
-        context.getSharedPreferences(USER_LIBRARY_PREFS, Context.MODE_PRIVATE).edit().clear().commit()
-        context.getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        val accountIds = setOf(
+            stableAccountId(HOST_A, USERNAME),
+            stableAccountId(HOST_B, USERNAME),
+        )
+        val preferenceNames = linkedSetOf(
+            USER_LIBRARY_PREFS,
+            PROFILE_PREFS,
+            ACCOUNT_SCOPE_PREFS,
+            ACCOUNT_SESSION_PREFS,
+        )
+        accountIds.forEach { accountId ->
+            preferenceNames += accountScopedPreferencesName(USER_LIBRARY_PREFS, accountId)
+            preferenceNames += accountScopedPreferencesName(PROFILE_PREFS, accountId)
+        }
+        preferenceNames.forEach { name ->
+            context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
+        }
     }
 
     private companion object {
         const val USER_LIBRARY_PREFS = "hulk_user_library"
         const val PROFILE_PREFS = "hulk_profiles_v1"
+        const val ACCOUNT_SCOPE_PREFS = "hulk_account_scope_v1"
+        const val ACCOUNT_SESSION_PREFS = "hulk_account_session_v1"
         const val LEGACY_FAVORITES_KEY = "favorites"
         const val LEGACY_HISTORY_KEY = "history"
+        const val HOST_A = "http://first.example.test:8080"
+        const val HOST_B = "http://second.example.test:8080"
+        const val USERNAME = "subscriber"
+        const val FIRST_ACCESS_CODE = "VUKqm6Z6ZZ"
+        const val SECOND_ACCESS_CODE = "aB12Cd34Ef"
     }
 }
