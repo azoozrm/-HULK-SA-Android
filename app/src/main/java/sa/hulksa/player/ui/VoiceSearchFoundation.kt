@@ -11,38 +11,36 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.collectAsState
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.HulkViewModel
@@ -141,6 +139,9 @@ internal fun isVoiceSearchDestination(state: HulkUiState): Boolean =
         state.account != null &&
         state.destination == MainDestination.SEARCH
 
+internal val LocalVoiceSearchLauncher = staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+@Suppress("UNUSED_PARAMETER")
 @Composable
 internal fun VoiceSearchAppLayer(
     viewModel: HulkViewModel,
@@ -148,93 +149,83 @@ internal fun VoiceSearchAppLayer(
     onVoiceSearch: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val state by viewModel.state.collectAsState()
-
-    Box(Modifier.fillMaxSize()) {
-        content()
-
-        if (isVoiceSearchDestination(state)) {
-            VoiceSearchAction(
-                isTv = isTv,
-                onClick = { onVoiceSearch(state.searchQuery) },
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .navigationBarsPadding()
-                    .padding(
-                        start = if (isTv) 24.dp else 16.dp,
-                        bottom = if (isTv) 24.dp else 78.dp,
-                    ),
-            )
-        }
-    }
+    CompositionLocalProvider(
+        LocalVoiceSearchLauncher provides onVoiceSearch,
+        content = content,
+    )
 }
 
 @Composable
-private fun VoiceSearchAction(
+internal fun InlineVoiceSearchAction(
+    query: String,
     isTv: Boolean,
-    onClick: () -> Unit,
+    requester: FocusRequester,
+    searchFieldRequester: FocusRequester,
+    downRequester: FocusRequester?,
     modifier: Modifier = Modifier,
 ) {
+    val launchVoiceSearch = LocalVoiceSearchLauncher.current ?: return
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
 
-    if (!isTv) {
-        Box(
-            modifier = modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(if (focused) colors.goldBright else colors.gold)
-                .border(
-                    width = if (focused) 2.dp else 1.dp,
-                    color = if (focused) Color.White else colors.goldBright.copy(alpha = .55f),
-                    shape = CircleShape,
-                )
-                .onFocusChanged { focused = it.isFocused }
-                .semantics { contentDescription = "بحث صوتي" }
-                .clickable(role = Role.Button, onClick = onClick)
-                .focusable(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Mic,
-                contentDescription = null,
-                tint = Color.Black,
-                modifier = Modifier.size(25.dp),
-            )
-        }
-        return
+    val tvFocusModifier = if (isTv) {
+        Modifier
+            .focusRequester(requester)
+            .focusProperties {
+                right = searchFieldRequester
+                left = FocusRequester.Cancel
+                up = FocusRequester.Cancel
+                down = downRequester ?: FocusRequester.Cancel
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else {
+                    when (event.key) {
+                        Key.Enter, Key.DirectionCenter -> {
+                            launchVoiceSearch(query)
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            runCatching { searchFieldRequester.requestFocus() }
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            downRequester?.let { runCatching { it.requestFocus() } }
+                            true
+                        }
+                        Key.DirectionLeft, Key.DirectionUp -> true
+                        else -> false
+                    }
+                }
+            }
+    } else {
+        Modifier
     }
 
-    Row(
+    Box(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
+            .size(if (isTv) 42.dp else 40.dp)
+            .then(tvFocusModifier)
+            .clip(CircleShape)
             .background(
-                if (focused) colors.goldBright else colors.surfaceRaised.copy(alpha = .96f),
+                if (focused) colors.goldBright else Color.Black.copy(alpha = .46f),
             )
             .border(
                 width = if (focused) 2.dp else 1.dp,
-                color = if (focused) colors.goldBright else colors.gold.copy(alpha = .45f),
-                shape = RoundedCornerShape(18.dp),
+                color = if (focused) Color.White else colors.gold.copy(alpha = .55f),
+                shape = CircleShape,
             )
-            .onFocusChanged { focused = it.isFocused }
             .semantics { contentDescription = "بحث صوتي" }
-            .clickable(role = Role.Button, onClick = onClick)
-            .focusable()
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(role = Role.Button) { launchVoiceSearch(query) },
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = Icons.Rounded.Mic,
             contentDescription = null,
             tint = if (focused) Color.Black else colors.goldBright,
-            modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "بحث صوتي",
-            color = if (focused) Color.Black else colors.text,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
+            modifier = Modifier.size(if (isTv) 23.dp else 21.dp),
         )
     }
 }

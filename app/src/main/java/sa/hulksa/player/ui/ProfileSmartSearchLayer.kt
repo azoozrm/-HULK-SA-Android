@@ -659,6 +659,7 @@ private fun SmartSearchInput(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     var tvEditing by remember { mutableStateOf(false) }
+    val voiceSearchRequester = remember { FocusRequester() }
 
     val moveDown: () -> Boolean = {
         when {
@@ -687,7 +688,7 @@ private fun SmartSearchInput(
             .focusProperties {
                 firstFilterRequester?.let { down = it }
                 up = FocusRequester.Cancel
-                left = FocusRequester.Cancel
+                left = voiceSearchRequester
                 railSearchRequester?.let { right = it }
             }
             .onFocusChanged { state ->
@@ -710,6 +711,7 @@ private fun SmartSearchInput(
                 } else if (!tvEditing && event.key == Key.DirectionUp) {
                     true
                 } else if (!tvEditing && event.key == Key.DirectionLeft) {
+                    runCatching { voiceSearchRequester.requestFocus() }
                     true
                 } else if (!tvEditing && event.key == Key.DirectionRight) {
                     railSearchRequester?.let { runCatching { it.requestFocus() } }
@@ -722,24 +724,36 @@ private fun SmartSearchInput(
         Modifier.onFocusChanged { onFocusStateChanged(it.isFocused) }
     }
 
-    HulkTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = "اكتب اسم فيلم او مسلسل او قناة…",
-        modifier = Modifier.fillMaxWidth().then(tvModifier),
-        readOnly = isTv && !tvEditing,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(
-            onSearch = {
-                keyboardController?.hide()
-                if (isTv) {
-                    moveDown()
-                } else {
-                    focusManager.clearFocus(force = true)
-                }
-            },
-        ),
-    )
+    Box(Modifier.fillMaxWidth()) {
+        HulkTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = "اكتب اسم فيلم او مسلسل او قناة…",
+            modifier = Modifier.fillMaxWidth().then(tvModifier),
+            readOnly = isTv && !tvEditing,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    keyboardController?.hide()
+                    if (isTv) {
+                        moveDown()
+                    } else {
+                        focusManager.clearFocus(force = true)
+                    }
+                },
+            ),
+        )
+        InlineVoiceSearchAction(
+            query = value,
+            isTv = isTv,
+            requester = voiceSearchRequester,
+            searchFieldRequester = searchFieldRequester,
+            downRequester = firstFilterRequester,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = if (isTv) 5.dp else 4.dp),
+        )
+    }
 }
 
 @Composable
