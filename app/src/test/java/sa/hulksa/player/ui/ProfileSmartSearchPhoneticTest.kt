@@ -31,4 +31,11 @@ class ProfileSmartSearchPhoneticTest {
     fun unrelatedCrossScriptTextDoesNotMatch() {
         assertNull(crossScriptPhoneticRank("بريزون بريك", "the office"))
     }
+
+    @Test
+    fun fastNormalizerPreservesArabicAndDigitEquivalence() {
+        assertEquals("بريزون بريك 123", normalizeSearchText("  بَرِيزُون---بريك ١٢٣  "))
+        assertEquals("prison break", normalizeSearchText("Prison...BREAK"))
+        assertEquals("ايمان وليد", normalizeSearchText("إيمان ـ وليد"))
+    }
 }
