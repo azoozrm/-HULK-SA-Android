@@ -9,6 +9,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -23,11 +24,16 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import sa.hulksa.player.ui.ProfileAwareHulkApp
+import sa.hulksa.player.ui.VoiceSearchAppLayer
+import sa.hulksa.player.ui.VoiceSearchDelegate
+import sa.hulksa.player.ui.isVoiceSearchDestination
+import sa.hulksa.player.ui.isVoiceSearchHardwareKey
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class MainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
     private var currentScreen: HulkScreen = HulkScreen.LOGIN
+    private lateinit var voiceSearchDelegate: VoiceSearchDelegate
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,6 +46,11 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        voiceSearchDelegate = VoiceSearchDelegate(
+            activity = this,
+            onTranscript = viewModel::updateSearch,
+        )
+
         configurePhoneWindow()
         applyPhoneOrientationPolicy(HulkScreen.LOGIN)
         observePhoneOrientationPolicy()
@@ -48,12 +59,31 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             HulkTheme {
-                ProfileAwareHulkApp(
+                VoiceSearchAppLayer(
                     viewModel = viewModel,
-                    isTelevisionDevice = isTelevisionDevice,
-                )
+                    isTv = false,
+                    onVoiceSearch = voiceSearchDelegate::launch,
+                ) {
+                    ProfileAwareHulkApp(
+                        viewModel = viewModel,
+                        isTelevisionDevice = false,
+                    )
+                }
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (
+            ::voiceSearchDelegate.isInitialized &&
+            event.action == KeyEvent.ACTION_DOWN &&
+            isVoiceSearchHardwareKey(event.keyCode) &&
+            isVoiceSearchDestination(viewModel.state.value)
+        ) {
+            voiceSearchDelegate.launch(viewModel.state.value.searchQuery)
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
