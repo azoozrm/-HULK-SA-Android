@@ -173,7 +173,7 @@ fun MovieDetailsProScreen(
                 text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                 onClick = onToggleFavorite,
                 requester = favoriteRequester,
-                mobileWeight = .85f,
+                mobileWeight = 1.2f,
             ),
         )
         add(
@@ -996,12 +996,9 @@ private fun DetailsProSeriesPills(
         buildList {
             technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
             detailsProRating(series.rating)?.let { add("★ $it") }
-            when {
-                seasonLabel != null && episodeLabel != null -> add("$seasonLabel · $episodeLabel")
-                seasonLabel != null -> add(seasonLabel)
-                episodeLabel != null -> add(episodeLabel)
-            }
-        }.take(3)
+            seasonLabel?.let(::add)
+            episodeLabel?.let(::add)
+        }.take(4)
     } else {
         buildList {
             technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
@@ -1013,25 +1010,32 @@ private fun DetailsProSeriesPills(
         }.take(5)
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        values.forEach { DetailsProPill(it) }
+    Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
+        values.forEach { DetailsProPill(it, compact = compact) }
     }
 }
 
 @Composable
-private fun DetailsProPill(text: String) {
+private fun DetailsProPill(
+    text: String,
+    compact: Boolean = false,
+) {
     val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(if (compact) 6.dp else 7.dp)
     Text(
         text = text,
         color = Color.White,
-        fontSize = 9.sp,
+        fontSize = if (compact) 8.sp else 9.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         modifier = Modifier
-            .clip(RoundedCornerShape(7.dp))
+            .clip(shape)
             .background(Color.Black.copy(alpha = .70f))
-            .border(1.dp, colors.gold.copy(alpha = .36f), RoundedCornerShape(7.dp))
-            .padding(horizontal = 7.dp, vertical = 4.dp),
+            .border(1.dp, colors.gold.copy(alpha = .36f), shape)
+            .padding(
+                horizontal = if (compact) 5.dp else 7.dp,
+                vertical = if (compact) 3.dp else 4.dp,
+            ),
     )
 }
 
