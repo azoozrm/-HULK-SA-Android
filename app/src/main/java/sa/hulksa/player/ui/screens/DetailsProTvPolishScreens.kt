@@ -940,8 +940,8 @@ private fun SeriesDetailsProTvPolished(
                                 modifier = Modifier
                                     .focusRequester(requester)
                                     .focusProperties {
-                                        up = FocusRequester.Cancel
-                                        down = episodeDown ?: FocusRequester.Cancel
+                                        up = FocusRequester.Default
+                                        down = episodeDown ?: FocusRequester.Default
                                         right = if (index > 0) seasonRequesters[index - 1] else FocusRequester.Cancel
                                         left = if (index < seasonRequesters.lastIndex) seasonRequesters[index + 1] else FocusRequester.Cancel
                                     },
