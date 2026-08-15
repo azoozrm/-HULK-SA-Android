@@ -165,6 +165,7 @@ fun MovieDetailsProScreen(
                 onClick = onPlay,
                 requester = playRequester,
                 primary = true,
+                mobileWeight = 1.5f,
             ),
         )
         add(
@@ -172,6 +173,7 @@ fun MovieDetailsProScreen(
                 text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                 onClick = onToggleFavorite,
                 requester = favoriteRequester,
+                mobileWeight = .85f,
             ),
         )
         add(
@@ -546,7 +548,7 @@ fun SeriesDetailsProScreen(
                 requester = playRequester,
                 primary = true,
                 enabled = heroEpisode != null,
-                mobileWeight = 1.15f,
+                mobileWeight = 1.5f,
             ),
         )
         previousEpisode?.let { episode ->
