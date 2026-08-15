@@ -30,10 +30,10 @@ import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.screens.LoginScreen
 import sa.hulksa.player.ui.screens.MainShellScreen
-import sa.hulksa.player.ui.screens.MovieDetailsProScreen
+import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerScreen
-import sa.hulksa.player.ui.screens.SeriesDetailsProScreen
+import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -211,7 +211,7 @@ fun HulkApp(
                                 candidates = state.catalogs[ContentType.MOVIE]?.items.orEmpty(),
                             )
                             val movieDownload = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
-                            MovieDetailsProScreen(
+                            MovieDetailsProPolishedScreen(
                                 item = item,
                                 details = state.selectedDetails,
                                 isLoading = state.isLoading,
@@ -265,7 +265,7 @@ fun HulkApp(
                                 source = series,
                                 candidates = state.catalogs[ContentType.SERIES]?.items.orEmpty(),
                             )
-                            SeriesDetailsProScreen(
+                            SeriesDetailsProPolishedScreen(
                                 series = series,
                                 details = state.selectedDetails,
                                 episodes = state.episodes,
