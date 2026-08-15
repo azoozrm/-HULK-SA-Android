@@ -269,105 +269,25 @@ class NavigationMemoryStore {
         val movies = newest(movieCatalog?.items.orEmpty())
         val series = newest(seriesCatalog?.items.orEmpty())
         val live = liveCatalog?.items.orEmpty()
-        val continueWatching = state.history.filter(HistoryEntry::isResumable).take(18)
-        val lastLive = state.history.firstOrNull { it.isLive }
-        val movieById = movies.associateBy(ContentItem::id)
-        val seriesByName = series.associateBy { it.name.trim().lowercase(Locale.ROOT) }
-        val historySeedItems = state.history.asSequence()
-            .filterNot { it.isLive }
-            .mapNotNull { entry ->
-                when (entry.streamKind) {
-                    "movie" -> movieById[entry.streamId]
-                    "series" -> seriesByName[entry.title.substringBefore("·").trim().lowercase(Locale.ROOT)]
-                    else -> null
-                }
-            }
-            .distinctBy { "${it.type}:${it.id}" }
-            .take(24)
-            .toList()
-        fun isFavorite(item: ContentItem): Boolean = "${item.type.name}:${item.id}" in state.favorites
-        val favoriteSeedItems = (movies + series).filter(::isFavorite)
-        val categoryWeights = mutableMapOf<String, Int>()
-        historySeedItems.forEachIndexed { index, item ->
-            val weight = (24 - index).coerceAtLeast(2)
-            categoryWeights[item.categoryId] = (categoryWeights[item.categoryId] ?: 0) + weight
-        }
-        favoriteSeedItems.forEach { item ->
-            categoryWeights[item.categoryId] = (categoryWeights[item.categoryId] ?: 0) + 30
-        }
-        val genreWeights = mutableMapOf<String, Int>()
-        fun addGenres(item: ContentItem, weight: Int) {
-            item.genre.orEmpty().split(',', '،', '/', '|')
-                .map { it.trim().lowercase(Locale.ROOT) }
-                .filter(String::isNotBlank)
-                .forEach { genre -> genreWeights[genre] = (genreWeights[genre] ?: 0) + weight }
-        }
-        historySeedItems.forEachIndexed { index, item -> addGenres(item, (24 - index).coerceAtLeast(2)) }
-        favoriteSeedItems.forEach { addGenres(it, 30) }
-        val watchedKeys = historySeedItems.map { "${it.type}:${it.id}" }.toSet()
-        val contentScores = (movies + series).associate { item ->
-            val categoryScore = (categoryWeights[item.categoryId] ?: 0) * 100
-            val genreScore = item.genre.orEmpty().split(',', '،', '/', '|')
-                .map { it.trim().lowercase(Locale.ROOT) }
-                .filter(String::isNotBlank)
-                .sumOf { genre -> (genreWeights[genre] ?: 0) * 28 }
-            "${item.type}:${item.id}" to (categoryScore + genreScore)
-        }
-        val pool = (movies + series).asSequence()
-            .filterNot { "${it.type}:${it.id}" in watchedKeys }
-            .sortedWith(
-                compareByDescending<ContentItem> { contentScores["${it.type}:${it.id}"] ?: 0 }
-                    .thenByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
-                    .thenByDescending { it.addedAtEpochSeconds ?: 0L },
-            )
-            .toList()
-        val because = pool.filter { (contentScores["${it.type}:${it.id}"] ?: 0) > 0 }.take(14)
-        val becauseKeys = because.map { "${it.type}:${it.id}" }.toSet()
-        val suggested = pool.asSequence().filterNot { "${it.type}:${it.id}" in becauseKeys }.take(24).toList()
-        val liveById = live.associateBy(ContentItem::id)
-        val viewedLive = state.history.asSequence().filter { it.isLive }.mapNotNull { liveById[it.streamId] }.take(30).toList()
-        val liveCategoryWeights = mutableMapOf<String, Int>()
-        viewedLive.forEachIndexed { index, item ->
-            val weight = (30 - index).coerceAtLeast(1)
-            liveCategoryWeights[item.categoryId] = (liveCategoryWeights[item.categoryId] ?: 0) + weight
-        }
-        live.filter(::isFavorite).forEach { item ->
-            liveCategoryWeights[item.categoryId] = (liveCategoryWeights[item.categoryId] ?: 0) + 35
-        }
-        val viewedLiveIds = viewedLive.map(ContentItem::id).toSet()
-        val personalizedLive = live.sortedWith(
-            compareByDescending<ContentItem> { item ->
-                (if (isFavorite(item)) 10_000 else 0) +
-                    (liveCategoryWeights[item.categoryId] ?: 0) * 100 +
-                    (if (item.id in viewedLiveIds) 25 else 0)
-            }
-                .thenByDescending { !it.nowPlaying.isNullOrBlank() }
-                .thenBy { it.name.lowercase(Locale.ROOT) },
+        val smartHome = buildSmartHomeRecommendations(
+            movies = movies,
+            series = series,
+            live = live,
+            history = state.history,
+            favorites = state.favorites,
         )
-        val popularMovies = movies.sortedWith(
-            compareByDescending<ContentItem> { it.rating?.toDoubleOrNull() ?: 0.0 }
-                .thenByDescending { it.addedAtEpochSeconds ?: 0L },
-        ).take(22)
-        val popularSeries = series.sortedWith(
-            compareByDescending<ContentItem> { it.rating?.toDoubleOrNull() ?: 0.0 }
-                .thenByDescending { it.addedAtEpochSeconds ?: 0L },
-        ).take(22)
-        val featured = (movies + series)
-            .filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
-            .distinctBy { "${it.type}:${it.id}" }
-            .take(8)
         return HomeContentSnapshot(
             movies = movies,
             series = series,
             live = live,
-            continueWatching = continueWatching,
-            lastLive = lastLive,
-            becauseYouWatched = because,
-            suggested = suggested,
-            personalizedLive = personalizedLive,
-            popularMovies = popularMovies,
-            popularSeries = popularSeries,
-            featuredCandidates = featured,
+            continueWatching = smartHome.continueWatching,
+            lastLive = smartHome.lastLive,
+            becauseYouWatched = smartHome.becauseYouWatched,
+            suggested = smartHome.suggested,
+            personalizedLive = smartHome.personalizedLive,
+            popularMovies = smartHome.popularMovies,
+            popularSeries = smartHome.popularSeries,
+            featuredCandidates = smartHome.featuredCandidates,
         ).also { snapshot ->
             homeMoviesCatalog = movieCatalog
             homeSeriesCatalog = seriesCatalog
@@ -1237,7 +1157,7 @@ private fun CinemaHero(
         ) {
             Column(Modifier.weight(1f)) {
                 Text("الرئيسية", color = colors.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("احدث اضافات HULK", color = colors.textMuted, fontSize = 11.sp)
+                Text("توصيات ومحتوى جديد", color = colors.textMuted, fontSize = 11.sp)
             }
             if (isLoading) LoadingRing()
             Spacer(Modifier.width(10.dp))
@@ -1250,7 +1170,7 @@ private fun CinemaHero(
                 .fillMaxWidth(if (isTv) .58f else .86f)
                 .padding(start = 27.dp, end = 27.dp, bottom = if (isTv) 38.dp else 24.dp),
         ) {
-            Text("وصل حديثا", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(5.dp))
             Text(
                 item.name,
