@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -894,17 +895,18 @@ private fun SeriesDetailsProTvPolished(
                         bottom = 6.dp,
                     ),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column {
-                        Text("الحلقات", color = colors.text, fontSize = 23.sp, fontWeight = FontWeight.Black)
-                        Text(
-                            if (completedCount > 0) "$completedCount مكتملة من ${ordered.size}" else "${ordered.size} حلقة",
-                            color = colors.textMuted,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    resumePair?.let { resume ->
+                Text("الحلقات", color = colors.text, fontSize = 23.sp, fontWeight = FontWeight.Black)
+                Text(
+                    if (completedCount > 0) "$completedCount مكتملة من ${ordered.size}" else "${ordered.size} حلقة",
+                    color = colors.textMuted,
+                    fontSize = 10.sp,
+                )
+                resumePair?.let { resume ->
+                    Spacer(Modifier.height(7.dp))
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = AbsoluteAlignment.CenterRight,
+                    ) {
                         val shape = RoundedCornerShape(8.dp)
                         Text(
                             text = "الحلقة الحالية : S${resume.first.season} E${resume.first.episodeNumber}  •  ${detailsTvFormatTime(resume.second.positionMs)}",
@@ -1296,7 +1298,7 @@ private fun DetailsTvInformationPanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp),
-        contentAlignment = Alignment.CenterEnd,
+        contentAlignment = AbsoluteAlignment.CenterRight,
     ) {
         Column(
             modifier = Modifier
