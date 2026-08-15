@@ -30,10 +30,11 @@ import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.screens.LoginScreen
 import sa.hulksa.player.ui.screens.MainShellScreen
-import sa.hulksa.player.ui.screens.MovieDetailsScreen
+import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerScreen
-import sa.hulksa.player.ui.screens.SeriesDetailsScreenV2
+import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
+import sa.hulksa.player.ui.screens.detailsProRelatedItems
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -205,15 +206,12 @@ fun HulkApp(
                     HulkScreen.MOVIE_DETAILS -> {
                         val item = state.selectedItem
                         if (item != null) {
-                            val relatedMovies = state.catalogs[ContentType.MOVIE]
-                                ?.items
-                                .orEmpty()
-                                .asSequence()
-                                .filter { it.id != item.id && it.categoryId == item.categoryId }
-                                .take(10)
-                                .toList()
+                            val relatedMovies = detailsProRelatedItems(
+                                source = item,
+                                candidates = state.catalogs[ContentType.MOVIE]?.items.orEmpty(),
+                            )
                             val movieDownload = state.downloads.firstOrNull { it.historyKey == "MOVIE:${item.id}" }
-                            MovieDetailsScreen(
+                            MovieDetailsProPolishedScreen(
                                 item = item,
                                 details = state.selectedDetails,
                                 isLoading = state.isLoading,
@@ -227,7 +225,13 @@ fun HulkApp(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
-                                    notify(if (movieDownload == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(movieDownload))
+                                    notify(
+                                        if (movieDownload == null) {
+                                            viewModel.downloadSelectedMovie()
+                                        } else {
+                                            viewModel.retryDownload(movieDownload)
+                                        },
+                                    )
                                 },
                                 onCancelDownload = {
                                     movieDownload?.let {
@@ -239,7 +243,13 @@ fun HulkApp(
                                 onToggleRelatedFavorite = { related ->
                                     val wasFavorite = viewModel.isFavorite(related)
                                     viewModel.toggleFavorite(related)
-                                    notify(if (wasFavorite) "تمت ازالة ${related.name} من المفضلة" else "تمت اضافة ${related.name} الى المفضلة")
+                                    notify(
+                                        if (wasFavorite) {
+                                            "تمت ازالة ${related.name} من المفضلة"
+                                        } else {
+                                            "تمت اضافة ${related.name} الى المفضلة"
+                                        },
+                                    )
                                 },
                                 onOpenRelated = viewModel::open,
                             )
@@ -251,14 +261,11 @@ fun HulkApp(
                     HulkScreen.SERIES -> {
                         val series = state.selectedSeries
                         if (series != null) {
-                            val relatedSeries = state.catalogs[ContentType.SERIES]
-                                ?.items
-                                .orEmpty()
-                                .asSequence()
-                                .filter { it.id != series.id && it.categoryId == series.categoryId }
-                                .take(10)
-                                .toList()
-                            SeriesDetailsScreenV2(
+                            val relatedSeries = detailsProRelatedItems(
+                                source = series,
+                                candidates = state.catalogs[ContentType.SERIES]?.items.orEmpty(),
+                            )
+                            SeriesDetailsProPolishedScreen(
                                 series = series,
                                 details = state.selectedDetails,
                                 episodes = state.episodes,
@@ -273,11 +280,21 @@ fun HulkApp(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playEpisode,
                                 onDownload = { episode ->
-                                    val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                    notify(if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing))
+                                    val existing = state.downloads.firstOrNull {
+                                        it.historyKey == "SERIES:${episode.id}"
+                                    }
+                                    notify(
+                                        if (existing == null) {
+                                            viewModel.downloadEpisode(episode)
+                                        } else {
+                                            viewModel.retryDownload(existing)
+                                        },
+                                    )
                                 },
                                 onCancelDownload = { episode ->
-                                    state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }?.let {
+                                    state.downloads.firstOrNull {
+                                        it.historyKey == "SERIES:${episode.id}"
+                                    }?.let {
                                         viewModel.deleteDownload(it)
                                         notify("تم الغاء التحميل.")
                                     }
@@ -286,7 +303,13 @@ fun HulkApp(
                                 onToggleRelatedFavorite = { related ->
                                     val wasFavorite = viewModel.isFavorite(related)
                                     viewModel.toggleFavorite(related)
-                                    notify(if (wasFavorite) "تمت ازالة ${related.name} من المفضلة" else "تمت اضافة ${related.name} الى المفضلة")
+                                    notify(
+                                        if (wasFavorite) {
+                                            "تمت ازالة ${related.name} من المفضلة"
+                                        } else {
+                                            "تمت اضافة ${related.name} الى المفضلة"
+                                        },
+                                    )
                                 },
                                 onOpenRelated = viewModel::open,
                             )
@@ -298,9 +321,20 @@ fun HulkApp(
                     HulkScreen.PLAYER -> {
                         val playback = state.playback
                         if (playback != null) {
-                            val orderedEpisodes = state.episodes.sortedWith(compareBy(sa.hulksa.player.model.Episode::season, sa.hulksa.player.model.Episode::episodeNumber))
-                            val currentEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == playback.streamId }
-                            val nextEpisode = if (playback.streamKind == "series") orderedEpisodes.getOrNull(currentEpisodeIndex + 1) else null
+                            val orderedEpisodes = state.episodes.sortedWith(
+                                compareBy(
+                                    sa.hulksa.player.model.Episode::season,
+                                    sa.hulksa.player.model.Episode::episodeNumber,
+                                ),
+                            )
+                            val currentEpisodeIndex = orderedEpisodes.indexOfFirst {
+                                it.id == playback.streamId
+                            }
+                            val nextEpisode = if (playback.streamKind == "series") {
+                                orderedEpisodes.getOrNull(currentEpisodeIndex + 1)
+                            } else {
+                                null
+                            }
                             PlayerScreen(
                                 request = playback,
                                 liveCatalog = state.catalogs[ContentType.LIVE],
@@ -309,8 +343,12 @@ fun HulkApp(
                                 onToggleFavorite = viewModel::toggleFavorite,
                                 onBack = viewModel::back,
                                 onProgress = viewModel::onPlaybackProgress,
-                                nextEpisodeTitle = nextEpisode?.let { "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}" },
-                                onPlayNextEpisode = nextEpisode?.let { { viewModel.playNextEpisode() } },
+                                nextEpisodeTitle = nextEpisode?.let {
+                                    "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}"
+                                },
+                                onPlayNextEpisode = nextEpisode?.let {
+                                    { viewModel.playNextEpisode() }
+                                },
                             )
                         } else {
                             LaunchedEffect(state.screen) { viewModel.back() }
