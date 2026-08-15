@@ -541,11 +541,7 @@ fun SeriesDetailsProScreen(
     val heroActions = buildList {
         add(
             DetailsProAction(
-                text = if (isTv) {
-                    if (resumePair != null) "▶ استكمال المشاهدة" else "▶ ابدأ المشاهدة"
-                } else {
-                    if (resumePair != null) "استكمال" else "ابدأ"
-                },
+                text = if (resumePair != null) "▶ استكمال المشاهدة" else "▶ ابدأ المشاهدة",
                 onClick = { heroEpisode?.let(onPlay) },
                 requester = playRequester,
                 primary = true,
@@ -1229,7 +1225,7 @@ private fun EpisodeDetailsProCard(
                     scaleY = scale
                     shadowElevation = if (showFocused) 12.dp.toPx() else 0f
                 }
-                .aspectRatio(16f / 9f)
+                .aspectRatio(if (isTv) 16f / 9f else 1.45f)
                 .clip(RoundedCornerShape(13.dp))
                 .background(Color(0xFF13140F))
                 .border(
