@@ -157,7 +157,7 @@ fun MovieDetailsProScreen(
         add(
             DetailsProAction(
                 text = if (resumePosition != null) {
-                    "▶ استكمال · ${detailsProFormatTime(resumePosition)}"
+                    "▶ استكمال"
                 } else {
                     "▶ مشاهدة الفيلم"
                 },
@@ -366,6 +366,18 @@ fun MovieDetailsProScreen(
             }
         }
 
+        if (detailsProHasInformation(details)) {
+            item(key = "movie_info") {
+                DetailsProInformationPanel(
+                    title = "معلومات الفيلم",
+                    details = details,
+                    isTv = isTv,
+                    horizontalPaddingDp = metrics.horizontalPaddingDp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
         if (relatedItems.isNotEmpty()) {
             item(key = "movie_related") {
                 DetailsProRelatedRow(
@@ -379,18 +391,6 @@ fun MovieDetailsProScreen(
                     isFavorite = isRelatedFavorite,
                     onToggleFavorite = onToggleRelatedFavorite,
                     onOpen = onOpenRelated,
-                )
-            }
-        }
-
-        if (detailsProHasInformation(details)) {
-            item(key = "movie_info") {
-                DetailsProInformationPanel(
-                    title = "معلومات الفيلم",
-                    details = details,
-                    isTv = isTv,
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -548,7 +548,7 @@ fun SeriesDetailsProScreen(
         previousEpisode?.let { episode ->
             add(
                 DetailsProAction(
-                    text = "السابق · S${episode.season} E${episode.episodeNumber}",
+                    text = "السابق S${episode.season} E${episode.episodeNumber}",
                     onClick = { onPlay(episode) },
                     requester = previousRequester,
                 ),
@@ -557,7 +557,7 @@ fun SeriesDetailsProScreen(
         nextEpisode?.let { episode ->
             add(
                 DetailsProAction(
-                    text = "التالي · S${episode.season} E${episode.episodeNumber}",
+                    text = "التالي S${episode.season} E${episode.episodeNumber}",
                     onClick = { onPlay(episode) },
                     requester = nextRequester,
                 ),
@@ -708,11 +708,10 @@ fun SeriesDetailsProScreen(
                             }
                             if (resumePair != null) {
                                 Spacer(Modifier.height(9.dp))
-                                val episode = resumePair.first
                                 val entry = resumePair.second
                                 DetailsProProgress(
                                     progress = resumePair.third,
-                                    label = "الموسم ${episode.season} · الحلقة ${episode.episodeNumber} · ${detailsProFormatTime(entry.positionMs)}",
+                                    label = "متابعة من ${detailsProFormatTime(entry.positionMs)}",
                                     modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .72f else 1f),
                                 )
                             }
@@ -805,8 +804,8 @@ fun SeriesDetailsProScreen(
                     onDownload = { onDownload(episode) },
                     onCancelDownload = { onCancelDownload(episode) },
                     modifier = Modifier.padding(
-                        start = if (isTv) 10.dp else 4.dp,
-                        end = if (isTv) 10.dp else 4.dp,
+                        start = if (isTv) 10.dp else 0.dp,
+                        end = if (isTv) 10.dp else 0.dp,
                         bottom = if (isTv) 8.dp else 5.dp,
                     ),
                 )

@@ -341,7 +341,7 @@ private fun MovieDetailsProTvPolished(
                         ) {
                             FocusButton(
                                 text = if (progress != null && historyEntry != null) {
-                                    "▶ استكمال · ${detailsTvFormatTime(historyEntry.positionMs)}"
+                                    "▶ استكمال"
                                 } else {
                                     "▶ مشاهدة الفيلم"
                                 },
@@ -860,7 +860,7 @@ private fun SeriesDetailsProTvPolished(
             item(key = "series_tv_resume_progress") {
                 DetailsTvResumeStrip(
                     progress = resumePair.third,
-                    label = "الموسم ${resumePair.first.season} · الحلقة ${resumePair.first.episodeNumber} · ${detailsTvFormatTime(resumePair.second.positionMs)}",
+                    label = "متابعة من ${detailsTvFormatTime(resumePair.second.positionMs)}",
                     horizontalPaddingDp = metrics.horizontalPaddingDp,
                 )
             }
@@ -1222,41 +1222,13 @@ private fun DetailsTvResumeStrip(
     label: String,
     horizontalPaddingDp: Int,
 ) {
-    val colors = LocalHulkColors.current
-    Row(
+    DetailsTvProgress(
+        progress = progress,
+        label = label,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(colors.surface.copy(alpha = .72f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text = label,
-            color = colors.goldBright,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            modifier = Modifier.width(170.dp),
-            overflow = TextOverflow.Ellipsis,
-        )
-        Box(
-            Modifier
-                .weight(1f)
-                .height(4.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.White.copy(alpha = .18f)),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                    .fillMaxHeight()
-                    .background(colors.goldBright),
-            )
-        }
-    }
+            .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp),
+    )
 }
 
 @Composable
