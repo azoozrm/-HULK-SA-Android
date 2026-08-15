@@ -955,6 +955,8 @@ private fun SeriesDetailsProTvPolished(
                         val leftCard = if (columnIndex < rowEpisodes.lastIndex) episodeCardRequesters.getOrNull(absoluteIndex + 1) else null
                         val upCard = if (rowIndex > 0) {
                             episodeCardRequesters.getOrNull(absoluteIndex - metrics.episodeColumns)
+                                ?: seasonRequesters.getOrNull(columnIndex.coerceAtMost(seasonRequesters.lastIndex.coerceAtLeast(0)))
+                                ?: playRequester
                         } else {
                             seasonRequesters.getOrNull(columnIndex.coerceAtMost(seasonRequesters.lastIndex.coerceAtLeast(0)))
                                 ?: playRequester
