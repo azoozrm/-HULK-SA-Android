@@ -100,6 +100,7 @@ private data class DetailsProAction(
     val requester: FocusRequester,
     val primary: Boolean = false,
     val enabled: Boolean = true,
+    val mobileWeight: Float = 1f,
 )
 
 private data class EpisodeFocusTargets(
@@ -434,6 +435,7 @@ fun SeriesDetailsProScreen(
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
     val metrics = detailsProMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, isTv)
+    val seriesHorizontalPaddingDp = if (isTv) metrics.horizontalPaddingDp else 4
     val gridState = rememberLazyGridState()
     val navigationScope = rememberCoroutineScope()
     val metadataStore = remember(context) { SeriesCardMetadataStore.get(context) }
@@ -457,6 +459,7 @@ fun SeriesDetailsProScreen(
             Triple(episode, entry, progress)
         }.maxByOrNull { it.second.updatedAtEpochMs }
     }
+    val mobileResumeHeroExtraDp = if (!isTv && resumePair != null) 30 else 0
     val completedCount = remember(orderedEpisodes, historyByKey) {
         orderedEpisodes.count { episode ->
             historyByKey["SERIES:${episode.id}"]?.detailsProCompleted() == true
@@ -538,11 +541,16 @@ fun SeriesDetailsProScreen(
     val heroActions = buildList {
         add(
             DetailsProAction(
-                text = if (resumePair != null) "▶ استكمال المشاهدة" else "▶ ابدأ المشاهدة",
+                text = if (isTv) {
+                    if (resumePair != null) "▶ استكمال المشاهدة" else "▶ ابدأ المشاهدة"
+                } else {
+                    if (resumePair != null) "استكمال" else "ابدأ"
+                },
                 onClick = { heroEpisode?.let(onPlay) },
                 requester = playRequester,
                 primary = true,
                 enabled = heroEpisode != null,
+                mobileWeight = .82f,
             ),
         )
         previousEpisode?.let { episode ->
@@ -592,7 +600,7 @@ fun SeriesDetailsProScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(metrics.heroHeightDp.dp)
+                        .height((metrics.heroHeightDp + mobileResumeHeroExtraDp).dp)
                         .background(colors.background),
                 ) {
                     if (!backdrop.isNullOrBlank()) {
@@ -643,8 +651,8 @@ fun SeriesDetailsProScreen(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .padding(
-                                start = metrics.horizontalPaddingDp.dp,
-                                end = metrics.horizontalPaddingDp.dp,
+                                start = seriesHorizontalPaddingDp.dp,
+                                end = seriesHorizontalPaddingDp.dp,
                                 bottom = metrics.verticalPaddingDp.dp,
                             ),
                         verticalAlignment = Alignment.Bottom,
@@ -747,7 +755,7 @@ fun SeriesDetailsProScreen(
                     resumeEpisode = resumePair?.first,
                     resumeEntry = resumePair?.second,
                     isTv = isTv,
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
+                    horizontalPaddingDp = seriesHorizontalPaddingDp,
                     seasonRequesters = seasonRequesters,
                     upRequester = heroReturnRequester,
                     downRequester = firstEpisodeRequester,
@@ -877,7 +885,7 @@ private fun DetailsProHeroScrim() {
                 Brush.verticalGradient(
                     0f to Color.Black.copy(alpha = .20f),
                     .38f to Color.Black.copy(alpha = .18f),
-                    .70f to Color.Black.copy(alpha = .62f),
+                    .70f to colors.background.copy(alpha = .62f),
                     1f to colors.background,
                 ),
             ),
@@ -1079,7 +1087,7 @@ private fun DetailsProActions(
                             enabled = action.enabled,
                             compact = true,
                             outlined = !action.primary,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(action.mobileWeight),
                         )
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
