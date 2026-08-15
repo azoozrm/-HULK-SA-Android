@@ -42,6 +42,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -200,6 +205,7 @@ private fun MovieDetailsProTvPolished(
     val backdrop = details?.backdropUrl ?: item.backdropUrl ?: item.posterUrl
     val technical = remember(item.id) { context.detailsTvMovieTechnical(item.id) }
     val progress = historyEntry?.detailsTvWatchProgress()
+    val movieResumeHeroExtraDp = if (progress != null && historyEntry != null) 34 else 0
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
@@ -228,7 +234,7 @@ private fun MovieDetailsProTvPolished(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(metrics.heroHeightDp.dp)
+                    .height((metrics.heroHeightDp + movieResumeHeroExtraDp).dp)
                     .background(Color(0xFF080906)),
             ) {
                 if (!backdrop.isNullOrBlank()) {
@@ -334,6 +340,14 @@ private fun MovieDetailsProTvPolished(
                                 modifier = Modifier.fillMaxWidth(.94f),
                             )
                         }
+                        if (progress != null && historyEntry != null) {
+                            Spacer(Modifier.height(8.dp))
+                            DetailsTvProgress(
+                                progress = progress,
+                                label = "متابعة من ${detailsTvFormatTime(historyEntry.positionMs)}",
+                                modifier = Modifier.fillMaxWidth(.94f),
+                            )
+                        }
                         Spacer(Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -341,9 +355,9 @@ private fun MovieDetailsProTvPolished(
                         ) {
                             FocusButton(
                                 text = if (progress != null && historyEntry != null) {
-                                    "▶ استكمال"
+                                    "▶ متابعة المشاهدة"
                                 } else {
-                                    "▶ مشاهدة الفيلم"
+                                    "▶ ابدا المشاهدة"
                                 },
                                 onClick = onPlay,
                                 compact = true,
@@ -439,22 +453,14 @@ private fun MovieDetailsProTvPolished(
             }
         }
 
-        if (progress != null && historyEntry != null) {
-            item(key = "movie_tv_resume_progress") {
-                DetailsTvResumeStrip(
-                    progress = progress,
-                    label = "متابعة من ${detailsTvFormatTime(historyEntry.positionMs)}",
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                )
-            }
-        }
-
         if (detailsTvHasInformation(details)) {
             item(key = "movie_tv_polished_info") {
                 DetailsTvInformationPanel(
                     title = "معلومات الفيلم",
                     details = details,
                     horizontalPaddingDp = metrics.horizontalPaddingDp,
+                    widthFraction = .74f,
+                    compact = true,
                 )
             }
         }
@@ -751,7 +757,7 @@ private fun SeriesDetailsProTvPolished(
                             horizontalArrangement = Arrangement.spacedBy(9.dp),
                         ) {
                             FocusButton(
-                                text = if (resumePair != null) "▶ استكمال المشاهدة" else "▶ ابدأ المشاهدة",
+                                text = if (resumePair != null) "▶ متابعة المشاهدة" else "▶ ابدا المشاهدة",
                                 onClick = { currentEpisode?.let(onPlay) },
                                 enabled = currentEpisode != null,
                                 compact = true,
@@ -898,12 +904,19 @@ private fun SeriesDetailsProTvPolished(
                     }
                     Spacer(Modifier.weight(1f))
                     resumePair?.let { resume ->
+                        val shape = RoundedCornerShape(8.dp)
                         Text(
-                            "الحالية: S${resume.first.season} E${resume.first.episodeNumber} · ${detailsTvFormatTime(resume.second.positionMs)}",
+                            text = "الحلقة الحالية : S${resume.first.season} E${resume.first.episodeNumber}  •  ${detailsTvFormatTime(resume.second.positionMs)}",
                             color = colors.goldBright,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .clip(shape)
+                                .background(colors.surface.copy(alpha = .84f))
+                                .border(1.dp, colors.gold.copy(alpha = .48f), shape)
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                         )
                     }
                 }
@@ -953,6 +966,8 @@ private fun SeriesDetailsProTvPolished(
                         val historyEntry = historyByKey["SERIES:${episode.id}"]
                         val rightCard = if (columnIndex > 0) episodeCardRequesters.getOrNull(absoluteIndex - 1) else null
                         val leftCard = if (columnIndex < rowEpisodes.lastIndex) episodeCardRequesters.getOrNull(absoluteIndex + 1) else null
+                        val rightAction = if (columnIndex > 0) episodeActionRequesters.getOrNull(absoluteIndex - 1) else null
+                        val leftAction = if (columnIndex < rowEpisodes.lastIndex) episodeActionRequesters.getOrNull(absoluteIndex + 1) else null
                         val upCard = if (rowIndex > 0) {
                             episodeCardRequesters.getOrNull(absoluteIndex - metrics.episodeColumns)
                                 ?: seasonRequesters.getOrNull(columnIndex.coerceAtMost(seasonRequesters.lastIndex.coerceAtLeast(0)))
@@ -981,6 +996,8 @@ private fun SeriesDetailsProTvPolished(
                             actionRequester = actionRequester,
                             leftCard = leftCard,
                             rightCard = rightCard,
+                            leftAction = leftAction,
+                            rightAction = rightAction,
                             upCard = upCard,
                             downCard = nextRowCard ?: relatedDown,
                             onPlay = { onPlay(episode) },
@@ -1024,6 +1041,8 @@ private fun DetailsTvEpisodeUnit(
     actionRequester: FocusRequester,
     leftCard: FocusRequester?,
     rightCard: FocusRequester?,
+    leftAction: FocusRequester?,
+    rightAction: FocusRequester?,
     upCard: FocusRequester,
     downCard: FocusRequester?,
     onPlay: () -> Unit,
@@ -1153,8 +1172,8 @@ private fun DetailsTvEpisodeUnit(
                 modifier = Modifier.weight(1f),
                 upTarget = cardRequester,
                 downTarget = downCard,
-                leftTarget = if (download != null) cancelRequester else null,
-                rightTarget = null,
+                leftTarget = if (download != null) cancelRequester else leftAction,
+                rightTarget = rightAction,
                 enabled = actionEnabled,
             )
             if (download != null) {
@@ -1165,8 +1184,8 @@ private fun DetailsTvEpisodeUnit(
                     modifier = Modifier.width(60.dp),
                     upTarget = cardRequester,
                     downTarget = downCard,
-                    rightTarget = if (actionEnabled) actionRequester else null,
-                    leftTarget = null,
+                    rightTarget = if (actionEnabled) actionRequester else rightAction,
+                    leftTarget = leftAction,
                 )
             }
         }
@@ -1200,6 +1219,31 @@ private fun DetailsTvMiniAction(
                 down = downTarget ?: FocusRequester.Cancel
                 left = leftTarget ?: FocusRequester.Cancel
                 right = rightTarget ?: FocusRequester.Cancel
+            }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else {
+                    when (event.key) {
+                        Key.DirectionUp -> {
+                            runCatching { upTarget.requestFocus() }
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            downTarget?.let { runCatching { it.requestFocus() } }
+                            true
+                        }
+                        Key.DirectionLeft -> {
+                            leftTarget?.let { runCatching { it.requestFocus() } }
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            rightTarget?.let { runCatching { it.requestFocus() } }
+                            true
+                        }
+                        else -> false
+                    }
+                }
             }
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
@@ -1236,6 +1280,8 @@ private fun DetailsTvInformationPanel(
     title: String,
     details: ContentDetails?,
     horizontalPaddingDp: Int,
+    widthFraction: Float = 1f,
+    compact: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val items = buildList {
@@ -1245,20 +1291,34 @@ private fun DetailsTvInformationPanel(
     }
     if (items.isEmpty()) return
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.surface.copy(alpha = .82f))
-            .border(1.dp, colors.gold.copy(alpha = .40f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp),
+        contentAlignment = Alignment.CenterEnd,
     ) {
-        Text(title, color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(6.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items.forEach { (label, value) ->
-                DetailsTvInfoItem(label, value, Modifier.weight(1f))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(widthFraction.coerceIn(.55f, 1f))
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.surface.copy(alpha = .82f))
+                .border(1.dp, colors.gold.copy(alpha = .40f), RoundedCornerShape(12.dp))
+                .padding(
+                    horizontal = if (compact) 12.dp else 14.dp,
+                    vertical = if (compact) 7.dp else 9.dp,
+                ),
+        ) {
+            Text(
+                title,
+                color = colors.text,
+                fontSize = if (compact) 15.sp else 16.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Spacer(Modifier.height(if (compact) 4.dp else 6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                items.forEach { (label, value) ->
+                    DetailsTvInfoItem(label, value, Modifier.weight(1f))
+                }
             }
         }
     }
