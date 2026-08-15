@@ -3,6 +3,7 @@ package sa.hulksa.player
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -11,20 +12,47 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import sa.hulksa.player.ui.ProfileAwareHulkApp
+import sa.hulksa.player.ui.VoiceSearchAppLayer
+import sa.hulksa.player.ui.VoiceSearchDelegate
+import sa.hulksa.player.ui.isVoiceSearchDestination
+import sa.hulksa.player.ui.isVoiceSearchHardwareKey
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class TvMainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
     private var initialImePolicyApplied = false
+    private lateinit var voiceSearchDelegate: VoiceSearchDelegate
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        voiceSearchDelegate = VoiceSearchDelegate(
+            activity = this,
+            onTranscript = viewModel::updateSearch,
+        )
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContent {
             HulkTheme {
-                ProfileAwareHulkApp(viewModel = viewModel, isTelevisionDevice = true)
+                VoiceSearchAppLayer(
+                    viewModel = viewModel,
+                    isTv = true,
+                    onVoiceSearch = voiceSearchDelegate::launch,
+                ) {
+                    ProfileAwareHulkApp(viewModel = viewModel, isTelevisionDevice = true)
+                }
             }
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (
+            ::voiceSearchDelegate.isInitialized &&
+            isVoiceSearchHardwareKey(keyCode) &&
+            isVoiceSearchDestination(viewModel.state.value)
+        ) {
+            voiceSearchDelegate.launch(viewModel.state.value.searchQuery)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onResume() {

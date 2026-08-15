@@ -138,7 +138,8 @@ private data class SmartSearchIndexEntry(
     val titleTokens: List<String>,
     val normalizedYear: String,
     val normalizedGenre: String,
-    val titleArabic: Boolean,
+    val titleHasArabic: Boolean,
+    val titleHasLatin: Boolean,
     val phoneticWords: List<String>,
     val phoneticPhrase: String,
 )
@@ -659,6 +660,7 @@ private fun SmartSearchInput(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     var tvEditing by remember { mutableStateOf(false) }
+    val voiceSearchRequester = remember { FocusRequester() }
 
     val moveDown: () -> Boolean = {
         when {
@@ -687,7 +689,7 @@ private fun SmartSearchInput(
             .focusProperties {
                 firstFilterRequester?.let { down = it }
                 up = FocusRequester.Cancel
-                left = FocusRequester.Cancel
+                left = voiceSearchRequester
                 railSearchRequester?.let { right = it }
             }
             .onFocusChanged { state ->
@@ -710,6 +712,7 @@ private fun SmartSearchInput(
                 } else if (!tvEditing && event.key == Key.DirectionUp) {
                     true
                 } else if (!tvEditing && event.key == Key.DirectionLeft) {
+                    runCatching { voiceSearchRequester.requestFocus() }
                     true
                 } else if (!tvEditing && event.key == Key.DirectionRight) {
                     railSearchRequester?.let { runCatching { it.requestFocus() } }
@@ -722,24 +725,36 @@ private fun SmartSearchInput(
         Modifier.onFocusChanged { onFocusStateChanged(it.isFocused) }
     }
 
-    HulkTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = "اكتب اسم فيلم او مسلسل او قناة…",
-        modifier = Modifier.fillMaxWidth().then(tvModifier),
-        readOnly = isTv && !tvEditing,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(
-            onSearch = {
-                keyboardController?.hide()
-                if (isTv) {
-                    moveDown()
-                } else {
-                    focusManager.clearFocus(force = true)
-                }
-            },
-        ),
-    )
+    Box(Modifier.fillMaxWidth()) {
+        HulkTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = "اكتب اسم فيلم او مسلسل او قناة…",
+            modifier = Modifier.fillMaxWidth().then(tvModifier),
+            readOnly = isTv && !tvEditing,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    keyboardController?.hide()
+                    if (isTv) {
+                        moveDown()
+                    } else {
+                        focusManager.clearFocus(force = true)
+                    }
+                },
+            ),
+        )
+        InlineVoiceSearchAction(
+            query = value,
+            isTv = isTv,
+            requester = voiceSearchRequester,
+            searchFieldRequester = searchFieldRequester,
+            downRequester = firstFilterRequester,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = if (isTv) 10.dp else 8.dp),
+        )
+    }
 }
 
 @Composable
@@ -1484,7 +1499,8 @@ private suspend fun buildSmartSearchIndex(state: HulkUiState): SmartSearchIndex 
 
             val normalizedName = normalizeSearchText(item.name)
             val titleTokens = normalizedName.split(' ').filter(String::isNotBlank)
-            val titleArabic = normalizedName.any(::isArabicSearchChar)
+            val titleHasArabic = normalizedName.any(::isArabicSearchChar)
+            val titleHasLatin = normalizedName.any(::isLatinSearchChar)
             val phoneticWords = phoneticSearchWordsNormalized(normalizedName)
             entries += SmartSearchIndexEntry(
                 item = item,
@@ -1492,7 +1508,8 @@ private suspend fun buildSmartSearchIndex(state: HulkUiState): SmartSearchIndex 
                 titleTokens = titleTokens,
                 normalizedYear = normalizeSearchText(item.year.orEmpty()),
                 normalizedGenre = normalizeSearchText(item.genre.orEmpty()),
-                titleArabic = titleArabic,
+                titleHasArabic = titleHasArabic,
+                titleHasLatin = titleHasLatin,
                 phoneticWords = phoneticWords,
                 phoneticPhrase = phoneticWords.joinToString(" "),
             )
@@ -1509,7 +1526,8 @@ private suspend fun boundedSmartSearch(
     val query = normalizeSearchText(rawQuery)
     if (query.length < SMART_SEARCH_MIN_QUERY_LENGTH) return emptyList()
     val queryTokens = query.split(' ').filter(String::isNotBlank)
-    val queryArabic = query.any(::isArabicSearchChar)
+    val queryHasArabic = query.any(::isArabicSearchChar)
+    val queryHasLatin = query.any(::isLatinSearchChar)
     val queryPhoneticWords = phoneticSearchWordsNormalized(query)
     val queryPhoneticPhrase = queryPhoneticWords.joinToString(" ")
 
@@ -1524,7 +1542,8 @@ private suspend fun boundedSmartSearch(
         val rank = entry.smartSearchRankOrNull(
             normalizedQuery = query,
             queryTokens = queryTokens,
-            queryArabic = queryArabic,
+            queryHasArabic = queryHasArabic,
+            queryHasLatin = queryHasLatin,
             queryPhoneticWords = queryPhoneticWords,
             queryPhoneticPhrase = queryPhoneticPhrase,
         ) ?: continue
@@ -1553,7 +1572,8 @@ private suspend fun boundedSmartSearch(
 private fun SmartSearchIndexEntry.smartSearchRankOrNull(
     normalizedQuery: String,
     queryTokens: List<String>,
-    queryArabic: Boolean,
+    queryHasArabic: Boolean,
+    queryHasLatin: Boolean,
     queryPhoneticWords: List<String>,
     queryPhoneticPhrase: String,
 ): Int? {
@@ -1567,7 +1587,9 @@ private fun SmartSearchIndexEntry.smartSearchRankOrNull(
         } -> return 4
     }
 
-    if (queryArabic != titleArabic && queryPhoneticPhrase.length >= 3) {
+    val crossScriptCandidate =
+        (queryHasArabic && titleHasLatin) || (queryHasLatin && titleHasArabic)
+    if (crossScriptCandidate && queryPhoneticPhrase.length >= 3) {
         val phoneticRank = crossScriptPhoneticRankPrepared(
             queryWords = queryPhoneticWords,
             queryPhrase = queryPhoneticPhrase,
@@ -1589,9 +1611,13 @@ private fun SmartSearchIndexEntry.smartSearchRankOrNull(
 internal fun crossScriptPhoneticRank(query: String, title: String): Int? {
     val normalizedQuery = normalizeSearchText(query)
     val normalizedTitle = normalizeSearchText(title)
-    val queryArabic = normalizedQuery.any(::isArabicSearchChar)
-    val titleArabic = normalizedTitle.any(::isArabicSearchChar)
-    if (queryArabic == titleArabic) return null
+    val queryHasArabic = normalizedQuery.any(::isArabicSearchChar)
+    val queryHasLatin = normalizedQuery.any(::isLatinSearchChar)
+    val titleHasArabic = normalizedTitle.any(::isArabicSearchChar)
+    val titleHasLatin = normalizedTitle.any(::isLatinSearchChar)
+    val crossScriptCandidate =
+        (queryHasArabic && titleHasLatin) || (queryHasLatin && titleHasArabic)
+    if (!crossScriptCandidate) return null
 
     val queryWords = phoneticSearchWordsNormalized(normalizedQuery)
     val titleWords = phoneticSearchWordsNormalized(normalizedTitle)
@@ -1613,12 +1639,48 @@ private fun crossScriptPhoneticRankPrepared(
         queryPhrase == titlePhrase -> 0
         titlePhrase.startsWith(queryPhrase) -> 1
         queryWords.all { queryWord ->
-            queryWord.length >= 2 && titleWords.any { titleWord ->
-                titleWord.startsWith(queryWord) || titleWord.contains(queryWord)
-            }
+            titleWords.any { titleWord -> phoneticWordMatches(queryWord, titleWord) }
         } -> 2
         else -> null
     }
+}
+
+private fun phoneticWordMatches(queryWord: String, titleWord: String): Boolean {
+    if (queryWord == titleWord) return true
+    if (queryWord.length == 1 || titleWord.length == 1) return false
+    if (titleWord.startsWith(queryWord) || titleWord.contains(queryWord)) return true
+    return phoneticEditDistanceAtMostOne(queryWord, titleWord)
+}
+
+private fun phoneticEditDistanceAtMostOne(first: String, second: String): Boolean {
+    if (kotlin.math.abs(first.length - second.length) > 1) return false
+    if (first == second) return true
+
+    var firstIndex = 0
+    var secondIndex = 0
+    var edits = 0
+
+    while (firstIndex < first.length && secondIndex < second.length) {
+        if (first[firstIndex] == second[secondIndex]) {
+            firstIndex++
+            secondIndex++
+            continue
+        }
+
+        edits++
+        if (edits > 1) return false
+        when {
+            first.length > second.length -> firstIndex++
+            second.length > first.length -> secondIndex++
+            else -> {
+                firstIndex++
+                secondIndex++
+            }
+        }
+    }
+
+    if (firstIndex < first.length || secondIndex < second.length) edits++
+    return edits <= 1
 }
 
 internal fun phoneticSearchWords(raw: String): List<String> =
@@ -1627,7 +1689,21 @@ internal fun phoneticSearchWords(raw: String): List<String> =
 private fun phoneticSearchWordsNormalized(normalized: String): List<String> = normalized
     .split(' ')
     .map(::phoneticSearchWord)
-    .filter { it.length >= 2 }
+    .map(::collapseRepeatedPhoneticChars)
+    .filter(String::isNotEmpty)
+
+private fun collapseRepeatedPhoneticChars(value: String): String {
+    if (value.length < 2) return value
+    return buildString(value.length) {
+        var previous: Char? = null
+        value.forEach { char ->
+            if (char != previous) {
+                append(char)
+                previous = char
+            }
+        }
+    }
+}
 
 private fun phoneticSearchWord(word: String): String = buildString(word.length) {
     word.forEach { char ->
@@ -1655,6 +1731,7 @@ private fun phoneticSearchWord(word: String): String = buildString(word.length) 
 }
 
 private fun isArabicSearchChar(char: Char): Boolean = char in '\u0600'..'\u06FF'
+private fun isLatinSearchChar(char: Char): Boolean = char in 'a'..'z'
 
 internal fun normalizeSearchText(raw: String): String {
     val normalized = StringBuilder(raw.length)
@@ -1671,6 +1748,7 @@ internal fun normalizeSearchText(raw: String): String {
                 'ى' -> 'ي'
                 'ؤ' -> 'و'
                 'ئ' -> 'ي'
+                'ة' -> 'ه'
                 else -> lower
             }
         }
