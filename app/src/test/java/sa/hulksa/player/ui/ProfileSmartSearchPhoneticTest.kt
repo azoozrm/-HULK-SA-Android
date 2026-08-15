@@ -22,6 +22,16 @@ class ProfileSmartSearchPhoneticTest {
     }
 
     @Test
+    fun mixedScriptTitleStillUsesEnglishPhoneticMatch() {
+        assertEquals(1, crossScriptPhoneticRank("بريزون بريك", "Prison Break مترجم"))
+    }
+
+    @Test
+    fun tolerantPhoneticMatchingHandlesCommonSpellingDifferences() {
+        assertEquals(2, crossScriptPhoneticRank("جون ويك", "John Wick"))
+    }
+
+    @Test
     fun sameScriptDoesNotUseCrossScriptFallback() {
         assertNull(crossScriptPhoneticRank("prison break", "prison break"))
         assertNull(crossScriptPhoneticRank("بريزون بريك", "بريزون بريك"))
@@ -37,5 +47,11 @@ class ProfileSmartSearchPhoneticTest {
         assertEquals("بريزون بريك 123", normalizeSearchText("  بَرِيزُون---بريك ١٢٣  "))
         assertEquals("prison break", normalizeSearchText("Prison...BREAK"))
         assertEquals("ايمان وليد", normalizeSearchText("إيمان ـ وليد"))
+    }
+
+    @Test
+    fun taaMarbutaAndHaSearchFormsAreEquivalent() {
+        assertEquals("باب الحاره", normalizeSearchText("باب الحارة"))
+        assertEquals("باب الحاره", normalizeSearchText("باب الحاره"))
     }
 }
