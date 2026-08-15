@@ -208,6 +208,12 @@ private fun MovieDetailsProTvPolished(
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(relatedKeys) { List(relatedItems.size) { FocusRequester() } }
     val firstBelowRequester = relatedRequesters.firstOrNull()
+    val downloadFocusable = download?.status != OfflineStatus.COMPLETED
+    val favoriteLeftTarget = when {
+        downloadFocusable -> downloadRequester
+        download != null -> cancelRequester
+        else -> FocusRequester.Cancel
+    }
 
     LaunchedEffect(item.id) {
         delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
@@ -259,7 +265,12 @@ private fun MovieDetailsProTvPolished(
                         compact = true,
                         modifier = Modifier
                             .focusRequester(backRequester)
-                            .focusProperties { down = playRequester },
+                            .focusProperties {
+                                up = FocusRequester.Cancel
+                                down = playRequester
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
                     )
                 }
 
@@ -318,17 +329,9 @@ private fun MovieDetailsProTvPolished(
                                 color = Color(0xFFE7E3D9),
                                 fontSize = 12.sp,
                                 lineHeight = 18.sp,
-                                maxLines = 3,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.fillMaxWidth(.94f),
-                            )
-                        }
-                        if (progress != null && historyEntry != null) {
-                            Spacer(Modifier.height(9.dp))
-                            DetailsTvProgress(
-                                progress = progress,
-                                label = "متابعة من ${detailsTvFormatTime(historyEntry.positionMs)}",
-                                modifier = Modifier.fillMaxWidth(.74f),
                             )
                         }
                         Spacer(Modifier.height(12.dp))
@@ -349,8 +352,9 @@ private fun MovieDetailsProTvPolished(
                                     .focusRequester(playRequester)
                                     .focusProperties {
                                         up = backRequester
-                                        if (firstBelowRequester != null) down = firstBelowRequester
+                                        down = firstBelowRequester ?: FocusRequester.Cancel
                                         left = favoriteRequester
+                                        right = FocusRequester.Cancel
                                     },
                             )
                             FocusButton(
@@ -364,9 +368,9 @@ private fun MovieDetailsProTvPolished(
                                     .focusRequester(favoriteRequester)
                                     .focusProperties {
                                         up = backRequester
-                                        if (firstBelowRequester != null) down = firstBelowRequester
+                                        down = firstBelowRequester ?: FocusRequester.Cancel
                                         right = playRequester
-                                        left = downloadRequester
+                                        left = favoriteLeftTarget
                                     },
                             )
                             FocusButton(
@@ -375,15 +379,15 @@ private fun MovieDetailsProTvPolished(
                                 primary = false,
                                 outlined = true,
                                 compact = true,
-                                enabled = download?.status != OfflineStatus.COMPLETED,
+                                enabled = downloadFocusable,
                                 modifier = Modifier
                                     .weight(.90f)
                                     .focusRequester(downloadRequester)
                                     .focusProperties {
                                         up = backRequester
-                                        if (firstBelowRequester != null) down = firstBelowRequester
+                                        down = firstBelowRequester ?: FocusRequester.Cancel
                                         right = favoriteRequester
-                                        if (download != null) left = cancelRequester
+                                        left = if (download != null) cancelRequester else FocusRequester.Cancel
                                     },
                             )
                             if (download != null) {
@@ -398,8 +402,9 @@ private fun MovieDetailsProTvPolished(
                                         .focusRequester(cancelRequester)
                                         .focusProperties {
                                             up = backRequester
-                                            if (firstBelowRequester != null) down = firstBelowRequester
-                                            right = downloadRequester
+                                            down = firstBelowRequester ?: FocusRequester.Cancel
+                                            right = if (downloadFocusable) downloadRequester else favoriteRequester
+                                            left = FocusRequester.Cancel
                                         },
                                 )
                             }
@@ -430,6 +435,16 @@ private fun MovieDetailsProTvPolished(
                 ErrorNotice(
                     errorMessage,
                     Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 10.dp),
+                )
+            }
+        }
+
+        if (progress != null && historyEntry != null) {
+            item(key = "movie_tv_resume_progress") {
+                DetailsTvResumeStrip(
+                    progress = progress,
+                    label = "متابعة من ${detailsTvFormatTime(historyEntry.positionMs)}",
+                    horizontalPaddingDp = metrics.horizontalPaddingDp,
                 )
             }
         }
@@ -664,7 +679,12 @@ private fun SeriesDetailsProTvPolished(
                         compact = true,
                         modifier = Modifier
                             .focusRequester(backRequester)
-                            .focusProperties { down = playRequester },
+                            .focusProperties {
+                                up = FocusRequester.Cancel
+                                down = playRequester
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
                     )
                 }
 
@@ -720,17 +740,9 @@ private fun SeriesDetailsProTvPolished(
                                 color = Color(0xFFE7E3D9),
                                 fontSize = 12.sp,
                                 lineHeight = 18.sp,
-                                maxLines = 3,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.fillMaxWidth(.94f),
-                            )
-                        }
-                        if (resumePair != null) {
-                            Spacer(Modifier.height(9.dp))
-                            DetailsTvProgress(
-                                progress = resumePair.third,
-                                label = "الموسم ${resumePair.first.season} · الحلقة ${resumePair.first.episodeNumber} · ${detailsTvFormatTime(resumePair.second.positionMs)}",
-                                modifier = Modifier.fillMaxWidth(.74f),
                             )
                         }
                         Spacer(Modifier.height(12.dp))
@@ -748,10 +760,13 @@ private fun SeriesDetailsProTvPolished(
                                     .focusRequester(playRequester)
                                     .focusProperties {
                                         up = backRequester
-                                        if (heroDownTarget != null) down = heroDownTarget
-                                        if (previousEpisode != null) left = previousRequester
-                                        else if (nextEpisode != null) left = nextRequester
-                                        else left = favoriteRequester
+                                        down = heroDownTarget ?: FocusRequester.Cancel
+                                        right = FocusRequester.Cancel
+                                        left = when {
+                                            previousEpisode != null -> previousRequester
+                                            nextEpisode != null -> nextRequester
+                                            else -> favoriteRequester
+                                        }
                                     },
                             )
                             if (previousEpisode != null) {
@@ -766,7 +781,7 @@ private fun SeriesDetailsProTvPolished(
                                         .focusRequester(previousRequester)
                                         .focusProperties {
                                             up = backRequester
-                                            if (heroDownTarget != null) down = heroDownTarget
+                                            down = heroDownTarget ?: FocusRequester.Cancel
                                             right = playRequester
                                             left = if (nextEpisode != null) nextRequester else favoriteRequester
                                         },
@@ -784,7 +799,7 @@ private fun SeriesDetailsProTvPolished(
                                         .focusRequester(nextRequester)
                                         .focusProperties {
                                             up = backRequester
-                                            if (heroDownTarget != null) down = heroDownTarget
+                                            down = heroDownTarget ?: FocusRequester.Cancel
                                             right = if (previousEpisode != null) previousRequester else playRequester
                                             left = favoriteRequester
                                         },
@@ -801,12 +816,13 @@ private fun SeriesDetailsProTvPolished(
                                     .focusRequester(favoriteRequester)
                                     .focusProperties {
                                         up = backRequester
-                                        if (heroDownTarget != null) down = heroDownTarget
+                                        down = heroDownTarget ?: FocusRequester.Cancel
                                         right = when {
                                             nextEpisode != null -> nextRequester
                                             previousEpisode != null -> previousRequester
                                             else -> playRequester
                                         }
+                                        left = FocusRequester.Cancel
                                     },
                             )
                         }
@@ -840,6 +856,16 @@ private fun SeriesDetailsProTvPolished(
             }
         }
 
+        if (resumePair != null) {
+            item(key = "series_tv_resume_progress") {
+                DetailsTvResumeStrip(
+                    progress = resumePair.third,
+                    label = "الموسم ${resumePair.first.season} · الحلقة ${resumePair.first.episodeNumber} · ${detailsTvFormatTime(resumePair.second.positionMs)}",
+                    horizontalPaddingDp = metrics.horizontalPaddingDp,
+                )
+            }
+        }
+
         if (detailsTvHasInformation(details)) {
             item(key = "series_tv_polished_info") {
                 DetailsTvInformationPanel(
@@ -857,8 +883,8 @@ private fun SeriesDetailsProTvPolished(
                     .padding(
                         start = metrics.horizontalPaddingDp.dp,
                         end = metrics.horizontalPaddingDp.dp,
-                        top = 14.dp,
-                        bottom = 8.dp,
+                        top = 10.dp,
+                        bottom = 6.dp,
                     ),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -882,10 +908,13 @@ private fun SeriesDetailsProTvPolished(
                     }
                 }
                 if (seasons.isNotEmpty()) {
-                    Spacer(Modifier.height(9.dp))
+                    Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         itemsIndexed(seasons, key = { _, season -> season }) { index, season ->
                             val requester = seasonRequesters[index]
+                            val episodeDown = firstEpisodeRequester?.let {
+                                episodeCardRequesters.getOrNull(index.coerceAtMost((metrics.episodeColumns - 1).coerceAtLeast(0))) ?: it
+                            }
                             FocusButton(
                                 text = "الموسم $season",
                                 onClick = { selectedSeason = season },
@@ -896,9 +925,9 @@ private fun SeriesDetailsProTvPolished(
                                     .focusRequester(requester)
                                     .focusProperties {
                                         up = playRequester
-                                        if (firstEpisodeRequester != null) down = firstEpisodeRequester
-                                        if (index > 0) right = seasonRequesters[index - 1]
-                                        if (index < seasonRequesters.lastIndex) left = seasonRequesters[index + 1]
+                                        down = episodeDown ?: FocusRequester.Cancel
+                                        right = if (index > 0) seasonRequesters[index - 1] else FocusRequester.Cancel
+                                        left = if (index < seasonRequesters.lastIndex) seasonRequesters[index + 1] else FocusRequester.Cancel
                                     },
                             )
                         }
@@ -922,11 +951,24 @@ private fun SeriesDetailsProTvPolished(
                         val actionRequester = episodeActionRequesters[absoluteIndex]
                         val download = downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
                         val historyEntry = historyByKey["SERIES:${episode.id}"]
-                        val leftCard = episodeCardRequesters.getOrNull(absoluteIndex + 1)
-                        val rightCard = episodeCardRequesters.getOrNull(absoluteIndex - 1)
-                        val upCard = episodeCardRequesters.getOrNull(absoluteIndex - metrics.episodeColumns)
-                        val nextRowCard = episodeCardRequesters.getOrNull(absoluteIndex + metrics.episodeColumns)
-                        val relatedDown = relatedRequesters.firstOrNull()
+                        val rightCard = if (columnIndex > 0) episodeCardRequesters.getOrNull(absoluteIndex - 1) else null
+                        val leftCard = if (columnIndex < rowEpisodes.lastIndex) episodeCardRequesters.getOrNull(absoluteIndex + 1) else null
+                        val upCard = if (rowIndex > 0) {
+                            episodeCardRequesters.getOrNull(absoluteIndex - metrics.episodeColumns)
+                        } else {
+                            seasonRequesters.getOrNull(columnIndex.coerceAtMost(seasonRequesters.lastIndex.coerceAtLeast(0)))
+                                ?: playRequester
+                        }
+                        val nextRow = rows.getOrNull(rowIndex + 1)
+                        val nextRowCard = nextRow?.let { nextEpisodes ->
+                            val nextColumn = columnIndex.coerceAtMost(nextEpisodes.lastIndex)
+                            episodeCardRequesters.getOrNull((rowIndex + 1) * metrics.episodeColumns + nextColumn)
+                        }
+                        val relatedDown = if (nextRowCard == null && relatedRequesters.isNotEmpty()) {
+                            relatedRequesters[columnIndex.coerceAtMost(relatedRequesters.lastIndex)]
+                        } else {
+                            null
+                        }
                         DetailsTvEpisodeUnit(
                             episode = episode,
                             fallbackArtwork = backdrop,
@@ -937,7 +979,7 @@ private fun SeriesDetailsProTvPolished(
                             actionRequester = actionRequester,
                             leftCard = leftCard,
                             rightCard = rightCard,
-                            upCard = upCard ?: firstSeasonRequester ?: playRequester,
+                            upCard = upCard,
                             downCard = nextRowCard ?: relatedDown,
                             onPlay = { onPlay(episode) },
                             onDownload = { onDownload(episode) },
@@ -994,6 +1036,8 @@ private fun DetailsTvEpisodeUnit(
     val artwork = episode.posterUrl?.takeIf(String::isNotBlank) ?: fallbackArtwork
     val shape = RoundedCornerShape(12.dp)
     val cancelRequester = remember(episode.id, download?.downloadId) { FocusRequester() }
+    val actionEnabled = download?.status != OfflineStatus.COMPLETED
+    val cardDownTarget = if (actionEnabled) actionRequester else cancelRequester
 
     Column(modifier) {
         Box(
@@ -1011,9 +1055,9 @@ private fun DetailsTvEpisodeUnit(
                 .focusRequester(cardRequester)
                 .focusProperties {
                     up = upCard
-                    down = actionRequester
-                    if (leftCard != null) left = leftCard
-                    if (rightCard != null) right = rightCard
+                    down = cardDownTarget
+                    left = leftCard ?: FocusRequester.Cancel
+                    right = rightCard ?: FocusRequester.Cancel
                 }
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(role = Role.Button, onClick = onPlay),
@@ -1108,7 +1152,8 @@ private fun DetailsTvEpisodeUnit(
                 upTarget = cardRequester,
                 downTarget = downCard,
                 leftTarget = if (download != null) cancelRequester else null,
-                enabled = download?.status != OfflineStatus.COMPLETED,
+                rightTarget = null,
+                enabled = actionEnabled,
             )
             if (download != null) {
                 DetailsTvMiniAction(
@@ -1118,7 +1163,8 @@ private fun DetailsTvEpisodeUnit(
                     modifier = Modifier.width(60.dp),
                     upTarget = cardRequester,
                     downTarget = downCard,
-                    rightTarget = actionRequester,
+                    rightTarget = if (actionEnabled) actionRequester else null,
+                    leftTarget = null,
                 )
             }
         }
@@ -1149,9 +1195,9 @@ private fun DetailsTvMiniAction(
             .focusRequester(requester)
             .focusProperties {
                 up = upTarget
-                if (downTarget != null) down = downTarget
-                if (leftTarget != null) left = leftTarget
-                if (rightTarget != null) right = rightTarget
+                down = downTarget ?: FocusRequester.Cancel
+                left = leftTarget ?: FocusRequester.Cancel
+                right = rightTarget ?: FocusRequester.Cancel
             }
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
@@ -1169,34 +1215,77 @@ private fun DetailsTvMiniAction(
 }
 
 @Composable
+private fun DetailsTvResumeStrip(
+    progress: Float,
+    label: String,
+    horizontalPaddingDp: Int,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.surface.copy(alpha = .72f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = label,
+            color = colors.goldBright,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            modifier = Modifier.width(170.dp),
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            Modifier
+                .weight(1f)
+                .height(4.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = .18f)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                    .fillMaxHeight()
+                    .background(colors.goldBright),
+            )
+        }
+    }
+}
+
+@Composable
 private fun DetailsTvInformationPanel(
     title: String,
     details: ContentDetails?,
     horizontalPaddingDp: Int,
 ) {
     val colors = LocalHulkColors.current
+    val items = buildList {
+        details?.releaseDate?.takeIf(String::isNotBlank)?.let { add("تاريخ العرض" to it) }
+        details?.director?.takeIf(String::isNotBlank)?.let { add("الاخراج" to it) }
+        details?.cast?.takeIf(String::isNotBlank)?.let { add("البطولة" to it) }
+    }
+    if (items.isEmpty()) return
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = horizontalPaddingDp.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.surface.copy(alpha = .86f))
-            .border(1.dp, colors.gold.copy(alpha = .48f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = horizontalPaddingDp.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surface.copy(alpha = .82f))
+            .border(1.dp, colors.gold.copy(alpha = .40f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
     ) {
-        Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(9.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-            details?.releaseDate?.takeIf(String::isNotBlank)?.let {
-                DetailsTvInfoItem("تاريخ العرض", it, Modifier.weight(1f))
+        Text(title, color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(6.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items.forEach { (label, value) ->
+                DetailsTvInfoItem(label, value, Modifier.weight(1f))
             }
-            details?.director?.takeIf(String::isNotBlank)?.let {
-                DetailsTvInfoItem("الاخراج", it, Modifier.weight(1f))
-            }
-        }
-        details?.cast?.takeIf(String::isNotBlank)?.let {
-            Spacer(Modifier.height(8.dp))
-            DetailsTvInfoItem("البطولة", it, Modifier.fillMaxWidth())
         }
     }
 }
@@ -1205,14 +1294,14 @@ private fun DetailsTvInformationPanel(
 private fun DetailsTvInfoItem(label: String, value: String, modifier: Modifier) {
     val colors = LocalHulkColors.current
     Column(modifier) {
-        Text(label, color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
+        Text(label, color = colors.goldBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(1.dp))
         Text(
             value,
             color = colors.textMuted,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            maxLines = 2,
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            maxLines = if (label == "البطولة") 2 else 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -1255,8 +1344,9 @@ private fun DetailsTvRelatedMovies(
                         .focusRequester(requesters[index])
                         .focusProperties {
                             up = upRequester
-                            if (index > 0) right = requesters[index - 1]
-                            if (index < requesters.lastIndex) left = requesters[index + 1]
+                            down = FocusRequester.Cancel
+                            right = if (index > 0) requesters[index - 1] else FocusRequester.Cancel
+                            left = if (index < requesters.lastIndex) requesters[index + 1] else FocusRequester.Cancel
                         },
                 )
             }
@@ -1301,8 +1391,9 @@ private fun DetailsTvRelatedSeries(
                         .focusRequester(requesters[index])
                         .focusProperties {
                             up = upRequester
-                            if (index > 0) right = requesters[index - 1]
-                            if (index < requesters.lastIndex) left = requesters[index + 1]
+                            down = FocusRequester.Cancel
+                            right = if (index > 0) requesters[index - 1] else FocusRequester.Cancel
+                            left = if (index < requesters.lastIndex) requesters[index + 1] else FocusRequester.Cancel
                         },
                 )
             }
