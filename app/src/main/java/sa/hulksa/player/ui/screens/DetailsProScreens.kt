@@ -101,7 +101,6 @@ private data class DetailsProAction(
     val primary: Boolean = false,
     val enabled: Boolean = true,
     val mobileWeight: Float = 1f,
-    val mobileFullWidth: Boolean = false,
 )
 
 private data class EpisodeFocusTargets(
@@ -167,7 +166,6 @@ fun MovieDetailsProScreen(
                 requester = playRequester,
                 primary = true,
                 mobileWeight = 1.5f,
-                mobileFullWidth = true,
             ),
         )
         add(
@@ -175,7 +173,7 @@ fun MovieDetailsProScreen(
                 text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                 onClick = onToggleFavorite,
                 requester = favoriteRequester,
-                mobileWeight = 1.2f,
+                mobileWeight = 1f,
             ),
         )
         add(
@@ -1116,22 +1114,7 @@ private fun DetailsProActions(
         }
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            val fullWidthAction = actions.firstOrNull()?.takeIf { it.mobileFullWidth }
-            val remainingActions = if (fullWidthAction != null) actions.drop(1) else actions
-
-            if (fullWidthAction != null) {
-                FocusButton(
-                    text = fullWidthAction.text,
-                    onClick = fullWidthAction.onClick,
-                    primary = fullWidthAction.primary,
-                    enabled = fullWidthAction.enabled,
-                    compact = true,
-                    outlined = !fullWidthAction.primary,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            remainingActions.chunked(2).forEach { row ->
+            actions.chunked(2).forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
