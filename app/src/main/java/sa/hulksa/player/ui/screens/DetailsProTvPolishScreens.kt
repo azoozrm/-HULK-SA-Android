@@ -615,6 +615,7 @@ private fun SeriesDetailsProTvPolished(
     val previousEpisode = ordered.getOrNull(currentIndex - 1)
     val nextEpisode = if (currentEpisode != null) ordered.getOrNull(currentIndex + 1) else null
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
+    val seriesResumeHeroExtraDp = if (resumePair != null) 34 else 0
 
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
@@ -648,7 +649,7 @@ private fun SeriesDetailsProTvPolished(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(metrics.heroHeightDp.dp)
+                    .height((metrics.heroHeightDp + seriesResumeHeroExtraDp).dp)
                     .background(Color(0xFF080906)),
             ) {
                 if (!backdrop.isNullOrBlank()) {
@@ -748,6 +749,14 @@ private fun SeriesDetailsProTvPolished(
                                 lineHeight = 18.sp,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth(.94f),
+                            )
+                        }
+                        if (resumePair != null) {
+                            Spacer(Modifier.height(8.dp))
+                            DetailsTvProgress(
+                                progress = resumePair.third,
+                                label = "متابعة من ${detailsTvFormatTime(resumePair.second.positionMs)}",
                                 modifier = Modifier.fillMaxWidth(.94f),
                             )
                         }
@@ -862,22 +871,14 @@ private fun SeriesDetailsProTvPolished(
             }
         }
 
-        if (resumePair != null) {
-            item(key = "series_tv_resume_progress") {
-                DetailsTvResumeStrip(
-                    progress = resumePair.third,
-                    label = "متابعة من ${detailsTvFormatTime(resumePair.second.positionMs)}",
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                )
-            }
-        }
-
         if (detailsTvHasInformation(details)) {
             item(key = "series_tv_polished_info") {
                 DetailsTvInformationPanel(
                     title = "معلومات المسلسل",
                     details = details,
                     horizontalPaddingDp = metrics.horizontalPaddingDp,
+                    widthFraction = .74f,
+                    compact = true,
                 )
             }
         }
