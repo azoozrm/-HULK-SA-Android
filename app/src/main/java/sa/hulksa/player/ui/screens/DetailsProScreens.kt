@@ -158,9 +158,9 @@ fun MovieDetailsProScreen(
         add(
             DetailsProAction(
                 text = if (resumePosition != null) {
-                    "متابعة المشاهدة"
+                    "▶ متابعة المشاهدة"
                 } else {
-                    "ابدا المشاهدة"
+                    "▶ ابدا المشاهدة"
                 },
                 onClick = onPlay,
                 requester = playRequester,
@@ -541,12 +541,12 @@ fun SeriesDetailsProScreen(
     val heroActions = buildList {
         add(
             DetailsProAction(
-                text = if (resumePair != null) "متابعة المشاهدة" else "ابدا المشاهدة",
+                text = if (resumePair != null) "▶ متابعة المشاهدة" else "▶ ابدا المشاهدة",
                 onClick = { heroEpisode?.let(onPlay) },
                 requester = playRequester,
                 primary = true,
                 enabled = heroEpisode != null,
-                mobileWeight = .82f,
+                mobileWeight = 1.15f,
             ),
         )
         previousEpisode?.let { episode ->
