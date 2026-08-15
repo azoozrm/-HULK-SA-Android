@@ -503,7 +503,8 @@ fun SeriesDetailsProScreen(
         ?: seasons.firstOrNull()?.let(seasonRequesters::get)
     val firstEpisodeRequester = visibleEpisodes.firstOrNull()?.let { episodeTargets[it.id]?.card }
     val heroDownTarget = selectedSeasonRequester ?: firstEpisodeRequester
-    val episodeStartGridIndex = 2
+    val hasMobileSeriesInfo = !isTv && detailsProHasInformation(details)
+    val episodeStartGridIndex = if (hasMobileSeriesInfo) 3 else 2
     val relatedGridIndex = episodeStartGridIndex + visibleEpisodes.size
 
     fun requestEpisodeAt(index: Int): Boolean {
@@ -554,7 +555,11 @@ fun SeriesDetailsProScreen(
         previousEpisode?.let { episode ->
             add(
                 DetailsProAction(
-                    text = "السابق S${episode.season} E${episode.episodeNumber}",
+                    text = if (isTv || episode.season != heroEpisode?.season) {
+                        "السابق S${episode.season} E${episode.episodeNumber}"
+                    } else {
+                        "السابق · E${episode.episodeNumber}"
+                    },
                     onClick = { onPlay(episode) },
                     requester = previousRequester,
                 ),
@@ -563,7 +568,11 @@ fun SeriesDetailsProScreen(
         nextEpisode?.let { episode ->
             add(
                 DetailsProAction(
-                    text = "التالي S${episode.season} E${episode.episodeNumber}",
+                    text = if (isTv || episode.season != heroEpisode?.season) {
+                        "التالي S${episode.season} E${episode.episodeNumber}"
+                    } else {
+                        "التالي · E${episode.episodeNumber}"
+                    },
                     onClick = { onPlay(episode) },
                     requester = nextRequester,
                 ),
@@ -741,6 +750,21 @@ fun SeriesDetailsProScreen(
                 }
             }
 
+            if (hasMobileSeriesInfo) {
+                item(
+                    key = "series_info_mobile",
+                    span = { GridItemSpan(maxLineSpan) },
+                ) {
+                    DetailsProInformationPanel(
+                        title = "معلومات المسلسل",
+                        details = details,
+                        isTv = false,
+                        horizontalPaddingDp = seriesHorizontalPaddingDp,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
             item(
                 key = "series_episode_header",
                 span = { GridItemSpan(maxLineSpan) },
@@ -844,7 +868,7 @@ fun SeriesDetailsProScreen(
                 }
             }
 
-            if (detailsProHasInformation(details)) {
+            if (isTv && detailsProHasInformation(details)) {
                 item(
                     key = "series_info",
                     span = { GridItemSpan(maxLineSpan) },
@@ -852,7 +876,7 @@ fun SeriesDetailsProScreen(
                     DetailsProInformationPanel(
                         title = "معلومات المسلسل",
                         details = details,
-                        isTv = isTv,
+                        isTv = true,
                         horizontalPaddingDp = metrics.horizontalPaddingDp,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -966,14 +990,28 @@ private fun DetailsProSeriesPills(
     compact: Boolean,
 ) {
     val verifiedSeasonCount = technicalMetadata.seasonCount?.takeIf { it > 0 } ?: seasonCount.takeIf { it > 0 }
-    val values = buildList {
-        technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
-        detailsProRating(series.rating)?.let { add("★ $it") }
-        series.year?.trim()?.takeIf(String::isNotBlank)?.let(::add)
-        verifiedSeasonCount?.let { add(if (it == 1) "1 موسم" else "$it مواسم") }
-        if (episodeCount > 0) add("$episodeCount حلقة")
-        if (completedCount > 0) add("✓ $completedCount مكتملة")
-    }.let { if (compact) it.take(3) else it.take(5) }
+    val seasonLabel = verifiedSeasonCount?.let { if (it == 1) "1 موسم" else "$it مواسم" }
+    val episodeLabel = episodeCount.takeIf { it > 0 }?.let { "$it حلقة" }
+    val values = if (compact) {
+        buildList {
+            technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
+            detailsProRating(series.rating)?.let { add("★ $it") }
+            when {
+                seasonLabel != null && episodeLabel != null -> add("$seasonLabel · $episodeLabel")
+                seasonLabel != null -> add(seasonLabel)
+                episodeLabel != null -> add(episodeLabel)
+            }
+        }.take(3)
+    } else {
+        buildList {
+            technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
+            detailsProRating(series.rating)?.let { add("★ $it") }
+            series.year?.trim()?.takeIf(String::isNotBlank)?.let(::add)
+            seasonLabel?.let(::add)
+            episodeLabel?.let(::add)
+            if (completedCount > 0) add("✓ $completedCount مكتملة")
+        }.take(5)
+    }
 
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         values.forEach { DetailsProPill(it) }
@@ -1141,15 +1179,32 @@ private fun SeriesDetailsProHeader(
                 )
             }
             Spacer(Modifier.weight(1f))
-            if (resumeEpisode != null && resumeEntry != null) {
+            if (isTv && resumeEpisode != null && resumeEntry != null) {
                 Text(
-                    text = "الحالية: S${resumeEpisode.season} E${resumeEpisode.episodeNumber} · ${detailsProFormatTime(resumeEntry.positionMs)}",
+                    text = "الحلقة الحالية : S${resumeEpisode.season} E${resumeEpisode.episodeNumber} · ${detailsProFormatTime(resumeEntry.positionMs)}",
                     color = colors.goldBright,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )
             }
+        }
+
+        if (!isTv && resumeEpisode != null && resumeEntry != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "الحلقة الحالية : S${resumeEpisode.season} E${resumeEpisode.episodeNumber}  •  ${detailsProFormatTime(resumeEntry.positionMs)}",
+                color = colors.goldBright,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.surface.copy(alpha = .82f))
+                    .border(1.dp, colors.gold.copy(alpha = .45f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
         }
 
         if (seasons.isNotEmpty()) {
