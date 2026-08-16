@@ -18,10 +18,6 @@ internal fun HomeHeroTechnicalPills(
     item: ContentItem,
     isTv: Boolean,
 ) {
-    // Keep the already-approved phone hero untouched; these extra metadata pills
-    // are the TV hero treatment requested during v1.4 field validation.
-    if (!isTv) return
-
     val context = LocalContext.current
     val store = remember(context) { HomeHeroMetadataStore.get(context) }
     var metadata by remember(item.type, item.id, store) {
