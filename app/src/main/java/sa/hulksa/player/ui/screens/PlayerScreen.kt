@@ -244,6 +244,8 @@ fun PlayerScreen(
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var videoTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
+    var audioLanguageLabel by remember(request) { mutableStateOf("") }
+    var subtitleLanguageLabel by remember(request) { mutableStateOf("") }
     var subtitleSizeIndex by remember(request) { mutableIntStateOf(1) }
     var subtitleRaised by remember(request) { mutableStateOf(false) }
 
@@ -308,6 +310,7 @@ fun PlayerScreen(
         val target = (base + deltaMs).coerceIn(0L, durationMs)
         manualSeekTargetMs = target
         currentPositionMs = target
+        if (tvRemoteInput) player.seekTo(target)
         seekFeedback = if (deltaMs > 0) "+10 ث" else "-10 ث"
         controlsVisible = true
     }
@@ -378,8 +381,6 @@ fun PlayerScreen(
         }
     }
 
-    // Give the Live browser its own back layer so the first Back is consumed by the
-    // browser instead of being interpreted as a focus-clear by the TV focus system.
     BackHandler(enabled = browserVisible) {
         browserVisible = false
     }
@@ -461,6 +462,16 @@ fun PlayerScreen(
                 audioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
                 videoTracks = extractTrackOptions(tracks, C.TRACK_TYPE_VIDEO)
+                audioLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO).orEmpty()
+                subtitleLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
+            }
+
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                if (subtitleLanguageLabel.isBlank()) {
+                    subtitleLanguageLabel = inferSubtitleLanguageFromText(
+                        cueGroup.cues.joinToString(" ") { cue -> cue.text?.toString().orEmpty() },
+                    ).orEmpty()
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -652,7 +663,7 @@ fun PlayerScreen(
             nextCountdown >= 0 -> nextEpisodePlayFocus
             unlockVisible -> unlockFocus
             controlsLocked || !controlsVisible -> playerFocus
-            focusTimelineOnReveal && !request.isLive -> seekBarFocus
+            focusTimelineOnReveal && !request.isLive -> playerFocus
             else -> primaryFocus
         }
         if (target != null) {
@@ -778,7 +789,6 @@ fun PlayerScreen(
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-                        // TV/remote timeline is RTL: left advances and right rewinds.
                         focusTimelineOnReveal = true
                         controlsVisible = true
                         seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS)
@@ -860,11 +870,11 @@ fun PlayerScreen(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = selectedTrackLabel(audioTracks, ""),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, ""),
+                    audioLabel = audioLanguageLabel,
+                    subtitleLabel = subtitleLanguageLabel,
                     resizeLabel = resizeLabel(resizeModeIndex),
-                    hasAudio = audioTracks.isNotEmpty(),
-                    hasSubtitles = subtitleTracks.isNotEmpty(),
+                    hasAudio = audioLanguageLabel.isNotBlank(),
+                    hasSubtitles = subtitleLanguageLabel.isNotBlank(),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -885,20 +895,17 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = selectedTrackLabel(audioTracks, ""),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, ""),
-                    hasAudio = audioTracks.isNotEmpty(),
-                    hasSubtitles = subtitleTracks.isNotEmpty(),
+                    audioLabel = audioLanguageLabel,
+                    subtitleLabel = subtitleLanguageLabel,
+                    hasAudio = audioLanguageLabel.isNotBlank(),
+                    hasSubtitles = subtitleLanguageLabel.isNotBlank(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onRewind = { seekBy(-SEEK_STEP_MS) },
                     onForward = { seekBy(SEEK_STEP_MS) },
                     onSeekTo = ::seekToPosition,
-                    onSeekingChanged = { focused ->
-                        seekBarFocused = focused
-                        if (!focused) focusTimelineOnReveal = false
-                    },
+                    onSeekingChanged = { focused -> seekBarFocused = focused },
                     onAudio = { activePanel = PlayerPanel.AUDIO },
                     onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
                     onSpeed = { activePanel = PlayerPanel.SPEED },
@@ -908,6 +915,7 @@ fun PlayerScreen(
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
                     seekBarFocusRequester = seekBarFocus,
+                    remoteSeekActive = focusTimelineOnReveal,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -1166,6 +1174,7 @@ private fun ModernVodControls(
     onLock: () -> Unit,
     primaryFocus: FocusRequester,
     seekBarFocusRequester: FocusRequester,
+    remoteSeekActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -1199,6 +1208,7 @@ private fun ModernVodControls(
             onSeekTo = onSeekTo,
             onSeekingChanged = onSeekingChanged,
             focusRequester = seekBarFocusRequester,
+            remoteActive = remoteSeekActive,
         )
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1308,18 +1318,20 @@ private fun SeekableProgressBar(
     onSeekTo: (Long) -> Unit,
     onSeekingChanged: (Boolean) -> Unit,
     focusRequester: FocusRequester,
+    remoteActive: Boolean,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     var focused by remember { mutableStateOf(false) }
     var previewMs by remember { mutableLongStateOf(positionMs) }
+    val active = focused || remoteActive
 
     DisposableEffect(Unit) {
         onDispose { onSeekingChanged(false) }
     }
 
-    LaunchedEffect(positionMs, durationMs, focused) {
+    LaunchedEffect(positionMs, durationMs, focused, remoteActive) {
         if (!focused) previewMs = positionMs.coerceIn(0L, durationMs.coerceAtLeast(0L))
     }
 
@@ -1332,7 +1344,7 @@ private fun SeekableProgressBar(
     val shape = RoundedCornerShape(20.dp)
 
     Column(Modifier.fillMaxWidth()) {
-        if (focused) {
+        if (active) {
             Text(
                 if (tvRemoteInput) {
                     "يسار +10 ث  •  يمين -10 ث"
@@ -1349,10 +1361,10 @@ private fun SeekableProgressBar(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (focused) 13.dp else 8.dp)
+                .height(if (active) 13.dp else 8.dp)
                 .clip(shape)
                 .background(Color.White.copy(alpha = .18f))
-                .border(if (focused) 2.dp else 0.dp, if (focused) colors.goldBright else Color.Transparent, shape)
+                .border(if (active) 2.dp else 0.dp, if (active) colors.goldBright else Color.Transparent, shape)
                 .pointerInput(durationMs) {
                     detectTapGestures { offset ->
                         if (durationMs > 0L && size.width > 0) {
@@ -1732,8 +1744,6 @@ private fun LiveChannelBrowser(
         catalog?.items?.firstOrNull { it.id == currentStreamId }
     }
 
-    // Share the exact same persisted order used by the main Live screen.
-    // Any move here is therefore reflected on the main Live category rail as well.
     val categoryOrderPrefs = remember(context) {
         context.getSharedPreferences(LIVE_CATEGORY_ORDER_PREFS, Context.MODE_PRIVATE)
     }
@@ -1764,8 +1774,6 @@ private fun LiveChannelBrowser(
         categoryOrderPrefs.edit().putString(PREF_IDS, values.joinToString(",")).apply()
     }
 
-    // Keep a lightweight, local Live watching history so "استكمال المشاهدة" can be
-    // offered from the player without changing the Movie/Series player contract.
     val liveHistoryPrefs = remember(context) {
         context.getSharedPreferences(LIVE_PLAYER_HISTORY_PREFS, Context.MODE_PRIVATE)
     }
@@ -1852,8 +1860,6 @@ private fun LiveChannelBrowser(
         val keyCode = event.nativeKeyEvent.keyCode
         val isBack = keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE
         if (isBack) {
-            // Consume the browser's first Back at preview phase so focus never gets a
-            // chance to clear first. KeyDown dismisses; any trailing event is consumed.
             if (event.type == KeyEventType.KeyDown) onClose()
             true
         } else {
@@ -2186,8 +2192,6 @@ private fun LiveChannelBrowser(
                 .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // RTL Row placement makes the second pane physically left: categories on the left,
-            // channels immediately to their right, matching the requested receiver/TV layout.
             ChannelPane(
                 paneModifier = Modifier.weight(1f).fillMaxHeight(),
                 showSearch = true,
@@ -2252,10 +2256,10 @@ private fun Int?.orZero(): Int = this ?: 0
 
 private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOption> = buildList {
     tracks.groups.forEachIndexed { groupIndex, group ->
-        if (group.type != type) return@forEachIndexed
         for (trackIndex in 0 until group.length) {
-            if (!group.isTrackSupported(trackIndex, true)) continue
             val format = group.getTrackFormat(trackIndex)
+            if (!formatMatchesTrackType(group.type, format, type)) continue
+            if (!group.isTrackSupported(trackIndex, true) && !group.isTrackSelected(trackIndex)) continue
             add(
                 PlayerTrackOption(
                     key = "$groupIndex:$trackIndex",
@@ -2270,20 +2274,43 @@ private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOpti
     }
 }.distinctBy { it.key }
 
-private fun trackLabel(format: Format, type: Int, index: Int): String {
-    val rawLanguage = format.language
+private fun formatMatchesTrackType(groupType: Int, format: Format, type: Int): Boolean =
+    groupType == type || format.sampleMimeType?.let { mime ->
+        androidx.media3.common.MimeTypes.getTrackType(mime) == type
+    } == true
+
+private fun trackLabel(format: Format, type: Int, index: Int): String = when (type) {
+    C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
+    C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_TEXT -> mediaTrackLanguage(format).orEmpty()
+    else -> format.label?.takeIf(String::isNotBlank) ?: "مسار ${index + 1}"
+}
+
+private fun detectedTrackLanguage(tracks: Tracks, type: Int): String? {
+    var fallback: String? = null
+    tracks.groups.forEach { group ->
+        for (trackIndex in 0 until group.length) {
+            val format = group.getTrackFormat(trackIndex)
+            if (!formatMatchesTrackType(group.type, format, type)) continue
+            val label = mediaTrackLanguage(format) ?: continue
+            if (group.isTrackSelected(trackIndex)) return label
+            if (fallback == null) fallback = label
+        }
+    }
+    return fallback
+}
+
+private fun mediaTrackLanguage(format: Format): String? {
+    format.language
         ?.trim()
         ?.takeIf(String::isNotBlank)
         ?.takeUnless(::isUndeterminedLanguage)
-    val language = rawLanguage?.let(::languageLabel)
-    val explicit = format.label?.takeIf(String::isNotBlank)
-    val explicitLanguage = languageFromExplicitLabel(explicit)
-    return when (type) {
-        C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-        C.TRACK_TYPE_AUDIO -> language ?: explicitLanguage ?: ""
-        C.TRACK_TYPE_TEXT -> language ?: explicitLanguage ?: ""
-        else -> explicit ?: "مسار ${index + 1}"
-    }
+        ?.let(::languageLabel)
+        ?.let { return it }
+
+    languageFromExplicitLabel(format.label)?.let { return it }
+    languageFromExplicitLabel(format.id)?.let { return it }
+    languageFromExplicitLabel(format.metadata?.toString())?.let { return it }
+    return null
 }
 
 private fun trackSecondary(format: Format, type: Int): String = when (type) {
@@ -2297,7 +2324,7 @@ private fun trackSecondary(format: Format, type: Int): String = when (type) {
 
 private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: String): String =
     options.firstOrNull { it.selected && it.label.isNotBlank() }?.label
-        ?: options.singleOrNull()?.label?.takeIf(String::isNotBlank)
+        ?: options.firstOrNull { it.label.isNotBlank() }?.label
         ?: fallback
 
 private fun isUndeterminedLanguage(value: String): Boolean =
@@ -2305,24 +2332,60 @@ private fun isUndeterminedLanguage(value: String): Boolean =
 
 private fun languageFromExplicitLabel(raw: String?): String? {
     val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
-    return when {
-        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> "Arabic"
-        value.contains("english") -> "English"
-        value.contains("french") || value.contains("français") -> "French"
-        value.contains("spanish") || value.contains("español") -> "Spanish"
-        value.contains("turkish") || value.contains("türk") -> "Turkish"
-        value.contains("german") || value.contains("deutsch") -> "German"
-        value.contains("italian") || value.contains("italiano") -> "Italian"
-        value.contains("portuguese") || value.contains("português") -> "Portuguese"
-        value.contains("russian") || value.contains("рус") -> "Russian"
-        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> "Persian"
-        value.contains("urdu") || value.contains("اردو") -> "Urdu"
-        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> "Hindi"
-        value.contains("japanese") || value.contains("日本") -> "Japanese"
-        value.contains("korean") || value.contains("한국") -> "Korean"
-        value.contains("chinese") || value.contains("中文") -> "Chinese"
-        else -> null
+    when {
+        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> return "Arabic"
+        value.contains("english") -> return "English"
+        value.contains("french") || value.contains("français") -> return "French"
+        value.contains("spanish") || value.contains("español") -> return "Spanish"
+        value.contains("turkish") || value.contains("türk") -> return "Turkish"
+        value.contains("german") || value.contains("deutsch") -> return "German"
+        value.contains("italian") || value.contains("italiano") -> return "Italian"
+        value.contains("portuguese") || value.contains("português") -> return "Portuguese"
+        value.contains("russian") || value.contains("рус") -> return "Russian"
+        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> return "Persian"
+        value.contains("urdu") || value.contains("اردو") -> return "Urdu"
+        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> return "Hindi"
+        value.contains("japanese") || value.contains("日本") -> return "Japanese"
+        value.contains("korean") || value.contains("한국") -> return "Korean"
+        value.contains("chinese") || value.contains("中文") -> return "Chinese"
     }
+    return value
+        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .asSequence()
+        .mapNotNull(::languageLabel)
+        .firstOrNull()
+}
+
+private fun inferSubtitleLanguageFromText(text: String): String? {
+    val letters = text.filter(Char::isLetter)
+    if (letters.length < 3) return null
+    fun countIn(range: CharRange): Int = letters.count { it in range }
+
+    val arabic = letters.count { it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' }
+    if (arabic >= 3 && arabic * 2 >= letters.length) return "Arabic"
+
+    val hebrew = countIn('\u0590'..'\u05FF')
+    if (hebrew >= 3 && hebrew * 2 >= letters.length) return "Hebrew"
+
+    val cyrillic = countIn('\u0400'..'\u04FF')
+    if (cyrillic >= 3 && cyrillic * 2 >= letters.length) return "Russian"
+
+    val greek = countIn('\u0370'..'\u03FF')
+    if (greek >= 3 && greek * 2 >= letters.length) return "Greek"
+
+    val devanagari = countIn('\u0900'..'\u097F')
+    if (devanagari >= 3 && devanagari * 2 >= letters.length) return "Hindi"
+
+    val hangul = letters.count { it in '\uAC00'..'\uD7AF' || it in '\u1100'..'\u11FF' }
+    if (hangul >= 3 && hangul * 2 >= letters.length) return "Korean"
+
+    val kana = letters.count { it in '\u3040'..'\u30FF' }
+    if (kana >= 2) return "Japanese"
+
+    val han = letters.count { it in '\u4E00'..'\u9FFF' }
+    if (han >= 2) return "Chinese"
+
+    return null
 }
 
 private fun languageLabel(code: String): String? = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
