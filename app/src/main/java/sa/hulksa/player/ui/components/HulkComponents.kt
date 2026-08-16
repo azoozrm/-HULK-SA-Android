@@ -999,7 +999,7 @@ fun InfoPill(text: String, modifier: Modifier = Modifier) {
         InfoPillBox(heroToken.label.ifBlank { if (heroToken.type == ContentType.MOVIE) "فيلم" else "مسلسل" })
         when (heroToken.type) {
             ContentType.MOVIE -> {
-                compactMovieDuration(metadata.durationMs)?.let(::InfoPillBox)
+                compactMovieDuration(metadata.durationMs)?.let { InfoPillBox(it) }
                 metadata.quality?.takeIf(String::isNotBlank)?.let { InfoPillBox("الجودة $it") }
             }
             ContentType.SERIES -> {
