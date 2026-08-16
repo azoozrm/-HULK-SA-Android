@@ -111,10 +111,8 @@ internal fun buildSmartHomeRecommendations(
     val affinityCandidates = candidatePool
         .filter { (affinityScores[it.smartHomeKey()] ?: 0) > 0 }
         .take(160)
-    val becauseCandidates = (affinityCandidates + candidatePool.take(80))
-        .distinctBy { it.smartHomeKey() }
     val becauseYouWatched = smartHomeDiversify(
-        candidates = becauseCandidates,
+        candidates = affinityCandidates,
         baseScores = totalScores,
         limit = 14,
         maxPerCategory = 4,
