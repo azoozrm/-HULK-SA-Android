@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -1103,6 +1104,7 @@ private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 25.dp)) { content() }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CinemaHero(
     item: ContentItem,
@@ -1120,7 +1122,7 @@ private fun CinemaHero(
     val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
     val heroHeight = when {
         isTv -> 374.dp
-        isPortraitPhone -> (configuration.screenWidthDp * .94f).coerceIn(336f, 360f).dp
+        isPortraitPhone -> (configuration.screenHeightDp * .58f).coerceIn(420f, 520f).dp
         else -> 288.dp
     }
     val image = item.backdropUrl ?: item.posterUrl
@@ -1158,7 +1160,14 @@ private fun CinemaHero(
         )
 
         Row(
-            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 26.dp, vertical = 18.dp),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+                .padding(
+                    horizontal = if (isTv) 26.dp else 18.dp,
+                    vertical = if (isTv) 18.dp else 10.dp,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -1173,8 +1182,12 @@ private fun CinemaHero(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) .58f else .86f)
-                .padding(start = 27.dp, end = 27.dp, bottom = if (isTv) 38.dp else 24.dp),
+                .fillMaxWidth(if (isTv) .58f else 1f)
+                .padding(
+                    start = if (isTv) 27.dp else 18.dp,
+                    end = if (isTv) 27.dp else 18.dp,
+                    bottom = if (isTv) 38.dp else 24.dp,
+                ),
         ) {
             Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(5.dp))
@@ -1188,11 +1201,15 @@ private fun CinemaHero(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(9.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                item.year?.let { InfoPill(it) }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                maxItemsInEachRow = if (isTv) 5 else 3,
+            ) {
                 item.rating?.let { InfoPill("★ $it") }
                 item.genre?.takeIf(String::isNotBlank)?.let { InfoPill(it.take(27)) }
-                HomeHeroTechnicalPills(item, isTv)
+                HomeHeroTechnicalPills(item, isTv = true)
             }
             item.plot?.takeIf(String::isNotBlank)?.let {
                 Spacer(Modifier.height(10.dp))
