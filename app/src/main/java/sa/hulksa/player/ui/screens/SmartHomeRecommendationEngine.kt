@@ -140,11 +140,22 @@ internal fun buildSmartHomeRecommendations(
         candidates = suggestedCandidates,
         rotationSeed = rotationSeed,
     )
-    val suggested = smartHomeDiversify(
-        candidates = suggestedWindow,
+    val suggestedPool = (
+        suggestedWindow +
+            suggestedCandidates.filter { it.type == ContentType.MOVIE }.take(48) +
+            suggestedCandidates.filter { it.type == ContentType.SERIES }.take(48)
+        )
+        .distinctBy { it.smartHomeKey() }
+    val diversifiedSuggested = smartHomeDiversify(
+        candidates = suggestedPool,
         baseScores = totalScores,
-        limit = 24,
+        limit = minOf(72, suggestedPool.size),
         maxPerCategory = 3,
+    )
+    val suggested = smartHomeBalanceContentTypes(
+        candidates = diversifiedSuggested + suggestedPool,
+        limit = 24,
+        minimumPerType = 8,
     )
 
     val popularMovies = movies.sortedWith(
@@ -169,12 +180,17 @@ internal fun buildSmartHomeRecommendations(
         .filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
         .distinctBy { it.smartHomeKey() }
         .toList()
-    val featuredCandidates = featuredPool.sortedWith(
+    val rankedFeatured = featuredPool.sortedWith(
         compareByDescending<ContentItem> { it.smartHomeHeroQualityScore() }
             .thenByDescending { totalScores[it.smartHomeKey()] ?: 0 }
             .thenByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
             .thenByDescending { it.addedAtEpochSeconds ?: 0L },
-    ).take(8)
+    )
+    val featuredCandidates = smartHomeBalanceContentTypes(
+        candidates = rankedFeatured,
+        limit = 8,
+        minimumPerType = 4,
+    )
 
     val liveById = live.associateBy(ContentItem::id)
     val viewedLive = orderedHistory.asSequence()
@@ -212,6 +228,49 @@ internal fun buildSmartHomeRecommendations(
         popularSeries = popularSeries,
         featuredCandidates = featuredCandidates,
     )
+}
+
+private fun smartHomeBalanceContentTypes(
+    candidates: List<ContentItem>,
+    limit: Int,
+    minimumPerType: Int,
+): List<ContentItem> {
+    if (limit <= 0 || candidates.isEmpty()) return emptyList()
+
+    val unique = candidates.distinctBy { it.smartHomeKey() }
+    val movieCandidates = unique.filter { it.type == ContentType.MOVIE }
+    val seriesCandidates = unique.filter { it.type == ContentType.SERIES }
+    if (movieCandidates.isEmpty() || seriesCandidates.isEmpty()) return unique.take(limit)
+
+    val requiredEach = minOf(
+        minimumPerType.coerceAtLeast(0),
+        limit / 2,
+        movieCandidates.size,
+        seriesCandidates.size,
+    )
+    if (requiredEach <= 0) return unique.take(limit)
+
+    val selected = ArrayList<ContentItem>(minOf(limit, unique.size))
+    var movieIndex = 0
+    var seriesIndex = 0
+    val movieFirst = unique.firstOrNull()?.type != ContentType.SERIES
+
+    repeat(requiredEach) {
+        if (movieFirst) {
+            selected += movieCandidates[movieIndex++]
+            selected += seriesCandidates[seriesIndex++]
+        } else {
+            selected += seriesCandidates[seriesIndex++]
+            selected += movieCandidates[movieIndex++]
+        }
+    }
+
+    val selectedKeys = selected.mapTo(hashSetOf()) { it.smartHomeKey() }
+    unique.asSequence()
+        .filterNot { it.smartHomeKey() in selectedKeys }
+        .take((limit - selected.size).coerceAtLeast(0))
+        .forEach { selected += it }
+    return selected.take(limit)
 }
 
 private fun smartHomeDiversify(
