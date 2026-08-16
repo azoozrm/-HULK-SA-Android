@@ -141,10 +141,30 @@ internal fun buildSmartHomeRecommendations(
         candidates = suggestedCandidates,
         rotationSeed = rotationSeed,
     )
+    val minimumSuggestedPerType = 8
+    val suggestedWindowKeys = suggestedWindow.mapTo(hashSetOf()) { it.smartHomeKey() }
+    val hasSuggestedMovies = suggestedCandidates.any { it.type == ContentType.MOVIE }
+    val hasSuggestedSeries = suggestedCandidates.any { it.type == ContentType.SERIES }
+    val movieDeficit = if (hasSuggestedMovies && hasSuggestedSeries) {
+        (minimumSuggestedPerType - suggestedWindow.count { it.type == ContentType.MOVIE }).coerceAtLeast(0)
+    } else {
+        0
+    }
+    val seriesDeficit = if (hasSuggestedMovies && hasSuggestedSeries) {
+        (minimumSuggestedPerType - suggestedWindow.count { it.type == ContentType.SERIES }).coerceAtLeast(0)
+    } else {
+        0
+    }
     val suggestedPool = (
         suggestedWindow +
-            suggestedCandidates.filter { it.type == ContentType.MOVIE }.take(48) +
-            suggestedCandidates.filter { it.type == ContentType.SERIES }.take(48)
+            suggestedCandidates.asSequence()
+                .filter { it.type == ContentType.MOVIE && it.smartHomeKey() !in suggestedWindowKeys }
+                .take(movieDeficit)
+                .toList() +
+            suggestedCandidates.asSequence()
+                .filter { it.type == ContentType.SERIES && it.smartHomeKey() !in suggestedWindowKeys }
+                .take(seriesDeficit)
+                .toList()
         )
         .distinctBy { it.smartHomeKey() }
     val diversifiedSuggested = smartHomeDiversify(
@@ -156,7 +176,7 @@ internal fun buildSmartHomeRecommendations(
     val suggested = smartHomeBalanceContentTypes(
         candidates = diversifiedSuggested + suggestedPool,
         limit = 24,
-        minimumPerType = 8,
+        minimumPerType = minimumSuggestedPerType,
     )
 
     val popularMovies = movies.sortedWith(
