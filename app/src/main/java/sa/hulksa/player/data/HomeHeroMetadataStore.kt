@@ -4,12 +4,47 @@ import android.content.Context
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 
+private const val HOME_HERO_TOKEN_PREFIX = "\u2063H:"
+
 internal data class HomeHeroTechnicalMetadata(
     val quality: String? = null,
     val durationMs: Long? = null,
     val seasonCount: Int? = null,
     val episodeCount: Int? = null,
 )
+
+internal data class HomeHeroMetadataToken(
+    val type: ContentType,
+    val contentId: Int,
+    val label: String,
+)
+
+internal fun ContentItem.withHomeHeroMetadataToken(): ContentItem {
+    if (type == ContentType.LIVE) return this
+    val typeCode = if (type == ContentType.MOVIE) "m" else "s"
+    val visibleLabel = genre
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: if (type == ContentType.MOVIE) "فيلم" else "مسلسل"
+    return copy(genre = "$HOME_HERO_TOKEN_PREFIX$typeCode:$id:$visibleLabel")
+}
+
+internal fun decodeHomeHeroMetadataToken(raw: String): HomeHeroMetadataToken? {
+    if (!raw.startsWith(HOME_HERO_TOKEN_PREFIX)) return null
+    val payload = raw.removePrefix(HOME_HERO_TOKEN_PREFIX)
+    val typeSeparator = payload.indexOf(':')
+    if (typeSeparator <= 0) return null
+    val idSeparator = payload.indexOf(':', startIndex = typeSeparator + 1)
+    if (idSeparator <= typeSeparator + 1) return null
+    val type = when (payload.substring(0, typeSeparator)) {
+        "m" -> ContentType.MOVIE
+        "s" -> ContentType.SERIES
+        else -> return null
+    }
+    val contentId = payload.substring(typeSeparator + 1, idSeparator).toIntOrNull() ?: return null
+    val label = payload.substring(idSeparator + 1).trim()
+    return HomeHeroMetadataToken(type = type, contentId = contentId, label = label)
+}
 
 internal class HomeHeroMetadataStore private constructor(context: Context) {
     private val appContext = context.applicationContext
@@ -21,15 +56,19 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
     private val seriesStore = SeriesCardMetadataStore.get(appContext)
     private val lastMovieAttemptAtMs = mutableMapOf<Int, Long>()
 
-    fun cached(item: ContentItem): HomeHeroTechnicalMetadata = when (item.type) {
-        ContentType.MOVIE -> readMovieCached(item.id)
-        ContentType.SERIES -> readSeriesCached(item.id)
+    fun cached(item: ContentItem): HomeHeroTechnicalMetadata = cached(item.type, item.id)
+
+    fun cached(type: ContentType, contentId: Int): HomeHeroTechnicalMetadata = when (type) {
+        ContentType.MOVIE -> readMovieCached(contentId)
+        ContentType.SERIES -> readSeriesCached(contentId)
         ContentType.LIVE -> HomeHeroTechnicalMetadata()
     }
 
-    suspend fun metadata(item: ContentItem): HomeHeroTechnicalMetadata = when (item.type) {
-        ContentType.MOVIE -> movieMetadata(item.id)
-        ContentType.SERIES -> seriesMetadata(item.id)
+    suspend fun metadata(item: ContentItem): HomeHeroTechnicalMetadata = metadata(item.type, item.id)
+
+    suspend fun metadata(type: ContentType, contentId: Int): HomeHeroTechnicalMetadata = when (type) {
+        ContentType.MOVIE -> movieMetadata(contentId)
+        ContentType.SERIES -> seriesMetadata(contentId)
         ContentType.LIVE -> HomeHeroTechnicalMetadata()
     }
 
