@@ -465,16 +465,15 @@ fun PlayerScreen(
                 subtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
                 videoTracks = extractTrackOptions(tracks, C.TRACK_TYPE_VIDEO)
                 hasActiveAudio = player.audioFormat != null || audioTracks.any { it.selected }
-                hasActiveSubtitles = subtitleTracks.any { it.selected }
+                hasActiveSubtitles = subtitleTracks.isNotEmpty()
                 audioLanguageLabel = if (hasActiveAudio) {
                     player.audioFormat?.let(::mediaTrackLanguage)
-                        ?: detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO)
-                        ?: ""
+                        ?: selectedTrackLabel(audioTracks, "")
                 } else {
                     ""
                 }
                 subtitleLanguageLabel = if (hasActiveSubtitles) {
-                    detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
+                    selectedTrackLabel(subtitleTracks, "")
                 } else {
                     ""
                 }
@@ -616,16 +615,17 @@ fun PlayerScreen(
 
             val audioActive = player.audioFormat != null || detectedAudioTracks.any { it.selected }
             hasActiveAudio = audioActive
-            if (audioActive && audioLanguageLabel.isBlank()) {
-                audioLanguageLabel = player.audioFormat?.let(::mediaTrackLanguage)
-                    ?: detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO)
-                    ?: ""
+            if (audioActive) {
+                val resolvedAudioLanguage = player.audioFormat?.let(::mediaTrackLanguage)
+                    ?: selectedTrackLabel(detectedAudioTracks, "")
+                if (resolvedAudioLanguage.isNotBlank()) audioLanguageLabel = resolvedAudioLanguage
+            } else {
+                audioLanguageLabel = ""
             }
 
-            val subtitlesSelected = detectedSubtitleTracks.any { it.selected }
-            if (subtitlesSelected) hasActiveSubtitles = true
+            if (detectedSubtitleTracks.isNotEmpty()) hasActiveSubtitles = true
             if (hasActiveSubtitles && subtitleLanguageLabel.isBlank()) {
-                subtitleLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
+                subtitleLanguageLabel = selectedTrackLabel(detectedSubtitleTracks, "")
             }
 
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
@@ -911,11 +911,11 @@ fun PlayerScreen(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = audioLanguageLabel,
-                    subtitleLabel = subtitleLanguageLabel,
+                    audioLabel = audioLanguageLabel.ifBlank { selectedTrackLabel(audioTracks, "") },
+                    subtitleLabel = subtitleLanguageLabel.ifBlank { selectedTrackLabel(subtitleTracks, "") },
                     resizeLabel = resizeLabel(resizeModeIndex),
                     hasAudio = hasActiveAudio,
-                    hasSubtitles = hasActiveSubtitles,
+                    hasSubtitles = hasActiveSubtitles || subtitleTracks.isNotEmpty(),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -936,10 +936,10 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = audioLanguageLabel,
-                    subtitleLabel = subtitleLanguageLabel,
+                    audioLabel = audioLanguageLabel.ifBlank { selectedTrackLabel(audioTracks, "") },
+                    subtitleLabel = subtitleLanguageLabel.ifBlank { selectedTrackLabel(subtitleTracks, "") },
                     hasAudio = hasActiveAudio,
-                    hasSubtitles = hasActiveSubtitles,
+                    hasSubtitles = hasActiveSubtitles || subtitleTracks.isNotEmpty(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -2381,12 +2381,12 @@ private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: Strin
         ?: fallback
 
 private fun isUndeterminedLanguage(value: String): Boolean =
-    value.lowercase(Locale.ROOT).substringBefore('-') in setOf("und", "zxx", "mul")
+    value.lowercase(Locale.ROOT).replace('_', '-').substringBefore('-') in setOf("und", "zxx", "mul")
 
 private fun languageFromExplicitLabel(raw: String?): String? {
     val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
     when {
-        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> return "Arabic"
+        value.contains("arabic") || value.contains("العربية") || value.contains("العربيه") || value.contains("عربي") -> return "Arabic"
         value.contains("english") -> return "English"
         value.contains("french") || value.contains("français") -> return "French"
         value.contains("spanish") || value.contains("español") -> return "Spanish"
@@ -2442,7 +2442,7 @@ private fun inferSubtitleLanguageFromText(text: String): String? {
 }
 
 private fun languageLabel(code: String): String? {
-    val normalized = code.trim().lowercase(Locale.ROOT).substringBefore('-')
+    val normalized = code.trim().lowercase(Locale.ROOT).replace('_', '-').substringBefore('-')
     val known = when (normalized) {
         "ar", "ara" -> "Arabic"
         "en", "eng" -> "English"
