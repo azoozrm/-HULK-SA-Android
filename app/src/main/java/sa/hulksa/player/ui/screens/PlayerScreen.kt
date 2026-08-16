@@ -128,13 +128,12 @@ private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
 
-private enum class PlayerPanel { SPEED, RESIZE, QUALITY, SERVERS }
+private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
 private data class PlayerTrackOption(
     val key: String,
     val label: String,
     val secondary: String,
-    val language: String?,
     val groupIndex: Int,
     val trackIndex: Int,
     val selected: Boolean,
@@ -244,6 +243,8 @@ fun PlayerScreen(
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var videoTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
+    var subtitleSizeIndex by remember(request) { mutableIntStateOf(1) }
+    var subtitleRaised by remember(request) { mutableStateOf(false) }
 
     val resizeModes = remember {
         listOf(
@@ -373,6 +374,8 @@ fun PlayerScreen(
         }
     }
 
+    // Give the Live browser its own back layer so the first Back is consumed by the
+    // browser instead of being interpreted as a focus-clear by the TV focus system.
     BackHandler(enabled = browserVisible) {
         browserVisible = false
     }
@@ -391,7 +394,9 @@ fun PlayerScreen(
             }
 
             override fun onAvailable(network: Network) = publishNetworkState()
+
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = publishNetworkState()
+
             override fun onLost(network: Network) = publishNetworkState()
         }
 
@@ -442,7 +447,10 @@ fun PlayerScreen(
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 videoHeight = videoSize.height
-                context.cacheVerifiedMovieCardMetadata(request = request, videoHeight = videoSize.height)
+                context.cacheVerifiedMovieCardMetadata(
+                    request = request,
+                    videoHeight = videoSize.height,
+                )
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -508,10 +516,15 @@ fun PlayerScreen(
 
     LaunchedEffect(networkAvailable, offlineFailure, finalError, request.historyKey, localPlayback) {
         if (localPlayback) return@LaunchedEffect
+
         if (!networkAvailable) {
             delay(350L)
             if (hasUsableNetwork(context)) return@LaunchedEffect
-            pendingSeekMs = if (request.isLive) 0L else maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+            pendingSeekMs = if (request.isLive) {
+                0L
+            } else {
+                maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+            }
             player.pause()
             buffering = false
             controlsVisible = true
@@ -519,8 +532,13 @@ fun PlayerScreen(
             finalError = PLAYER_OFFLINE_MESSAGE
             return@LaunchedEffect
         }
+
         if (offlineFailure && finalError == PLAYER_OFFLINE_MESSAGE) {
-            val resumePositionMs = if (request.isLive) 0L else maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+            val resumePositionMs = if (request.isLive) {
+                0L
+            } else {
+                maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
+            }
             delay(700L)
             if (!hasUsableNetwork(context)) return@LaunchedEffect
             pendingSeekMs = resumePositionMs
@@ -551,10 +569,15 @@ fun PlayerScreen(
     LaunchedEffect(player, request) {
         while (isActive) {
             delay(500L)
-            if (manualSeekTargetMs == null) currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+            if (manualSeekTargetMs == null) {
+                currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+            }
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
             if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
-                context.cacheVerifiedMovieCardMetadata(request = request, durationMs = durationMs)
+                context.cacheVerifiedMovieCardMetadata(
+                    request = request,
+                    durationMs = durationMs,
+                )
                 cachedMovieDurationMs = durationMs
             }
             bufferedPercent = player.bufferedPercentage.coerceIn(0, 100)
@@ -570,8 +593,16 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(
-        controlsVisible, buffering, finalError, isPlaying, browserVisible, activePanel,
-        resumePromptVisible, controlsLocked, seekBarFocused, manualSeekTargetMs,
+        controlsVisible,
+        buffering,
+        finalError,
+        isPlaying,
+        browserVisible,
+        activePanel,
+        resumePromptVisible,
+        controlsLocked,
+        seekBarFocused,
+        manualSeekTargetMs,
     ) {
         if (
             controlsVisible && !browserVisible && activePanel == null && !resumePromptVisible &&
@@ -601,8 +632,14 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(
-        controlsVisible, activePanel, browserVisible, resumePromptVisible, unlockVisible,
-        controlsLocked, nextCountdown, request.historyKey,
+        controlsVisible,
+        activePanel,
+        browserVisible,
+        resumePromptVisible,
+        unlockVisible,
+        controlsLocked,
+        nextCountdown,
+        request.historyKey,
     ) {
         val target = when {
             browserVisible || activePanel != null -> null
@@ -659,7 +696,9 @@ fun PlayerScreen(
                 if (
                     event.type != KeyEventType.KeyDown || browserVisible || activePanel != null ||
                     resumePromptVisible || unlockVisible || nextCountdown >= 0
-                ) return@onPreviewKeyEvent false
+                ) {
+                    return@onPreviewKeyEvent false
+                }
                 val keyCode = event.nativeKeyEvent.keyCode
                 if (keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
                     handleBackAction()
@@ -674,7 +713,10 @@ fun PlayerScreen(
                         AndroidKeyEvent.KEYCODE_DPAD_DOWN,
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT,
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
-                        -> { unlockVisible = true; controlsVisible = true }
+                        -> {
+                            unlockVisible = true
+                            controlsVisible = true
+                        }
                     }
                     return@onPreviewKeyEvent true
                 }
@@ -730,6 +772,7 @@ fun PlayerScreen(
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
+                        // The VOD timeline is visually RTL on TV/remote: left advances, right rewinds.
                         seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
@@ -771,8 +814,9 @@ fun PlayerScreen(
                 view.useController = false
                 view.resizeMode = resizeModes[resizeModeIndex]
                 view.subtitleView?.apply {
-                    setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 21f)
-                    setBottomPaddingFraction(.08f)
+                    val sizes = floatArrayOf(16f, 21f, 27f)
+                    setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, sizes[subtitleSizeIndex])
+                    setBottomPaddingFraction(if (subtitleRaised) .20f else .08f)
                     setStyle(
                         CaptionStyleCompat(
                             AndroidColor.WHITE,
@@ -789,26 +833,33 @@ fun PlayerScreen(
         )
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
-            PlayerTopBar(request.title, request.isLive, qualityLabel(videoHeight), playbackSpeed, ::saveAndBack)
+            PlayerTopBar(
+                title = request.title,
+                isLive = request.isLive,
+                quality = qualityLabel(videoHeight),
+                speed = playbackSpeed,
+                onBack = ::saveAndBack,
+            )
         }
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
-            val audioLanguage = selectedTrackLanguageLabel(audioTracks, "غير محدد")
-            val subtitleLanguage = selectedTrackLanguageLabel(subtitleTracks, "غير متوفرة")
             if (request.isLive) {
                 ModernLiveControls(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = audioLanguage,
-                    subtitleLabel = subtitleLanguage,
+                    audioLabel = selectedTrackLabel(audioTracks, "الصوت"),
+                    subtitleLabel = selectedTrackLabel(subtitleTracks, "الترجمة"),
                     resizeLabel = resizeLabel(resizeModeIndex),
+                    hasAudio = audioTracks.isNotEmpty(),
                     hasSubtitles = subtitleTracks.isNotEmpty(),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onReload = { pendingSeekMs = 0L; candidateIndex = 0; retryNonce += 1 },
                     onMute = { isMuted = !isMuted; player.volume = if (isMuted) 0f else 1f },
+                    onAudio = { activePanel = PlayerPanel.AUDIO },
+                    onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
@@ -822,8 +873,10 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = audioLanguage,
-                    subtitleLabel = subtitleLanguage,
+                    audioLabel = selectedTrackLabel(audioTracks, "الصوت"),
+                    subtitleLabel = selectedTrackLabel(subtitleTracks, "الترجمة"),
+                    hasAudio = audioTracks.isNotEmpty(),
+                    hasSubtitles = subtitleTracks.isNotEmpty(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -831,6 +884,8 @@ fun PlayerScreen(
                     onForward = { seekBy(SEEK_STEP_MS) },
                     onSeekTo = ::seekToPosition,
                     onSeekingChanged = { seekBarFocused = it },
+                    onAudio = { activePanel = PlayerPanel.AUDIO },
+                    onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
                     onSpeed = { activePanel = PlayerPanel.SPEED },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onQuality = { activePanel = PlayerPanel.QUALITY },
@@ -900,8 +955,15 @@ fun PlayerScreen(
 
         if (unlockVisible) {
             UnlockPrompt(
-                onUnlock = { controlsLocked = false; unlockVisible = false; controlsVisible = true },
-                onKeepLocked = { unlockVisible = false; controlsVisible = false },
+                onUnlock = {
+                    controlsLocked = false
+                    unlockVisible = false
+                    controlsVisible = true
+                },
+                onKeepLocked = {
+                    unlockVisible = false
+                    controlsVisible = false
+                },
                 focusRequester = unlockFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -942,12 +1004,36 @@ fun PlayerScreen(
                 },
                 onSelectChannel = { channel -> browserVisible = false; onSelectLiveChannel(channel) },
                 onClose = { browserVisible = false },
-                modifier = if (tvRemoteInput) Modifier.align(Alignment.CenterEnd) else Modifier.align(Alignment.Center),
+                modifier = if (tvRemoteInput) {
+                    Modifier.align(Alignment.CenterEnd)
+                } else {
+                    Modifier.align(Alignment.Center)
+                },
             )
         }
 
         activePanel?.let { panel ->
             when (panel) {
+                PlayerPanel.AUDIO -> TrackSelectionPanel(
+                    title = "مسارات الصوت",
+                    emptyMessage = "لا توجد مسارات صوت اضافية في هذا المحتوى",
+                    options = audioTracks,
+                    showOff = false,
+                    onSelect = { applyTrack(C.TRACK_TYPE_AUDIO, it) },
+                    onClose = { activePanel = null },
+                    modifier = Modifier.align(Alignment.CenterStart),
+                )
+                PlayerPanel.SUBTITLES -> SubtitleSelectionPanel(
+                    options = subtitleTracks,
+                    subtitleSizeIndex = subtitleSizeIndex,
+                    raised = subtitleRaised,
+                    onSelect = { applyTrack(C.TRACK_TYPE_TEXT, it) },
+                    onDisable = { applyTrack(C.TRACK_TYPE_TEXT, null) },
+                    onCycleSize = { subtitleSizeIndex = (subtitleSizeIndex + 1) % 3 },
+                    onTogglePosition = { subtitleRaised = !subtitleRaised },
+                    onClose = { activePanel = null },
+                    modifier = Modifier.align(Alignment.CenterStart),
+                )
                 PlayerPanel.SPEED -> SimpleOptionsPanel(
                     title = "سرعة التشغيل",
                     options = listOf(.75f, 1f, 1.25f, 1.5f, 2f).map { speed ->
@@ -1046,6 +1132,8 @@ private fun ModernVodControls(
     speed: Float,
     audioLabel: String,
     subtitleLabel: String,
+    hasAudio: Boolean,
+    hasSubtitles: Boolean,
     hasMultipleQualities: Boolean,
     hasMultipleServers: Boolean,
     onPlayPause: () -> Unit,
@@ -1053,6 +1141,8 @@ private fun ModernVodControls(
     onForward: () -> Unit,
     onSeekTo: (Long) -> Unit,
     onSeekingChanged: (Boolean) -> Unit,
+    onAudio: () -> Unit,
+    onSubtitles: () -> Unit,
     onSpeed: () -> Unit,
     onResize: () -> Unit,
     onQuality: () -> Unit,
@@ -1063,6 +1153,8 @@ private fun ModernVodControls(
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val progress = if (durationMs > 0L) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    val animatedProgress by animateFloatAsState(progress, label = "playerProgress")
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1095,8 +1187,8 @@ private fun ModernVodControls(
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            item { PlayerInfoPill("الصوت: $audioLabel") }
-            item { PlayerInfoPill("الترجمة: $subtitleLabel") }
+            if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
+            item { FocusButton(if (hasSubtitles) subtitleLabel else "الترجمة", onSubtitles, primary = false, compact = true) }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1114,12 +1206,15 @@ private fun ModernLiveControls(
     audioLabel: String,
     subtitleLabel: String,
     resizeLabel: String,
+    hasAudio: Boolean,
     hasSubtitles: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onPlayPause: () -> Unit,
     onReload: () -> Unit,
     onMute: () -> Unit,
+    onAudio: () -> Unit,
+    onSubtitles: () -> Unit,
     onResize: () -> Unit,
     onLock: () -> Unit,
     primaryFocus: FocusRequester,
@@ -1161,30 +1256,12 @@ private fun ModernLiveControls(
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            item { PlayerInfoPill("الصوت: $audioLabel") }
-            if (hasSubtitles) item { PlayerInfoPill("الترجمة: $subtitleLabel") }
+            if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
+            if (hasSubtitles) item { FocusButton(subtitleLabel, onSubtitles, primary = false, compact = true) }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
     }
-}
-
-@Composable
-private fun PlayerInfoPill(text: String) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(10.dp)
-    Text(
-        text = text,
-        color = colors.text,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        maxLines = 1,
-        modifier = Modifier
-            .clip(shape)
-            .background(Color.White.copy(alpha = .09f))
-            .border(1.dp, colors.line.copy(alpha = .55f), shape)
-            .padding(horizontal = 13.dp, vertical = 9.dp),
-    )
 }
 
 @Composable
@@ -1201,13 +1278,20 @@ private fun SeekableProgressBar(
     var focused by remember { mutableStateOf(false) }
     var previewMs by remember { mutableLongStateOf(positionMs) }
 
-    DisposableEffect(Unit) { onDispose { onSeekingChanged(false) } }
+    DisposableEffect(Unit) {
+        onDispose { onSeekingChanged(false) }
+    }
+
     LaunchedEffect(positionMs, durationMs, focused) {
         if (!focused) previewMs = positionMs.coerceIn(0L, durationMs.coerceAtLeast(0L))
     }
 
     val activePosition = if (focused) previewMs else positionMs
-    val progress = if (durationMs > 0L) (activePosition.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    val progress = if (durationMs > 0L) {
+        (activePosition.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
     val shape = RoundedCornerShape(20.dp)
 
     Column(Modifier.fillMaxWidth()) {
@@ -1260,17 +1344,28 @@ private fun SeekableProgressBar(
                     if (event.type != KeyEventType.KeyDown || durationMs <= 0L) return@onPreviewKeyEvent false
                     when (event.nativeKeyEvent.keyCode) {
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-                            previewMs = if (tvRemoteInput) (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs) else (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            previewMs = if (tvRemoteInput) {
+                                (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            } else {
+                                (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            }
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            previewMs = if (tvRemoteInput) (previewMs - SEEK_STEP_MS).coerceAtLeast(0L) else (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            previewMs = if (tvRemoteInput) {
+                                (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                            } else {
+                                (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                            }
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_CENTER,
                         AndroidKeyEvent.KEYCODE_ENTER,
                         AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
-                        -> { onSeekTo(previewMs); true }
+                        -> {
+                            onSeekTo(previewMs)
+                            true
+                        }
                         else -> false
                     }
                 }
@@ -1319,7 +1414,11 @@ private fun ResumePrompt(
         Text("توقفت عند ${formatTime(positionMs)}", color = colors.goldBright, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FocusButton("متابعة من ${formatTime(positionMs)}", onResume, modifier = Modifier.focusRequester(focusRequester))
+            FocusButton(
+                "متابعة من ${formatTime(positionMs)}",
+                onResume,
+                modifier = Modifier.focusRequester(focusRequester),
+            )
             FocusButton("من البداية", onRestart, primary = false)
         }
     }
@@ -1350,16 +1449,24 @@ private fun NextEpisodePrompt(
         Spacer(Modifier.height(13.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FocusButton(
-                "تشغيل الان", onPlayNow,
+                "تشغيل الان",
+                onPlayNow,
                 modifier = Modifier.focusRequester(playFocusRequester).focusProperties {
-                    left = cancelFocusRequester; right = cancelFocusRequester; up = FocusRequester.Cancel; down = FocusRequester.Cancel
+                    left = cancelFocusRequester
+                    right = cancelFocusRequester
+                    up = FocusRequester.Cancel
+                    down = FocusRequester.Cancel
                 },
                 compact = true,
             )
             FocusButton(
-                "الغاء", onCancel,
+                "الغاء",
+                onCancel,
                 modifier = Modifier.focusRequester(cancelFocusRequester).focusProperties {
-                    left = playFocusRequester; right = playFocusRequester; up = FocusRequester.Cancel; down = FocusRequester.Cancel
+                    left = playFocusRequester
+                    right = playFocusRequester
+                    up = FocusRequester.Cancel
+                    down = FocusRequester.Cancel
                 },
                 primary = false,
                 compact = true,
@@ -1419,6 +1526,69 @@ private fun PlayerErrorPanel(
             if (canChooseServer) FocusButton("اختيار مصدر", onChooseServer, primary = false)
             FocusButton("رجوع", onBack, primary = false)
         }
+    }
+}
+
+@Composable
+private fun TrackSelectionPanel(
+    title: String,
+    emptyMessage: String,
+    options: List<PlayerTrackOption>,
+    showOff: Boolean,
+    onSelect: (PlayerTrackOption) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    PlayerSidePanel(title, onClose, modifier) {
+        if (showOff) FocusButton("ايقاف", {}, primary = false, compact = true)
+        if (options.isEmpty()) {
+            Text(emptyMessage, color = LocalHulkColors.current.textMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 30.dp))
+        } else {
+            options.forEach { option ->
+                FocusButton(
+                    text = if (option.secondary.isBlank()) option.label else "${option.label}  •  ${option.secondary}",
+                    onClick = { onSelect(option) },
+                    primary = option.selected,
+                    compact = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(7.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitleSelectionPanel(
+    options: List<PlayerTrackOption>,
+    subtitleSizeIndex: Int,
+    raised: Boolean,
+    onSelect: (PlayerTrackOption) -> Unit,
+    onDisable: () -> Unit,
+    onCycleSize: () -> Unit,
+    onTogglePosition: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    PlayerSidePanel("الترجمة", onClose, modifier) {
+        FocusButton("ايقاف الترجمة", onDisable, primary = options.none { it.selected }, compact = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        options.forEach { option ->
+            FocusButton(
+                if (option.secondary.isBlank()) option.label else "${option.label}  •  ${option.secondary}",
+                { onSelect(option) },
+                primary = option.selected,
+                compact = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(7.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("مظهر الترجمة", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(7.dp))
+        FocusButton("الحجم: ${listOf("صغير", "متوسط", "كبير")[subtitleSizeIndex]}", onCycleSize, primary = false, compact = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(7.dp))
+        FocusButton("المكان: ${if (raised) "مرتفع" else "اسفل"}", onTogglePosition, primary = false, compact = true, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -1491,7 +1661,10 @@ private fun PlayerSidePanel(
         }
         Spacer(Modifier.height(18.dp))
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
             content = content,
         )
     }
@@ -1511,17 +1684,29 @@ private fun LiveChannelBrowser(
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
     val tvLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
-    val current = remember(catalog, currentStreamId) { catalog?.items?.firstOrNull { it.id == currentStreamId } }
+    val current = remember(catalog, currentStreamId) {
+        catalog?.items?.firstOrNull { it.id == currentStreamId }
+    }
 
-    val categoryOrderPrefs = remember(context) { context.getSharedPreferences(LIVE_CATEGORY_ORDER_PREFS, Context.MODE_PRIVATE) }
+    // Share the exact same persisted order used by the main Live screen.
+    // Any move here is therefore reflected on the main Live category rail as well.
+    val categoryOrderPrefs = remember(context) {
+        context.getSharedPreferences(LIVE_CATEGORY_ORDER_PREFS, Context.MODE_PRIVATE)
+    }
     var orderedCategoryIds by remember(catalog) {
-        mutableStateOf(categoryOrderPrefs.getString(PREF_IDS, "").orEmpty().split(',').filter(String::isNotBlank))
+        mutableStateOf(
+            categoryOrderPrefs.getString(PREF_IDS, "")
+                .orEmpty()
+                .split(',')
+                .filter(String::isNotBlank),
+        )
     }
     var movingCategoryId by remember { mutableStateOf<String?>(null) }
     val orderedCategories = remember(catalog?.categories, orderedCategoryIds) {
         val categories = catalog?.categories.orEmpty()
         val byId = categories.associateBy { it.id }
-        (orderedCategoryIds.mapNotNull(byId::get) + categories.filterNot { it.id in orderedCategoryIds }).distinctBy { it.id }
+        (orderedCategoryIds.mapNotNull(byId::get) + categories.filterNot { it.id in orderedCategoryIds })
+            .distinctBy { it.id }
     }
 
     fun moveCategory(id: String, delta: Int) {
@@ -1535,13 +1720,23 @@ private fun LiveChannelBrowser(
         categoryOrderPrefs.edit().putString(PREF_IDS, values.joinToString(",")).apply()
     }
 
-    val liveHistoryPrefs = remember(context) { context.getSharedPreferences(LIVE_PLAYER_HISTORY_PREFS, Context.MODE_PRIVATE) }
+    // Keep a lightweight, local Live watching history so "استكمال المشاهدة" can be
+    // offered from the player without changing the Movie/Series player contract.
+    val liveHistoryPrefs = remember(context) {
+        context.getSharedPreferences(LIVE_PLAYER_HISTORY_PREFS, Context.MODE_PRIVATE)
+    }
     var recentChannelIds by remember(catalog) {
-        mutableStateOf(liveHistoryPrefs.getString(PREF_IDS, "").orEmpty().split(',').mapNotNull(String::toIntOrNull))
+        mutableStateOf(
+            liveHistoryPrefs.getString(PREF_IDS, "")
+                .orEmpty()
+                .split(',')
+                .mapNotNull(String::toIntOrNull),
+        )
     }
     LaunchedEffect(currentStreamId, catalog) {
         if (catalog?.items?.any { it.id == currentStreamId } == true) {
-            val updated = (listOf(currentStreamId) + recentChannelIds.filterNot { it == currentStreamId }).take(60)
+            val updated = (listOf(currentStreamId) + recentChannelIds.filterNot { it == currentStreamId })
+                .take(60)
             if (updated != recentChannelIds) {
                 recentChannelIds = updated
                 liveHistoryPrefs.edit().putString(PREF_IDS, updated.joinToString(",")).apply()
@@ -1561,7 +1756,10 @@ private fun LiveChannelBrowser(
         mutableStateOf(catalog?.items.orEmpty().filter(isFavorite).map(ContentItem::id).toSet())
     }
     val categoryArtwork = remember(catalog) {
-        catalog?.items.orEmpty().filter { !it.posterUrl.isNullOrBlank() }.groupBy(ContentItem::categoryId).mapValues { (_, channels) -> channels.first() }
+        catalog?.items.orEmpty()
+            .filter { !it.posterUrl.isNullOrBlank() }
+            .groupBy(ContentItem::categoryId)
+            .mapValues { (_, channels) -> channels.first() }
     }
 
     val categoryChannels = when (selectedCategory) {
@@ -1571,8 +1769,13 @@ private fun LiveChannelBrowser(
         else -> catalog?.items.orEmpty().filter { it.categoryId == selectedCategory }
     }
     val normalizedQuery = searchQuery.trim()
-    val visible = if (normalizedQuery.isBlank()) categoryChannels else catalog?.items.orEmpty().filter { channel ->
-        channel.name.contains(normalizedQuery, ignoreCase = true) || channel.id.toString().contains(normalizedQuery)
+    val visible = if (normalizedQuery.isBlank()) {
+        categoryChannels
+    } else {
+        catalog?.items.orEmpty().filter { channel ->
+            channel.name.contains(normalizedQuery, ignoreCase = true) ||
+                channel.id.toString().contains(normalizedQuery)
+        }
     }
     val selectedCategoryTitle = when {
         normalizedQuery.isNotBlank() -> "نتائج البحث"
@@ -1605,9 +1808,13 @@ private fun LiveChannelBrowser(
         val keyCode = event.nativeKeyEvent.keyCode
         val isBack = keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE
         if (isBack) {
+            // Consume the browser's first Back at preview phase so focus never gets a
+            // chance to clear first. KeyDown dismisses; any trailing event is consumed.
             if (event.type == KeyEventType.KeyDown) onClose()
             true
-        } else false
+        } else {
+            false
+        }
     }
 
     @Composable
@@ -1648,9 +1855,16 @@ private fun LiveChannelBrowser(
                 .onFocusChanged { focused = it.isFocused }
                 .onPreviewKeyEvent { event ->
                     val keyCode = event.nativeKeyEvent.keyCode
-                    val selectKey = keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER || keyCode == AndroidKeyEvent.KEYCODE_ENTER || keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
+                    val selectKey =
+                        keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+                            keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
+                            keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
+
                     when {
-                        selectKey && event.type == KeyEventType.KeyDown -> { selectPressed = true; true }
+                        selectKey && event.type == KeyEventType.KeyDown -> {
+                            selectPressed = true
+                            true
+                        }
                         selectKey && event.type == KeyEventType.KeyUp -> {
                             selectPressed = false
                             if (!longPressHandled) {
@@ -1659,19 +1873,36 @@ private fun LiveChannelBrowser(
                             longPressHandled = false
                             true
                         }
-                        moving && event.type == KeyEventType.KeyDown && (keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP || keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN) -> true
-                        moving && event.type == KeyEventType.KeyUp && keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP -> { moveCategory(category.id, -1); true }
-                        moving && event.type == KeyEventType.KeyUp && keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN -> { moveCategory(category.id, 1); true }
+                        moving && event.type == KeyEventType.KeyDown &&
+                            (keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP ||
+                                keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN) -> true
+                        moving && event.type == KeyEventType.KeyUp &&
+                            keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP -> {
+                            moveCategory(category.id, -1)
+                            true
+                        }
+                        moving && event.type == KeyEventType.KeyUp &&
+                            keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN -> {
+                            moveCategory(category.id, 1)
+                            true
+                        }
                         else -> false
                     }
                 }
-                .clickable(role = Role.Button, onClick = { if (moving) movingCategoryId = null else selectCategory(category.id) })
+                .clickable(
+                    role = Role.Button,
+                    onClick = {
+                        if (moving) movingCategoryId = null else selectCategory(category.id)
+                    },
+                )
                 .focusable()
                 .padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            categoryArtwork[category.id]?.let { channel -> ChannelLogo(channel, Modifier.size(28.dp)) }
+            categoryArtwork[category.id]?.let { channel ->
+                ChannelLogo(channel, Modifier.size(28.dp))
+            }
             Text(
                 text = if (moving) "↕ ${category.name}" else category.name,
                 modifier = Modifier.weight(1f),
@@ -1690,16 +1921,39 @@ private fun LiveChannelBrowser(
         Column(
             modifier = paneModifier
                 .clip(paneShape)
-                .background(if (tvLayout) Color.Black.copy(alpha = .58f) else Color.White.copy(alpha = .045f))
-                .border(1.dp, Color.White.copy(alpha = if (tvLayout) .14f else .08f), paneShape)
+                .background(
+                    if (tvLayout) Color.Black.copy(alpha = .58f)
+                    else Color.White.copy(alpha = .045f),
+                )
+                .border(
+                    1.dp,
+                    Color.White.copy(alpha = if (tvLayout) .14f else .08f),
+                    paneShape,
+                )
                 .padding(if (tvLayout) 9.dp else 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("الفئات", color = colors.goldBright, fontSize = if (tvLayout) 16.sp else 15.sp, fontWeight = FontWeight.Bold)
-                    if (movingCategoryId != null) Text("حرك ↑ ↓ ثم OK للحفظ", color = colors.goldBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "الفئات",
+                        color = colors.goldBright,
+                        fontSize = if (tvLayout) 16.sp else 15.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (movingCategoryId != null) {
+                        Text(
+                            "حرك ↑ ↓ ثم OK للحفظ",
+                            color = colors.goldBright,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
-                Text("${orderedCategories.size}", color = colors.textMuted, fontSize = 10.sp)
+                Text(
+                    "${orderedCategories.size}",
+                    color = colors.textMuted,
+                    fontSize = 10.sp,
+                )
             }
             Spacer(Modifier.height(if (tvLayout) 7.dp else 8.dp))
             LazyColumn(
@@ -1707,12 +1961,18 @@ private fun LiveChannelBrowser(
                 contentPadding = PaddingValues(bottom = 12.dp),
             ) {
                 item("all") {
-                    FocusButton("الكل", { selectCategory(null) }, modifier = Modifier.fillMaxWidth(), primary = selectedCategory == null && searchQuery.isBlank(), compact = true)
+                    FocusButton(
+                        text = "الكل",
+                        onClick = { selectCategory(null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        primary = selectedCategory == null && searchQuery.isBlank(),
+                        compact = true,
+                    )
                 }
                 item("continue") {
                     FocusButton(
-                        "▶ استكمال المشاهدة (${recentChannels.size})",
-                        { selectCategory(PLAYER_CONTINUE_CATEGORY) },
+                        text = "▶ استكمال المشاهدة (${recentChannels.size})",
+                        onClick = { selectCategory(PLAYER_CONTINUE_CATEGORY) },
                         modifier = Modifier.fillMaxWidth(),
                         primary = selectedCategory == PLAYER_CONTINUE_CATEGORY && searchQuery.isBlank(),
                         compact = true,
@@ -1721,8 +1981,8 @@ private fun LiveChannelBrowser(
                 }
                 item("favorites") {
                     FocusButton(
-                        "★ المفضلة (${favoriteIds.size})",
-                        { selectCategory(PLAYER_FAVORITES_CATEGORY) },
+                        text = "★ المفضلة (${favoriteIds.size})",
+                        onClick = { selectCategory(PLAYER_FAVORITES_CATEGORY) },
                         modifier = Modifier.fillMaxWidth(),
                         primary = selectedCategory == PLAYER_FAVORITES_CATEGORY && searchQuery.isBlank(),
                         compact = true,
@@ -1732,11 +1992,17 @@ private fun LiveChannelBrowser(
                     if (tvLayout) {
                         ReorderableCategoryRow(category)
                     } else {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            categoryArtwork[category.id]?.let { channel -> ChannelLogo(channel, Modifier.size(32.dp)) }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            categoryArtwork[category.id]?.let { channel ->
+                                ChannelLogo(channel, Modifier.size(32.dp))
+                            }
                             FocusButton(
-                                category.name,
-                                { selectCategory(category.id) },
+                                text = category.name,
+                                onClick = { selectCategory(category.id) },
                                 modifier = Modifier.weight(1f),
                                 primary = selectedCategory == category.id && searchQuery.isBlank(),
                                 compact = true,
@@ -1749,18 +2015,36 @@ private fun LiveChannelBrowser(
     }
 
     @Composable
-    fun ChannelPane(paneModifier: Modifier, showSearch: Boolean, showClose: Boolean) {
+    fun ChannelPane(
+        paneModifier: Modifier,
+        showSearch: Boolean,
+        showClose: Boolean,
+    ) {
         val paneShape = RoundedCornerShape(if (tvLayout) 12.dp else 18.dp)
         Column(
             modifier = paneModifier
                 .clip(paneShape)
-                .background(if (tvLayout) Color.Black.copy(alpha = .38f) else Color.Black.copy(alpha = .18f))
-                .border(1.dp, Color.White.copy(alpha = if (tvLayout) .13f else .08f), paneShape)
+                .background(
+                    if (tvLayout) Color.Black.copy(alpha = .38f)
+                    else Color.Black.copy(alpha = .18f),
+                )
+                .border(
+                    1.dp,
+                    Color.White.copy(alpha = if (tvLayout) .13f else .08f),
+                    paneShape,
+                )
                 .padding(if (tvLayout) 11.dp else 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(selectedCategoryTitle, color = colors.text, fontSize = if (tvLayout) 19.sp else 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        selectedCategoryTitle,
+                        color = colors.text,
+                        fontSize = if (tvLayout) 19.sp else 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         buildString {
                             append("${visible.size} قناة")
@@ -1772,17 +2056,27 @@ private fun LiveChannelBrowser(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (showClose) FocusButton("اغلاق", onClose, primary = false, compact = true)
+                if (showClose) {
+                    FocusButton("اغلاق", onClose, primary = false, compact = true)
+                }
             }
 
             if (showSearch) {
                 Spacer(Modifier.height(8.dp))
-                HulkTextField(value = searchQuery, onValueChange = { searchQuery = it }, label = "بحث سريع عن قناة", modifier = Modifier.fillMaxWidth().focusRequester(searchFocus))
+                HulkTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = "بحث سريع عن قناة",
+                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+                )
             }
             Spacer(Modifier.height(if (tvLayout) 7.dp else 8.dp))
 
             when {
-                catalog == null -> LoadingRing(label = "جاري تجهيز القنوات…", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp))
+                catalog == null -> LoadingRing(
+                    label = "جاري تجهيز القنوات…",
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp),
+                )
                 visible.isEmpty() -> Text(
                     when {
                         normalizedQuery.isNotBlank() -> "لا توجد قناة مطابقة للبحث"
@@ -1812,7 +2106,11 @@ private fun LiveChannelBrowser(
                                 favoriteIds = if (favorite) favoriteIds - channel.id else favoriteIds + channel.id
                                 onToggleFavorite(channel)
                             },
-                            modifier = if (index == focusIndex && normalizedQuery.isBlank()) Modifier.focusRequester(channelFocus) else Modifier,
+                            modifier = if (index == focusIndex && normalizedQuery.isBlank()) {
+                                Modifier.focusRequester(channelFocus)
+                            } else {
+                                Modifier
+                            },
                         )
                     }
                 }
@@ -1821,21 +2119,45 @@ private fun LiveChannelBrowser(
     }
 
     if (tvLayout) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .10f)).then(closeOnBackModifier))
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = .10f))
+                .then(closeOnBackModifier),
+        )
         Row(
             modifier = modifier
                 .fillMaxHeight()
                 .fillMaxWidth(.72f)
                 .then(closeOnBackModifier)
-                .background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = .76f), Color.Black.copy(alpha = .56f), Color.Black.copy(alpha = .22f))))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color.Black.copy(alpha = .76f),
+                            Color.Black.copy(alpha = .56f),
+                            Color.Black.copy(alpha = .22f),
+                        ),
+                    ),
+                )
                 .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            ChannelPane(Modifier.weight(1f).fillMaxHeight(), showSearch = true, showClose = true)
+            // RTL Row placement makes the second pane physically left: categories on the left,
+            // channels immediately to their right, matching the requested receiver/TV layout.
+            ChannelPane(
+                paneModifier = Modifier.weight(1f).fillMaxHeight(),
+                showSearch = true,
+                showClose = true,
+            )
             CategoryPane(Modifier.width(250.dp).fillMaxHeight())
         }
     } else {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .72f)).then(closeOnBackModifier))
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = .72f))
+                .then(closeOnBackModifier),
+        )
         Column(
             modifier = modifier
                 .fillMaxHeight(.80f)
@@ -1852,16 +2174,31 @@ private fun LiveChannelBrowser(
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
                     Text("القنوات المباشرة", color = colors.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Text("${visible.size} قناة  •  اضغط مطولا OK لاضافة او ازالة المفضلة", color = colors.textMuted, fontSize = 11.sp)
+                    Text(
+                        "${visible.size} قناة  •  اضغط مطولا OK لاضافة او ازالة المفضلة",
+                        color = colors.textMuted,
+                        fontSize = 11.sp,
+                    )
                 }
                 FocusButton("اغلاق", onClose, primary = false, compact = true)
             }
+
             Spacer(Modifier.height(11.dp))
-            HulkTextField(value = searchQuery, onValueChange = { searchQuery = it }, label = "بحث سريع عن قناة", modifier = Modifier.fillMaxWidth().focusRequester(searchFocus))
+            HulkTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = "بحث سريع عن قناة",
+                modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+            )
             Spacer(Modifier.height(11.dp))
+
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CategoryPane(Modifier.width(220.dp).fillMaxHeight())
-                ChannelPane(Modifier.weight(1f).fillMaxHeight(), showSearch = false, showClose = false)
+                ChannelPane(
+                    paneModifier = Modifier.weight(1f).fillMaxHeight(),
+                    showSearch = false,
+                    showClose = false,
+                )
             }
         }
     }
@@ -1880,7 +2217,6 @@ private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOpti
                     key = "$groupIndex:$trackIndex",
                     label = trackLabel(format, type, trackIndex),
                     secondary = trackSecondary(format, type),
-                    language = trackLanguageLabel(format),
                     groupIndex = groupIndex,
                     trackIndex = trackIndex,
                     selected = group.isTrackSelected(trackIndex),
@@ -1891,12 +2227,12 @@ private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOpti
 }.distinctBy { it.key }
 
 private fun trackLabel(format: Format, type: Int, index: Int): String {
-    val language = trackLanguageLabel(format)
+    val language = format.language?.let(::languageLabel)
     val explicit = format.label?.takeIf(String::isNotBlank)
     return when (type) {
         C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-        C.TRACK_TYPE_AUDIO -> language ?: explicit ?: "مسار صوت ${index + 1}"
-        C.TRACK_TYPE_TEXT -> language ?: explicit ?: "ترجمة ${index + 1}"
+        C.TRACK_TYPE_AUDIO -> explicit ?: language ?: "مسار صوت ${index + 1}"
+        C.TRACK_TYPE_TEXT -> explicit ?: language ?: "ترجمة ${index + 1}"
         else -> explicit ?: "مسار ${index + 1}"
     }
 }
@@ -1910,44 +2246,8 @@ private fun trackSecondary(format: Format, type: Int): String = when (type) {
     else -> format.sampleMimeType?.substringAfterLast('/').orEmpty()
 }
 
-private fun selectedTrackLanguageLabel(options: List<PlayerTrackOption>, fallback: String): String =
-    options.firstOrNull { it.selected }?.language
-        ?: options.singleOrNull()?.language
-        ?: fallback
-
-private fun trackLanguageLabel(format: Format): String? {
-    val languageCode = format.language
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?.takeUnless(::isUndeterminedLanguage)
-    if (languageCode != null) return languageLabel(languageCode)
-    return languageFromExplicitLabel(format.label)
-}
-
-private fun isUndeterminedLanguage(value: String): Boolean =
-    value.lowercase(Locale.ROOT).substringBefore('-') in setOf("und", "zxx", "mul")
-
-private fun languageFromExplicitLabel(raw: String?): String? {
-    val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
-    return when {
-        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> "العربية"
-        value.contains("english") -> "English"
-        value.contains("french") || value.contains("français") -> "Français"
-        value.contains("spanish") || value.contains("español") -> "Español"
-        value.contains("turkish") || value.contains("türk") -> "Türkçe"
-        value.contains("german") || value.contains("deutsch") -> "Deutsch"
-        value.contains("italian") || value.contains("italiano") -> "Italiano"
-        value.contains("portuguese") || value.contains("português") -> "Português"
-        value.contains("russian") || value.contains("рус") -> "Русский"
-        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> "فارسی"
-        value.contains("urdu") || value.contains("اردو") -> "اردو"
-        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> "हिन्दी"
-        value.contains("japanese") || value.contains("日本") -> "日本語"
-        value.contains("korean") || value.contains("한국") -> "한국어"
-        value.contains("chinese") || value.contains("中文") -> "中文"
-        else -> null
-    }
-}
+private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: String): String =
+    options.firstOrNull { it.selected }?.label ?: fallback
 
 private fun languageLabel(code: String): String = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
     "ar", "ara" -> "العربية"
@@ -1956,15 +2256,6 @@ private fun languageLabel(code: String): String = when (code.lowercase(Locale.RO
     "es", "spa" -> "Español"
     "tr", "tur" -> "Türkçe"
     "de", "deu", "ger" -> "Deutsch"
-    "it", "ita" -> "Italiano"
-    "pt", "por" -> "Português"
-    "ru", "rus" -> "Русский"
-    "fa", "fas", "per" -> "فارسی"
-    "ur", "urd" -> "اردو"
-    "hi", "hin" -> "हिन्दी"
-    "ja", "jpn" -> "日本語"
-    "ko", "kor" -> "한국어"
-    "zh", "zho", "chi" -> "中文"
     else -> code.uppercase(Locale.ROOT)
 }
 
@@ -1999,8 +2290,11 @@ private fun formatTime(ms: Long): String {
     val hours = totalSeconds / 3_600L
     val minutes = (totalSeconds % 3_600L) / 60L
     val seconds = totalSeconds % 60L
-    return if (hours > 0L) String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
-    else String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    return if (hours > 0L) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
 }
 
 internal fun relativeChannelIndex(currentIndex: Int, delta: Int, size: Int): Int {
