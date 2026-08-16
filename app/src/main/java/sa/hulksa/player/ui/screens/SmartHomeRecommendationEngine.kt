@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import sa.hulksa.player.data.withHomeHeroMetadataToken
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.HistoryEntry
@@ -190,7 +191,7 @@ internal fun buildSmartHomeRecommendations(
         candidates = rankedFeatured,
         limit = 8,
         minimumPerType = 4,
-    )
+    ).map(ContentItem::withHomeHeroMetadataToken)
 
     val liveById = live.associateBy(ContentItem::id)
     val viewedLive = orderedHistory.asSequence()
