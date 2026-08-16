@@ -1793,7 +1793,7 @@ private fun Context.detailsProMovieTechnicalMetadata(movieId: Int): DetailsProMo
 }
 
 private fun HistoryEntry.detailsProWatchProgress(): Float? {
-    if (positionMs < 30_000L || durationMs <= 0L) return null
+    if (positionMs <= 0L || durationMs <= 0L) return null
     return (positionMs.toFloat() / durationMs.toFloat())
         .coerceIn(0f, 1f)
         .takeIf { it < .95f }
