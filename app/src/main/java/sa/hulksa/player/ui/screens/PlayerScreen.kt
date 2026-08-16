@@ -244,6 +244,8 @@ fun PlayerScreen(
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var videoTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
+    var hasActiveAudio by remember(request) { mutableStateOf(false) }
+    var hasActiveSubtitles by remember(request) { mutableStateOf(false) }
     var audioLanguageLabel by remember(request) { mutableStateOf("") }
     var subtitleLanguageLabel by remember(request) { mutableStateOf("") }
     var subtitleSizeIndex by remember(request) { mutableIntStateOf(1) }
@@ -462,13 +464,24 @@ fun PlayerScreen(
                 audioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
                 videoTracks = extractTrackOptions(tracks, C.TRACK_TYPE_VIDEO)
-                audioLanguageLabel = player.audioFormat?.let(::mediaTrackLanguage)
-                    ?: detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO)
-                    ?: ""
-                subtitleLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
+                hasActiveAudio = player.audioFormat != null || audioTracks.any { it.selected }
+                hasActiveSubtitles = subtitleTracks.any { it.selected }
+                audioLanguageLabel = if (hasActiveAudio) {
+                    player.audioFormat?.let(::mediaTrackLanguage)
+                        ?: detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO)
+                        ?: ""
+                } else {
+                    ""
+                }
+                subtitleLanguageLabel = if (hasActiveSubtitles) {
+                    detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
+                } else {
+                    ""
+                }
             }
 
             override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                if (cueGroup.cues.isNotEmpty()) hasActiveSubtitles = true
                 if (subtitleLanguageLabel.isBlank()) {
                     subtitleLanguageLabel = inferSubtitleLanguageFromText(
                         cueGroup.cues.joinToString(" ") { cue -> cue.text?.toString().orEmpty() },
@@ -518,6 +531,10 @@ fun PlayerScreen(
         }
         finalError = null
         buffering = true
+        audioTracks = emptyList()
+        subtitleTracks = emptyList()
+        hasActiveAudio = false
+        hasActiveSubtitles = false
         audioLanguageLabel = ""
         subtitleLanguageLabel = ""
         player.setMediaItem(MediaItem.fromUri(url))
@@ -591,14 +608,26 @@ fun PlayerScreen(
             if (manualSeekTargetMs == null) {
                 currentPositionMs = player.currentPosition.coerceAtLeast(0L)
             }
-            if (audioLanguageLabel.isBlank()) {
+            val tracks = player.currentTracks
+            val detectedAudioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO)
+            val detectedSubtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
+            if (detectedAudioTracks != audioTracks) audioTracks = detectedAudioTracks
+            if (detectedSubtitleTracks != subtitleTracks) subtitleTracks = detectedSubtitleTracks
+
+            val audioActive = player.audioFormat != null || detectedAudioTracks.any { it.selected }
+            hasActiveAudio = audioActive
+            if (audioActive && audioLanguageLabel.isBlank()) {
                 audioLanguageLabel = player.audioFormat?.let(::mediaTrackLanguage)
-                    ?: detectedTrackLanguage(player.currentTracks, C.TRACK_TYPE_AUDIO)
+                    ?: detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO)
                     ?: ""
             }
-            if (subtitleLanguageLabel.isBlank()) {
-                subtitleLanguageLabel = detectedTrackLanguage(player.currentTracks, C.TRACK_TYPE_TEXT).orEmpty()
+
+            val subtitlesSelected = detectedSubtitleTracks.any { it.selected }
+            if (subtitlesSelected) hasActiveSubtitles = true
+            if (hasActiveSubtitles && subtitleLanguageLabel.isBlank()) {
+                subtitleLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
             }
+
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
             if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
                 context.cacheVerifiedMovieCardMetadata(
@@ -885,15 +914,15 @@ fun PlayerScreen(
                     audioLabel = audioLanguageLabel,
                     subtitleLabel = subtitleLanguageLabel,
                     resizeLabel = resizeLabel(resizeModeIndex),
-                    hasAudio = audioLanguageLabel.isNotBlank(),
-                    hasSubtitles = subtitleLanguageLabel.isNotBlank(),
+                    hasAudio = hasActiveAudio,
+                    hasSubtitles = hasActiveSubtitles,
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onReload = { pendingSeekMs = 0L; candidateIndex = 0; retryNonce += 1 },
                     onMute = { isMuted = !isMuted; player.volume = if (isMuted) 0f else 1f },
-                    onAudio = { activePanel = PlayerPanel.AUDIO },
-                    onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
+                    onAudio = {},
+                    onSubtitles = {},
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
@@ -909,8 +938,8 @@ fun PlayerScreen(
                     speed = playbackSpeed,
                     audioLabel = audioLanguageLabel,
                     subtitleLabel = subtitleLanguageLabel,
-                    hasAudio = audioLanguageLabel.isNotBlank(),
-                    hasSubtitles = subtitleLanguageLabel.isNotBlank(),
+                    hasAudio = hasActiveAudio,
+                    hasSubtitles = hasActiveSubtitles,
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -918,8 +947,8 @@ fun PlayerScreen(
                     onForward = { seekBy(SEEK_STEP_MS) },
                     onSeekTo = ::seekToPosition,
                     onSeekingChanged = { focused -> seekBarFocused = focused },
-                    onAudio = { activePanel = PlayerPanel.AUDIO },
-                    onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
+                    onAudio = {},
+                    onSubtitles = {},
                     onSpeed = { activePanel = PlayerPanel.SPEED },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onQuality = { activePanel = PlayerPanel.QUALITY },
@@ -1227,8 +1256,22 @@ private fun ModernVodControls(
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            if (hasAudio && audioLabel.isNotBlank()) item { FocusButton("الصوت: $audioLabel", {}, primary = false, compact = true) }
-            if (hasSubtitles && subtitleLabel.isNotBlank()) item { FocusButton("الترجمة: $subtitleLabel", {}, primary = false, compact = true) }
+            if (hasAudio) item {
+                FocusButton(
+                    if (audioLabel.isNotBlank()) "الصوت : $audioLabel" else "الصوت",
+                    onAudio,
+                    primary = false,
+                    compact = true,
+                )
+            }
+            if (hasSubtitles) item {
+                FocusButton(
+                    if (subtitleLabel.isNotBlank()) "الترجمة : $subtitleLabel" else "الترجمة",
+                    onSubtitles,
+                    primary = false,
+                    compact = true,
+                )
+            }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1296,8 +1339,22 @@ private fun ModernLiveControls(
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            if (hasAudio && audioLabel.isNotBlank()) item { FocusButton("الصوت: $audioLabel", {}, primary = false, compact = true) }
-            if (hasSubtitles && subtitleLabel.isNotBlank()) item { FocusButton("الترجمة: $subtitleLabel", {}, primary = false, compact = true) }
+            if (hasAudio) item {
+                FocusButton(
+                    if (audioLabel.isNotBlank()) "الصوت : $audioLabel" else "الصوت",
+                    onAudio,
+                    primary = false,
+                    compact = true,
+                )
+            }
+            if (hasSubtitles) item {
+                FocusButton(
+                    if (subtitleLabel.isNotBlank()) "الترجمة : $subtitleLabel" else "الترجمة",
+                    onSubtitles,
+                    primary = false,
+                    compact = true,
+                )
+            }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
@@ -2250,10 +2307,10 @@ private fun Int?.orZero(): Int = this ?: 0
 
 private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOption> = buildList {
     tracks.groups.forEachIndexed { groupIndex, group ->
+        if (group.type != type) return@forEachIndexed
         for (trackIndex in 0 until group.length) {
+            if (!group.isTrackSupported(trackIndex, true)) continue
             val format = group.getTrackFormat(trackIndex)
-            if (!formatMatchesTrackType(group.type, format, type)) continue
-            if (!group.isTrackSupported(trackIndex, true) && !group.isTrackSelected(trackIndex)) continue
             add(
                 PlayerTrackOption(
                     key = "$groupIndex:$trackIndex",
@@ -2268,23 +2325,24 @@ private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOpti
     }
 }.distinctBy { it.key }
 
-private fun formatMatchesTrackType(groupType: Int, format: Format, type: Int): Boolean =
-    groupType == type || format.sampleMimeType?.let { mime ->
-        androidx.media3.common.MimeTypes.getTrackType(mime) == type
-    } == true
-
-private fun trackLabel(format: Format, type: Int, index: Int): String = when (type) {
-    C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-    C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_TEXT -> mediaTrackLanguage(format).orEmpty()
-    else -> format.label?.takeIf(String::isNotBlank) ?: "مسار ${index + 1}"
+private fun trackLabel(format: Format, type: Int, index: Int): String {
+    val language = mediaTrackLanguage(format)
+    val explicit = format.label?.trim()?.takeIf(String::isNotBlank)
+    return when (type) {
+        C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
+        C.TRACK_TYPE_AUDIO -> language ?: explicit?.let(::languageFromExplicitLabel) ?: ""
+        C.TRACK_TYPE_TEXT -> language ?: explicit?.let(::languageFromExplicitLabel) ?: ""
+        else -> explicit ?: "مسار ${index + 1}"
+    }
 }
 
 private fun detectedTrackLanguage(tracks: Tracks, type: Int): String? {
     val candidates = buildList {
         tracks.groups.forEach { group ->
+            if (group.type != type) return@forEach
             for (trackIndex in 0 until group.length) {
+                if (!group.isTrackSupported(trackIndex, true) && !group.isTrackSelected(trackIndex)) continue
                 val format = group.getTrackFormat(trackIndex)
-                if (!formatMatchesTrackType(group.type, format, type)) continue
                 val label = mediaTrackLanguage(format) ?: continue
                 add(group.isTrackSelected(trackIndex) to label)
             }
