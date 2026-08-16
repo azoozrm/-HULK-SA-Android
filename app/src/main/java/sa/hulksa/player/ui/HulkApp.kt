@@ -56,8 +56,10 @@ fun HulkApp(
         } else {
             colors.surface
         }
+    val isPhoneHome =
+        !isTv && state.screen == HulkScreen.MAIN && state.destination == MainDestination.HOME
     val applySafeDrawingInsets =
-        !isTv && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN
+        !isTv && !isPhoneHome && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,

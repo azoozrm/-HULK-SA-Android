@@ -47,7 +47,7 @@ internal fun HomeHeroTechnicalPills(
                 ?.let { InfoPill("$it موسم") }
             metadata.episodeCount
                 ?.takeIf { it > 0 }
-                ?.let { InfoPill("$it حلقات") }
+                ?.let { InfoPill("$it حلقة") }
         }
 
         ContentType.LIVE -> Unit

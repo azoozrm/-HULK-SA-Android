@@ -1101,7 +1101,7 @@ private fun ActiveDownloadsSection(
 
 @Composable
 private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 25.dp)) { content() }
+    Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 0.dp)) { content() }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
