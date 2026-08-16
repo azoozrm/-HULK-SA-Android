@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 data class SeriesCardTechnicalMetadata(
     val quality: String? = null,
     val seasonCount: Int? = null,
+    val episodeCount: Int? = null,
 )
 
 class SeriesCardMetadataClient {
@@ -128,6 +129,7 @@ class SeriesCardMetadataClient {
             episodeObjects.isNotEmpty() -> 1
             else -> null
         }
+        val episodeCount = episodeObjects.size.takeIf { it > 0 }
 
         val qualityLabels = episodeObjects
             .asSequence()
@@ -153,6 +155,7 @@ class SeriesCardMetadataClient {
         SeriesCardTechnicalMetadata(
             quality = predominantQuality(qualityLabels) ?: fallbackQuality,
             seasonCount = seasonCount,
+            episodeCount = episodeCount,
         )
     }
 
