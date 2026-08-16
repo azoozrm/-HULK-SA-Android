@@ -462,7 +462,9 @@ fun PlayerScreen(
                 audioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
                 videoTracks = extractTrackOptions(tracks, C.TRACK_TYPE_VIDEO)
-                audioLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO).orEmpty()
+                audioLanguageLabel = player.audioFormat?.let(::mediaTrackLanguage)
+                    ?: detectedTrackLanguage(tracks, C.TRACK_TYPE_AUDIO)
+                    ?: ""
                 subtitleLanguageLabel = detectedTrackLanguage(tracks, C.TRACK_TYPE_TEXT).orEmpty()
             }
 
@@ -516,6 +518,8 @@ fun PlayerScreen(
         }
         finalError = null
         buffering = true
+        audioLanguageLabel = ""
+        subtitleLanguageLabel = ""
         player.setMediaItem(MediaItem.fromUri(url))
         val seekTarget = when {
             pendingSeekMs > 0L -> pendingSeekMs
@@ -586,6 +590,14 @@ fun PlayerScreen(
             delay(500L)
             if (manualSeekTargetMs == null) {
                 currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+            }
+            val playingAudioFormat = player.audioFormat
+            audioLanguageLabel = if (playingAudioFormat == null) {
+                ""
+            } else {
+                mediaTrackLanguage(playingAudioFormat)
+                    ?: detectedTrackLanguage(player.currentTracks, C.TRACK_TYPE_AUDIO)
+                    ?: ""
             }
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
             if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
@@ -1215,8 +1227,8 @@ private fun ModernVodControls(
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            if (hasAudio && audioLabel.isNotBlank()) item { PlayerInfoPill(audioLabel) }
-            if (hasSubtitles && subtitleLabel.isNotBlank()) item { PlayerInfoPill(subtitleLabel) }
+            if (hasAudio && audioLabel.isNotBlank()) item { FocusButton("الصوت: $audioLabel", {}, primary = false, compact = true) }
+            if (hasSubtitles && subtitleLabel.isNotBlank()) item { FocusButton("الترجمة: $subtitleLabel", {}, primary = false, compact = true) }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1284,30 +1296,12 @@ private fun ModernLiveControls(
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            if (hasAudio && audioLabel.isNotBlank()) item { PlayerInfoPill(audioLabel) }
-            if (hasSubtitles && subtitleLabel.isNotBlank()) item { PlayerInfoPill(subtitleLabel) }
+            if (hasAudio && audioLabel.isNotBlank()) item { FocusButton("الصوت: $audioLabel", {}, primary = false, compact = true) }
+            if (hasSubtitles && subtitleLabel.isNotBlank()) item { FocusButton("الترجمة: $subtitleLabel", {}, primary = false, compact = true) }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
     }
-}
-
-@Composable
-private fun PlayerInfoPill(text: String) {
-    val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(10.dp)
-    Text(
-        text = text,
-        color = colors.text,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        maxLines = 1,
-        modifier = Modifier
-            .clip(shape)
-            .background(Color.White.copy(alpha = .09f))
-            .border(1.dp, colors.line.copy(alpha = .55f), shape)
-            .padding(horizontal = 13.dp, vertical = 9.dp),
-    )
 }
 
 @Composable
@@ -2286,17 +2280,15 @@ private fun trackLabel(format: Format, type: Int, index: Int): String = when (ty
 }
 
 private fun detectedTrackLanguage(tracks: Tracks, type: Int): String? {
-    var fallback: String? = null
     tracks.groups.forEach { group ->
         for (trackIndex in 0 until group.length) {
+            if (!group.isTrackSelected(trackIndex)) continue
             val format = group.getTrackFormat(trackIndex)
             if (!formatMatchesTrackType(group.type, format, type)) continue
-            val label = mediaTrackLanguage(format) ?: continue
-            if (group.isTrackSelected(trackIndex)) return label
-            if (fallback == null) fallback = label
+            mediaTrackLanguage(format)?.let { return it }
         }
     }
-    return fallback
+    return null
 }
 
 private fun mediaTrackLanguage(format: Format): String? {
