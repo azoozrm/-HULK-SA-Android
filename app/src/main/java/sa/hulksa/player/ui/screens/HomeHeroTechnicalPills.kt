@@ -34,24 +34,24 @@ internal fun HomeHeroTechnicalPills(
 
     when (item.type) {
         ContentType.MOVIE -> {
-            heroMovieDurationLabel(metadata.durationMs)?.let { InfoPill(it) }
             metadata.quality
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
                 ?.let { InfoPill(it) }
+            heroMovieDurationLabel(metadata.durationMs)?.let { InfoPill(it) }
         }
 
         ContentType.SERIES -> {
-            metadata.episodeCount
-                ?.takeIf { it > 0 }
-                ?.let { InfoPill("الحلقات $it") }
-            metadata.seasonCount
-                ?.takeIf { it > 0 }
-                ?.let { InfoPill("المواسم $it") }
             metadata.quality
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
                 ?.let { InfoPill(it) }
+            metadata.seasonCount
+                ?.takeIf { it > 0 }
+                ?.let { InfoPill("$it موسم") }
+            metadata.episodeCount
+                ?.takeIf { it > 0 }
+                ?.let { InfoPill("$it حلقات") }
         }
 
         ContentType.LIVE -> Unit
