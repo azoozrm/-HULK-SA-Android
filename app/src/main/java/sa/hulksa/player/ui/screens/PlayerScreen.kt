@@ -116,7 +116,7 @@ import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
-private const val CONTROLS_TIMEOUT_MS = 5_500L
+private const val CONTROLS_TIMEOUT_MS = 5_000L
 private const val PLAYER_FAVORITES_CATEGORY = "__player_favorites__"
 private const val PLAYER_CONTINUE_CATEGORY = "__player_continue__"
 private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
@@ -236,6 +236,7 @@ fun PlayerScreen(
     var unlockVisible by remember(request) { mutableStateOf(false) }
     var seekFeedback by remember(request) { mutableStateOf<String?>(null) }
     var seekBarFocused by remember(request) { mutableStateOf(false) }
+    var focusTimelineOnReveal by remember(request) { mutableStateOf(false) }
     var resumePromptVisible by remember(request) {
         mutableStateOf(!request.isLive && request.resumePositionMs >= RESUME_PROMPT_THRESHOLD_MS)
     }
@@ -255,6 +256,7 @@ fun PlayerScreen(
     }
     val playerFocus = remember { FocusRequester() }
     val primaryFocus = remember { FocusRequester() }
+    val seekBarFocus = remember { FocusRequester() }
     val resumeFocus = remember { FocusRequester() }
     val unlockFocus = remember { FocusRequester() }
     val nextEpisodePlayFocus = remember { FocusRequester() }
@@ -295,6 +297,7 @@ fun PlayerScreen(
     }
 
     fun revealControls() {
+        focusTimelineOnReveal = false
         controlsVisible = true
         runCatching { primaryFocus.requestFocus() }
     }
@@ -367,6 +370,7 @@ fun PlayerScreen(
             }
             controlsVisible -> {
                 controlsVisible = false
+                focusTimelineOnReveal = false
                 activePanel = null
                 browserVisible = false
             }
@@ -601,16 +605,16 @@ fun PlayerScreen(
         activePanel,
         resumePromptVisible,
         controlsLocked,
-        seekBarFocused,
         manualSeekTargetMs,
     ) {
         if (
             controlsVisible && !browserVisible && activePanel == null && !resumePromptVisible &&
             !buffering && finalError == null && isPlaying && !controlsLocked &&
-            !seekBarFocused && manualSeekTargetMs == null
+            manualSeekTargetMs == null
         ) {
             delay(CONTROLS_TIMEOUT_MS)
             controlsVisible = false
+            focusTimelineOnReveal = false
         }
     }
 
@@ -639,6 +643,7 @@ fun PlayerScreen(
         unlockVisible,
         controlsLocked,
         nextCountdown,
+        focusTimelineOnReveal,
         request.historyKey,
     ) {
         val target = when {
@@ -647,6 +652,7 @@ fun PlayerScreen(
             nextCountdown >= 0 -> nextEpisodePlayFocus
             unlockVisible -> unlockFocus
             controlsLocked || !controlsVisible -> playerFocus
+            focusTimelineOnReveal && !request.isLive -> seekBarFocus
             else -> primaryFocus
         }
         if (target != null) {
@@ -772,11 +778,17 @@ fun PlayerScreen(
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-                        // The VOD timeline is visually RTL on TV/remote: left advances, right rewinds.
-                        seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
+                        // TV/remote timeline is RTL: left advances and right rewinds.
+                        focusTimelineOnReveal = true
+                        controlsVisible = true
+                        seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS)
+                        true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-                        seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS); true
+                        focusTimelineOnReveal = true
+                        controlsVisible = true
+                        seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS)
+                        true
                     } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> if (!request.isLive && surfaceFocused) {
                         seekBy(-SEEK_STEP_MS); true
@@ -848,8 +860,8 @@ fun PlayerScreen(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = selectedTrackLabel(audioTracks, "غير محدد"),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, "غير متوفرة"),
+                    audioLabel = selectedTrackLabel(audioTracks, ""),
+                    subtitleLabel = selectedTrackLabel(subtitleTracks, ""),
                     resizeLabel = resizeLabel(resizeModeIndex),
                     hasAudio = audioTracks.isNotEmpty(),
                     hasSubtitles = subtitleTracks.isNotEmpty(),
@@ -873,8 +885,8 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = selectedTrackLabel(audioTracks, "غير محدد"),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, "غير متوفرة"),
+                    audioLabel = selectedTrackLabel(audioTracks, ""),
+                    subtitleLabel = selectedTrackLabel(subtitleTracks, ""),
                     hasAudio = audioTracks.isNotEmpty(),
                     hasSubtitles = subtitleTracks.isNotEmpty(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
@@ -883,7 +895,10 @@ fun PlayerScreen(
                     onRewind = { seekBy(-SEEK_STEP_MS) },
                     onForward = { seekBy(SEEK_STEP_MS) },
                     onSeekTo = ::seekToPosition,
-                    onSeekingChanged = { seekBarFocused = it },
+                    onSeekingChanged = { focused ->
+                        seekBarFocused = focused
+                        if (!focused) focusTimelineOnReveal = false
+                    },
                     onAudio = { activePanel = PlayerPanel.AUDIO },
                     onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
                     onSpeed = { activePanel = PlayerPanel.SPEED },
@@ -892,6 +907,7 @@ fun PlayerScreen(
                     onServers = { activePanel = PlayerPanel.SERVERS },
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
+                    seekBarFocusRequester = seekBarFocus,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -1149,6 +1165,7 @@ private fun ModernVodControls(
     onServers: () -> Unit,
     onLock: () -> Unit,
     primaryFocus: FocusRequester,
+    seekBarFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -1181,14 +1198,15 @@ private fun ModernVodControls(
             buffered = bufferedPercent / 100f,
             onSeekTo = onSeekTo,
             onSeekingChanged = onSeekingChanged,
+            focusRequester = seekBarFocusRequester,
         )
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            if (hasAudio) item { PlayerInfoPill("الصوت: $audioLabel") }
-            item { PlayerInfoPill("الترجمة: ${if (hasSubtitles) subtitleLabel else "غير متوفرة"}") }
+            if (hasAudio && audioLabel.isNotBlank()) item { PlayerInfoPill(audioLabel) }
+            if (hasSubtitles && subtitleLabel.isNotBlank()) item { PlayerInfoPill(subtitleLabel) }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1256,8 +1274,8 @@ private fun ModernLiveControls(
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            if (hasAudio) item { PlayerInfoPill("الصوت: $audioLabel") }
-            if (hasSubtitles) item { PlayerInfoPill("الترجمة: $subtitleLabel") }
+            if (hasAudio && audioLabel.isNotBlank()) item { PlayerInfoPill(audioLabel) }
+            if (hasSubtitles && subtitleLabel.isNotBlank()) item { PlayerInfoPill(subtitleLabel) }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
@@ -1289,6 +1307,7 @@ private fun SeekableProgressBar(
     buffered: Float,
     onSeekTo: (Long) -> Unit,
     onSeekingChanged: (Boolean) -> Unit,
+    focusRequester: FocusRequester,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1315,7 +1334,11 @@ private fun SeekableProgressBar(
     Column(Modifier.fillMaxWidth()) {
         if (focused) {
             Text(
-                "${formatTime(previewMs)}  •  حرك يمين ويسار ثم اضغط OK",
+                if (tvRemoteInput) {
+                    "يسار +10 ث  •  يمين -10 ث"
+                } else {
+                    "حرك يمين ويسار للتقديم والترجيع"
+                },
                 color = colors.goldBright,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -1367,6 +1390,7 @@ private fun SeekableProgressBar(
                             } else {
                                 (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
                             }
+                            onSeekTo(previewMs)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -1375,6 +1399,7 @@ private fun SeekableProgressBar(
                             } else {
                                 (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
                             }
+                            onSeekTo(previewMs)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_CENTER,
@@ -1387,6 +1412,7 @@ private fun SeekableProgressBar(
                         else -> false
                     }
                 }
+                .focusRequester(focusRequester)
                 .focusable(),
         ) {
             Box(Modifier.fillMaxWidth(buffered.coerceIn(0f, 1f)).fillMaxHeight().background(Color.White.copy(alpha = .28f)))
@@ -2254,8 +2280,8 @@ private fun trackLabel(format: Format, type: Int, index: Int): String {
     val explicitLanguage = languageFromExplicitLabel(explicit)
     return when (type) {
         C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-        C.TRACK_TYPE_AUDIO -> language ?: explicitLanguage ?: "غير محدد"
-        C.TRACK_TYPE_TEXT -> language ?: explicitLanguage ?: "غير محدد"
+        C.TRACK_TYPE_AUDIO -> language ?: explicitLanguage ?: ""
+        C.TRACK_TYPE_TEXT -> language ?: explicitLanguage ?: ""
         else -> explicit ?: "مسار ${index + 1}"
     }
 }
@@ -2270,7 +2296,9 @@ private fun trackSecondary(format: Format, type: Int): String = when (type) {
 }
 
 private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: String): String =
-    options.firstOrNull { it.selected }?.label ?: fallback
+    options.firstOrNull { it.selected && it.label.isNotBlank() }?.label
+        ?: options.singleOrNull()?.label?.takeIf(String::isNotBlank)
+        ?: fallback
 
 private fun isUndeterminedLanguage(value: String): Boolean =
     value.lowercase(Locale.ROOT).substringBefore('-') in setOf("und", "zxx", "mul")
@@ -2278,42 +2306,56 @@ private fun isUndeterminedLanguage(value: String): Boolean =
 private fun languageFromExplicitLabel(raw: String?): String? {
     val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
     return when {
-        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> "العربية"
+        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> "Arabic"
         value.contains("english") -> "English"
-        value.contains("french") || value.contains("français") -> "Français"
-        value.contains("spanish") || value.contains("español") -> "Español"
-        value.contains("turkish") || value.contains("türk") -> "Türkçe"
-        value.contains("german") || value.contains("deutsch") -> "Deutsch"
-        value.contains("italian") || value.contains("italiano") -> "Italiano"
-        value.contains("portuguese") || value.contains("português") -> "Português"
-        value.contains("russian") || value.contains("рус") -> "Русский"
-        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> "فارسی"
-        value.contains("urdu") || value.contains("اردو") -> "اردو"
-        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> "हिन्दी"
-        value.contains("japanese") || value.contains("日本") -> "日本語"
-        value.contains("korean") || value.contains("한국") -> "한국어"
-        value.contains("chinese") || value.contains("中文") -> "中文"
+        value.contains("french") || value.contains("français") -> "French"
+        value.contains("spanish") || value.contains("español") -> "Spanish"
+        value.contains("turkish") || value.contains("türk") -> "Turkish"
+        value.contains("german") || value.contains("deutsch") -> "German"
+        value.contains("italian") || value.contains("italiano") -> "Italian"
+        value.contains("portuguese") || value.contains("português") -> "Portuguese"
+        value.contains("russian") || value.contains("рус") -> "Russian"
+        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> "Persian"
+        value.contains("urdu") || value.contains("اردو") -> "Urdu"
+        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> "Hindi"
+        value.contains("japanese") || value.contains("日本") -> "Japanese"
+        value.contains("korean") || value.contains("한국") -> "Korean"
+        value.contains("chinese") || value.contains("中文") -> "Chinese"
         else -> null
     }
 }
 
-private fun languageLabel(code: String): String = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
-    "ar", "ara" -> "العربية"
+private fun languageLabel(code: String): String? = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
+    "ar", "ara" -> "Arabic"
     "en", "eng" -> "English"
-    "fr", "fra", "fre" -> "Français"
-    "es", "spa" -> "Español"
-    "tr", "tur" -> "Türkçe"
-    "de", "deu", "ger" -> "Deutsch"
-    "it", "ita" -> "Italiano"
-    "pt", "por" -> "Português"
-    "ru", "rus" -> "Русский"
-    "fa", "fas", "per" -> "فارسی"
-    "ur", "urd" -> "اردو"
-    "hi", "hin" -> "हिन्दी"
-    "ja", "jpn" -> "日本語"
-    "ko", "kor" -> "한국어"
-    "zh", "zho", "chi" -> "中文"
-    else -> code.uppercase(Locale.ROOT)
+    "fr", "fra", "fre" -> "French"
+    "es", "spa" -> "Spanish"
+    "tr", "tur" -> "Turkish"
+    "de", "deu", "ger" -> "German"
+    "it", "ita" -> "Italian"
+    "pt", "por" -> "Portuguese"
+    "ru", "rus" -> "Russian"
+    "fa", "fas", "per" -> "Persian"
+    "ur", "urd" -> "Urdu"
+    "hi", "hin" -> "Hindi"
+    "ja", "jpn" -> "Japanese"
+    "ko", "kor" -> "Korean"
+    "zh", "zho", "chi" -> "Chinese"
+    "id", "ind" -> "Indonesian"
+    "ms", "msa", "may" -> "Malay"
+    "th", "tha" -> "Thai"
+    "nl", "nld", "dut" -> "Dutch"
+    "sv", "swe" -> "Swedish"
+    "pl", "pol" -> "Polish"
+    "uk", "ukr" -> "Ukrainian"
+    "he", "heb" -> "Hebrew"
+    "el", "ell", "gre" -> "Greek"
+    "cs", "ces", "cze" -> "Czech"
+    "ro", "ron", "rum" -> "Romanian"
+    "hu", "hun" -> "Hungarian"
+    "bn", "ben" -> "Bengali"
+    "vi", "vie" -> "Vietnamese"
+    else -> null
 }
 
 private fun qualityLabel(height: Int): String = when {
