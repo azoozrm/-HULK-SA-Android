@@ -22,6 +22,7 @@ internal fun buildSmartHomeRecommendations(
     live: List<ContentItem>,
     history: List<HistoryEntry>,
     favorites: Set<String>,
+    rotationSeed: Int = smartHomeRotationSeed(movies, series, history, favorites),
 ): SmartHomeRecommendationResult {
     val orderedHistory = history.sortedWith(
         compareByDescending<HistoryEntry> { it.updatedAtEpochMs }
@@ -107,23 +108,31 @@ internal fun buildSmartHomeRecommendations(
         )
         .toList()
 
-    val becauseCandidates = candidatePool
+    val affinityCandidates = candidatePool
         .filter { (affinityScores[it.smartHomeKey()] ?: 0) > 0 }
-        .take(180)
+        .take(160)
+    val becauseCandidates = (affinityCandidates + candidatePool.take(80))
+        .distinctBy { it.smartHomeKey() }
     val becauseYouWatched = smartHomeDiversify(
         candidates = becauseCandidates,
         baseScores = totalScores,
         limit = 14,
+        maxPerCategory = 4,
     )
     val becauseKeys = becauseYouWatched.mapTo(hashSetOf()) { it.smartHomeKey() }
     val suggestedCandidates = candidatePool.asSequence()
         .filterNot { it.smartHomeKey() in becauseKeys }
         .take(220)
         .toList()
-    val suggested = smartHomeDiversify(
+    val suggestedWindow = smartHomeRecommendationWindow(
         candidates = suggestedCandidates,
+        rotationSeed = rotationSeed,
+    )
+    val suggested = smartHomeDiversify(
+        candidates = suggestedWindow,
         baseScores = totalScores,
         limit = 24,
+        maxPerCategory = 3,
     )
 
     val popularMovies = movies.sortedWith(
@@ -137,9 +146,9 @@ internal fun buildSmartHomeRecommendations(
             .thenBy { it.id },
     ).take(22)
 
-    val featuredCandidates = sequenceOf(
-        becauseYouWatched,
+    val featuredPool = sequenceOf(
         suggested,
+        becauseYouWatched,
         popularMovies,
         popularSeries,
         movies,
@@ -147,8 +156,13 @@ internal fun buildSmartHomeRecommendations(
     ).flatten()
         .filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
         .distinctBy { it.smartHomeKey() }
-        .take(8)
         .toList()
+    val featuredCandidates = featuredPool.sortedWith(
+        compareByDescending<ContentItem> { it.smartHomeHeroQualityScore() }
+            .thenByDescending { totalScores[it.smartHomeKey()] ?: 0 }
+            .thenByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
+            .thenByDescending { it.addedAtEpochSeconds ?: 0L },
+    ).take(8)
 
     val liveById = live.associateBy(ContentItem::id)
     val viewedLive = orderedHistory.asSequence()
@@ -192,6 +206,7 @@ private fun smartHomeDiversify(
     candidates: List<ContentItem>,
     baseScores: Map<String, Int>,
     limit: Int,
+    maxPerCategory: Int = Int.MAX_VALUE,
 ): List<ContentItem> {
     if (limit <= 0 || candidates.isEmpty()) return emptyList()
     val remaining = candidates.toMutableList()
@@ -200,10 +215,14 @@ private fun smartHomeDiversify(
     val typeCounts = mutableMapOf<ContentType, Int>()
 
     while (selected.size < limit && remaining.isNotEmpty()) {
-        val best = remaining.maxWithOrNull(
+        val underCategoryCap = remaining.filter { item ->
+            (categoryCounts[item.categoryId] ?: 0) < maxPerCategory
+        }
+        val source = if (underCategoryCap.isNotEmpty()) underCategoryCap else remaining
+        val best = source.maxWithOrNull(
             compareBy<ContentItem> { item ->
-                val categoryPenalty = (categoryCounts[item.categoryId] ?: 0) * 520
-                val typePenalty = (typeCounts[item.type] ?: 0) * 70
+                val categoryPenalty = (categoryCounts[item.categoryId] ?: 0) * 1_600
+                val typePenalty = (typeCounts[item.type] ?: 0) * 120
                 (baseScores[item.smartHomeKey()] ?: 0) - categoryPenalty - typePenalty
             }
                 .thenBy { it.rating?.toDoubleOrNull() ?: 0.0 }
@@ -217,6 +236,48 @@ private fun smartHomeDiversify(
     }
     return selected
 }
+
+private fun smartHomeRecommendationWindow(
+    candidates: List<ContentItem>,
+    rotationSeed: Int,
+): List<ContentItem> {
+    if (candidates.size <= 32 || rotationSeed == 0) return candidates.take(120)
+    val maxOffset = minOf(56, (candidates.size - 24).coerceAtLeast(0))
+    if (maxOffset <= 0) return candidates.take(120)
+    val step = 8
+    val pageCount = (maxOffset / step) + 1
+    val offset = Math.floorMod(rotationSeed, pageCount) * step
+    return candidates.drop(offset).take(120)
+}
+
+private fun smartHomeRotationSeed(
+    movies: List<ContentItem>,
+    series: List<ContentItem>,
+    history: List<HistoryEntry>,
+    favorites: Set<String>,
+): Int {
+    var result = 17
+    history.sortedByDescending { it.updatedAtEpochMs }.take(8).forEach { entry ->
+        result = 31 * result + entry.key.hashCode()
+        result = 31 * result + entry.updatedAtEpochMs.hashCode()
+        result = 31 * result + entry.positionMs.hashCode()
+    }
+    favorites.sorted().take(16).forEach { key -> result = 31 * result + key.hashCode() }
+    (movies.take(4) + series.take(4)).forEach { item ->
+        result = 31 * result + item.id
+        result = 31 * result + (item.addedAtEpochSeconds ?: 0L).hashCode()
+    }
+    result = 31 * result + movies.size
+    result = 31 * result + series.size
+    return result
+}
+
+private fun ContentItem.smartHomeHeroQualityScore(): Int =
+    (if (!backdropUrl.isNullOrBlank()) 6_000 else 0) +
+        (if (!plot.isNullOrBlank()) 2_200 else 0) +
+        (if (!genre.isNullOrBlank()) 900 else 0) +
+        (if (!year.isNullOrBlank()) 450 else 0) +
+        (if (!posterUrl.isNullOrBlank()) 200 else 0)
 
 private fun smartHomeFreshness(index: Int): Int = (720 - index * 18).coerceAtLeast(0)
 

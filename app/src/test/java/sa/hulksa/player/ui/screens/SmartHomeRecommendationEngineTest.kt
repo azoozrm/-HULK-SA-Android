@@ -2,6 +2,7 @@ package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.model.ContentItem
@@ -122,6 +123,80 @@ class SmartHomeRecommendationEngineTest {
         assertEquals(setOf(1, 2), first.becauseYouWatched.map(ContentItem::id).toSet())
     }
 
+    @Test
+    fun refreshRotationChangesSuggestedContentWithoutLosingDeterminismPerSeed() {
+        val content = (1..80).map { id ->
+            movie(
+                id = id,
+                name = "Movie $id",
+                category = "category-${id % 8}",
+                genre = "Genre ${id % 5}",
+                rating = String.format(java.util.Locale.US, "%.1f", 6.0 + (id % 30) / 10.0),
+                added = (1_000 - id).toLong(),
+            )
+        }
+
+        val first = buildSmartHomeRecommendations(content, emptyList(), emptyList(), emptyList(), emptySet(), rotationSeed = 0)
+        val refreshed = buildSmartHomeRecommendations(content, emptyList(), emptyList(), emptyList(), emptySet(), rotationSeed = 1)
+        val refreshedAgain = buildSmartHomeRecommendations(content, emptyList(), emptyList(), emptyList(), emptySet(), rotationSeed = 1)
+
+        assertNotEquals(first.suggested.map(ContentItem::id), refreshed.suggested.map(ContentItem::id))
+        assertEquals(refreshed.suggested, refreshedAgain.suggested)
+    }
+
+    @Test
+    fun becauseYouWatchedAvoidsSingleCategorySaturationWhenAlternativesExist() {
+        val favorite = movie(1, "Sports Favorite", "sports", "Sports", "8.0", 1_000L)
+        val sports = (2..12).map { id -> movie(id, "Sports $id", "sports", "Sports", "9.0", (1_000 - id).toLong()) }
+        val alternatives = (20..27).map { id ->
+            movie(id, "Alternative $id", "alt-$id", "Drama", "8.5", (900 - id).toLong())
+        }
+
+        val result = buildSmartHomeRecommendations(
+            movies = listOf(favorite) + sports + alternatives,
+            series = emptyList(),
+            live = emptyList(),
+            history = emptyList(),
+            favorites = setOf("MOVIE:1"),
+        )
+
+        assertTrue(result.becauseYouWatched.take(10).count { it.categoryId == "sports" } <= 4)
+    }
+
+    @Test
+    fun heroPrefersCinematicMetadataOverBareHighRatedArtwork() {
+        val bare = movie(
+            id = 1,
+            name = "Bare Event",
+            category = "event",
+            genre = "",
+            rating = "10.0",
+            added = 1_000L,
+            artwork = true,
+            plot = null,
+        )
+        val cinematic = movie(
+            id = 2,
+            name = "Cinematic Movie",
+            category = "drama",
+            genre = "Drama",
+            rating = "8.0",
+            added = 900L,
+            artwork = true,
+            plot = "A complete cinematic story with useful metadata.",
+        )
+
+        val result = buildSmartHomeRecommendations(
+            movies = listOf(bare, cinematic),
+            series = emptyList(),
+            live = emptyList(),
+            history = emptyList(),
+            favorites = emptySet(),
+        )
+
+        assertEquals(cinematic.id, result.featuredCandidates.first().id)
+    }
+
     private fun movie(
         id: Int,
         name: String,
@@ -130,6 +205,7 @@ class SmartHomeRecommendationEngineTest {
         rating: String,
         added: Long,
         artwork: Boolean = false,
+        plot: String? = null,
     ): ContentItem = ContentItem(
         id = id,
         name = name,
@@ -140,6 +216,7 @@ class SmartHomeRecommendationEngineTest {
         year = "2026",
         containerExtension = "mp4",
         addedAtEpochSeconds = added,
+        plot = plot,
         genre = genre,
         backdropUrl = if (artwork) "https://example.com/$id-backdrop.jpg" else null,
     )
