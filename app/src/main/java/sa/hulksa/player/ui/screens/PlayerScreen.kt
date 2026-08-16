@@ -591,13 +591,13 @@ fun PlayerScreen(
             if (manualSeekTargetMs == null) {
                 currentPositionMs = player.currentPosition.coerceAtLeast(0L)
             }
-            val playingAudioFormat = player.audioFormat
-            audioLanguageLabel = if (playingAudioFormat == null) {
-                ""
-            } else {
-                mediaTrackLanguage(playingAudioFormat)
+            if (audioLanguageLabel.isBlank()) {
+                audioLanguageLabel = player.audioFormat?.let(::mediaTrackLanguage)
                     ?: detectedTrackLanguage(player.currentTracks, C.TRACK_TYPE_AUDIO)
                     ?: ""
+            }
+            if (subtitleLanguageLabel.isBlank()) {
+                subtitleLanguageLabel = detectedTrackLanguage(player.currentTracks, C.TRACK_TYPE_TEXT).orEmpty()
             }
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
             if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
@@ -2280,15 +2280,18 @@ private fun trackLabel(format: Format, type: Int, index: Int): String = when (ty
 }
 
 private fun detectedTrackLanguage(tracks: Tracks, type: Int): String? {
-    tracks.groups.forEach { group ->
-        for (trackIndex in 0 until group.length) {
-            if (!group.isTrackSelected(trackIndex)) continue
-            val format = group.getTrackFormat(trackIndex)
-            if (!formatMatchesTrackType(group.type, format, type)) continue
-            mediaTrackLanguage(format)?.let { return it }
+    val candidates = buildList {
+        tracks.groups.forEach { group ->
+            for (trackIndex in 0 until group.length) {
+                val format = group.getTrackFormat(trackIndex)
+                if (!formatMatchesTrackType(group.type, format, type)) continue
+                val label = mediaTrackLanguage(format) ?: continue
+                add(group.isTrackSelected(trackIndex) to label)
+            }
         }
     }
-    return null
+    return candidates.firstOrNull { it.first }?.second
+        ?: candidates.singleOrNull()?.second
 }
 
 private fun mediaTrackLanguage(format: Format): String? {
@@ -2380,37 +2383,53 @@ private fun inferSubtitleLanguageFromText(text: String): String? {
     return null
 }
 
-private fun languageLabel(code: String): String? = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
-    "ar", "ara" -> "Arabic"
-    "en", "eng" -> "English"
-    "fr", "fra", "fre" -> "French"
-    "es", "spa" -> "Spanish"
-    "tr", "tur" -> "Turkish"
-    "de", "deu", "ger" -> "German"
-    "it", "ita" -> "Italian"
-    "pt", "por" -> "Portuguese"
-    "ru", "rus" -> "Russian"
-    "fa", "fas", "per" -> "Persian"
-    "ur", "urd" -> "Urdu"
-    "hi", "hin" -> "Hindi"
-    "ja", "jpn" -> "Japanese"
-    "ko", "kor" -> "Korean"
-    "zh", "zho", "chi" -> "Chinese"
-    "id", "ind" -> "Indonesian"
-    "ms", "msa", "may" -> "Malay"
-    "th", "tha" -> "Thai"
-    "nl", "nld", "dut" -> "Dutch"
-    "sv", "swe" -> "Swedish"
-    "pl", "pol" -> "Polish"
-    "uk", "ukr" -> "Ukrainian"
-    "he", "heb" -> "Hebrew"
-    "el", "ell", "gre" -> "Greek"
-    "cs", "ces", "cze" -> "Czech"
-    "ro", "ron", "rum" -> "Romanian"
-    "hu", "hun" -> "Hungarian"
-    "bn", "ben" -> "Bengali"
-    "vi", "vie" -> "Vietnamese"
-    else -> null
+private fun languageLabel(code: String): String? {
+    val normalized = code.trim().lowercase(Locale.ROOT).substringBefore('-')
+    val known = when (normalized) {
+        "ar", "ara" -> "Arabic"
+        "en", "eng" -> "English"
+        "fr", "fra", "fre" -> "French"
+        "es", "spa" -> "Spanish"
+        "tr", "tur" -> "Turkish"
+        "de", "deu", "ger" -> "German"
+        "it", "ita" -> "Italian"
+        "pt", "por" -> "Portuguese"
+        "ru", "rus" -> "Russian"
+        "fa", "fas", "per" -> "Persian"
+        "ur", "urd" -> "Urdu"
+        "hi", "hin" -> "Hindi"
+        "ja", "jpn" -> "Japanese"
+        "ko", "kor" -> "Korean"
+        "zh", "zho", "chi" -> "Chinese"
+        "id", "ind" -> "Indonesian"
+        "ms", "msa", "may" -> "Malay"
+        "th", "tha" -> "Thai"
+        "nl", "nld", "dut" -> "Dutch"
+        "sv", "swe" -> "Swedish"
+        "pl", "pol" -> "Polish"
+        "uk", "ukr" -> "Ukrainian"
+        "he", "heb" -> "Hebrew"
+        "el", "ell", "gre" -> "Greek"
+        "cs", "ces", "cze" -> "Czech"
+        "ro", "ron", "rum" -> "Romanian"
+        "hu", "hun" -> "Hungarian"
+        "bn", "ben" -> "Bengali"
+        "vi", "vie" -> "Vietnamese"
+        else -> null
+    }
+    if (known != null) return known
+    if (normalized.isBlank() || isUndeterminedLanguage(normalized)) return null
+
+    return runCatching {
+        val locale = Locale.forLanguageTag(normalized)
+        locale.getDisplayLanguage(Locale.ENGLISH)
+            .trim()
+            .takeIf { display ->
+                display.isNotBlank() &&
+                    !display.equals(normalized, ignoreCase = true) &&
+                    !display.equals("Unknown language", ignoreCase = true)
+            }
+    }.getOrNull()
 }
 
 private fun qualityLabel(height: Int): String = when {
