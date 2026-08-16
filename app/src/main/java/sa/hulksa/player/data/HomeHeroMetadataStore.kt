@@ -19,15 +19,7 @@ internal data class HomeHeroMetadataToken(
     val label: String,
 )
 
-internal fun ContentItem.withHomeHeroMetadataToken(): ContentItem {
-    if (type == ContentType.LIVE) return this
-    val typeCode = if (type == ContentType.MOVIE) "m" else "s"
-    val visibleLabel = genre
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-        ?: if (type == ContentType.MOVIE) "فيلم" else "مسلسل"
-    return copy(genre = "$HOME_HERO_TOKEN_PREFIX$typeCode:$id:$visibleLabel")
-}
+internal fun ContentItem.withHomeHeroMetadataToken(): ContentItem = this
 
 internal fun decodeHomeHeroMetadataToken(raw: String): HomeHeroMetadataToken? {
     if (!raw.startsWith(HOME_HERO_TOKEN_PREFIX)) return null

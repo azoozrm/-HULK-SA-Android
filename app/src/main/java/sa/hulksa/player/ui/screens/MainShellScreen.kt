@@ -1192,6 +1192,7 @@ private fun CinemaHero(
                 item.year?.let { InfoPill(it) }
                 item.rating?.let { InfoPill("★ $it") }
                 item.genre?.takeIf(String::isNotBlank)?.let { InfoPill(it.take(27)) }
+                HomeHeroTechnicalPills(item, isTv)
             }
             item.plot?.takeIf(String::isNotBlank)?.let {
                 Spacer(Modifier.height(10.dp))
