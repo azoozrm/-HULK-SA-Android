@@ -942,6 +942,12 @@ private fun CinemaHomeScreen(
     val becauseYouWatched = homeContent.becauseYouWatched
     val suggested = homeContent.suggested
     val personalizedLive = homeContent.personalizedLive
+    val suggestedLive = remember(personalizedLive, lastLive) {
+        val lastLiveId = lastLive?.streamId
+        personalizedLive
+            .filterNot { lastLiveId != null && it.id == lastLiveId }
+            .take(20)
+    }
     val popularMovies = homeContent.popularMovies
     val popularSeries = homeContent.popularSeries
     val featuredCandidates = homeContent.featuredCandidates
@@ -975,20 +981,19 @@ private fun CinemaHomeScreen(
     val seriesRow = if (homeSeries.isNotEmpty()) rowCursor++ else -1
     val topMoviesRow = if (popularMovies.isNotEmpty()) rowCursor++ else -1
     val topSeriesRow = if (popularSeries.isNotEmpty()) rowCursor++ else -1
-    val liveRow = if (lastLive != null || live.isNotEmpty()) rowCursor else -1
+    val lastLiveRow = if (lastLive != null) rowCursor++ else -1
+    val popularLiveRow = if (suggestedLive.isNotEmpty()) rowCursor++ else -1
     val rowIndexByKey = mapOf(
         "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
         "recommended" to recommendedRow, "recent-movies" to moviesRow, "recent-series" to seriesRow, "top-movies" to topMoviesRow,
-        "top-series" to topSeriesRow, "last-live" to liveRow, "popular-live" to liveRow,
+        "top-series" to topSeriesRow, "last-live" to lastLiveRow, "popular-live" to popularLiveRow,
     )
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
 
     LazyColumn(
         state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(if (isTv) TV_PAGE_GUTTER else 0.dp),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
     ) {
@@ -1032,9 +1037,10 @@ private fun CinemaHomeScreen(
             item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (lastLive != null) {
-            item { HomeSectionPadding(isTv) { HistorySection("اخر قناة شاهدتها", "last-live", liveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
-        } else if (live.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", liveRow, personalizedLive.take(20), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { HistorySection("اخر قناة شاهدتها", "last-live", lastLiveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
+        }
+        if (suggestedLive.isNotEmpty()) {
+            item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
     }
 }
