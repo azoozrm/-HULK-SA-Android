@@ -73,14 +73,18 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         val merged = SeriesCardTechnicalMetadata(
             quality = fetched.quality ?: cached?.quality,
             seasonCount = fetched.seasonCount ?: cached?.seasonCount,
+            episodeCount = fetched.episodeCount ?: cached?.episodeCount,
         )
 
-        if (merged.quality != null || merged.seasonCount != null) {
+        if (merged.quality != null || merged.seasonCount != null || merged.episodeCount != null) {
             preferences.edit().apply {
                 merged.quality?.let { putString("series:$seriesId:quality", it) }
                 merged.seasonCount
                     ?.takeIf { it > 0 }
                     ?.let { putInt("series:$seriesId:season_count", it) }
+                merged.episodeCount
+                    ?.takeIf { it > 0 }
+                    ?.let { putInt("series:$seriesId:episode_count", it) }
             }.apply()
         }
         return merged
@@ -94,15 +98,19 @@ class SeriesCardMetadataStore private constructor(context: Context) {
         val seasonCount = preferences
             .getInt("series:$seriesId:season_count", 0)
             .takeIf { it > 0 }
-        if (quality == null && seasonCount == null) return null
+        val episodeCount = preferences
+            .getInt("series:$seriesId:episode_count", 0)
+            .takeIf { it > 0 }
+        if (quality == null && seasonCount == null && episodeCount == null) return null
         return SeriesCardTechnicalMetadata(
             quality = quality,
             seasonCount = seasonCount,
+            episodeCount = episodeCount,
         )
     }
 
     private fun SeriesCardTechnicalMetadata.isComplete(): Boolean =
-        !quality.isNullOrBlank() && (seasonCount ?: 0) > 0
+        !quality.isNullOrBlank() && (seasonCount ?: 0) > 0 && (episodeCount ?: 0) > 0
 
     companion object {
         private const val PREFERENCES = "series_card_verified_metadata"
