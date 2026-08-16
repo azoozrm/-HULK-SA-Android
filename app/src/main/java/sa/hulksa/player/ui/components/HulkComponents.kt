@@ -79,6 +79,8 @@ import androidx.lifecycle.ViewModelStoreOwner
 import coil3.compose.AsyncImage
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.R
+import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.decodeHomeHeroMetadataToken
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.HistoryEntry
@@ -972,6 +974,46 @@ private tailrec fun Context.findViewModelStoreOwner(): ViewModelStoreOwner? = wh
 
 @Composable
 fun InfoPill(text: String, modifier: Modifier = Modifier) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val heroToken = remember(text) { decodeHomeHeroMetadataToken(text) }
+    if (heroToken == null || !adaptiveUi.isTelevision) {
+        InfoPillBox(text = heroToken?.label ?: text, modifier = modifier)
+        return
+    }
+
+    val context = LocalContext.current
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    var metadata by remember(heroToken.type, heroToken.contentId) {
+        mutableStateOf(metadataStore.cached(heroToken.type, heroToken.contentId))
+    }
+    LaunchedEffect(heroToken.type, heroToken.contentId) {
+        metadata = metadataStore.cached(heroToken.type, heroToken.contentId)
+        metadata = metadataStore.metadata(heroToken.type, heroToken.contentId)
+    }
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        InfoPillBox(heroToken.label.ifBlank { if (heroToken.type == ContentType.MOVIE) "فيلم" else "مسلسل" })
+        when (heroToken.type) {
+            ContentType.MOVIE -> {
+                compactMovieDuration(metadata.durationMs)?.let(::InfoPillBox)
+                metadata.quality?.takeIf(String::isNotBlank)?.let { InfoPillBox("الجودة $it") }
+            }
+            ContentType.SERIES -> {
+                metadata.episodeCount?.takeIf { it > 0 }?.let { InfoPillBox("$it حلقة") }
+                metadata.seasonCount?.takeIf { it > 0 }?.let { InfoPillBox("$it موسم") }
+                metadata.quality?.takeIf(String::isNotBlank)?.let { InfoPillBox("الجودة $it") }
+            }
+            ContentType.LIVE -> Unit
+        }
+    }
+}
+
+@Composable
+private fun InfoPillBox(text: String, modifier: Modifier = Modifier) {
     val colors = LocalHulkColors.current
     Box(
         modifier = modifier
