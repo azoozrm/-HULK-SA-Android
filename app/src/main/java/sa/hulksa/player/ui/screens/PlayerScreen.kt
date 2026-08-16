@@ -848,8 +848,8 @@ fun PlayerScreen(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = selectedTrackLabel(audioTracks, "الصوت"),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, "الترجمة"),
+                    audioLabel = selectedTrackLabel(audioTracks, "غير محدد"),
+                    subtitleLabel = selectedTrackLabel(subtitleTracks, "غير متوفرة"),
                     resizeLabel = resizeLabel(resizeModeIndex),
                     hasAudio = audioTracks.isNotEmpty(),
                     hasSubtitles = subtitleTracks.isNotEmpty(),
@@ -873,8 +873,8 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = selectedTrackLabel(audioTracks, "الصوت"),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, "الترجمة"),
+                    audioLabel = selectedTrackLabel(audioTracks, "غير محدد"),
+                    subtitleLabel = selectedTrackLabel(subtitleTracks, "غير متوفرة"),
                     hasAudio = audioTracks.isNotEmpty(),
                     hasSubtitles = subtitleTracks.isNotEmpty(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
@@ -1187,8 +1187,8 @@ private fun ModernVodControls(
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
-            item { FocusButton(if (hasSubtitles) subtitleLabel else "الترجمة", onSubtitles, primary = false, compact = true) }
+            if (hasAudio) item { PlayerInfoPill("الصوت: $audioLabel") }
+            item { PlayerInfoPill("الترجمة: ${if (hasSubtitles) subtitleLabel else "غير متوفرة"}") }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1256,12 +1256,30 @@ private fun ModernLiveControls(
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
-            if (hasSubtitles) item { FocusButton(subtitleLabel, onSubtitles, primary = false, compact = true) }
+            if (hasAudio) item { PlayerInfoPill("الصوت: $audioLabel") }
+            if (hasSubtitles) item { PlayerInfoPill("الترجمة: $subtitleLabel") }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
     }
+}
+
+@Composable
+private fun PlayerInfoPill(text: String) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(10.dp)
+    Text(
+        text = text,
+        color = colors.text,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(shape)
+            .background(Color.White.copy(alpha = .09f))
+            .border(1.dp, colors.line.copy(alpha = .55f), shape)
+            .padding(horizontal = 13.dp, vertical = 9.dp),
+    )
 }
 
 @Composable
@@ -2227,12 +2245,17 @@ private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOpti
 }.distinctBy { it.key }
 
 private fun trackLabel(format: Format, type: Int, index: Int): String {
-    val language = format.language?.let(::languageLabel)
+    val rawLanguage = format.language
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.takeUnless(::isUndeterminedLanguage)
+    val language = rawLanguage?.let(::languageLabel)
     val explicit = format.label?.takeIf(String::isNotBlank)
+    val explicitLanguage = languageFromExplicitLabel(explicit)
     return when (type) {
         C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-        C.TRACK_TYPE_AUDIO -> explicit ?: language ?: "مسار صوت ${index + 1}"
-        C.TRACK_TYPE_TEXT -> explicit ?: language ?: "ترجمة ${index + 1}"
+        C.TRACK_TYPE_AUDIO -> language ?: explicitLanguage ?: "غير محدد"
+        C.TRACK_TYPE_TEXT -> language ?: explicitLanguage ?: "غير محدد"
         else -> explicit ?: "مسار ${index + 1}"
     }
 }
@@ -2249,6 +2272,31 @@ private fun trackSecondary(format: Format, type: Int): String = when (type) {
 private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: String): String =
     options.firstOrNull { it.selected }?.label ?: fallback
 
+private fun isUndeterminedLanguage(value: String): Boolean =
+    value.lowercase(Locale.ROOT).substringBefore('-') in setOf("und", "zxx", "mul")
+
+private fun languageFromExplicitLabel(raw: String?): String? {
+    val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
+    return when {
+        value.contains("arabic") || value.contains("العربية") || value.contains("عربي") -> "العربية"
+        value.contains("english") -> "English"
+        value.contains("french") || value.contains("français") -> "Français"
+        value.contains("spanish") || value.contains("español") -> "Español"
+        value.contains("turkish") || value.contains("türk") -> "Türkçe"
+        value.contains("german") || value.contains("deutsch") -> "Deutsch"
+        value.contains("italian") || value.contains("italiano") -> "Italiano"
+        value.contains("portuguese") || value.contains("português") -> "Português"
+        value.contains("russian") || value.contains("рус") -> "Русский"
+        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> "فارسی"
+        value.contains("urdu") || value.contains("اردو") -> "اردو"
+        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> "हिन्दी"
+        value.contains("japanese") || value.contains("日本") -> "日本語"
+        value.contains("korean") || value.contains("한국") -> "한국어"
+        value.contains("chinese") || value.contains("中文") -> "中文"
+        else -> null
+    }
+}
+
 private fun languageLabel(code: String): String = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
     "ar", "ara" -> "العربية"
     "en", "eng" -> "English"
@@ -2256,6 +2304,15 @@ private fun languageLabel(code: String): String = when (code.lowercase(Locale.RO
     "es", "spa" -> "Español"
     "tr", "tur" -> "Türkçe"
     "de", "deu", "ger" -> "Deutsch"
+    "it", "ita" -> "Italiano"
+    "pt", "por" -> "Português"
+    "ru", "rus" -> "Русский"
+    "fa", "fas", "per" -> "فارسی"
+    "ur", "urd" -> "اردو"
+    "hi", "hin" -> "हिन्दी"
+    "ja", "jpn" -> "日本語"
+    "ko", "kor" -> "한국어"
+    "zh", "zho", "chi" -> "中文"
     else -> code.uppercase(Locale.ROOT)
 }
 
