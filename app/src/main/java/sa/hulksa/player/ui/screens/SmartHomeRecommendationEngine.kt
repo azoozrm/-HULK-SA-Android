@@ -111,8 +111,22 @@ internal fun buildSmartHomeRecommendations(
     val affinityCandidates = candidatePool
         .filter { (affinityScores[it.smartHomeKey()] ?: 0) > 0 }
         .take(160)
+    val needsBecauseDiversification = affinityCandidates
+        .groupingBy(ContentItem::categoryId)
+        .eachCount()
+        .values
+        .any { count -> count > 4 }
+    val becauseCandidates = if (needsBecauseDiversification) {
+        (affinityCandidates + candidatePool.asSequence()
+            .filter { (affinityScores[it.smartHomeKey()] ?: 0) <= 0 }
+            .take(80)
+            .toList())
+            .distinctBy { it.smartHomeKey() }
+    } else {
+        affinityCandidates
+    }
     val becauseYouWatched = smartHomeDiversify(
-        candidates = affinityCandidates,
+        candidates = becauseCandidates,
         baseScores = totalScores,
         limit = 14,
         maxPerCategory = 4,
