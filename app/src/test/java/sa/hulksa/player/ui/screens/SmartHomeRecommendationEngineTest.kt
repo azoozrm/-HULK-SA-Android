@@ -197,6 +197,48 @@ class SmartHomeRecommendationEngineTest {
         assertEquals(cinematic.id, result.featuredCandidates.first().id)
     }
 
+    @Test
+    fun suggestedAndHeroKeepMoviesVisibleWhenSeriesScoresDominate() {
+        val movies = (1..16).map { id ->
+            movie(
+                id = id,
+                name = "Movie $id",
+                category = "movie-${id % 5}",
+                genre = "Movie Genre ${id % 4}",
+                rating = "7.0",
+                added = (2_000 - id).toLong(),
+                artwork = true,
+                plot = "Movie story $id",
+            )
+        }
+        val series = (100..139).map { id ->
+            series(
+                id = id,
+                name = "Series $id",
+                category = "series-${id % 4}",
+                genre = "Series Genre ${id % 3}",
+                rating = "10.0",
+                added = (5_000 - id).toLong(),
+                artwork = true,
+                plot = "Series story $id",
+            )
+        }
+
+        val result = buildSmartHomeRecommendations(
+            movies = movies,
+            series = series,
+            live = emptyList(),
+            history = emptyList(),
+            favorites = emptySet(),
+            rotationSeed = 3,
+        )
+
+        assertTrue(result.suggested.count { it.type == ContentType.MOVIE } >= 8)
+        assertTrue(result.suggested.count { it.type == ContentType.SERIES } >= 8)
+        assertEquals(4, result.featuredCandidates.count { it.type == ContentType.MOVIE })
+        assertEquals(4, result.featuredCandidates.count { it.type == ContentType.SERIES })
+    }
+
     private fun movie(
         id: Int,
         name: String,
@@ -229,6 +271,7 @@ class SmartHomeRecommendationEngineTest {
         rating: String,
         added: Long,
         artwork: Boolean = false,
+        plot: String? = null,
     ): ContentItem = ContentItem(
         id = id,
         name = name,
@@ -239,6 +282,7 @@ class SmartHomeRecommendationEngineTest {
         year = "2026",
         containerExtension = null,
         addedAtEpochSeconds = added,
+        plot = plot,
         genre = genre,
         backdropUrl = if (artwork) "https://example.com/$id-backdrop.jpg" else null,
     )
