@@ -56,12 +56,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
-import sa.hulksa.player.R
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.HulkArtworkSurface
+import sa.hulksa.player.ui.components.HulkFallbackArtwork
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -263,21 +264,26 @@ fun LiveTvProChannelBrowser(
         artworkModifier: Modifier = Modifier,
     ) {
         var imageFailed by remember(posterUrl) { mutableStateOf(false) }
-        Box(
-            modifier = artworkModifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFFF0EEE7))
-                .border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(10.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            AsyncImage(
-                model = if (!posterUrl.isNullOrBlank() && !imageFailed) posterUrl else R.mipmap.ic_launcher_tv,
-                contentDescription = description,
-                modifier = Modifier.fillMaxSize().padding(3.dp),
-                contentScale = ContentScale.Fit,
-                onError = {
-                    if (!posterUrl.isNullOrBlank()) imageFailed = true
-                },
+        if (!posterUrl.isNullOrBlank() && !imageFailed) {
+            Box(
+                modifier = artworkModifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF0EEE7))
+                    .border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = posterUrl,
+                    contentDescription = description,
+                    modifier = Modifier.fillMaxSize().padding(3.dp),
+                    contentScale = ContentScale.Fit,
+                    onError = { imageFailed = true },
+                )
+            }
+        } else {
+            HulkFallbackArtwork(
+                modifier = artworkModifier,
+                surface = HulkArtworkSurface.SQUARE,
             )
         }
     }
@@ -489,30 +495,55 @@ fun LiveTvProChannelBrowser(
             Text(
                 "الفئات",
                 color = colors.text,
-                fontSize = if (tvLayout) 17.sp else 15.sp,
+                fontSize = if (tvLayout) 18.sp else 16.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(3.dp))
-            if (movingCategoryId != null) {
-                Text(
-                    if (tvLayout) "حرك بالاسهم ثم اضغط OK للحفظ" else "اسحب الفئة لاعلى او اسفل ثم اضغط عليها للحفظ",
-                    color = colors.goldBright,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            } else {
-                Text(
-                    if (tvLayout) "تفضيل القناة : زر OK مطول" else "تفضيل القناة : اضغط مطولا على القناة",
-                    color = colors.textMuted,
-                    fontSize = 9.sp,
-                )
-                Text(
-                    if (tvLayout) "ترتيب الفئات : زر OK مطول على الفئة لترتيبها" else "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها",
-                    color = colors.textMuted,
-                    fontSize = 9.sp,
-                )
+            Spacer(Modifier.height(6.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color.White.copy(alpha = .055f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (movingCategoryId != null) {
+                    Text(
+                        if (tvLayout) {
+                            "وضع الترتيب : حرك الفئة ↑ ↓ ثم اضغط OK للحفظ"
+                        } else {
+                            "وضع الترتيب : اسحب الفئة ↑ ↓ ثم اضغط عليها للحفظ"
+                        },
+                        color = colors.goldBright,
+                        fontSize = if (tvLayout) 11.sp else 10.sp,
+                        lineHeight = if (tvLayout) 15.sp else 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                } else {
+                    Text(
+                        if (tvLayout) {
+                            "تفضيل القناة : اضغط OK مطولا على القناة"
+                        } else {
+                            "تفضيل القناة : اضغط مطولا على القناة"
+                        },
+                        color = colors.text,
+                        fontSize = if (tvLayout) 11.sp else 10.sp,
+                        lineHeight = if (tvLayout) 15.sp else 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        if (tvLayout) {
+                            "ترتيب الفئات : اضغط OK مطولا على الفئة، ثم حرك ↑ ↓ واضغط OK للحفظ"
+                        } else {
+                            "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها ↑ ↓"
+                        },
+                        color = colors.textMuted,
+                        fontSize = if (tvLayout) 10.sp else 9.sp,
+                        lineHeight = if (tvLayout) 14.sp else 13.sp,
+                    )
+                }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(9.dp))
             LazyColumn(
                 state = categoryListState,
                 verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -527,6 +558,15 @@ fun LiveTvProChannelBrowser(
                         compact = true,
                     )
                 }
+                item("favorites") {
+                    FocusButton(
+                        text = "★ المفضلة (${favoriteIds.size})",
+                        onClick = { selectCategory(LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY) },
+                        modifier = Modifier.fillMaxWidth().focusRequester(favoritesCategoryFocus),
+                        primary = selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY && searchQuery.isBlank(),
+                        compact = true,
+                    )
+                }
                 item("continue") {
                     FocusButton(
                         text = "▶ استكمال اخر مشاهدة (${recentChannels.size})",
@@ -535,15 +575,6 @@ fun LiveTvProChannelBrowser(
                         primary = selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY && searchQuery.isBlank(),
                         compact = true,
                         enabled = recentChannels.isNotEmpty(),
-                    )
-                }
-                item("favorites") {
-                    FocusButton(
-                        text = "★ المفضلة (${favoriteIds.size})",
-                        onClick = { selectCategory(LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY) },
-                        modifier = Modifier.fillMaxWidth().focusRequester(favoritesCategoryFocus),
-                        primary = selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY && searchQuery.isBlank(),
-                        compact = true,
                     )
                 }
                 items(orderedCategories, key = { it.id }) { category ->
@@ -684,7 +715,7 @@ fun LiveTvProChannelBrowser(
                 Row(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .fillMaxHeight(if (tvLayout) .90f else .90f)
+                        .fillMaxHeight(.90f)
                         .fillMaxWidth(if (tvLayout) .82f else .94f)
                         .clip(shellShape)
                         .background(Brush.horizontalGradient(listOf(Color(0xFA080907), Color(0xF814150F))))
