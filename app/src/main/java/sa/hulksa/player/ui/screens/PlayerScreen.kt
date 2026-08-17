@@ -920,7 +920,11 @@ fun PlayerScreen(
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onReload = { pendingSeekMs = 0L; candidateIndex = 0; retryNonce += 1 },
-                    onMute = { isMuted = !isMuted; player.volume = if (isMuted) 0f else 1f },
+                    onMute = {
+                        val muted = !isMuted
+                        isMuted = muted
+                        player.volume = if (muted) 0f else 1f
+                    },
                     onAudio = {},
                     onSubtitles = {},
                     onResize = { activePanel = PlayerPanel.RESIZE },
@@ -1305,43 +1309,117 @@ private fun ModernLiveControls(
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val remoteLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .97f))))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.Transparent,
+                        Color.Black.copy(alpha = .84f),
+                        Color.Black.copy(alpha = .985f),
+                    ),
+                ),
+            )
             .navigationBarsPadding()
             .padding(
-                start = if (adaptiveUi.isTelevision) 34.dp else 24.dp,
-                end = if (adaptiveUi.isTelevision) 34.dp else 24.dp,
-                top = 12.dp,
-                bottom = if (adaptiveUi.isTelevision) 32.dp else 24.dp,
+                start = if (remoteLayout) 34.dp else 18.dp,
+                end = if (remoteLayout) 34.dp else 18.dp,
+                top = if (remoteLayout) 18.dp else 13.dp,
+                bottom = if (remoteLayout) 30.dp else 18.dp,
             ),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("● مباشر الان", color = Color(0xFFFF4E55), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(10.dp))
-            Text(quality, color = colors.textMuted, fontSize = 11.sp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFFF4E55).copy(alpha = .16f))
+                    .border(1.dp, Color(0xFFFF4E55).copy(alpha = .55f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    "● LIVE",
+                    color = Color(0xFFFF6268),
+                    fontSize = if (remoteLayout) 12.sp else 10.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Text(
+                quality,
+                color = colors.goldBright,
+                fontSize = if (remoteLayout) 12.sp else 10.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "تحكم البث المباشر",
+                color = Color.White,
+                fontSize = if (remoteLayout) 14.sp else 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
             Spacer(Modifier.weight(1f))
             Text(
-                if (adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE) {
-                    "OK: القنوات والفئات  •  يمين/يسار: ادوات المشغل  •  اعلى/اسفل: تبديل القناة"
+                if (remoteLayout) {
+                    "OK للقنوات  •  ↑ ↓ تبديل سريع  •  ← → ادوات المشغل"
                 } else {
-                    "اسحب لاعلى للقناة التالية  •  اسحب لاسفل للقناة السابقة"
+                    "اسحب ↑ للقناة التالية  •  اسحب ↓ للقناة السابقة"
                 },
                 color = colors.textMuted,
-                fontSize = 10.sp,
+                fontSize = if (remoteLayout) 10.sp else 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(Modifier.height(12.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
-            item { FocusButton("القناة التالية", onNext, compact = true) }
-            item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
+
+        Spacer(Modifier.height(if (remoteLayout) 13.dp else 10.dp))
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(if (remoteLayout) 10.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            contentPadding = PaddingValues(vertical = 2.dp),
+        ) {
+            item {
+                FocusButton(
+                    "القناة السابقة",
+                    onPrevious,
+                    primary = false,
+                    compact = !remoteLayout,
+                )
+            }
+            item {
+                FocusButton(
+                    if (isPlaying) "ايقاف مؤقت" else "تشغيل",
+                    onPlayPause,
+                    modifier = Modifier.focusRequester(primaryFocus),
+                    compact = !remoteLayout,
+                )
+            }
+            item {
+                FocusButton(
+                    "القناة التالية",
+                    onNext,
+                    primary = false,
+                    compact = !remoteLayout,
+                )
+            }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
+        }
+
+        Spacer(Modifier.height(if (remoteLayout) 9.dp else 7.dp))
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            contentPadding = PaddingValues(vertical = 2.dp),
+        ) {
             if (hasAudio) item {
                 FocusButton(
-                    if (audioLabel.isNotBlank()) "الصوت : $audioLabel" else "الصوت",
+                    if (audioLabel.isNotBlank()) "الصوت • $audioLabel" else "الصوت",
                     onAudio,
                     primary = false,
                     compact = true,
@@ -1349,13 +1427,13 @@ private fun ModernLiveControls(
             }
             if (hasSubtitles) item {
                 FocusButton(
-                    if (subtitleLabel.isNotBlank()) "الترجمة : $subtitleLabel" else "الترجمة",
+                    if (subtitleLabel.isNotBlank()) "الترجمة • $subtitleLabel" else "الترجمة",
                     onSubtitles,
                     primary = false,
                     compact = true,
                 )
             }
-            item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
+            item { FocusButton("الصورة • $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
     }
