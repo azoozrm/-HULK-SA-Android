@@ -77,6 +77,40 @@ internal fun playerProEpisodeNeighbors(
 internal fun playerProEpisodeLabel(episode: Episode): String =
     "الموسم ${episode.season} • الحلقة ${episode.episodeNumber} • ${episode.title}"
 
+internal fun playerProLiveNavigationSequence(
+    channels: List<ContentItem>,
+    currentStreamId: Int,
+    launchContext: String,
+    favoriteIds: Set<Int>,
+    recentIds: List<Int>,
+): List<ContentItem> {
+    if (channels.isEmpty()) return emptyList()
+    val byId = channels.associateBy(ContentItem::id)
+    val contextual = when (launchContext) {
+        LIVE_TV_PRO_CONTEXT_FAVORITES -> channels.filter { it.id in favoriteIds }
+        LIVE_TV_PRO_CONTEXT_RECENT -> recentIds.mapNotNull(byId::get).distinctBy(ContentItem::id)
+        LIVE_TV_PRO_CONTEXT_ALL -> channels
+        else -> channels.filter { it.categoryId == launchContext }
+    }
+    return contextual.takeIf { sequence -> sequence.any { it.id == currentStreamId } }
+        ?: liveTvProChannelSequence(channels, currentStreamId)
+}
+
+internal fun playerProQueuedRelativeChannel(
+    sequence: List<ContentItem>,
+    currentStreamId: Int,
+    pendingStreamId: Int?,
+    delta: Int,
+): ContentItem? {
+    if (sequence.isEmpty()) return null
+    val anchorStreamId = pendingStreamId
+        ?.takeIf { pendingId -> sequence.any { it.id == pendingId } }
+        ?: currentStreamId
+    val anchorIndex = sequence.indexOfFirst { it.id == anchorStreamId }.takeIf { it >= 0 } ?: 0
+    val targetIndex = (((anchorIndex + delta) % sequence.size) + sequence.size) % sequence.size
+    return sequence[targetIndex]
+}
+
 /**
  * Player Pro entry point shared by VOD/series and Live TV Pro.
  *
@@ -217,10 +251,18 @@ fun PlayerProScreen(
         liveControlsInteractionTick += 1
     }
 
+    fun liveNavigationSequence(): List<ContentItem> = playerProLiveNavigationSequence(
+        channels = liveChannels,
+        currentStreamId = request.streamId,
+        launchContext = context.liveTvProLaunchContext(),
+        favoriteIds = liveChannels.asSequence().filter(isFavorite).map(ContentItem::id).toSet(),
+        recentIds = recentChannelIds,
+    )
+
     fun queueLiveRelative(delta: Int): Boolean {
         if (!request.isLive) return false
-        val channel = liveTvProQueuedRelativeChannel(
-            channels = liveChannels,
+        val channel = playerProQueuedRelativeChannel(
+            sequence = liveNavigationSequence(),
             currentStreamId = request.streamId,
             pendingStreamId = pendingLiveChannelId,
             delta = delta,

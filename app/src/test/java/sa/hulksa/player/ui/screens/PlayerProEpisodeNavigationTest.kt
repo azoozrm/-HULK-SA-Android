@@ -3,6 +3,8 @@ package sa.hulksa.player.ui.screens
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Episode
 
 class PlayerProEpisodeNavigationTest {
@@ -51,6 +53,71 @@ class PlayerProEpisodeNavigationTest {
         )
     }
 
+    @Test
+    fun favoritesZappingWrapsInsideFavoritesAcrossUnderlyingCategories() {
+        val channels = listOf(
+            channel(1, "news"),
+            channel(2, "news"),
+            channel(3, "sports"),
+            channel(4, "sports"),
+            channel(5, "movies"),
+        )
+        val sequence = playerProLiveNavigationSequence(
+            channels = channels,
+            currentStreamId = 5,
+            launchContext = LIVE_TV_PRO_CONTEXT_FAVORITES,
+            favoriteIds = setOf(1, 3, 5),
+            recentIds = emptyList(),
+        )
+
+        assertEquals(listOf(1, 3, 5), sequence.map(ContentItem::id))
+        assertEquals(
+            1,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 5,
+                pendingStreamId = null,
+                delta = 1,
+            )?.id,
+        )
+        assertEquals(
+            5,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = null,
+                delta = -1,
+            )?.id,
+        )
+    }
+
+    @Test
+    fun explicitCategoryNavigationNeverLeaksIntoAnotherCategory() {
+        val channels = listOf(
+            channel(1, "news"),
+            channel(2, "sports"),
+            channel(3, "movies"),
+        )
+        val sequence = playerProLiveNavigationSequence(
+            channels = channels,
+            currentStreamId = 1,
+            launchContext = "news",
+            favoriteIds = emptySet(),
+            recentIds = emptyList(),
+        )
+
+        assertEquals(listOf(1), sequence.map(ContentItem::id))
+        assertEquals(
+            1,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = null,
+                delta = 1,
+            )?.id,
+        )
+    }
+
     private fun episode(
         id: Int,
         season: Int,
@@ -64,5 +131,16 @@ class PlayerProEpisodeNavigationTest {
         containerExtension = "mp4",
         posterUrl = null,
         duration = "00:45:00",
+    )
+
+    private fun channel(id: Int, categoryId: String) = ContentItem(
+        id = id,
+        name = "Channel $id",
+        categoryId = categoryId,
+        type = ContentType.LIVE,
+        posterUrl = null,
+        rating = null,
+        year = null,
+        containerExtension = "ts",
     )
 }
