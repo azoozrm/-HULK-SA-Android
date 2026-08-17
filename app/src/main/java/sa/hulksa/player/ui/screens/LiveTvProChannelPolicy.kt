@@ -31,6 +31,33 @@ internal fun liveTvProRelativeChannel(
     return sequence[targetIndex]
 }
 
+/**
+ * Channel Zapping Pro target policy.
+ *
+ * During rapid remote/gesture input the player request may still point to the channel that is
+ * currently playing. Use the pending preview target as the next anchor so repeated presses advance
+ * 1 -> 2 -> 3 instead of repeatedly resolving 1 -> 2 until playback has re-created.
+ *
+ * The navigation sequence remains anchored to the category of the channel that is actually
+ * playing. This keeps fast zapping deterministic and prevents rapid input from leaking into a
+ * different category before the selected target is committed.
+ */
+internal fun liveTvProQueuedRelativeChannel(
+    channels: List<ContentItem>,
+    currentStreamId: Int,
+    pendingStreamId: Int?,
+    delta: Int,
+): ContentItem? {
+    val sequence = liveTvProChannelSequence(channels, currentStreamId)
+    if (sequence.isEmpty()) return null
+    val anchorStreamId = pendingStreamId
+        ?.takeIf { pendingId -> sequence.any { it.id == pendingId } }
+        ?: currentStreamId
+    val anchorIndex = sequence.indexOfFirst { it.id == anchorStreamId }.takeIf { it >= 0 } ?: 0
+    val targetIndex = (((anchorIndex + delta) % sequence.size) + sequence.size) % sequence.size
+    return sequence[targetIndex]
+}
+
 internal fun liveTvProUpdateRecentChannelIds(
     existingIds: List<Int>,
     currentStreamId: Int,
