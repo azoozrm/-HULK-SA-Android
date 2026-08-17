@@ -911,11 +911,7 @@ fun PlayerScreen(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = audioLanguageLabel.ifBlank { selectedTrackLabel(audioTracks, "") },
-                    subtitleLabel = subtitleLanguageLabel.ifBlank { selectedTrackLabel(subtitleTracks, "") },
                     resizeLabel = resizeLabel(resizeModeIndex),
-                    hasAudio = hasActiveAudio,
-                    hasSubtitles = hasActiveSubtitles || subtitleTracks.isNotEmpty(),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -925,8 +921,6 @@ fun PlayerScreen(
                         isMuted = muted
                         player.volume = if (muted) 0f else 1f
                     },
-                    onAudio = {},
-                    onSubtitles = {},
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
@@ -940,10 +934,6 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = audioLanguageLabel.ifBlank { selectedTrackLabel(audioTracks, "") },
-                    subtitleLabel = subtitleLanguageLabel.ifBlank { selectedTrackLabel(subtitleTracks, "") },
-                    hasAudio = hasActiveAudio,
-                    hasSubtitles = hasActiveSubtitles || subtitleTracks.isNotEmpty(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
@@ -951,8 +941,6 @@ fun PlayerScreen(
                     onForward = { seekBy(SEEK_STEP_MS) },
                     onSeekTo = ::seekToPosition,
                     onSeekingChanged = { focused -> seekBarFocused = focused },
-                    onAudio = {},
-                    onSubtitles = {},
                     onSpeed = { activePanel = PlayerPanel.SPEED },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onQuality = { activePanel = PlayerPanel.QUALITY },
@@ -1199,10 +1187,6 @@ private fun ModernVodControls(
     bufferedPercent: Int,
     quality: String,
     speed: Float,
-    audioLabel: String,
-    subtitleLabel: String,
-    hasAudio: Boolean,
-    hasSubtitles: Boolean,
     hasMultipleQualities: Boolean,
     hasMultipleServers: Boolean,
     onPlayPause: () -> Unit,
@@ -1210,8 +1194,6 @@ private fun ModernVodControls(
     onForward: () -> Unit,
     onSeekTo: (Long) -> Unit,
     onSeekingChanged: (Boolean) -> Unit,
-    onAudio: () -> Unit,
-    onSubtitles: () -> Unit,
     onSpeed: () -> Unit,
     onResize: () -> Unit,
     onQuality: () -> Unit,
@@ -1260,22 +1242,6 @@ private fun ModernVodControls(
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            if (hasAudio) item {
-                FocusButton(
-                    if (audioLabel.isNotBlank()) "الصوت : $audioLabel" else "الصوت",
-                    onAudio,
-                    primary = false,
-                    compact = true,
-                )
-            }
-            if (hasSubtitles) item {
-                FocusButton(
-                    if (subtitleLabel.isNotBlank()) "الترجمة : $subtitleLabel" else "الترجمة",
-                    onSubtitles,
-                    primary = false,
-                    compact = true,
-                )
-            }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1290,18 +1256,12 @@ private fun ModernLiveControls(
     isPlaying: Boolean,
     isMuted: Boolean,
     quality: String,
-    audioLabel: String,
-    subtitleLabel: String,
     resizeLabel: String,
-    hasAudio: Boolean,
-    hasSubtitles: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onPlayPause: () -> Unit,
     onReload: () -> Unit,
     onMute: () -> Unit,
-    onAudio: () -> Unit,
-    onSubtitles: () -> Unit,
     onResize: () -> Unit,
     onLock: () -> Unit,
     primaryFocus: FocusRequester,
@@ -1378,62 +1338,23 @@ private fun ModernLiveControls(
         Spacer(Modifier.height(if (remoteLayout) 13.dp else 10.dp))
 
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(if (remoteLayout) 10.dp else 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (remoteLayout) 8.dp else 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             contentPadding = PaddingValues(vertical = 2.dp),
         ) {
-            item {
-                FocusButton(
-                    "القناة السابقة",
-                    onPrevious,
-                    primary = false,
-                    compact = !remoteLayout,
-                )
-            }
+            item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
+            item { FocusButton("القناة التالية", onNext, primary = false, compact = true) }
             item {
                 FocusButton(
                     if (isPlaying) "ايقاف مؤقت" else "تشغيل",
                     onPlayPause,
                     modifier = Modifier.focusRequester(primaryFocus),
-                    compact = !remoteLayout,
-                )
-            }
-            item {
-                FocusButton(
-                    "القناة التالية",
-                    onNext,
-                    primary = false,
-                    compact = !remoteLayout,
+                    compact = true,
                 )
             }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-        }
-
-        Spacer(Modifier.height(if (remoteLayout) 9.dp else 7.dp))
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(vertical = 2.dp),
-        ) {
-            if (hasAudio) item {
-                FocusButton(
-                    if (audioLabel.isNotBlank()) "الصوت • $audioLabel" else "الصوت",
-                    onAudio,
-                    primary = false,
-                    compact = true,
-                )
-            }
-            if (hasSubtitles) item {
-                FocusButton(
-                    if (subtitleLabel.isNotBlank()) "الترجمة • $subtitleLabel" else "الترجمة",
-                    onSubtitles,
-                    primary = false,
-                    compact = true,
-                )
-            }
-            item { FocusButton("الصورة • $resizeLabel", onResize, primary = false, compact = true) }
+            item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
     }
