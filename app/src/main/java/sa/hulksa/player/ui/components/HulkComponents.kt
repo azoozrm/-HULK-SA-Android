@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -94,6 +96,12 @@ private data class VerifiedMovieCardMetadata(
     val quality: String? = null,
     val durationMs: Long? = null,
 )
+
+enum class HulkArtworkSurface {
+    SQUARE,
+    POSTER,
+    WIDE,
+}
 
 private fun Context.verifiedMovieCardMetadata(item: ContentItem): VerifiedMovieCardMetadata {
     if (item.type != ContentType.MOVIE) return VerifiedMovieCardMetadata()
@@ -184,31 +192,78 @@ fun BrandLogo(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
 ) {
-    Image(
-        painter = painterResource(R.drawable.hulk_sa_logo),
-        contentDescription = "HULK SA",
-        modifier = modifier,
-        contentScale = contentScale,
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        val compactFallback = maxWidth <= 24.dp && maxHeight <= 24.dp
+        Image(
+            painter = painterResource(
+                if (compactFallback) R.drawable.ic_launcher_foreground else R.drawable.hulk_sa_logo,
+            ),
+            contentDescription = "HULK SA",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = contentScale,
+        )
+    }
+}
+
+@Composable
+fun HulkFallbackArtwork(
+    modifier: Modifier = Modifier,
+    surface: HulkArtworkSurface = HulkArtworkSurface.SQUARE,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(
+        when (surface) {
+            HulkArtworkSurface.SQUARE -> 10.dp
+            HulkArtworkSurface.POSTER -> 12.dp
+            HulkArtworkSurface.WIDE -> 14.dp
+        },
     )
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFF080906), Color(0xFF171912)),
+                ),
+            )
+            .border(1.dp, colors.gold.copy(alpha = .24f), shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (surface) {
+            HulkArtworkSurface.SQUARE -> AsyncImage(
+                model = R.mipmap.ic_launcher_tv,
+                contentDescription = "HULK SA",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+            HulkArtworkSurface.POSTER -> BrandLogo(
+                Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 34.dp),
+            )
+            HulkArtworkSurface.WIDE -> BrandLogo(
+                Modifier.fillMaxSize().padding(horizontal = 44.dp, vertical = 14.dp),
+            )
+        }
+    }
 }
 
 @Composable
 fun BrandBadge(
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(16.dp)
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                Brush.radialGradient(
-                    listOf(colors.gold.copy(alpha = .18f), Color(0xFF050604)),
-                ),
-            )
-            .border(1.dp, colors.gold.copy(alpha = .28f), RoundedCornerShape(18.dp)),
+            .clip(shape)
+            .background(Color(0xFFF0EEE7))
+            .border(1.dp, Color.White.copy(alpha = .72f), shape),
         contentAlignment = Alignment.Center,
     ) {
-        BrandLogo(Modifier.fillMaxSize().padding(5.dp))
+        Icon(
+            painter = painterResource(R.drawable.ic_launcher_foreground),
+            contentDescription = "HULK SA",
+            tint = Color(0xFF171912),
+            modifier = Modifier.fillMaxSize().padding(2.dp),
+        )
     }
 }
 
@@ -513,11 +568,11 @@ fun CompactPosterCard(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                placeholder = painterResource(R.drawable.hulk_sa_logo),
+                placeholder = painterResource(R.drawable.ic_launcher_foreground),
                 onError = { artworkFailed = true },
             )
         } else {
-            BrandLogo(Modifier.fillMaxSize().padding(22.dp))
+            HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.POSTER)
         }
         Box(
             Modifier
@@ -654,6 +709,7 @@ fun HistoryCard(
     }
     val canDismiss = !entry.isLive
     var focused by remember(entry.key) { mutableStateOf(false) }
+    var artworkFailed by remember(entry.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember(entry.key) { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
@@ -706,9 +762,6 @@ fun HistoryCard(
                         (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
                         !remoteLongPressHandled
                     ) {
-                        // Own the whole select-key gesture, but do not mutate the list while
-                        // the key is still held. Removing on KEY_UP prevents repeats or the
-                        // trailing release from activating the card that replaces this one.
                         remoteLongPressHandled = true
                     }
                     true
@@ -730,10 +783,16 @@ fun HistoryCard(
                 onLongClick = if (canDismiss) ({ dismissFromContinueWatching(false) }) else null,
             ),
     ) {
-        if (!entry.posterUrl.isNullOrBlank()) {
-            AsyncImage(entry.posterUrl, primaryTitle, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (!entry.posterUrl.isNullOrBlank() && !artworkFailed) {
+            AsyncImage(
+                model = entry.posterUrl,
+                contentDescription = primaryTitle,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                onError = { artworkFailed = true },
+            )
         } else {
-            BrandLogo(Modifier.align(Alignment.Center).size(76.dp))
+            HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.WIDE)
         }
         Box(
             Modifier
@@ -906,7 +965,6 @@ fun ChannelLogo(
     item: ContentItem,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
     var imageFailed by remember(item.posterUrl) { mutableStateOf(false) }
     Box(
         modifier = modifier
@@ -921,42 +979,12 @@ fun ChannelLogo(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize().padding(4.dp),
                 contentScale = ContentScale.Fit,
-                placeholder = painterResource(R.drawable.hulk_sa_logo),
+                placeholder = painterResource(R.drawable.ic_launcher_foreground),
                 onError = { imageFailed = true },
             )
         } else {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF171912), Color(0xFF262315)),
-                        ),
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = channelMonogram(item.name),
-                    color = colors.goldBright,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                )
-            }
+            HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.SQUARE)
         }
-    }
-}
-
-private fun channelMonogram(name: String): String {
-    val words = name
-        .replace(Regex("[^\\p{L}\\p{N} ]"), " ")
-        .trim()
-        .split(Regex("\\s+"))
-        .filter(String::isNotBlank)
-    return when {
-        words.size >= 2 -> words.take(2).joinToString("") { it.take(1) }.uppercase()
-        words.isNotEmpty() -> words.first().take(2).uppercase()
-        else -> "TV"
     }
 }
 

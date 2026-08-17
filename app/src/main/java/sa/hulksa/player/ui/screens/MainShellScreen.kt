@@ -1461,7 +1461,7 @@ private fun LiveCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 12.dp, mobileVertical = 11.dp),
+            .liveCatalogEdgeToEdge(isTv),
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
@@ -1558,11 +1558,19 @@ private fun LiveStage(
                 Box(Modifier.align(Alignment.TopStart).padding(17.dp).clip(CircleShape).background(Color(0xFFD3262E)).padding(horizontal = 10.dp, vertical = 5.dp)) {
                     Text("LIVE", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("اضغط تشغيل للانتقال الى ملء الشاشة", color = colors.textMuted, fontSize = 10.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
             }
         }
         if (item != null) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Text(
+                    "اضغط تشغيل القناة لعرضها بملء الشاشة",
+                    color = colors.textMuted,
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(3.dp))
                 Text("على الهواء الان", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(item.name, color = colors.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(12.dp))
@@ -3087,18 +3095,27 @@ private fun ReorderableLiveCategoryBar(
             )
         }
         items(ordered, key = Category::id) { category ->
-            LiveCategoryChip(
-                category = category,
-                representative = artworkByCategory[category.id],
-                selected = selectedId == category.id,
-                moving = moving == category.id,
-                onClick = {
-                    if (moving == category.id) moving = null else onSelect(category.id)
-                },
-                onLongClick = { moving = category.id },
-                onMoveLeft = { move(category.id, 1) },
-                onMoveRight = { move(category.id, -1) },
-            )
+            if (category.id == LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
+                FocusButton(
+                    "▶ استكمال اخر مشاهدة",
+                    { onSelect(category.id) },
+                    primary = selectedId == category.id,
+                    compact = true,
+                )
+            } else {
+                LiveCategoryChip(
+                    category = category,
+                    representative = artworkByCategory[category.id],
+                    selected = selectedId == category.id,
+                    moving = moving == category.id,
+                    onClick = {
+                        if (moving == category.id) moving = null else onSelect(category.id)
+                    },
+                    onLongClick = { moving = category.id },
+                    onMoveLeft = { move(category.id, 1) },
+                    onMoveRight = { move(category.id, -1) },
+                )
+            }
         }
     }
 }
@@ -3202,7 +3219,16 @@ private fun LiveCategoryChip(
         if (representative != null) {
             ChannelLogo(representative, Modifier.size(28.dp))
         } else {
-            BrandBadge(Modifier.size(28.dp))
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF10110D))
+                    .border(1.dp, colors.line.copy(alpha = .35f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                BrandLogo(Modifier.fillMaxSize().padding(4.dp))
+            }
         }
         Text(
             text = if (moving) "↔ ${category.name}" else category.name,
