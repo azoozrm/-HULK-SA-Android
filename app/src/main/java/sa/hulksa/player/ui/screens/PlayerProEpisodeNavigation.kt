@@ -2,8 +2,18 @@ package sa.hulksa.player.ui.screens
 
 import android.content.Context
 import android.view.KeyEvent as AndroidKeyEvent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -13,20 +23,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.ui.components.ChannelLogo
+import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private const val LIVE_TV_PRO_HISTORY_PREFS = "live_player_history"
 private const val LIVE_TV_PRO_HISTORY_IDS = "ids"
 private const val ANDROID_KEYCODE_LAST_CHANNEL = 229
 private const val LIVE_TV_PRO_CONTROLS_HINT_TIMEOUT_MS = 5_200L
+private const val LIVE_TV_PRO_ZAP_COMMIT_DELAY_MS = 220L
 
 internal data class PlayerProEpisodeNeighbors(
     val previous: Episode?,
@@ -56,8 +75,8 @@ internal fun playerProEpisodeLabel(episode: Episode): String =
  * Player Pro entry point shared by VOD/series and Live TV Pro.
  *
  * Series continuity remains isolated here. For Live, this layer owns recent history, hardware
- * Channel +/- and Last Channel actions, plus the v1.6 TV browser launched by OK while the player
- * controls are hidden. PlayerScreen remains the qualified playback/control core.
+ * Channel +/- and Last Channel actions, the v1.6 TV browser, and Channel Zapping Pro coalescing.
+ * PlayerScreen remains the qualified playback/control core.
  */
 @Composable
 fun PlayerProScreen(
@@ -89,6 +108,8 @@ fun PlayerProScreen(
     var liveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
     var liveControlsLikelyVisible by remember(request.historyKey) { mutableStateOf(false) }
     var liveControlsInteractionTick by remember(request.historyKey) { mutableIntStateOf(0) }
+    var pendingLiveChannelId by remember(request.streamId, liveCatalog) { mutableStateOf<Int?>(null) }
+    var liveZapInteractionTick by remember(request.streamId) { mutableIntStateOf(0) }
 
     LaunchedEffect(liveControlsLikelyVisible, liveControlsInteractionTick) {
         if (liveControlsLikelyVisible) {
@@ -123,24 +144,95 @@ fun PlayerProScreen(
             )
         }
     }
+    val pendingLiveChannel = remember(liveCatalog, pendingLiveChannelId) {
+        val pendingId = pendingLiveChannelId
+        if (pendingId == null) null else liveChannels.firstOrNull { it.id == pendingId }
+    }
+
+    LaunchedEffect(
+        request.isLive,
+        request.streamId,
+        pendingLiveChannelId,
+        liveZapInteractionTick,
+        liveCatalog,
+    ) {
+        if (!request.isLive) {
+            pendingLiveChannelId = null
+            return@LaunchedEffect
+        }
+        val targetId = pendingLiveChannelId ?: return@LaunchedEffect
+        val interaction = liveZapInteractionTick
+        delay(LIVE_TV_PRO_ZAP_COMMIT_DELAY_MS)
+        if (pendingLiveChannelId != targetId || liveZapInteractionTick != interaction) {
+            return@LaunchedEffect
+        }
+        val target = liveChannels.firstOrNull { it.id == targetId }
+        pendingLiveChannelId = null
+        if (target != null && target.id != request.streamId) {
+            onSelectLiveChannel(target)
+        }
+    }
+
+    fun cancelPendingLiveZap() {
+        pendingLiveChannelId = null
+        liveZapInteractionTick += 1
+    }
 
     fun markLiveControlsInteraction() {
+        cancelPendingLiveZap()
         liveControlsLikelyVisible = true
         liveControlsInteractionTick += 1
     }
 
-    fun switchLiveRelative(delta: Int): Boolean {
+    fun queueLiveRelative(delta: Int): Boolean {
         if (!request.isLive) return false
-        val channel = liveTvProRelativeChannel(
+        val channel = liveTvProQueuedRelativeChannel(
             channels = liveChannels,
             currentStreamId = request.streamId,
+            pendingStreamId = pendingLiveChannelId,
             delta = delta,
         ) ?: return false
-        if (channel.id == request.streamId) return false
+        if (channel.id == request.streamId && pendingLiveChannelId == null) return false
         liveBrowserVisible = false
         liveControlsLikelyVisible = false
-        onSelectLiveChannel(channel)
+        pendingLiveChannelId = channel.id
+        liveZapInteractionTick += 1
         return true
+    }
+
+    fun queuePlayerRequestedLiveChannel(channel: ContentItem) {
+        if (!request.isLive) {
+            onSelectLiveChannel(channel)
+            return
+        }
+        if (channel.id == request.streamId && pendingLiveChannelId == null) return
+
+        val sequence = liveTvProChannelSequence(
+            channels = liveChannels,
+            currentStreamId = request.streamId,
+        )
+        val currentIndex = sequence.indexOfFirst { it.id == request.streamId }
+        val requestedIndex = sequence.indexOfFirst { it.id == channel.id }
+        val relativeDelta = if (currentIndex >= 0 && requestedIndex >= 0 && sequence.size > 1) {
+            val nextIndex = (currentIndex + 1) % sequence.size
+            val previousIndex = (currentIndex - 1 + sequence.size) % sequence.size
+            when (requestedIndex) {
+                nextIndex -> 1
+                previousIndex -> -1
+                else -> null
+            }
+        } else {
+            null
+        }
+
+        if (relativeDelta != null) {
+            queueLiveRelative(relativeDelta)
+        } else {
+            cancelPendingLiveZap()
+            liveBrowserVisible = false
+            liveControlsLikelyVisible = false
+            onSelectLiveChannel(channel)
+        }
     }
 
     Box(
@@ -158,18 +250,19 @@ fun PlayerProScreen(
                         AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
                         -> {
                             liveControlsLikelyVisible = false
-                            return@onPreviewKeyEvent switchLiveRelative(1)
+                            return@onPreviewKeyEvent queueLiveRelative(1)
                         }
 
                         AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
                         AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
                         -> {
                             liveControlsLikelyVisible = false
-                            return@onPreviewKeyEvent switchLiveRelative(-1)
+                            return@onPreviewKeyEvent queueLiveRelative(-1)
                         }
 
                         ANDROID_KEYCODE_LAST_CHANNEL -> {
                             val channel = lastChannel ?: return@onPreviewKeyEvent false
+                            cancelPendingLiveZap()
                             liveControlsLikelyVisible = false
                             onSelectLiveChannel(channel)
                             return@onPreviewKeyEvent true
@@ -180,6 +273,7 @@ fun PlayerProScreen(
                         AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
                         -> {
                             if (!liveControlsLikelyVisible) {
+                                cancelPendingLiveZap()
                                 liveBrowserVisible = true
                                 return@onPreviewKeyEvent true
                             }
@@ -205,6 +299,7 @@ fun PlayerProScreen(
                         AndroidKeyEvent.KEYCODE_BACK,
                         AndroidKeyEvent.KEYCODE_ESCAPE,
                         -> {
+                            cancelPendingLiveZap()
                             liveControlsLikelyVisible = false
                             return@onPreviewKeyEvent false
                         }
@@ -243,13 +338,22 @@ fun PlayerProScreen(
             request = request,
             liveCatalog = liveCatalog,
             isFavorite = isFavorite,
-            onSelectLiveChannel = onSelectLiveChannel,
+            onSelectLiveChannel = ::queuePlayerRequestedLiveChannel,
             onToggleFavorite = onToggleFavorite,
             onBack = onBack,
             onProgress = onProgress,
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
             onPlayNextEpisode = onPlayNextEpisode,
         )
+
+        if (request.isLive && pendingLiveChannel != null && !liveBrowserVisible) {
+            LiveZapIndicator(
+                channel = pendingLiveChannel,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 82.dp),
+            )
+        }
 
         if (request.isLive && liveBrowserVisible) {
             LiveTvProChannelBrowser(
@@ -258,12 +362,53 @@ fun PlayerProScreen(
                 isFavorite = isFavorite,
                 onToggleFavorite = onToggleFavorite,
                 onSelectChannel = { channel ->
+                    cancelPendingLiveZap()
                     liveBrowserVisible = false
                     liveControlsLikelyVisible = false
                     onSelectLiveChannel(channel)
                 },
-                onClose = { liveBrowserVisible = false },
+                onClose = {
+                    cancelPendingLiveZap()
+                    liveBrowserVisible = false
+                },
                 modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveZapIndicator(
+    channel: ContentItem,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = modifier
+            .widthIn(max = 440.dp)
+            .clip(shape)
+            .background(Color.Black.copy(alpha = .86f))
+            .border(1.dp, colors.gold.copy(alpha = .60f), shape)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ChannelLogo(channel, Modifier.size(52.dp))
+        Column {
+            Text(
+                text = "تبديل القناة",
+                color = colors.goldBright,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = channel.name,
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
