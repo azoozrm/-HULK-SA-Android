@@ -91,6 +91,8 @@ fun LiveTvProChannelBrowser(
     val safeInsets = tvPageSafeInsets(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     val safeHorizontal = if (tvLayout) maxOf(24f, safeInsets.horizontalDp).dp else 10.dp
     val safeVertical = if (tvLayout) maxOf(16f, safeInsets.verticalDp).dp else 10.dp
+    val hintFontSize = if (tvLayout) 10.sp else 9.sp
+    val hintLineHeight = if (tvLayout) 14.sp else 13.sp
     val current = remember(catalog, currentStreamId) {
         catalog?.items?.firstOrNull { it.id == currentStreamId }
     }
@@ -498,56 +500,12 @@ fun LiveTvProChannelBrowser(
                 fontSize = if (tvLayout) 18.sp else 16.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(6.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color.White.copy(alpha = .055f))
-                    .padding(horizontal = 9.dp, vertical = 7.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                if (movingCategoryId != null) {
-                    Text(
-                        if (tvLayout) {
-                            "وضع الترتيب : حرك الفئة ↑ ↓ ثم اضغط OK للحفظ"
-                        } else {
-                            "وضع الترتيب : اسحب الفئة ↑ ↓ ثم اضغط عليها للحفظ"
-                        },
-                        color = colors.goldBright,
-                        fontSize = if (tvLayout) 11.sp else 10.sp,
-                        lineHeight = if (tvLayout) 15.sp else 14.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                } else {
-                    Text(
-                        if (tvLayout) {
-                            "تفضيل القناة : اضغط OK مطولا على القناة"
-                        } else {
-                            "تفضيل القناة : اضغط مطولا على القناة"
-                        },
-                        color = colors.text,
-                        fontSize = if (tvLayout) 11.sp else 10.sp,
-                        lineHeight = if (tvLayout) 15.sp else 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        if (tvLayout) {
-                            "ترتيب الفئات : اضغط OK مطولا على الفئة، ثم حرك ↑ ↓ واضغط OK للحفظ"
-                        } else {
-                            "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها ↑ ↓"
-                        },
-                        color = colors.textMuted,
-                        fontSize = if (tvLayout) 10.sp else 9.sp,
-                        lineHeight = if (tvLayout) 14.sp else 13.sp,
-                    )
-                }
-            }
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(7.dp))
             LazyColumn(
                 state = categoryListState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
-                contentPadding = PaddingValues(bottom = 12.dp),
+                contentPadding = PaddingValues(bottom = 8.dp),
             ) {
                 item("all") {
                     FocusButton(
@@ -580,6 +538,34 @@ fun LiveTvProChannelBrowser(
                 items(orderedCategories, key = { it.id }) { category ->
                     ReorderableCategoryRow(category, categoryFocusRequesters[category.id])
                 }
+            }
+            Spacer(Modifier.height(7.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color.White.copy(alpha = .055f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    text = if (movingCategoryId != null) {
+                        if (tvLayout) {
+                            "وضع الترتيب : حرك الفئة ↑ ↓ ثم اضغط OK للحفظ"
+                        } else {
+                            "وضع الترتيب : اسحب الفئة ↑ ↓ ثم اضغط عليها للحفظ"
+                        }
+                    } else {
+                        if (tvLayout) {
+                            "ترتيب الفئات : اضغط OK مطولا على الفئة، ثم حرك ↑ ↓ واضغط OK للحفظ"
+                        } else {
+                            "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها ↑ ↓"
+                        }
+                    },
+                    color = if (movingCategoryId != null) colors.goldBright else colors.textMuted,
+                    fontSize = hintFontSize,
+                    lineHeight = hintLineHeight,
+                    fontWeight = if (movingCategoryId != null) FontWeight.Bold else FontWeight.Medium,
+                )
             }
         }
     }
@@ -618,7 +604,27 @@ fun LiveTvProChannelBrowser(
                 FocusButton("اغلاق", onClose, primary = false, compact = true)
             }
 
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(7.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color.White.copy(alpha = .055f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    text = if (tvLayout) {
+                        "تفضيل القناة : اضغط OK مطولا على القناة"
+                    } else {
+                        "تفضيل القناة : اضغط مطولا على القناة"
+                    },
+                    color = colors.textMuted,
+                    fontSize = hintFontSize,
+                    lineHeight = hintLineHeight,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             HulkTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },

@@ -1558,11 +1558,19 @@ private fun LiveStage(
                 Box(Modifier.align(Alignment.TopStart).padding(17.dp).clip(CircleShape).background(Color(0xFFD3262E)).padding(horizontal = 10.dp, vertical = 5.dp)) {
                     Text("LIVE", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("اضغط تشغيل للانتقال الى ملء الشاشة", color = colors.textMuted, fontSize = 10.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
             }
         }
         if (item != null) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Text(
+                    "اضغط تشغيل القناة لعرضها بملء الشاشة",
+                    color = colors.textMuted,
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(3.dp))
                 Text("على الهواء الان", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(item.name, color = colors.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(12.dp))
