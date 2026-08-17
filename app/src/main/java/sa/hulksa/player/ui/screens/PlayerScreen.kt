@@ -922,7 +922,6 @@ fun PlayerScreen(
                         player.volume = if (muted) 0f else 1f
                     },
                     onResize = { activePanel = PlayerPanel.RESIZE },
-                    onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -1263,7 +1262,6 @@ private fun ModernLiveControls(
     onReload: () -> Unit,
     onMute: () -> Unit,
     onResize: () -> Unit,
-    onLock: () -> Unit,
     primaryFocus: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
@@ -1343,7 +1341,6 @@ private fun ModernLiveControls(
             contentPadding = PaddingValues(vertical = 2.dp),
         ) {
             item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
-            item { FocusButton("القناة التالية", onNext, primary = false, compact = true) }
             item {
                 FocusButton(
                     if (isPlaying) "ايقاف مؤقت" else "تشغيل",
@@ -1352,10 +1349,10 @@ private fun ModernLiveControls(
                     compact = true,
                 )
             }
+            item { FocusButton("القناة التالية", onNext, primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
-            item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
     }
 }
@@ -1724,9 +1721,27 @@ private fun SimpleOptionsPanel(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val optionFocus = remember { FocusRequester() }
+    val initialIndex = options.indexOfFirst { it.first == selectedLabel }.takeIf { it >= 0 } ?: 0
+
+    LaunchedEffect(selectedLabel, options.size) {
+        withFrameNanos { }
+        runCatching { optionFocus.requestFocus() }
+    }
+
     PlayerSidePanel(title, onClose, modifier) {
-        options.forEach { (label, action) ->
-            FocusButton(label, action, primary = label == selectedLabel, compact = true, modifier = Modifier.fillMaxWidth())
+        options.forEachIndexed { index, (label, action) ->
+            FocusButton(
+                label,
+                action,
+                primary = label == selectedLabel,
+                compact = true,
+                modifier = if (index == initialIndex) {
+                    Modifier.fillMaxWidth().focusRequester(optionFocus)
+                } else {
+                    Modifier.fillMaxWidth()
+                },
+            )
             Spacer(Modifier.height(7.dp))
         }
     }
