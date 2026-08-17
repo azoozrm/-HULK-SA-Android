@@ -1,28 +1,22 @@
 package sa.hulksa.player.ui.screens
 
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 /**
- * Live catalog only: keep the page visually edge-to-edge while protecting phone content from
- * status bars and display cutouts. TV already runs immersive, so no artificial outer gutter is
- * added there.
+ * Match the proven main/home shell spacing for the Live catalog.
+ * TV keeps a small internal content gutter so controls never touch the rail, bezel, or bottom edge.
+ * Phones stay visually edge-to-edge and only reserve the top status-bar/notch area.
  */
 @Composable
 internal fun Modifier.liveCatalogEdgeToEdge(isTv: Boolean): Modifier =
     then(
         if (isTv) {
-            Modifier
+            Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
         } else {
-            Modifier.windowInsetsPadding(
-                WindowInsets.safeDrawing.only(
-                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-                ),
-            )
+            Modifier.statusBarsPadding()
         },
     )
