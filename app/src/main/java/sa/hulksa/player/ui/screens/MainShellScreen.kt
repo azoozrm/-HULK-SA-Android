@@ -3087,18 +3087,27 @@ private fun ReorderableLiveCategoryBar(
             )
         }
         items(ordered, key = Category::id) { category ->
-            LiveCategoryChip(
-                category = category,
-                representative = artworkByCategory[category.id],
-                selected = selectedId == category.id,
-                moving = moving == category.id,
-                onClick = {
-                    if (moving == category.id) moving = null else onSelect(category.id)
-                },
-                onLongClick = { moving = category.id },
-                onMoveLeft = { move(category.id, 1) },
-                onMoveRight = { move(category.id, -1) },
-            )
+            if (category.id == LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
+                FocusButton(
+                    "▶ استكمال اخر مشاهدة",
+                    { onSelect(category.id) },
+                    primary = selectedId == category.id,
+                    compact = true,
+                )
+            } else {
+                LiveCategoryChip(
+                    category = category,
+                    representative = artworkByCategory[category.id],
+                    selected = selectedId == category.id,
+                    moving = moving == category.id,
+                    onClick = {
+                        if (moving == category.id) moving = null else onSelect(category.id)
+                    },
+                    onLongClick = { moving = category.id },
+                    onMoveLeft = { move(category.id, 1) },
+                    onMoveRight = { move(category.id, -1) },
+                )
+            }
         }
     }
 }
@@ -3202,7 +3211,16 @@ private fun LiveCategoryChip(
         if (representative != null) {
             ChannelLogo(representative, Modifier.size(28.dp))
         } else {
-            BrandBadge(Modifier.size(28.dp))
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF10110D))
+                    .border(1.dp, colors.line.copy(alpha = .35f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                BrandLogo(Modifier.fillMaxSize().padding(4.dp))
+            }
         }
         Text(
             text = if (moving) "↔ ${category.name}" else category.name,
