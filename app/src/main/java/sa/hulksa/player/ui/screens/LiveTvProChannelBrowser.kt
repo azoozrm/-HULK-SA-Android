@@ -6,7 +6,9 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -65,9 +69,8 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 /**
  * v1.6 Live TV Pro browser shown over playback.
  *
- * Restores the launch filter (Favorites / Recent / All / exact category), gives every channel an
- * explicit LEFT target back to the currently selected category, and uses a denser opaque TV shell
- * so the underlying ticker/video no longer competes visually with the browser content.
+ * Keeps the launch context, explicit channel-to-category focus return and a safe responsive shell
+ * for both TV/remote and touch layouts.
  */
 @Composable
 fun LiveTvProChannelBrowser(
@@ -83,6 +86,10 @@ fun LiveTvProChannelBrowser(
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
     val tvLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+    val stackedMobile = !tvLayout && adaptiveUi.screenWidthDp < 600
+    val safeInsets = tvPageSafeInsets(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    val safeHorizontal = if (tvLayout) maxOf(24f, safeInsets.horizontalDp).dp else 10.dp
+    val safeVertical = if (tvLayout) maxOf(16f, safeInsets.verticalDp).dp else 10.dp
     val current = remember(catalog, currentStreamId) {
         catalog?.items?.firstOrNull { it.id == currentStreamId }
     }
@@ -186,7 +193,7 @@ fun LiveTvProChannelBrowser(
     }
     val selectedCategoryTitle = when {
         normalizedQuery.isNotBlank() -> "نتائج البحث"
-        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "متابعة المشاهدة"
+        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "استكمال اخر مشاهدة"
         selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> "القنوات المفضلة"
         selectedCategory == null -> "كل القنوات"
         else -> orderedCategories.firstOrNull { it.id == selectedCategory }?.name ?: "كل القنوات"
@@ -243,6 +250,7 @@ fun LiveTvProChannelBrowser(
         var focused by remember(category.id) { mutableStateOf(false) }
         var selectPressed by remember(category.id) { mutableStateOf(false) }
         var longPressHandled by remember(category.id) { mutableStateOf(false) }
+        var dragAccumulator by remember(category.id) { mutableFloatStateOf(0f) }
         val moving = movingCategoryId == category.id
         val shape = RoundedCornerShape(11.dp)
 
@@ -306,11 +314,30 @@ fun LiveTvProChannelBrowser(
                         else -> false
                     }
                 }
-                .clickable(
+                .pointerInput(category.id, moving, tvLayout) {
+                    if (!tvLayout && moving) {
+                        detectVerticalDragGestures(
+                            onDragStart = { dragAccumulator = 0f },
+                            onDragCancel = { dragAccumulator = 0f },
+                            onDragEnd = {
+                                when {
+                                    dragAccumulator >= 48f -> moveCategory(category.id, 1)
+                                    dragAccumulator <= -48f -> moveCategory(category.id, -1)
+                                }
+                                dragAccumulator = 0f
+                            },
+                        ) { change, dragAmount ->
+                            change.consume()
+                            dragAccumulator += dragAmount
+                        }
+                    }
+                }
+                .combinedClickable(
                     role = Role.Button,
                     onClick = {
                         if (moving) movingCategoryId = null else selectCategory(category.id)
                     },
+                    onLongClick = { movingCategoryId = category.id },
                 )
                 .focusable()
                 .padding(horizontal = 9.dp, vertical = 8.dp),
@@ -332,31 +359,41 @@ fun LiveTvProChannelBrowser(
 
     @Composable
     fun CategoryPane(paneModifier: Modifier) {
-        val paneShape = RoundedCornerShape(if (tvLayout) 16.dp else 18.dp)
+        val paneShape = RoundedCornerShape(if (tvLayout) 16.dp else 15.dp)
         Column(
             modifier = paneModifier
                 .clip(paneShape)
-                .background(if (tvLayout) Color(0xED0B0C09) else Color(0xF20D0E0B))
-                .border(1.dp, Color.White.copy(alpha = .11f), paneShape)
-                .padding(if (tvLayout) 11.dp else 10.dp),
+                .background(if (tvLayout) Color(0xF20B0C09) else Color(0xF60D0E0B))
+                .border(1.dp, Color.White.copy(alpha = .12f), paneShape)
+                .padding(if (tvLayout) 11.dp else 9.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "الفئات",
-                        color = colors.text,
-                        fontSize = if (tvLayout) 17.sp else 15.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        if (movingCategoryId != null) "حرك ↑ ↓ ثم OK للحفظ" else "${orderedCategories.size} فئة",
-                        color = if (movingCategoryId != null) colors.goldBright else colors.textMuted,
-                        fontSize = 9.sp,
-                        fontWeight = if (movingCategoryId != null) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
+            Text(
+                "الفئات",
+                color = colors.text,
+                fontSize = if (tvLayout) 17.sp else 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(3.dp))
+            if (movingCategoryId != null) {
+                Text(
+                    if (tvLayout) "حرك بالاسهم ثم اضغط OK للحفظ" else "اسحب الفئة لاعلى او اسفل ثم اضغط عليها للحفظ",
+                    color = colors.goldBright,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            } else {
+                Text(
+                    if (tvLayout) "تفضيل القناة: زر OK مطول" else "تفضيل القناة: اضغط مطولا على القناة",
+                    color = colors.textMuted,
+                    fontSize = 9.sp,
+                )
+                Text(
+                    if (tvLayout) "ترتيب الفئات: زر OK مطول على الفئة لترتيبها" else "ترتيب الفئات: اضغط مطولا على الفئة ثم اسحبها",
+                    color = colors.textMuted,
+                    fontSize = 9.sp,
+                )
             }
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(8.dp))
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 contentPadding = PaddingValues(bottom = 12.dp),
@@ -372,7 +409,7 @@ fun LiveTvProChannelBrowser(
                 }
                 item("continue") {
                     FocusButton(
-                        text = "▶ متابعة المشاهدة (${recentChannels.size})",
+                        text = "▶ استكمال اخر مشاهدة (${recentChannels.size})",
                         onClick = { selectCategory(LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY) },
                         modifier = Modifier.fillMaxWidth().focusRequester(recentCategoryFocus),
                         primary = selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY && searchQuery.isBlank(),
@@ -398,20 +435,20 @@ fun LiveTvProChannelBrowser(
 
     @Composable
     fun ChannelPane(paneModifier: Modifier) {
-        val paneShape = RoundedCornerShape(if (tvLayout) 16.dp else 18.dp)
+        val paneShape = RoundedCornerShape(if (tvLayout) 16.dp else 15.dp)
         Column(
             modifier = paneModifier
                 .clip(paneShape)
-                .background(if (tvLayout) Color(0xE711120E) else Color(0xF212130F))
-                .border(1.dp, Color.White.copy(alpha = .10f), paneShape)
-                .padding(if (tvLayout) 13.dp else 12.dp),
+                .background(if (tvLayout) Color(0xF011120E) else Color(0xF612130F))
+                .border(1.dp, Color.White.copy(alpha = .11f), paneShape)
+                .padding(if (tvLayout) 13.dp else 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         selectedCategoryTitle,
                         color = colors.text,
-                        fontSize = if (tvLayout) 20.sp else 18.sp,
+                        fontSize = if (tvLayout) 20.sp else 17.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -422,7 +459,7 @@ fun LiveTvProChannelBrowser(
                             current?.let { append("  •  تشاهد الان: ${it.name}") }
                         },
                         color = if (current != null) colors.goldBright else colors.textMuted,
-                        fontSize = 10.sp,
+                        fontSize = if (tvLayout) 10.sp else 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -430,29 +467,29 @@ fun LiveTvProChannelBrowser(
                 FocusButton("اغلاق", onClose, primary = false, compact = true)
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(9.dp))
             HulkTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 label = "بحث سريع عن قناة",
                 modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(9.dp))
 
             when {
                 catalog == null -> LoadingRing(
                     label = "جاري تجهيز القنوات…",
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp),
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 70.dp),
                 )
                 visible.isEmpty() -> Text(
                     when {
                         normalizedQuery.isNotBlank() -> "لا توجد قناة مطابقة للبحث"
-                        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "لا توجد قنوات في متابعة المشاهدة"
+                        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "لا توجد قنوات في استكمال اخر مشاهدة"
                         selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> "لا توجد قنوات مفضلة"
                         else -> "لا توجد قنوات في هذه الفئة"
                     },
                     color = colors.textMuted,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp),
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 70.dp),
                 )
                 else -> LazyColumn(
                     state = listState,
@@ -493,29 +530,57 @@ fun LiveTvProChannelBrowser(
         }
     }
 
-    val shellShape = RoundedCornerShape(if (tvLayout) 22.dp else 20.dp)
+    val shellShape = RoundedCornerShape(if (tvLayout) 22.dp else 18.dp)
     Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = if (tvLayout) .34f else .72f))
-            .then(closeOnBackModifier),
-    )
-    Row(
         modifier = modifier
-            .fillMaxHeight(if (tvLayout) .92f else .86f)
-            .fillMaxWidth(if (tvLayout) .78f else .92f)
-            .then(closeOnBackModifier)
-            .clip(shellShape)
-            .background(
-                Brush.horizontalGradient(
-                    listOf(Color(0xF5080907), Color(0xF014150F)),
-                ),
-            )
-            .border(1.dp, colors.gold.copy(alpha = .30f), shellShape)
-            .padding(if (tvLayout) 14.dp else 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 13.dp else 10.dp),
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = if (tvLayout) .38f else .72f))
+            .then(closeOnBackModifier),
     ) {
-        ChannelPane(Modifier.weight(1f).fillMaxHeight())
-        CategoryPane(Modifier.width(if (tvLayout) 246.dp else 210.dp).fillMaxHeight())
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = safeHorizontal, vertical = safeVertical),
+        ) {
+            if (stackedMobile) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .fillMaxHeight(.96f)
+                        .clip(shellShape)
+                        .background(Brush.verticalGradient(listOf(Color(0xFA080907), Color(0xF814150F))))
+                        .border(1.dp, colors.gold.copy(alpha = .30f), shellShape)
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CategoryPane(
+                        Modifier
+                            .fillMaxWidth()
+                            .height((adaptiveUi.screenHeightDp * .31f).coerceIn(190f, 255f).dp),
+                    )
+                    ChannelPane(Modifier.fillMaxWidth().weight(1f))
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxHeight(if (tvLayout) .90f else .90f)
+                        .fillMaxWidth(if (tvLayout) .82f else .94f)
+                        .clip(shellShape)
+                        .background(Brush.horizontalGradient(listOf(Color(0xFA080907), Color(0xF814150F))))
+                        .border(1.dp, colors.gold.copy(alpha = .30f), shellShape)
+                        .padding(if (tvLayout) 14.dp else 11.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 13.dp else 10.dp),
+                ) {
+                    ChannelPane(Modifier.weight(1f).fillMaxHeight())
+                    CategoryPane(
+                        Modifier
+                            .width(if (tvLayout) 246.dp else 210.dp)
+                            .fillMaxHeight(),
+                    )
+                }
+            }
+        }
     }
 }
