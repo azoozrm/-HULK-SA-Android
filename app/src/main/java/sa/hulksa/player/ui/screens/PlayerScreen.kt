@@ -116,7 +116,7 @@ import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
-private const val CONTROLS_TIMEOUT_MS = 5_500L
+private const val CONTROLS_TIMEOUT_MS = 5_000L
 private const val PLAYER_FAVORITES_CATEGORY = "__player_favorites__"
 private const val PLAYER_CONTINUE_CATEGORY = "__player_continue__"
 private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
@@ -236,6 +236,7 @@ fun PlayerScreen(
     var unlockVisible by remember(request) { mutableStateOf(false) }
     var seekFeedback by remember(request) { mutableStateOf<String?>(null) }
     var seekBarFocused by remember(request) { mutableStateOf(false) }
+    var focusTimelineOnReveal by remember(request) { mutableStateOf(false) }
     var resumePromptVisible by remember(request) {
         mutableStateOf(!request.isLive && request.resumePositionMs >= RESUME_PROMPT_THRESHOLD_MS)
     }
@@ -243,6 +244,10 @@ fun PlayerScreen(
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var videoTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
+    var hasActiveAudio by remember(request) { mutableStateOf(false) }
+    var hasActiveSubtitles by remember(request) { mutableStateOf(false) }
+    var audioLanguageLabel by remember(request) { mutableStateOf("") }
+    var subtitleLanguageLabel by remember(request) { mutableStateOf("") }
     var subtitleSizeIndex by remember(request) { mutableIntStateOf(1) }
     var subtitleRaised by remember(request) { mutableStateOf(false) }
 
@@ -255,6 +260,7 @@ fun PlayerScreen(
     }
     val playerFocus = remember { FocusRequester() }
     val primaryFocus = remember { FocusRequester() }
+    val seekBarFocus = remember { FocusRequester() }
     val resumeFocus = remember { FocusRequester() }
     val unlockFocus = remember { FocusRequester() }
     val nextEpisodePlayFocus = remember { FocusRequester() }
@@ -295,6 +301,7 @@ fun PlayerScreen(
     }
 
     fun revealControls() {
+        focusTimelineOnReveal = false
         controlsVisible = true
         runCatching { primaryFocus.requestFocus() }
     }
@@ -305,6 +312,7 @@ fun PlayerScreen(
         val target = (base + deltaMs).coerceIn(0L, durationMs)
         manualSeekTargetMs = target
         currentPositionMs = target
+        if (tvRemoteInput) player.seekTo(target)
         seekFeedback = if (deltaMs > 0) "+10 ث" else "-10 ث"
         controlsVisible = true
     }
@@ -367,6 +375,7 @@ fun PlayerScreen(
             }
             controlsVisible -> {
                 controlsVisible = false
+                focusTimelineOnReveal = false
                 activePanel = null
                 browserVisible = false
             }
@@ -374,8 +383,6 @@ fun PlayerScreen(
         }
     }
 
-    // Give the Live browser its own back layer so the first Back is consumed by the
-    // browser instead of being interpreted as a focus-clear by the TV focus system.
     BackHandler(enabled = browserVisible) {
         browserVisible = false
     }
@@ -457,6 +464,28 @@ fun PlayerScreen(
                 audioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
                 videoTracks = extractTrackOptions(tracks, C.TRACK_TYPE_VIDEO)
+                hasActiveAudio = player.audioFormat != null || audioTracks.any { it.selected }
+                hasActiveSubtitles = subtitleTracks.isNotEmpty()
+                audioLanguageLabel = if (hasActiveAudio) {
+                    player.audioFormat?.let(::mediaTrackLanguage)
+                        ?: selectedTrackLabel(audioTracks, "")
+                } else {
+                    ""
+                }
+                subtitleLanguageLabel = if (hasActiveSubtitles) {
+                    selectedTrackLabel(subtitleTracks, "")
+                } else {
+                    ""
+                }
+            }
+
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                if (cueGroup.cues.isNotEmpty()) hasActiveSubtitles = true
+                if (subtitleLanguageLabel.isBlank()) {
+                    subtitleLanguageLabel = inferSubtitleLanguageFromText(
+                        cueGroup.cues.joinToString(" ") { cue -> cue.text?.toString().orEmpty() },
+                    ).orEmpty()
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -501,6 +530,12 @@ fun PlayerScreen(
         }
         finalError = null
         buffering = true
+        audioTracks = emptyList()
+        subtitleTracks = emptyList()
+        hasActiveAudio = false
+        hasActiveSubtitles = false
+        audioLanguageLabel = ""
+        subtitleLanguageLabel = ""
         player.setMediaItem(MediaItem.fromUri(url))
         val seekTarget = when {
             pendingSeekMs > 0L -> pendingSeekMs
@@ -572,6 +607,27 @@ fun PlayerScreen(
             if (manualSeekTargetMs == null) {
                 currentPositionMs = player.currentPosition.coerceAtLeast(0L)
             }
+            val tracks = player.currentTracks
+            val detectedAudioTracks = extractTrackOptions(tracks, C.TRACK_TYPE_AUDIO)
+            val detectedSubtitleTracks = extractTrackOptions(tracks, C.TRACK_TYPE_TEXT)
+            if (detectedAudioTracks != audioTracks) audioTracks = detectedAudioTracks
+            if (detectedSubtitleTracks != subtitleTracks) subtitleTracks = detectedSubtitleTracks
+
+            val audioActive = player.audioFormat != null || detectedAudioTracks.any { it.selected }
+            hasActiveAudio = audioActive
+            if (audioActive) {
+                val resolvedAudioLanguage = player.audioFormat?.let(::mediaTrackLanguage)
+                    ?: selectedTrackLabel(detectedAudioTracks, "")
+                if (resolvedAudioLanguage.isNotBlank()) audioLanguageLabel = resolvedAudioLanguage
+            } else {
+                audioLanguageLabel = ""
+            }
+
+            if (detectedSubtitleTracks.isNotEmpty()) hasActiveSubtitles = true
+            if (hasActiveSubtitles && subtitleLanguageLabel.isBlank()) {
+                subtitleLanguageLabel = selectedTrackLabel(detectedSubtitleTracks, "")
+            }
+
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
             if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
                 context.cacheVerifiedMovieCardMetadata(
@@ -601,16 +657,16 @@ fun PlayerScreen(
         activePanel,
         resumePromptVisible,
         controlsLocked,
-        seekBarFocused,
         manualSeekTargetMs,
     ) {
         if (
             controlsVisible && !browserVisible && activePanel == null && !resumePromptVisible &&
             !buffering && finalError == null && isPlaying && !controlsLocked &&
-            !seekBarFocused && manualSeekTargetMs == null
+            manualSeekTargetMs == null
         ) {
             delay(CONTROLS_TIMEOUT_MS)
             controlsVisible = false
+            focusTimelineOnReveal = false
         }
     }
 
@@ -639,6 +695,7 @@ fun PlayerScreen(
         unlockVisible,
         controlsLocked,
         nextCountdown,
+        focusTimelineOnReveal,
         request.historyKey,
     ) {
         val target = when {
@@ -647,6 +704,7 @@ fun PlayerScreen(
             nextCountdown >= 0 -> nextEpisodePlayFocus
             unlockVisible -> unlockFocus
             controlsLocked || !controlsVisible -> playerFocus
+            focusTimelineOnReveal && !request.isLive -> playerFocus
             else -> primaryFocus
         }
         if (target != null) {
@@ -772,11 +830,16 @@ fun PlayerScreen(
                         true
                     }
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-                        // The VOD timeline is visually RTL on TV/remote: left advances, right rewinds.
-                        seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
+                        focusTimelineOnReveal = true
+                        controlsVisible = true
+                        seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS)
+                        true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-                        seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS); true
+                        focusTimelineOnReveal = true
+                        controlsVisible = true
+                        seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS)
+                        true
                     } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> if (!request.isLive && surfaceFocused) {
                         seekBy(-SEEK_STEP_MS); true
@@ -848,18 +911,18 @@ fun PlayerScreen(
                     isPlaying = isPlaying,
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
-                    audioLabel = selectedTrackLabel(audioTracks, "الصوت"),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, "الترجمة"),
+                    audioLabel = audioLanguageLabel.ifBlank { selectedTrackLabel(audioTracks, "") },
+                    subtitleLabel = subtitleLanguageLabel.ifBlank { selectedTrackLabel(subtitleTracks, "") },
                     resizeLabel = resizeLabel(resizeModeIndex),
-                    hasAudio = audioTracks.isNotEmpty(),
-                    hasSubtitles = subtitleTracks.isNotEmpty(),
+                    hasAudio = hasActiveAudio,
+                    hasSubtitles = hasActiveSubtitles || subtitleTracks.isNotEmpty(),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onReload = { pendingSeekMs = 0L; candidateIndex = 0; retryNonce += 1 },
                     onMute = { isMuted = !isMuted; player.volume = if (isMuted) 0f else 1f },
-                    onAudio = { activePanel = PlayerPanel.AUDIO },
-                    onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
+                    onAudio = {},
+                    onSubtitles = {},
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
@@ -873,25 +936,27 @@ fun PlayerScreen(
                     bufferedPercent = bufferedPercent,
                     quality = qualityLabel(videoHeight),
                     speed = playbackSpeed,
-                    audioLabel = selectedTrackLabel(audioTracks, "الصوت"),
-                    subtitleLabel = selectedTrackLabel(subtitleTracks, "الترجمة"),
-                    hasAudio = audioTracks.isNotEmpty(),
-                    hasSubtitles = subtitleTracks.isNotEmpty(),
+                    audioLabel = audioLanguageLabel.ifBlank { selectedTrackLabel(audioTracks, "") },
+                    subtitleLabel = subtitleLanguageLabel.ifBlank { selectedTrackLabel(subtitleTracks, "") },
+                    hasAudio = hasActiveAudio,
+                    hasSubtitles = hasActiveSubtitles || subtitleTracks.isNotEmpty(),
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                     onRewind = { seekBy(-SEEK_STEP_MS) },
                     onForward = { seekBy(SEEK_STEP_MS) },
                     onSeekTo = ::seekToPosition,
-                    onSeekingChanged = { seekBarFocused = it },
-                    onAudio = { activePanel = PlayerPanel.AUDIO },
-                    onSubtitles = { activePanel = PlayerPanel.SUBTITLES },
+                    onSeekingChanged = { focused -> seekBarFocused = focused },
+                    onAudio = {},
+                    onSubtitles = {},
                     onSpeed = { activePanel = PlayerPanel.SPEED },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     onQuality = { activePanel = PlayerPanel.QUALITY },
                     onServers = { activePanel = PlayerPanel.SERVERS },
                     onLock = { controlsLocked = true; controlsVisible = false },
                     primaryFocus = primaryFocus,
+                    seekBarFocusRequester = seekBarFocus,
+                    remoteSeekActive = focusTimelineOnReveal,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -1149,6 +1214,8 @@ private fun ModernVodControls(
     onServers: () -> Unit,
     onLock: () -> Unit,
     primaryFocus: FocusRequester,
+    seekBarFocusRequester: FocusRequester,
+    remoteSeekActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -1181,14 +1248,30 @@ private fun ModernVodControls(
             buffered = bufferedPercent / 100f,
             onSeekTo = onSeekTo,
             onSeekingChanged = onSeekingChanged,
+            focusRequester = seekBarFocusRequester,
+            remoteActive = remoteSeekActive,
         )
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
             item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
-            if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
-            item { FocusButton(if (hasSubtitles) subtitleLabel else "الترجمة", onSubtitles, primary = false, compact = true) }
+            if (hasAudio) item {
+                FocusButton(
+                    if (audioLabel.isNotBlank()) "الصوت : $audioLabel" else "الصوت",
+                    onAudio,
+                    primary = false,
+                    compact = true,
+                )
+            }
+            if (hasSubtitles) item {
+                FocusButton(
+                    if (subtitleLabel.isNotBlank()) "الترجمة : $subtitleLabel" else "الترجمة",
+                    onSubtitles,
+                    primary = false,
+                    compact = true,
+                )
+            }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1256,8 +1339,22 @@ private fun ModernLiveControls(
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            if (hasAudio) item { FocusButton(audioLabel, onAudio, primary = false, compact = true) }
-            if (hasSubtitles) item { FocusButton(subtitleLabel, onSubtitles, primary = false, compact = true) }
+            if (hasAudio) item {
+                FocusButton(
+                    if (audioLabel.isNotBlank()) "الصوت : $audioLabel" else "الصوت",
+                    onAudio,
+                    primary = false,
+                    compact = true,
+                )
+            }
+            if (hasSubtitles) item {
+                FocusButton(
+                    if (subtitleLabel.isNotBlank()) "الترجمة : $subtitleLabel" else "الترجمة",
+                    onSubtitles,
+                    primary = false,
+                    compact = true,
+                )
+            }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
             item { FocusButton("قفل التحكم", onLock, primary = false, compact = true) }
         }
@@ -1271,18 +1368,21 @@ private fun SeekableProgressBar(
     buffered: Float,
     onSeekTo: (Long) -> Unit,
     onSeekingChanged: (Boolean) -> Unit,
+    focusRequester: FocusRequester,
+    remoteActive: Boolean,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     var focused by remember { mutableStateOf(false) }
     var previewMs by remember { mutableLongStateOf(positionMs) }
+    val active = focused || remoteActive
 
     DisposableEffect(Unit) {
         onDispose { onSeekingChanged(false) }
     }
 
-    LaunchedEffect(positionMs, durationMs, focused) {
+    LaunchedEffect(positionMs, durationMs, focused, remoteActive) {
         if (!focused) previewMs = positionMs.coerceIn(0L, durationMs.coerceAtLeast(0L))
     }
 
@@ -1295,9 +1395,13 @@ private fun SeekableProgressBar(
     val shape = RoundedCornerShape(20.dp)
 
     Column(Modifier.fillMaxWidth()) {
-        if (focused) {
+        if (active) {
             Text(
-                "${formatTime(previewMs)}  •  حرك يمين ويسار ثم اضغط OK",
+                if (tvRemoteInput) {
+                    "يسار +10 ث  •  يمين -10 ث"
+                } else {
+                    "حرك يمين ويسار للتقديم والترجيع"
+                },
                 color = colors.goldBright,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -1308,10 +1412,10 @@ private fun SeekableProgressBar(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (focused) 13.dp else 8.dp)
+                .height(if (active) 13.dp else 8.dp)
                 .clip(shape)
                 .background(Color.White.copy(alpha = .18f))
-                .border(if (focused) 2.dp else 0.dp, if (focused) colors.goldBright else Color.Transparent, shape)
+                .border(if (active) 2.dp else 0.dp, if (active) colors.goldBright else Color.Transparent, shape)
                 .pointerInput(durationMs) {
                     detectTapGestures { offset ->
                         if (durationMs > 0L && size.width > 0) {
@@ -1349,6 +1453,7 @@ private fun SeekableProgressBar(
                             } else {
                                 (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
                             }
+                            onSeekTo(previewMs)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -1357,6 +1462,7 @@ private fun SeekableProgressBar(
                             } else {
                                 (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
                             }
+                            onSeekTo(previewMs)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_CENTER,
@@ -1369,6 +1475,7 @@ private fun SeekableProgressBar(
                         else -> false
                     }
                 }
+                .focusRequester(focusRequester)
                 .focusable(),
         ) {
             Box(Modifier.fillMaxWidth(buffered.coerceIn(0f, 1f)).fillMaxHeight().background(Color.White.copy(alpha = .28f)))
@@ -1688,8 +1795,6 @@ private fun LiveChannelBrowser(
         catalog?.items?.firstOrNull { it.id == currentStreamId }
     }
 
-    // Share the exact same persisted order used by the main Live screen.
-    // Any move here is therefore reflected on the main Live category rail as well.
     val categoryOrderPrefs = remember(context) {
         context.getSharedPreferences(LIVE_CATEGORY_ORDER_PREFS, Context.MODE_PRIVATE)
     }
@@ -1720,8 +1825,6 @@ private fun LiveChannelBrowser(
         categoryOrderPrefs.edit().putString(PREF_IDS, values.joinToString(",")).apply()
     }
 
-    // Keep a lightweight, local Live watching history so "استكمال المشاهدة" can be
-    // offered from the player without changing the Movie/Series player contract.
     val liveHistoryPrefs = remember(context) {
         context.getSharedPreferences(LIVE_PLAYER_HISTORY_PREFS, Context.MODE_PRIVATE)
     }
@@ -1808,8 +1911,6 @@ private fun LiveChannelBrowser(
         val keyCode = event.nativeKeyEvent.keyCode
         val isBack = keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE
         if (isBack) {
-            // Consume the browser's first Back at preview phase so focus never gets a
-            // chance to clear first. KeyDown dismisses; any trailing event is consumed.
             if (event.type == KeyEventType.KeyDown) onClose()
             true
         } else {
@@ -2142,8 +2243,6 @@ private fun LiveChannelBrowser(
                 .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // RTL Row placement makes the second pane physically left: categories on the left,
-            // channels immediately to their right, matching the requested receiver/TV layout.
             ChannelPane(
                 paneModifier = Modifier.weight(1f).fillMaxHeight(),
                 showSearch = true,
@@ -2227,14 +2326,44 @@ private fun extractTrackOptions(tracks: Tracks, type: Int): List<PlayerTrackOpti
 }.distinctBy { it.key }
 
 private fun trackLabel(format: Format, type: Int, index: Int): String {
-    val language = format.language?.let(::languageLabel)
-    val explicit = format.label?.takeIf(String::isNotBlank)
+    val language = mediaTrackLanguage(format)
+    val explicit = format.label?.trim()?.takeIf(String::isNotBlank)
     return when (type) {
         C.TRACK_TYPE_VIDEO -> qualityLabel(format.height)
-        C.TRACK_TYPE_AUDIO -> explicit ?: language ?: "مسار صوت ${index + 1}"
-        C.TRACK_TYPE_TEXT -> explicit ?: language ?: "ترجمة ${index + 1}"
+        C.TRACK_TYPE_AUDIO -> language ?: explicit?.let(::languageFromExplicitLabel) ?: ""
+        C.TRACK_TYPE_TEXT -> language ?: explicit?.let(::languageFromExplicitLabel) ?: ""
         else -> explicit ?: "مسار ${index + 1}"
     }
+}
+
+private fun detectedTrackLanguage(tracks: Tracks, type: Int): String? {
+    val candidates = buildList {
+        tracks.groups.forEach { group ->
+            if (group.type != type) return@forEach
+            for (trackIndex in 0 until group.length) {
+                if (!group.isTrackSupported(trackIndex, true) && !group.isTrackSelected(trackIndex)) continue
+                val format = group.getTrackFormat(trackIndex)
+                val label = mediaTrackLanguage(format) ?: continue
+                add(group.isTrackSelected(trackIndex) to label)
+            }
+        }
+    }
+    return candidates.firstOrNull { it.first }?.second
+        ?: candidates.singleOrNull()?.second
+}
+
+private fun mediaTrackLanguage(format: Format): String? {
+    format.language
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.takeUnless(::isUndeterminedLanguage)
+        ?.let(::languageLabel)
+        ?.let { return it }
+
+    languageFromExplicitLabel(format.label)?.let { return it }
+    languageFromExplicitLabel(format.id)?.let { return it }
+    languageFromExplicitLabel(format.metadata?.toString())?.let { return it }
+    return null
 }
 
 private fun trackSecondary(format: Format, type: Int): String = when (type) {
@@ -2247,16 +2376,118 @@ private fun trackSecondary(format: Format, type: Int): String = when (type) {
 }
 
 private fun selectedTrackLabel(options: List<PlayerTrackOption>, fallback: String): String =
-    options.firstOrNull { it.selected }?.label ?: fallback
+    options.firstOrNull { it.selected && it.label.isNotBlank() }?.label
+        ?: options.firstOrNull { it.label.isNotBlank() }?.label
+        ?: fallback
 
-private fun languageLabel(code: String): String = when (code.lowercase(Locale.ROOT).substringBefore('-')) {
-    "ar", "ara" -> "العربية"
-    "en", "eng" -> "English"
-    "fr", "fra", "fre" -> "Français"
-    "es", "spa" -> "Español"
-    "tr", "tur" -> "Türkçe"
-    "de", "deu", "ger" -> "Deutsch"
-    else -> code.uppercase(Locale.ROOT)
+private fun isUndeterminedLanguage(value: String): Boolean =
+    value.lowercase(Locale.ROOT).replace('_', '-').substringBefore('-') in setOf("und", "zxx", "mul")
+
+private fun languageFromExplicitLabel(raw: String?): String? {
+    val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf(String::isNotBlank) ?: return null
+    when {
+        value.contains("arabic") || value.contains("العربية") || value.contains("العربيه") || value.contains("عربي") -> return "Arabic"
+        value.contains("english") -> return "English"
+        value.contains("french") || value.contains("français") -> return "French"
+        value.contains("spanish") || value.contains("español") -> return "Spanish"
+        value.contains("turkish") || value.contains("türk") -> return "Turkish"
+        value.contains("german") || value.contains("deutsch") -> return "German"
+        value.contains("italian") || value.contains("italiano") -> return "Italian"
+        value.contains("portuguese") || value.contains("português") -> return "Portuguese"
+        value.contains("russian") || value.contains("рус") -> return "Russian"
+        value.contains("persian") || value.contains("farsi") || value.contains("فارسی") -> return "Persian"
+        value.contains("urdu") || value.contains("اردو") -> return "Urdu"
+        value.contains("hindi") || value.contains("हिन्दी") || value.contains("हिंदी") -> return "Hindi"
+        value.contains("japanese") || value.contains("日本") -> return "Japanese"
+        value.contains("korean") || value.contains("한국") -> return "Korean"
+        value.contains("chinese") || value.contains("中文") -> return "Chinese"
+    }
+    return value
+        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .asSequence()
+        .mapNotNull(::languageLabel)
+        .firstOrNull()
+}
+
+private fun inferSubtitleLanguageFromText(text: String): String? {
+    val letters = text.filter(Char::isLetter)
+    if (letters.length < 3) return null
+    fun countIn(range: CharRange): Int = letters.count { it in range }
+
+    val arabic = letters.count { it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' }
+    if (arabic >= 3 && arabic * 2 >= letters.length) return "Arabic"
+
+    val hebrew = countIn('\u0590'..'\u05FF')
+    if (hebrew >= 3 && hebrew * 2 >= letters.length) return "Hebrew"
+
+    val cyrillic = countIn('\u0400'..'\u04FF')
+    if (cyrillic >= 3 && cyrillic * 2 >= letters.length) return "Russian"
+
+    val greek = countIn('\u0370'..'\u03FF')
+    if (greek >= 3 && greek * 2 >= letters.length) return "Greek"
+
+    val devanagari = countIn('\u0900'..'\u097F')
+    if (devanagari >= 3 && devanagari * 2 >= letters.length) return "Hindi"
+
+    val hangul = letters.count { it in '\uAC00'..'\uD7AF' || it in '\u1100'..'\u11FF' }
+    if (hangul >= 3 && hangul * 2 >= letters.length) return "Korean"
+
+    val kana = letters.count { it in '\u3040'..'\u30FF' }
+    if (kana >= 2) return "Japanese"
+
+    val han = letters.count { it in '\u4E00'..'\u9FFF' }
+    if (han >= 2) return "Chinese"
+
+    return null
+}
+
+private fun languageLabel(code: String): String? {
+    val normalized = code.trim().lowercase(Locale.ROOT).replace('_', '-').substringBefore('-')
+    val known = when (normalized) {
+        "ar", "ara" -> "Arabic"
+        "en", "eng" -> "English"
+        "fr", "fra", "fre" -> "French"
+        "es", "spa" -> "Spanish"
+        "tr", "tur" -> "Turkish"
+        "de", "deu", "ger" -> "German"
+        "it", "ita" -> "Italian"
+        "pt", "por" -> "Portuguese"
+        "ru", "rus" -> "Russian"
+        "fa", "fas", "per" -> "Persian"
+        "ur", "urd" -> "Urdu"
+        "hi", "hin" -> "Hindi"
+        "ja", "jpn" -> "Japanese"
+        "ko", "kor" -> "Korean"
+        "zh", "zho", "chi" -> "Chinese"
+        "id", "ind" -> "Indonesian"
+        "ms", "msa", "may" -> "Malay"
+        "th", "tha" -> "Thai"
+        "nl", "nld", "dut" -> "Dutch"
+        "sv", "swe" -> "Swedish"
+        "pl", "pol" -> "Polish"
+        "uk", "ukr" -> "Ukrainian"
+        "he", "heb" -> "Hebrew"
+        "el", "ell", "gre" -> "Greek"
+        "cs", "ces", "cze" -> "Czech"
+        "ro", "ron", "rum" -> "Romanian"
+        "hu", "hun" -> "Hungarian"
+        "bn", "ben" -> "Bengali"
+        "vi", "vie" -> "Vietnamese"
+        else -> null
+    }
+    if (known != null) return known
+    if (normalized.isBlank() || isUndeterminedLanguage(normalized)) return null
+
+    return runCatching {
+        val locale = Locale.forLanguageTag(normalized)
+        locale.getDisplayLanguage(Locale.ENGLISH)
+            .trim()
+            .takeIf { display ->
+                display.isNotBlank() &&
+                    !display.equals(normalized, ignoreCase = true) &&
+                    !display.equals("Unknown language", ignoreCase = true)
+            }
+    }.getOrNull()
 }
 
 private fun qualityLabel(height: Int): String = when {

@@ -32,9 +32,10 @@ import sa.hulksa.player.ui.screens.LoginScreen
 import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
-import sa.hulksa.player.ui.screens.PlayerScreen
+import sa.hulksa.player.ui.screens.PlayerProScreen
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -323,21 +324,11 @@ fun HulkApp(
                     HulkScreen.PLAYER -> {
                         val playback = state.playback
                         if (playback != null) {
-                            val orderedEpisodes = state.episodes.sortedWith(
-                                compareBy(
-                                    sa.hulksa.player.model.Episode::season,
-                                    sa.hulksa.player.model.Episode::episodeNumber,
-                                ),
+                            val episodeNeighbors = playerProEpisodeNeighbors(
+                                episodes = if (playback.streamKind == "series") state.episodes else emptyList(),
+                                currentStreamId = playback.streamId,
                             )
-                            val currentEpisodeIndex = orderedEpisodes.indexOfFirst {
-                                it.id == playback.streamId
-                            }
-                            val nextEpisode = if (playback.streamKind == "series") {
-                                orderedEpisodes.getOrNull(currentEpisodeIndex + 1)
-                            } else {
-                                null
-                            }
-                            PlayerScreen(
+                            PlayerProScreen(
                                 request = playback,
                                 liveCatalog = state.catalogs[ContentType.LIVE],
                                 isFavorite = viewModel::isFavorite,
@@ -345,11 +336,13 @@ fun HulkApp(
                                 onToggleFavorite = viewModel::toggleFavorite,
                                 onBack = viewModel::back,
                                 onProgress = viewModel::onPlaybackProgress,
-                                nextEpisodeTitle = nextEpisode?.let {
-                                    "الموسم ${it.season} • الحلقة ${it.episodeNumber} • ${it.title}"
+                                previousEpisode = episodeNeighbors.previous,
+                                nextEpisode = episodeNeighbors.next,
+                                onPlayPreviousEpisode = episodeNeighbors.previous?.let { episode ->
+                                    { viewModel.playEpisode(episode) }
                                 },
-                                onPlayNextEpisode = nextEpisode?.let {
-                                    { viewModel.playNextEpisode() }
+                                onPlayNextEpisode = episodeNeighbors.next?.let { episode ->
+                                    { viewModel.playEpisode(episode) }
                                 },
                             )
                         } else {
