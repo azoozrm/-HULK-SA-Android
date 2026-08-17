@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -197,7 +198,7 @@ fun BrandBadge(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .background(
@@ -208,7 +209,19 @@ fun BrandBadge(
             .border(1.dp, colors.gold.copy(alpha = .28f), RoundedCornerShape(18.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        BrandLogo(Modifier.fillMaxSize().padding(5.dp))
+        val compactCategoryBadge = maxWidth <= 30.dp && maxHeight <= 30.dp
+        if (compactCategoryBadge) {
+            Text(
+                text = "▶",
+                color = colors.goldBright,
+                fontSize = 15.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+        } else {
+            BrandLogo(Modifier.fillMaxSize().padding(5.dp))
+        }
     }
 }
 
