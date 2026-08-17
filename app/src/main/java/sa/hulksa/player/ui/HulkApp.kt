@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.ApplyAdaptiveWindowPresentation
@@ -28,6 +29,8 @@ import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
+import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_ALL
+import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_FAVORITES
 import sa.hulksa.player.ui.screens.LoginScreen
 import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
@@ -35,7 +38,10 @@ import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.PlayerProScreen
 import sa.hulksa.player.ui.screens.SeriesDetailsProPolishedScreen
 import sa.hulksa.player.ui.screens.detailsProRelatedItems
+import sa.hulksa.player.ui.screens.liveTvProDecorateMainState
+import sa.hulksa.player.ui.screens.liveTvProMainCategoryToContext
 import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
+import sa.hulksa.player.ui.screens.saveLiveTvProLaunchContext
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -71,6 +77,17 @@ fun HulkApp(
     val homeRecommendationFavorites = remember(state.catalogs, state.history) { state.favorites }
     val notify: (String) -> Unit = { message ->
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+    val openWithLiveContext: (ContentItem) -> Unit = { item ->
+        if (item.type == ContentType.LIVE) {
+            val launchContext = when (state.destination) {
+                MainDestination.FAVORITES -> LIVE_TV_PRO_CONTEXT_FAVORITES
+                MainDestination.LIVE -> liveTvProMainCategoryToContext(state.selectedCategoryId)
+                else -> LIVE_TV_PRO_CONTEXT_ALL
+            }
+            context.saveLiveTvProLaunchContext(launchContext)
+        }
+        viewModel.open(item)
     }
 
     val selectDestinationWithProfileContext: (MainDestination) -> Unit = { destination ->
@@ -142,7 +159,7 @@ fun HulkApp(
                                 isFavorite = viewModel::isFavorite,
                                 onSelectDestination = selectDestinationWithProfileContext,
                                 onSearch = viewModel::updateSearch,
-                                onOpen = viewModel::open,
+                                onOpen = openWithLiveContext,
                                 onToggleFavorite = { item ->
                                     val wasFavorite = viewModel.isFavorite(item)
                                     viewModel.toggleFavorite(item)
@@ -162,10 +179,10 @@ fun HulkApp(
                             // the profile-owned catalog context restored above.
                             key(catalogNavigationMemory, state.destination) {
                                 MainShellScreen(
-                                    state = if (state.destination == MainDestination.HOME) {
-                                        state.copy(favorites = homeRecommendationFavorites)
-                                    } else {
-                                        state
+                                    state = when (state.destination) {
+                                        MainDestination.HOME -> state.copy(favorites = homeRecommendationFavorites)
+                                        MainDestination.LIVE -> liveTvProDecorateMainState(state, context)
+                                        else -> state
                                     },
                                     isTv = isTv,
                                     navigationMemory = navigationMemory,
@@ -173,7 +190,7 @@ fun HulkApp(
                                     onSelectDestination = selectDestinationWithProfileContext,
                                     onSelectCategory = selectCategoryWithProfileContext,
                                     onSearch = searchCatalogWithProfileContext,
-                                    onOpen = viewModel::open,
+                                    onOpen = openWithLiveContext,
                                     onOpenHistory = { entry ->
                                         val localDownload = state.downloads.firstOrNull { download ->
                                             download.historyKey == entry.key &&

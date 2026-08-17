@@ -7,14 +7,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
@@ -23,6 +26,7 @@ import sa.hulksa.player.model.PlaybackRequest
 private const val LIVE_TV_PRO_HISTORY_PREFS = "live_player_history"
 private const val LIVE_TV_PRO_HISTORY_IDS = "ids"
 private const val ANDROID_KEYCODE_LAST_CHANNEL = 229
+private const val LIVE_TV_PRO_CONTROLS_HINT_TIMEOUT_MS = 5_200L
 
 internal data class PlayerProEpisodeNeighbors(
     val previous: Episode?,
@@ -51,9 +55,9 @@ internal fun playerProEpisodeLabel(episode: Episode): String =
 /**
  * Player Pro entry point shared by VOD/series and Live TV Pro.
  *
- * Series continuity remains isolated here. For Live, this layer now owns the persistent recent
- * channel history plus hardware Channel +/- and Last Channel actions, while PlayerScreen keeps
- * the already-qualified playback, browser, D-pad focus and control behavior.
+ * Series continuity remains isolated here. For Live, this layer owns recent history, hardware
+ * Channel +/- and Last Channel actions, plus the v1.6 TV browser launched by OK while the player
+ * controls are hidden. PlayerScreen remains the qualified playback/control core.
  */
 @Composable
 fun PlayerProScreen(
@@ -81,6 +85,16 @@ fun PlayerProScreen(
                 .split(',')
                 .mapNotNull(String::toIntOrNull),
         )
+    }
+    var liveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
+    var liveControlsLikelyVisible by remember(request.historyKey) { mutableStateOf(false) }
+    var liveControlsInteractionTick by remember(request.historyKey) { mutableIntStateOf(0) }
+
+    LaunchedEffect(liveControlsLikelyVisible, liveControlsInteractionTick) {
+        if (liveControlsLikelyVisible) {
+            delay(LIVE_TV_PRO_CONTROLS_HINT_TIMEOUT_MS)
+            liveControlsLikelyVisible = false
+        }
     }
 
     LaunchedEffect(request.isLive, request.streamId, liveCatalog) {
@@ -110,6 +124,11 @@ fun PlayerProScreen(
         }
     }
 
+    fun markLiveControlsInteraction() {
+        liveControlsLikelyVisible = true
+        liveControlsInteractionTick += 1
+    }
+
     fun switchLiveRelative(delta: Int): Boolean {
         if (!request.isLive) return false
         val channel = liveTvProRelativeChannel(
@@ -118,6 +137,8 @@ fun PlayerProScreen(
             delta = delta,
         ) ?: return false
         if (channel.id == request.streamId) return false
+        liveBrowserVisible = false
+        liveControlsLikelyVisible = false
         onSelectLiveChannel(channel)
         return true
     }
@@ -130,19 +151,62 @@ fun PlayerProScreen(
 
                 val keyCode = event.nativeKeyEvent.keyCode
                 if (request.isLive) {
+                    if (liveBrowserVisible) return@onPreviewKeyEvent false
+
                     when (keyCode) {
                         AndroidKeyEvent.KEYCODE_CHANNEL_UP,
                         AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
-                        -> return@onPreviewKeyEvent switchLiveRelative(1)
+                        -> {
+                            liveControlsLikelyVisible = false
+                            return@onPreviewKeyEvent switchLiveRelative(1)
+                        }
 
                         AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
                         AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
-                        -> return@onPreviewKeyEvent switchLiveRelative(-1)
+                        -> {
+                            liveControlsLikelyVisible = false
+                            return@onPreviewKeyEvent switchLiveRelative(-1)
+                        }
 
                         ANDROID_KEYCODE_LAST_CHANNEL -> {
                             val channel = lastChannel ?: return@onPreviewKeyEvent false
+                            liveControlsLikelyVisible = false
                             onSelectLiveChannel(channel)
                             return@onPreviewKeyEvent true
+                        }
+
+                        AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                        AndroidKeyEvent.KEYCODE_ENTER,
+                        AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+                        -> {
+                            if (!liveControlsLikelyVisible) {
+                                liveBrowserVisible = true
+                                return@onPreviewKeyEvent true
+                            }
+                            markLiveControlsInteraction()
+                            return@onPreviewKeyEvent false
+                        }
+
+                        AndroidKeyEvent.KEYCODE_DPAD_LEFT,
+                        AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
+                        AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                        -> {
+                            markLiveControlsInteraction()
+                            return@onPreviewKeyEvent false
+                        }
+
+                        AndroidKeyEvent.KEYCODE_DPAD_UP,
+                        AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+                        -> {
+                            liveControlsLikelyVisible = false
+                            return@onPreviewKeyEvent false
+                        }
+
+                        AndroidKeyEvent.KEYCODE_BACK,
+                        AndroidKeyEvent.KEYCODE_ESCAPE,
+                        -> {
+                            liveControlsLikelyVisible = false
+                            return@onPreviewKeyEvent false
                         }
                     }
                     return@onPreviewKeyEvent false
@@ -186,5 +250,21 @@ fun PlayerProScreen(
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
             onPlayNextEpisode = onPlayNextEpisode,
         )
+
+        if (request.isLive && liveBrowserVisible) {
+            LiveTvProChannelBrowser(
+                catalog = liveCatalog,
+                currentStreamId = request.streamId,
+                isFavorite = isFavorite,
+                onToggleFavorite = onToggleFavorite,
+                onSelectChannel = { channel ->
+                    liveBrowserVisible = false
+                    liveControlsLikelyVisible = false
+                    onSelectLiveChannel(channel)
+                },
+                onClose = { liveBrowserVisible = false },
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
     }
 }
