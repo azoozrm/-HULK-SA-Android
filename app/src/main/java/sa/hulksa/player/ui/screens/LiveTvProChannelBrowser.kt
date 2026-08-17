@@ -5,7 +5,6 @@ import android.view.KeyEvent as AndroidKeyEvent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -47,20 +46,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import sa.hulksa.player.R
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
-import sa.hulksa.player.ui.components.ChannelLogo
-import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
@@ -171,9 +171,10 @@ fun LiveTvProChannelBrowser(
 
     val categoryArtwork = remember(catalog) {
         catalog?.items.orEmpty()
-            .filter { !it.posterUrl.isNullOrBlank() }
             .groupBy(ContentItem::categoryId)
-            .mapValues { (_, channels) -> channels.first() }
+            .mapValues { (_, channels) ->
+                channels.firstOrNull { !it.posterUrl.isNullOrBlank() } ?: channels.first()
+            }
     }
 
     val categoryChannels = when (selectedCategory) {
@@ -200,13 +201,17 @@ fun LiveTvProChannelBrowser(
     }
 
     val listState = rememberLazyListState()
+    val categoryListState = rememberLazyListState()
     val channelFocus = remember { FocusRequester() }
     val searchFocus = remember { FocusRequester() }
     val allCategoryFocus = remember { FocusRequester() }
     val recentCategoryFocus = remember { FocusRequester() }
     val favoritesCategoryFocus = remember { FocusRequester() }
-    val categoryFocusRequesters = remember(orderedCategories.map { it.id }) {
-        orderedCategories.associate { it.id to FocusRequester() }
+    val stableCategoryIds = remember(catalog?.categories) {
+        catalog?.categories.orEmpty().map { it.id }
+    }
+    val categoryFocusRequesters = remember(stableCategoryIds) {
+        stableCategoryIds.associateWith { FocusRequester() }
     }
     val selectedCategoryFocusRequester = when (selectedCategory) {
         null -> allCategoryFocus
@@ -221,6 +226,15 @@ fun LiveTvProChannelBrowser(
             listState.scrollToItem(focusIndex)
             withFrameNanos { }
             runCatching { channelFocus.requestFocus() }
+        }
+    }
+    LaunchedEffect(orderedCategoryIds, movingCategoryId) {
+        val movingId = movingCategoryId ?: return@LaunchedEffect
+        val categoryIndex = orderedCategories.indexOfFirst { it.id == movingId }
+        if (categoryIndex >= 0) {
+            categoryListState.scrollToItem(categoryIndex + 3)
+            withFrameNanos { }
+            runCatching { categoryFocusRequesters[movingId]?.requestFocus() }
         }
     }
 
@@ -239,6 +253,107 @@ fun LiveTvProChannelBrowser(
             true
         } else {
             false
+        }
+    }
+
+    @Composable
+    fun BrowserArtwork(
+        posterUrl: String?,
+        description: String,
+        artworkModifier: Modifier = Modifier,
+    ) {
+        var imageFailed by remember(posterUrl) { mutableStateOf(false) }
+        Box(
+            modifier = artworkModifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFFF0EEE7))
+                .border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = if (!posterUrl.isNullOrBlank() && !imageFailed) posterUrl else R.mipmap.ic_launcher_tv,
+                contentDescription = description,
+                modifier = Modifier.fillMaxSize().padding(3.dp),
+                contentScale = ContentScale.Fit,
+                onError = {
+                    if (!posterUrl.isNullOrBlank()) imageFailed = true
+                },
+            )
+        }
+    }
+
+    @Composable
+    fun BrowserChannelRow(
+        channel: ContentItem,
+        selected: Boolean,
+        favorite: Boolean,
+        rowModifier: Modifier = Modifier,
+        onClick: () -> Unit,
+        onLongClick: () -> Unit,
+    ) {
+        var focused by remember(channel.id) { mutableStateOf(false) }
+        var remoteLongPressHandled by remember(channel.id) { mutableStateOf(false) }
+        val showFocused = focused && adaptiveUi.showFocusHighlights
+        val active = showFocused || selected
+        val shape = RoundedCornerShape(11.dp)
+        Row(
+            modifier = rowModifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .clip(shape)
+                .background(if (active) colors.gold.copy(alpha = .14f) else Color.Transparent)
+                .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+                .onFocusChanged { focused = it.isFocused }
+                .onPreviewKeyEvent { event ->
+                    val code = event.nativeKeyEvent.keyCode
+                    val remoteSelect = code == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+                        code == AndroidKeyEvent.KEYCODE_ENTER ||
+                        code == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ||
+                        code == AndroidKeyEvent.KEYCODE_SPACE
+                    if (!remoteSelect) {
+                        false
+                    } else if (event.type == KeyEventType.KeyDown) {
+                        if (
+                            (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
+                            !remoteLongPressHandled
+                        ) {
+                            remoteLongPressHandled = true
+                            onLongClick()
+                        }
+                        true
+                    } else if (event.type == KeyEventType.KeyUp) {
+                        if (!remoteLongPressHandled) onClick()
+                        remoteLongPressHandled = false
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .combinedClickable(
+                    role = Role.Button,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                )
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            BrowserArtwork(channel.posterUrl, channel.name, Modifier.size(48.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    channel.name,
+                    color = colors.text,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text("● بث مباشر", color = if (active) colors.goldBright else colors.textMuted, fontSize = 10.sp)
+            }
+            if (favorite) {
+                Text("★", color = colors.goldBright, fontSize = 16.sp)
+            }
+            Text("▶", color = if (active) colors.goldBright else colors.textMuted, fontSize = 14.sp)
         }
     }
 
@@ -344,7 +459,11 @@ fun LiveTvProChannelBrowser(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            categoryArtwork[category.id]?.let { ChannelLogo(it, Modifier.size(29.dp)) }
+            BrowserArtwork(
+                categoryArtwork[category.id]?.posterUrl,
+                category.name,
+                Modifier.size(29.dp),
+            )
             Text(
                 text = if (moving) "↕ ${category.name}" else category.name,
                 modifier = Modifier.weight(1f),
@@ -383,18 +502,19 @@ fun LiveTvProChannelBrowser(
                 )
             } else {
                 Text(
-                    if (tvLayout) "تفضيل القناة: زر OK مطول" else "تفضيل القناة: اضغط مطولا على القناة",
+                    if (tvLayout) "تفضيل القناة : زر OK مطول" else "تفضيل القناة : اضغط مطولا على القناة",
                     color = colors.textMuted,
                     fontSize = 9.sp,
                 )
                 Text(
-                    if (tvLayout) "ترتيب الفئات: زر OK مطول على الفئة لترتيبها" else "ترتيب الفئات: اضغط مطولا على الفئة ثم اسحبها",
+                    if (tvLayout) "ترتيب الفئات : زر OK مطول على الفئة لترتيبها" else "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها",
                     color = colors.textMuted,
                     fontSize = 9.sp,
                 )
             }
             Spacer(Modifier.height(8.dp))
             LazyColumn(
+                state = categoryListState,
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 contentPadding = PaddingValues(bottom = 12.dp),
             ) {
@@ -456,7 +576,7 @@ fun LiveTvProChannelBrowser(
                     Text(
                         buildString {
                             append("${visible.size} قناة")
-                            current?.let { append("  •  تشاهد الان: ${it.name}") }
+                            current?.let { append("  •  تشاهد الان : ${it.name}") }
                         },
                         color = if (current != null) colors.goldBright else colors.textMuted,
                         fontSize = if (tvLayout) 10.sp else 9.sp,
@@ -505,12 +625,11 @@ fun LiveTvProChannelBrowser(
                         } else {
                             Modifier
                         }
-                        ChannelListItem(
-                            item = channel,
+                        BrowserChannelRow(
+                            channel = channel,
                             selected = channel.id == currentStreamId,
-                            onFocused = {},
+                            favorite = favorite,
                             onClick = { onSelectChannel(channel) },
-                            isFavorite = favorite,
                             onLongClick = {
                                 favoriteIds = if (favorite) favoriteIds - channel.id else favoriteIds + channel.id
                                 onToggleFavorite(channel)
@@ -520,7 +639,7 @@ fun LiveTvProChannelBrowser(
                                     Toast.LENGTH_SHORT,
                                 ).show()
                             },
-                            modifier = baseModifier.focusProperties {
+                            rowModifier = baseModifier.focusProperties {
                                 selectedCategoryFocusRequester?.let { left = it }
                             },
                         )
