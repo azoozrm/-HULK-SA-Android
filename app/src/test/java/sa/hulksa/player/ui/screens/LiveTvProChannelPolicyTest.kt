@@ -40,6 +40,56 @@ class LiveTvProChannelPolicyTest {
     }
 
     @Test
+    fun queuedZappingAdvancesFromPendingTargetBeforePlaybackRecreates() {
+        val channels = listOf(channel(1, "news"), channel(2, "news"), channel(3, "news"))
+
+        val first = liveTvProQueuedRelativeChannel(
+            channels = channels,
+            currentStreamId = 1,
+            pendingStreamId = null,
+            delta = 1,
+        )
+        val second = liveTvProQueuedRelativeChannel(
+            channels = channels,
+            currentStreamId = 1,
+            pendingStreamId = first?.id,
+            delta = 1,
+        )
+
+        assertEquals(2, first?.id)
+        assertEquals(3, second?.id)
+    }
+
+    @Test
+    fun queuedZappingWrapsAndIgnoresPendingTargetOutsideCurrentSequence() {
+        val channels = listOf(
+            channel(1, "news"),
+            channel(2, "news"),
+            channel(3, "news"),
+            channel(9, "sports"),
+        )
+
+        assertEquals(
+            1,
+            liveTvProQueuedRelativeChannel(
+                channels = channels,
+                currentStreamId = 1,
+                pendingStreamId = 3,
+                delta = 1,
+            )?.id,
+        )
+        assertEquals(
+            2,
+            liveTvProQueuedRelativeChannel(
+                channels = channels,
+                currentStreamId = 1,
+                pendingStreamId = 9,
+                delta = 1,
+            )?.id,
+        )
+    }
+
+    @Test
     fun recentHistoryIsDeduplicatedAndKeepsNewestFirst() {
         assertEquals(
             listOf(3, 2, 1),
