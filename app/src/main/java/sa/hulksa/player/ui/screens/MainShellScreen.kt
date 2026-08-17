@@ -1461,7 +1461,7 @@ private fun LiveCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 12.dp, mobileVertical = 11.dp),
+            .liveCatalogEdgeToEdge(isTv),
     ) {
         CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
         if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
