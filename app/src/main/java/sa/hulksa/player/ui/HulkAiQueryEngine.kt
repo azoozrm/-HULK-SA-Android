@@ -101,7 +101,8 @@ internal fun isHulkAiRequest(rawQuery: String): Boolean {
     val normalized = rawQuery.hulkAiNormalizeText()
     if (normalized.isBlank()) return false
     return HULK_AI_TRIGGERS.any { trigger ->
-        normalized == trigger || normalized.startsWith("$trigger ")
+        val normalizedTrigger = trigger.hulkAiNormalizeText()
+        normalized == normalizedTrigger || normalized.startsWith("$normalizedTrigger ")
     }
 }
 
@@ -281,7 +282,7 @@ internal fun buildHulkAiQuerySuggestions(
         }
 
         score += if (parsed.wantsRecent) {
-            (2_600 - freshRank * 24).coerceAtLeast(0)
+            (5_000 - freshRank * 260).coerceAtLeast(0)
         } else {
             (500 - freshRank * 5).coerceAtLeast(0)
         }
@@ -414,11 +415,14 @@ private fun stripHulkAiTrigger(rawQuery: String): String {
     val trimmed = rawQuery.trim()
     val normalized = trimmed.hulkAiNormalizeText()
     val trigger = HULK_AI_TRIGGERS
-        .sortedByDescending(String::length)
-        .firstOrNull { normalized == it || normalized.startsWith("$it ") }
+        .sortedByDescending { it.hulkAiNormalizeText().length }
+        .firstOrNull { trigger ->
+            val normalizedTrigger = trigger.hulkAiNormalizeText()
+            normalized == normalizedTrigger || normalized.startsWith("$normalizedTrigger ")
+        }
         ?: return trimmed
 
-    val triggerTokenCount = trigger.split(' ').size
+    val triggerTokenCount = trigger.trim().split(Regex("""\s+""")).size
     val originalTokens = trimmed.split(Regex("""\s+"""))
     return if (originalTokens.size <= triggerTokenCount) {
         ""
