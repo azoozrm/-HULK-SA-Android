@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +51,9 @@ import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
+import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
@@ -231,7 +236,6 @@ internal fun isVoiceSearchDestination(state: HulkUiState): Boolean =
 
 internal val LocalVoiceSearchLauncher = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
-@Suppress("UNUSED_PARAMETER")
 @Composable
 internal fun VoiceSearchAppLayer(
     viewModel: HulkViewModel,
@@ -239,10 +243,36 @@ internal fun VoiceSearchAppLayer(
     onVoiceSearch: (String) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    CompositionLocalProvider(
-        LocalVoiceSearchLauncher provides onVoiceSearch,
-        content = content,
-    )
+    val state by viewModel.state.collectAsState()
+    val hulkAiActive =
+        state.screen == HulkScreen.MAIN &&
+            state.destination == MainDestination.SEARCH &&
+            isHulkAiRequest(state.searchQuery)
+
+    CompositionLocalProvider(LocalVoiceSearchLauncher provides onVoiceSearch) {
+        if (hulkAiActive) {
+            val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTv)
+            CompositionLocalProvider(LocalAdaptiveUi provides adaptiveUi) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .trackAdaptiveInput(adaptiveInputController),
+                ) {
+                    HulkAiSearchLayer(
+                        state = state,
+                        isTv = adaptiveUi.isTelevision,
+                        isFavorite = viewModel::isFavorite,
+                        onSelectDestination = viewModel::selectDestination,
+                        onSearch = viewModel::updateSearch,
+                        onOpen = viewModel::open,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                    )
+                }
+            }
+        } else {
+            content()
+        }
+    }
 }
 
 @Composable
