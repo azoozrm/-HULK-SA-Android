@@ -52,6 +52,53 @@ data class AdaptiveUiState(
 
     val showFocusHighlights: Boolean
         get() = shouldShowFocusHighlights(deviceClass, inputMode)
+
+    val tvPremiumPolicy: TvPremiumWindowPolicy
+        get() = tvPremiumWindowPolicy(screenWidthDp, screenHeightDp)
+}
+
+/**
+ * Shared Android TV / Google TV presentation policy for v2.0.
+ *
+ * This keeps TV-safe gutters, rail identity sizing and focus chrome deterministic from the
+ * current Compose window instead of relying on physical-panel resolution or device-specific
+ * constants. Screens can adopt these tokens progressively without changing mobile behavior.
+ */
+@Immutable
+data class TvPremiumWindowPolicy(
+    val horizontalSafeInsetDp: Float,
+    val verticalSafeInsetDp: Float,
+    val contentWidthFraction: Float,
+    val railLogoSizeDp: Float,
+    val focusBorderWidthDp: Float,
+)
+
+fun tvPremiumWindowPolicy(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+): TvPremiumWindowPolicy {
+    val width = screenWidthDp.coerceAtLeast(1).toFloat()
+    val height = screenHeightDp.coerceAtLeast(1).toFloat()
+
+    // Preserve the proven compact-TV protection already used by the shell, but make it a
+    // single adaptive policy that every v2.0 TV surface can share.
+    val widthPressure = ((1280f - width) / 320f).coerceIn(0f, 1f)
+    val heightPressure = ((720f - height) / 180f).coerceIn(0f, 1f)
+    val compactPressure = maxOf(widthPressure, heightPressure)
+
+    val contentWidthFraction = when {
+        width <= 960f || height <= 540f -> 0.96f
+        width <= 1280f || height <= 720f -> 0.95f
+        else -> 0.94f
+    }
+
+    return TvPremiumWindowPolicy(
+        horizontalSafeInsetDp = 8f + (10f * compactPressure),
+        verticalSafeInsetDp = 8f + (8f * compactPressure),
+        contentWidthFraction = contentWidthFraction,
+        railLogoSizeDp = (width / 32f).coerceIn(28f, 60f),
+        focusBorderWidthDp = 2f,
+    )
 }
 
 @Stable

@@ -116,6 +116,52 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
+    fun compactTvWindowGetsExtraSafeAreaWithoutShrinkingIdentity() {
+        val policy = tvPremiumWindowPolicy(screenWidthDp = 960, screenHeightDp = 540)
+
+        assertEquals(18f, policy.horizontalSafeInsetDp, 0.001f)
+        assertEquals(16f, policy.verticalSafeInsetDp, 0.001f)
+        assertEquals(0.96f, policy.contentWidthFraction, 0.001f)
+        assertEquals(30f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(2f, policy.focusBorderWidthDp, 0.001f)
+    }
+
+    @Test
+    fun standardTvWindowUsesStableSafeAreaAndBalancedContentWidth() {
+        val policy = tvPremiumWindowPolicy(screenWidthDp = 1280, screenHeightDp = 720)
+
+        assertEquals(8f, policy.horizontalSafeInsetDp, 0.001f)
+        assertEquals(8f, policy.verticalSafeInsetDp, 0.001f)
+        assertEquals(0.95f, policy.contentWidthFraction, 0.001f)
+        assertEquals(40f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(2f, policy.focusBorderWidthDp, 0.001f)
+    }
+
+    @Test
+    fun largeTvWindowCapsRailIdentityAndKeepsSafeMarginsDeterministic() {
+        val policy = tvPremiumWindowPolicy(screenWidthDp = 1920, screenHeightDp = 1080)
+
+        assertEquals(8f, policy.horizontalSafeInsetDp, 0.001f)
+        assertEquals(8f, policy.verticalSafeInsetDp, 0.001f)
+        assertEquals(0.94f, policy.contentWidthFraction, 0.001f)
+        assertEquals(60f, policy.railLogoSizeDp, 0.001f)
+    }
+
+    @Test
+    fun adaptiveStateExposesTheSameTvPremiumPolicyForScreens() {
+        val state = AdaptiveUiState(
+            deviceClass = HulkDeviceClass.TELEVISION,
+            windowWidthClass = HulkWindowWidthClass.EXPANDED,
+            navigationType = HulkNavigationType.RAIL,
+            inputMode = HulkInputMode.REMOTE,
+            screenWidthDp = 1280,
+            screenHeightDp = 720,
+        )
+
+        assertEquals(tvPremiumWindowPolicy(1280, 720), state.tvPremiumPolicy)
+    }
+
+    @Test
     fun keyboardAndRemoteSourcesAreClassifiedWithoutBitmaskOverlap() {
         assertEquals(HulkInputMode.KEYBOARD, classifyInputSource(InputDevice.SOURCE_KEYBOARD))
         assertEquals(HulkInputMode.REMOTE, classifyInputSource(InputDevice.SOURCE_DPAD))
