@@ -7,22 +7,24 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,11 +53,13 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.data.SettingsProStore
@@ -72,6 +76,28 @@ private const val SETTINGS_WEBSITE_URL = "https://hulksa.com/"
 private const val SETTINGS_ACCOUNT_URL = "https://hulksa.com/account/login.php"
 private const val SETTINGS_APPS_URL = "https://hulksa.com/hulk-app/"
 private const val SETTINGS_SUPPORT_URL = "https://wa.me/966506349935"
+
+private class SettingsFocusGraph {
+    val refreshAccount = FocusRequester()
+    val autoplayNext = FocusRequester()
+    val resumePlayback = FocusRequester()
+    val seekStep = FocusRequester()
+    val keepScreenOn = FocusRequester()
+    val autoHideControls = FocusRequester()
+    val wifiOnly = FocusRequester()
+    val downloadSchedule = FocusRequester()
+    val concurrentDownloads = FocusRequester()
+    val manageDownloads = FocusRequester()
+    val clearCache = FocusRequester()
+    val switchProfile = FocusRequester()
+    val refreshLibrary = FocusRequester()
+    val clearHistory = FocusRequester()
+    val subscribe = FocusRequester()
+    val customerAccount = FocusRequester()
+    val support = FocusRequester()
+    val apps = FocusRequester()
+    val logout = FocusRequester()
+}
 
 @Composable
 internal fun SettingsProScreen(
@@ -91,9 +117,8 @@ internal fun SettingsProScreen(
     val profileSwitch = LocalProfileSwitchRequester.current
     val settingsStore = remember(context) { SettingsProStore(context) }
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
-    val subscriptionRefreshRequester = remember { FocusRequester() }
-    val playbackFirstRequester = remember { FocusRequester() }
+    val scrollState = rememberScrollState()
+    val focus = remember { SettingsFocusGraph() }
     var playback by remember(state.account?.username) { mutableStateOf(settingsStore.playbackSettings()) }
     var cacheBytes by remember { mutableLongStateOf(0L) }
 
@@ -106,7 +131,7 @@ internal fun SettingsProScreen(
     }
 
     LaunchedEffect(Unit) {
-        listState.scrollToItem(0)
+        scrollState.scrollTo(0)
         cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
     }
 
@@ -114,278 +139,349 @@ internal fun SettingsProScreen(
     val downloadedBytes = remember(state.downloads) {
         state.downloads.sumOf { download -> maxOf(download.bytesDownloaded, 0L) }
     }
+    val historyAvailable = state.history.isNotEmpty()
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(if (isTv) .88f else 1f)
-                .widthIn(max = if (isTv) 940.dp else 680.dp),
-            contentPadding = PaddingValues(
-                start = if (isTv) 18.dp else 14.dp,
-                end = if (isTv) 18.dp else 14.dp,
-                top = if (isTv) 20.dp else 16.dp,
-                bottom = if (isTv) 44.dp else 86.dp,
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                if (isTv) {
+                    Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+                } else {
+                    Modifier
+                },
             ),
-            verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 11.dp),
+    ) {
+        val expandedLayout = isTv || maxWidth >= 720.dp
+        val metricColumns = if (maxWidth >= 720.dp) 4 else 2
+        val horizontalPadding = when {
+            isTv -> (maxWidth * .035f).coerceIn(24.dp, 64.dp)
+            maxWidth >= 1000.dp -> 40.dp
+            maxWidth >= 600.dp -> 24.dp
+            else -> 14.dp
+        }
+        val topPadding = if (expandedLayout) 24.dp else 16.dp
+        val bottomPadding = if (isTv) 56.dp else 96.dp
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(
+                    start = horizontalPadding,
+                    end = horizontalPadding,
+                    top = topPadding,
+                    bottom = bottomPadding,
+                ),
+            verticalArrangement = Arrangement.spacedBy(if (expandedLayout) 18.dp else 12.dp),
         ) {
-            item(key = "settings_header") {
-                SettingsHeader(isTv = isTv)
-            }
+            SettingsHeader(expanded = expandedLayout)
 
-            item(key = "subscription") {
-                SettingsPanel(title = "بيانات الاشتراك", isTv = isTv, emphasized = true) {
-                    SubscriptionSummary(account = account, isTv = isTv)
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = if (state.isAccountRefreshing) "جاري تحديث بيانات الاشتراك" else "تحديث بيانات الاشتراك",
-                        value = if (state.isAccountRefreshing) "..." else "تحديث",
-                        accentValue = true,
-                        enabled = account != null,
-                        isTv = isTv,
-                        focusRequester = subscriptionRefreshRequester,
-                        upRequester = FocusRequester.Cancel,
-                        downRequester = playbackFirstRequester,
-                        onFocused = {
-                            if (isTv) {
-                                scope.launch { listState.animateScrollToItem(0) }
-                            }
-                        },
-                        onClick = {
-                            if (!state.isAccountRefreshing) onRefreshAccount()
-                        },
-                    )
-                }
-            }
-
-            item(key = "playback") {
-                SettingsPanel(title = "التشغيل", isTv = isTv) {
-                    SettingsMenuRow(
-                        label = "تشغيل الحلقة التالية",
-                        value = settingsToggleLabel(playback.autoplayNextEpisode),
-                        accentValue = playback.autoplayNextEpisode,
-                        isTv = isTv,
-                        focusRequester = playbackFirstRequester,
-                        upRequester = subscriptionRefreshRequester,
-                        onClick = {
-                            playback = settingsStore.setAutoplayNextEpisode(!playback.autoplayNextEpisode)
-                            toast("تم تحديث تشغيل الحلقة التالية")
-                        },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "استكمال المشاهدة",
-                        value = settingsToggleLabel(playback.resumePlayback),
-                        accentValue = playback.resumePlayback,
-                        isTv = isTv,
-                        onClick = {
-                            playback = settingsStore.setResumePlayback(!playback.resumePlayback)
-                            toast("تم تحديث استكمال المشاهدة")
-                        },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "التقديم والترجيع",
-                        value = "${playback.seekStepSeconds} ث",
-                        isTv = isTv,
-                        onClick = {
-                            playback = settingsStore.cycleSeekStep()
-                            toast("التقديم والترجيع ${playback.seekStepSeconds} ثانية")
-                        },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "ابقاء الشاشة اثناء التشغيل",
-                        value = settingsToggleLabel(playback.keepScreenOn),
-                        accentValue = playback.keepScreenOn,
-                        isTv = isTv,
-                        onClick = {
-                            playback = settingsStore.setKeepScreenOn(!playback.keepScreenOn)
-                        },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "اخفاء ادوات التحكم تلقائيا",
-                        value = settingsToggleLabel(playback.autoHideControls),
-                        accentValue = playback.autoHideControls,
-                        isTv = isTv,
-                        onClick = {
-                            playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
-                        },
-                    )
-                }
-            }
-
-            item(key = "downloads_storage") {
-                SettingsPanel(title = "التنزيلات والتخزين", isTv = isTv) {
-                    StorageSummary(
-                        downloadedBytes = downloadedBytes,
-                        cacheBytes = cacheBytes,
-                        isTv = isTv,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "التنزيل عبر واي فاي فقط",
-                        value = settingsToggleLabel(state.downloadSettings.wifiOnly),
-                        accentValue = state.downloadSettings.wifiOnly,
-                        isTv = isTv,
-                        onClick = onToggleWifiOnly,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "جدولة التنزيل",
-                        value = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NIGHT) "2 ليلا" else "الان",
-                        isTv = isTv,
-                        onClick = onToggleDownloadSchedule,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "التنزيلات المتزامنة",
-                        value = state.downloadSettings.concurrentDownloads.toString(),
-                        isTv = isTv,
-                        onClick = onCycleConcurrentDownloads,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "ادارة التنزيلات",
-                        value = "",
-                        accentValue = true,
-                        isTv = isTv,
-                        onClick = onOpenDownloads,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "مسح الكاش",
-                        value = settingsFormatBytes(cacheBytes),
-                        isTv = isTv,
-                        onClick = {
+            SettingsPanel(title = "بيانات الاشتراك", expanded = expandedLayout, emphasized = true) {
+                SubscriptionSummary(
+                    account = account,
+                    expanded = expandedLayout,
+                    columns = metricColumns,
+                )
+                SettingsDivider(
+                    verticalPadding = if (expandedLayout) 18.dp else 14.dp,
+                )
+                SettingsMenuRow(
+                    label = if (state.isAccountRefreshing) "جاري تحديث بيانات الاشتراك" else "تحديث بيانات الاشتراك",
+                    value = if (state.isAccountRefreshing) "..." else "تحديث",
+                    accentValue = true,
+                    enabled = account != null || state.isAccountRefreshing,
+                    expanded = expandedLayout,
+                    focusRequester = focus.refreshAccount,
+                    upRequester = FocusRequester.Cancel,
+                    downRequester = focus.autoplayNext,
+                    onFocused = {
+                        if (isTv) {
                             scope.launch {
-                                withContext(Dispatchers.IO) { clearSettingsCache(context) }
-                                cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
-                                toast("تم مسح الكاش")
+                                // Let Compose finish moving focus, then make the page header
+                                // the authoritative top anchor instead of the focused row.
+                                yield()
+                                scrollState.scrollTo(0)
                             }
-                        },
-                    )
-                }
+                        }
+                    },
+                    onClick = {
+                        if (!state.isAccountRefreshing) onRefreshAccount()
+                    },
+                )
             }
 
-            item(key = "account_content") {
-                SettingsPanel(title = "الحساب", isTv = isTv) {
-                    SettingsMenuRow(
-                        label = "تغيير المستخدم",
-                        value = "",
-                        accentValue = true,
-                        isTv = isTv,
-                        onClick = profileSwitch,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "تحديث المكتبة",
-                        value = "",
-                        isTv = isTv,
-                        onClick = onRefreshLibrary,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "مسح سجل المشاهدة",
-                        value = if (state.history.isEmpty()) "فارغ" else "",
-                        enabled = state.history.isNotEmpty(),
-                        isTv = isTv,
-                        onClick = onClearHistory,
-                    )
-                }
+            SettingsPanel(title = "التشغيل", expanded = expandedLayout) {
+                SettingsMenuRow(
+                    label = "تشغيل الحلقة التالية",
+                    value = settingsToggleLabel(playback.autoplayNextEpisode),
+                    accentValue = playback.autoplayNextEpisode,
+                    expanded = expandedLayout,
+                    focusRequester = focus.autoplayNext,
+                    upRequester = focus.refreshAccount,
+                    downRequester = focus.resumePlayback,
+                    onClick = {
+                        playback = settingsStore.setAutoplayNextEpisode(!playback.autoplayNextEpisode)
+                        toast("تم تحديث تشغيل الحلقة التالية")
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "استكمال المشاهدة",
+                    value = settingsToggleLabel(playback.resumePlayback),
+                    accentValue = playback.resumePlayback,
+                    expanded = expandedLayout,
+                    focusRequester = focus.resumePlayback,
+                    upRequester = focus.autoplayNext,
+                    downRequester = focus.seekStep,
+                    onClick = {
+                        playback = settingsStore.setResumePlayback(!playback.resumePlayback)
+                        toast("تم تحديث استكمال المشاهدة")
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "التقديم والترجيع",
+                    value = "${playback.seekStepSeconds} ث",
+                    expanded = expandedLayout,
+                    focusRequester = focus.seekStep,
+                    upRequester = focus.resumePlayback,
+                    downRequester = focus.keepScreenOn,
+                    onClick = {
+                        playback = settingsStore.cycleSeekStep()
+                        toast("التقديم والترجيع ${playback.seekStepSeconds} ثانية")
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "إبقاء الشاشة أثناء التشغيل",
+                    value = settingsToggleLabel(playback.keepScreenOn),
+                    accentValue = playback.keepScreenOn,
+                    expanded = expandedLayout,
+                    focusRequester = focus.keepScreenOn,
+                    upRequester = focus.seekStep,
+                    downRequester = focus.autoHideControls,
+                    onClick = {
+                        playback = settingsStore.setKeepScreenOn(!playback.keepScreenOn)
+                    },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "إخفاء أدوات التحكم تلقائيًا",
+                    value = settingsToggleLabel(playback.autoHideControls),
+                    accentValue = playback.autoHideControls,
+                    expanded = expandedLayout,
+                    focusRequester = focus.autoHideControls,
+                    upRequester = focus.keepScreenOn,
+                    downRequester = focus.wifiOnly,
+                    onClick = {
+                        playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
+                    },
+                )
             }
 
-            item(key = "services") {
-                SettingsPanel(title = "الخدمات", isTv = isTv) {
-                    SettingsMenuRow(
-                        label = "الاشتراك او التجديد",
-                        value = "",
-                        accentValue = true,
-                        isTv = isTv,
-                        onClick = { open(SETTINGS_WEBSITE_URL) },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "حساب العميل",
-                        value = "",
-                        isTv = isTv,
-                        onClick = { open(SETTINGS_ACCOUNT_URL) },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "الدعم الفني",
-                        value = "",
-                        isTv = isTv,
-                        onClick = { open(SETTINGS_SUPPORT_URL) },
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "مركز التطبيقات",
-                        value = "",
-                        isTv = isTv,
-                        onClick = { open(SETTINGS_APPS_URL) },
-                    )
-                }
+            SettingsPanel(title = "التنزيلات والتخزين", expanded = expandedLayout) {
+                StorageSummary(
+                    downloadedBytes = downloadedBytes,
+                    cacheBytes = cacheBytes,
+                    expanded = expandedLayout,
+                )
+                SettingsDivider(
+                    verticalPadding = if (expandedLayout) 18.dp else 14.dp,
+                )
+                SettingsMenuRow(
+                    label = "التنزيل عبر Wi-Fi فقط",
+                    value = settingsToggleLabel(state.downloadSettings.wifiOnly),
+                    accentValue = state.downloadSettings.wifiOnly,
+                    expanded = expandedLayout,
+                    focusRequester = focus.wifiOnly,
+                    upRequester = focus.autoHideControls,
+                    downRequester = focus.downloadSchedule,
+                    onClick = onToggleWifiOnly,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "جدولة التنزيل",
+                    value = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NIGHT) "2 ليلًا" else "الآن",
+                    expanded = expandedLayout,
+                    focusRequester = focus.downloadSchedule,
+                    upRequester = focus.wifiOnly,
+                    downRequester = focus.concurrentDownloads,
+                    onClick = onToggleDownloadSchedule,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "التنزيلات المتزامنة",
+                    value = state.downloadSettings.concurrentDownloads.toString(),
+                    expanded = expandedLayout,
+                    focusRequester = focus.concurrentDownloads,
+                    upRequester = focus.downloadSchedule,
+                    downRequester = focus.manageDownloads,
+                    onClick = onCycleConcurrentDownloads,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "إدارة التنزيلات",
+                    value = "",
+                    accentValue = true,
+                    expanded = expandedLayout,
+                    focusRequester = focus.manageDownloads,
+                    upRequester = focus.concurrentDownloads,
+                    downRequester = focus.clearCache,
+                    onClick = onOpenDownloads,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "مسح الكاش",
+                    value = settingsFormatBytes(cacheBytes),
+                    expanded = expandedLayout,
+                    focusRequester = focus.clearCache,
+                    upRequester = focus.manageDownloads,
+                    downRequester = focus.switchProfile,
+                    onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { clearSettingsCache(context) }
+                            cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
+                            toast("تم مسح الكاش")
+                        }
+                    },
+                )
             }
 
-            item(key = "device_app") {
-                SettingsPanel(title = "حول التطبيق", isTv = isTv) {
-                    SettingsInfoRow("HULK SA", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", isTv)
-                    SettingsDivider()
-                    SettingsInfoRow("Android", "${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}", isTv)
-                    SettingsDivider()
-                    SettingsInfoRow(
-                        "الجهاز",
-                        "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
-                        isTv,
-                    )
-                    SettingsDivider()
-                    SettingsMenuRow(
-                        label = "تسجيل الخروج",
-                        value = "",
-                        isTv = isTv,
-                        onClick = onLogout,
-                    )
-                }
+            SettingsPanel(title = "الحساب", expanded = expandedLayout) {
+                SettingsMenuRow(
+                    label = "تغيير المستخدم",
+                    value = "",
+                    accentValue = true,
+                    expanded = expandedLayout,
+                    focusRequester = focus.switchProfile,
+                    upRequester = focus.clearCache,
+                    downRequester = focus.refreshLibrary,
+                    onClick = profileSwitch,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "تحديث المكتبة",
+                    value = "",
+                    expanded = expandedLayout,
+                    focusRequester = focus.refreshLibrary,
+                    upRequester = focus.switchProfile,
+                    downRequester = if (historyAvailable) focus.clearHistory else focus.subscribe,
+                    onClick = onRefreshLibrary,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "مسح سجل المشاهدة",
+                    value = if (state.history.isEmpty()) "فارغ" else "",
+                    enabled = historyAvailable,
+                    expanded = expandedLayout,
+                    focusRequester = focus.clearHistory,
+                    upRequester = focus.refreshLibrary,
+                    downRequester = focus.subscribe,
+                    onClick = {
+                        if (isTv) focus.refreshLibrary.requestFocus()
+                        onClearHistory()
+                    },
+                )
+            }
+
+            SettingsPanel(title = "الخدمات", expanded = expandedLayout) {
+                SettingsMenuRow(
+                    label = "الاشتراك أو التجديد",
+                    value = "",
+                    accentValue = true,
+                    expanded = expandedLayout,
+                    focusRequester = focus.subscribe,
+                    upRequester = if (historyAvailable) focus.clearHistory else focus.refreshLibrary,
+                    downRequester = focus.customerAccount,
+                    onClick = { open(SETTINGS_WEBSITE_URL) },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "حساب العميل",
+                    value = "",
+                    expanded = expandedLayout,
+                    focusRequester = focus.customerAccount,
+                    upRequester = focus.subscribe,
+                    downRequester = focus.support,
+                    onClick = { open(SETTINGS_ACCOUNT_URL) },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "الدعم الفني",
+                    value = "",
+                    expanded = expandedLayout,
+                    focusRequester = focus.support,
+                    upRequester = focus.customerAccount,
+                    downRequester = focus.apps,
+                    onClick = { open(SETTINGS_SUPPORT_URL) },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "مركز التطبيقات",
+                    value = "",
+                    expanded = expandedLayout,
+                    focusRequester = focus.apps,
+                    upRequester = focus.support,
+                    downRequester = focus.logout,
+                    onClick = { open(SETTINGS_APPS_URL) },
+                )
+            }
+
+            SettingsPanel(title = "حول التطبيق", expanded = expandedLayout) {
+                SettingsInfoRow("HULK SA", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", expandedLayout)
+                SettingsDivider()
+                SettingsInfoRow("Android", "${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}", expandedLayout)
+                SettingsDivider()
+                SettingsInfoRow(
+                    "الجهاز",
+                    "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
+                    expandedLayout,
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "تسجيل الخروج",
+                    value = "",
+                    expanded = expandedLayout,
+                    focusRequester = focus.logout,
+                    upRequester = focus.apps,
+                    downRequester = FocusRequester.Cancel,
+                    onClick = onLogout,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SettingsHeader(isTv: Boolean) {
+private fun SettingsHeader(expanded: Boolean) {
     val colors = LocalHulkColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = if (isTv) 3.dp else 2.dp),
+            .padding(vertical = if (expanded) 5.dp else 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (expanded) 14.dp else 10.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(if (isTv) 48.dp else 42.dp)
+                .size(if (expanded) 54.dp else 44.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF171912))
-                .border(1.dp, colors.gold.copy(alpha = .28f), CircleShape),
+                .background(Color(0xFF171812))
+                .border(1.dp, colors.gold.copy(alpha = .34f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Rounded.Settings,
                 contentDescription = null,
                 tint = colors.goldBright,
-                modifier = Modifier.size(if (isTv) 25.dp else 23.dp),
+                modifier = Modifier.size(if (expanded) 28.dp else 23.dp),
             )
         }
         Text(
-            text = "الاعدادات",
+            text = "الإعدادات",
             color = colors.text,
-            fontSize = if (isTv) 27.sp else 23.sp,
+            fontSize = if (expanded) 30.sp else 24.sp,
             fontWeight = FontWeight.Black,
         )
     }
@@ -394,76 +490,97 @@ private fun SettingsHeader(isTv: Boolean) {
 @Composable
 private fun SettingsPanel(
     title: String,
-    isTv: Boolean,
+    expanded: Boolean,
     emphasized: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(if (isTv) 20.dp else 16.dp)
+    val shape = RoundedCornerShape(if (expanded) 22.dp else 17.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (emphasized) Color(0xFF141610) else Color(0xFF11130F))
+            .background(if (emphasized) Color(0xFF14150F) else Color(0xFF10110E))
             .border(
                 width = 1.dp,
-                color = colors.gold.copy(alpha = if (emphasized) .28f else .13f),
+                color = colors.gold.copy(alpha = if (emphasized) .34f else .11f),
                 shape = shape,
             )
-            .padding(horizontal = if (isTv) 18.dp else 14.dp, vertical = if (isTv) 15.dp else 13.dp),
+            .padding(
+                horizontal = if (expanded) 24.dp else 16.dp,
+                vertical = if (expanded) 20.dp else 15.dp,
+            ),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (expanded) 11.dp else 9.dp),
         ) {
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(if (isTv) 21.dp else 18.dp)
+                    .height(if (expanded) 25.dp else 20.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(colors.goldBright.copy(alpha = if (emphasized) .95f else .65f)),
             )
             Text(
                 text = title,
                 color = colors.text,
-                fontSize = if (isTv) 19.sp else 16.sp,
+                fontSize = if (expanded) 22.sp else 18.sp,
                 fontWeight = FontWeight.Black,
             )
         }
-        Spacer(Modifier.height(if (isTv) 11.dp else 8.dp))
+        Spacer(Modifier.height(if (expanded) 16.dp else 12.dp))
         content()
     }
 }
 
 @Composable
-private fun SubscriptionSummary(account: AccountInfo?, isTv: Boolean) {
+private fun SubscriptionSummary(
+    account: AccountInfo?,
+    expanded: Boolean,
+    columns: Int,
+) {
     val colors = LocalHulkColors.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (expanded) 18.dp else 12.dp),
     ) {
         Column(Modifier.weight(1f)) {
             Text(
+                text = "الحساب",
+                color = colors.textMuted,
+                fontSize = if (expanded) 12.sp else 10.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
                 text = account?.username?.let(::maskedSettingsUsername) ?: "—",
                 color = colors.text,
-                fontSize = if (isTv) 16.sp else 14.sp,
+                fontSize = if (expanded) 18.sp else 15.sp,
                 fontWeight = FontWeight.Bold,
             )
+        }
+        Column(horizontalAlignment = Alignment.End) {
             Text(
-                text = if (account?.isTrial == true) "تجريبي" else "HULK SA",
+                text = "الحالة",
                 color = colors.textMuted,
-                fontSize = if (isTv) 10.sp else 9.sp,
+                fontSize = if (expanded) 12.sp else 10.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = settingsSubscriptionStatus(account),
+                color = colors.goldBright,
+                fontSize = if (expanded) 14.sp else 12.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.gold.copy(alpha = .10f))
+                    .border(1.dp, colors.gold.copy(alpha = .24f), RoundedCornerShape(50))
+                    .padding(horizontal = if (expanded) 12.dp else 10.dp, vertical = 5.dp),
             )
         }
-        Text(
-            text = settingsSubscriptionStatus(account),
-            color = colors.goldBright,
-            fontSize = if (isTv) 13.sp else 12.sp,
-            fontWeight = FontWeight.Black,
-        )
     }
-    Spacer(Modifier.height(if (isTv) 13.dp else 10.dp))
+    Spacer(Modifier.height(if (expanded) 18.dp else 14.dp))
     val metrics = listOf(
         "تاريخ الانتهاء" to settingsExpiryDate(account),
         "المتبقي" to settingsRemaining(account),
@@ -474,53 +591,58 @@ private fun SubscriptionSummary(account: AccountInfo?, isTv: Boolean) {
             null -> "—"
         },
     )
-    val columns = if (isTv) 4 else 2
-    Column(verticalArrangement = Arrangement.spacedBy(if (isTv) 8.dp else 7.dp)) {
-        metrics.chunked(columns).forEach { rowMetrics ->
+    val safeColumns = columns.coerceIn(1, metrics.size)
+    Column(verticalArrangement = Arrangement.spacedBy(if (expanded) 10.dp else 8.dp)) {
+        metrics.chunked(safeColumns).forEach { rowMetrics ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (expanded) 12.dp else 8.dp),
             ) {
                 rowMetrics.forEach { (label, value) ->
-                    SettingsMetric(label, value, isTv, Modifier.weight(1f))
+                    SettingsMetric(label, value, expanded, Modifier.weight(1f))
                 }
-                repeat(columns - rowMetrics.size) { Spacer(Modifier.weight(1f)) }
+                repeat(safeColumns - rowMetrics.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
 
 @Composable
-private fun StorageSummary(downloadedBytes: Long, cacheBytes: Long, isTv: Boolean) {
+private fun StorageSummary(downloadedBytes: Long, cacheBytes: Long, expanded: Boolean) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (expanded) 12.dp else 8.dp),
     ) {
-        SettingsMetric("التنزيلات", settingsFormatBytes(downloadedBytes), isTv, Modifier.weight(1f))
-        SettingsMetric("الكاش", settingsFormatBytes(cacheBytes), isTv, Modifier.weight(1f))
+        SettingsMetric("التنزيلات", settingsFormatBytes(downloadedBytes), expanded, Modifier.weight(1f))
+        SettingsMetric("الكاش", settingsFormatBytes(cacheBytes), expanded, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun SettingsMetric(label: String, value: String, isTv: Boolean, modifier: Modifier = Modifier) {
+private fun SettingsMetric(label: String, value: String, expanded: Boolean, modifier: Modifier = Modifier) {
     val colors = LocalHulkColors.current
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(if (isTv) 12.dp else 10.dp))
-            .background(Color(0xFF181A14))
-            .padding(horizontal = if (isTv) 11.dp else 9.dp, vertical = if (isTv) 9.dp else 8.dp),
+            .heightIn(min = if (expanded) 76.dp else 64.dp)
+            .clip(RoundedCornerShape(if (expanded) 14.dp else 11.dp))
+            .background(Color(0xFF181914))
+            .padding(
+                horizontal = if (expanded) 15.dp else 11.dp,
+                vertical = if (expanded) 13.dp else 10.dp,
+            ),
     ) {
         Text(
             text = label,
             color = colors.textMuted,
-            fontSize = if (isTv) 9.sp else 8.sp,
+            fontSize = if (expanded) 12.sp else 10.sp,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(if (expanded) 7.dp else 5.dp))
         Text(
             text = value,
             color = colors.text,
-            fontSize = if (isTv) 12.sp else 11.sp,
+            fontSize = if (expanded) 16.sp else 14.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -534,7 +656,7 @@ private fun SettingsMenuRow(
     value: String,
     accentValue: Boolean = false,
     enabled: Boolean = true,
-    isTv: Boolean,
+    expanded: Boolean,
     focusRequester: FocusRequester? = null,
     upRequester: FocusRequester? = null,
     downRequester: FocusRequester? = null,
@@ -543,7 +665,7 @@ private fun SettingsMenuRow(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 11.dp else 10.dp)
+    val shape = RoundedCornerShape(if (expanded) 13.dp else 11.dp)
     val focusModifier = Modifier
         .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
         .focusProperties {
@@ -554,13 +676,14 @@ private fun SettingsMenuRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = if (expanded) 62.dp else 54.dp)
             .then(focusModifier)
-            .graphicsLayer { alpha = if (enabled) 1f else .42f }
+            .graphicsLayer { alpha = if (enabled) 1f else .38f }
             .clip(shape)
-            .background(if (focused) colors.gold.copy(alpha = .12f) else Color.Transparent)
+            .background(if (focused) colors.gold.copy(alpha = .13f) else Color.Transparent)
             .border(
                 width = 1.dp,
-                color = if (focused) colors.goldBright.copy(alpha = .80f) else Color.Transparent,
+                color = if (focused) colors.goldBright.copy(alpha = .86f) else Color.Transparent,
                 shape = shape,
             )
             .onFocusChanged { state ->
@@ -571,59 +694,67 @@ private fun SettingsMenuRow(
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .focusable(enabled = enabled)
             .padding(
-                horizontal = if (isTv) 13.dp else 10.dp,
-                vertical = if (isTv) 12.dp else 11.dp,
+                horizontal = if (expanded) 16.dp else 12.dp,
+                vertical = if (expanded) 14.dp else 12.dp,
             ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (expanded) 16.dp else 12.dp),
     ) {
         Text(
             text = label,
             color = colors.text,
-            fontSize = if (isTv) 13.sp else 12.sp,
+            fontSize = if (expanded) 16.sp else 14.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
-            maxLines = 1,
+            maxLines = if (expanded) 1 else 2,
             overflow = TextOverflow.Ellipsis,
         )
         if (value.isNotBlank()) {
             Text(
                 text = value,
                 color = if (accentValue) colors.goldBright else colors.textMuted,
-                fontSize = if (isTv) 11.sp else 10.sp,
+                fontSize = if (expanded) 13.sp else 12.sp,
                 fontWeight = if (accentValue) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF1A1C15))
-                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                    .background(
+                        if (focused) colors.gold.copy(alpha = .10f) else Color(0xFF1A1C16),
+                    )
+                    .padding(
+                        horizontal = if (expanded) 11.dp else 9.dp,
+                        vertical = if (expanded) 6.dp else 5.dp,
+                    ),
             )
         }
     }
 }
 
 @Composable
-private fun SettingsInfoRow(label: String, value: String, isTv: Boolean) {
+private fun SettingsInfoRow(label: String, value: String, expanded: Boolean) {
     val colors = LocalHulkColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (isTv) 13.dp else 10.dp, vertical = if (isTv) 11.dp else 9.dp),
+            .padding(
+                horizontal = if (expanded) 16.dp else 12.dp,
+                vertical = if (expanded) 14.dp else 11.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (expanded) 16.dp else 12.dp),
     ) {
         Text(
             text = label,
             color = colors.textMuted,
-            fontSize = if (isTv) 11.sp else 10.sp,
-            modifier = Modifier.weight(.34f),
+            fontSize = if (expanded) 13.sp else 11.sp,
+            modifier = Modifier.weight(.30f),
         )
         Text(
             text = value,
             color = colors.text,
-            fontSize = if (isTv) 12.sp else 11.sp,
+            fontSize = if (expanded) 15.sp else 13.sp,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(.66f),
+            modifier = Modifier.weight(.70f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -631,14 +762,17 @@ private fun SettingsInfoRow(label: String, value: String, isTv: Boolean) {
 }
 
 @Composable
-private fun SettingsDivider() {
+private fun SettingsDivider(
+    verticalPadding: Dp = 0.dp,
+    horizontalInset: Dp = 12.dp,
+) {
     val colors = LocalHulkColors.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp)
+            .padding(horizontal = horizontalInset, vertical = verticalPadding)
             .height(1.dp)
-            .background(colors.textMuted.copy(alpha = .07f)),
+            .background(colors.textMuted.copy(alpha = .09f)),
     )
 }
 
@@ -648,7 +782,7 @@ private fun maskedSettingsUsername(username: String): String {
     val clean = username.trim()
     if (clean.isBlank()) return "—"
     val visible = clean.takeLast(minOf(4, clean.length))
-    return "الحساب ••••$visible"
+    return "\u200E••••$visible\u200E"
 }
 
 private fun settingsSubscriptionStatus(account: AccountInfo?): String {
@@ -679,7 +813,8 @@ private fun settingsRemaining(account: AccountInfo?): String {
 
 private fun settingsConnectionUsage(account: AccountInfo?): String {
     account ?: return "—"
-    val maxConnections = account.maxConnections.coerceAtLeast(1)
+    val maxConnections = account.maxConnections
+    if (maxConnections <= 0) return "—"
     val currentConnections = account.activeConnections
         .coerceAtLeast(1)
         .coerceAtMost(maxConnections)
