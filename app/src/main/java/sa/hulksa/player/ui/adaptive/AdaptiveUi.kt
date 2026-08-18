@@ -70,11 +70,20 @@ data class TvPremiumWindowPolicy(
     val horizontalSafeInsetDp: Float,
     val verticalSafeInsetDp: Float,
     val contentWidthFraction: Float,
-    val railLogoSizeDp: Float,
-    val railExpandedWidthDp: Float,
     val railCollapsedWidthDp: Float,
-    val railItemMinHeightDp: Float,
-    val railItemVerticalPaddingDp: Float,
+    val railExpandedWidthDp: Float,
+    val railLogoSizeDp: Float,
+    val railItemHeightDp: Float,
+    val railIconSizeDp: Float,
+    val railLabelSizeSp: Float,
+    val railOuterHorizontalPaddingDp: Float,
+    val railItemHorizontalPaddingDp: Float,
+    val railIconLabelGapDp: Float,
+    val railLogoItemGapDp: Float,
+    val railItemGapDp: Float,
+    val railTopPaddingDp: Float,
+    val railBottomPaddingDp: Float,
+    val railCornerRadiusDp: Float,
     val focusBorderWidthDp: Float,
     val focusScale: Float,
 )
@@ -85,6 +94,7 @@ fun tvPremiumWindowPolicy(
 ): TvPremiumWindowPolicy {
     val width = screenWidthDp.coerceAtLeast(1).toFloat()
     val height = screenHeightDp.coerceAtLeast(1).toFloat()
+    val shortSide = minOf(width, height)
 
     // Compact TV canvases need extra protection from overscan. Larger canvases keep a stable
     // living-room margin while allowing the content to use most of the available width.
@@ -95,37 +105,45 @@ fun tvPremiumWindowPolicy(
     val compactTv = width <= 960f || height <= 540f
     val standardTv = !compactTv && (width <= 1280f || height <= 720f)
 
-    val contentWidthFraction = when {
-        compactTv -> 0.96f
-        standardTv -> 0.95f
-        else -> 0.94f
-    }
+    // These rail calculations intentionally preserve the already-qualified shell proportions.
+    // v2.0 centralizes them here so every TV surface can share one deterministic source of truth.
+    val railCollapsedWidth = (width / 14f).coerceIn(88f, 102f)
+    val railExpandedWidth = (width / 6.2f).coerceIn(194f, 236f)
+    val railLogoSize = (shortSide / 10f).coerceIn(54f, 78f)
+    val railItemHeight = (height / 14.5f).coerceIn(46f, 56f)
+    val railIconSize = (height / 30f).coerceIn(23f, 28f)
+    val railLabelSize = (height / 50f).coerceIn(14f, 17f)
+    val railOuterHorizontalPadding = (railCollapsedWidth * .11f).coerceIn(9f, 12f)
+    val railItemHorizontalPadding = (railExpandedWidth * .064f).coerceIn(12f, 15f)
+    val railIconLabelGap = (railExpandedWidth * .052f).coerceIn(10f, 13f)
+    val railLogoItemGap = (height / 72f).coerceIn(9f, 15f)
+    val railItemGap = (height / 300f).coerceIn(2f, 4f)
+    val railTopPadding = (height / 28f).coerceIn(20f, 30f)
+    val railBottomPadding = (height / 36f).coerceIn(16f, 24f)
+    val railCornerRadius = (railItemHeight * .25f).coerceIn(11f, 14f)
 
     return TvPremiumWindowPolicy(
         horizontalSafeInsetDp = 8f + (10f * compactPressure),
         verticalSafeInsetDp = 8f + (8f * compactPressure),
-        contentWidthFraction = contentWidthFraction,
-        railLogoSizeDp = (width / 32f).coerceIn(28f, 60f),
-        railExpandedWidthDp = when {
-            compactTv -> 188f
-            standardTv -> 212f
-            else -> 236f
+        contentWidthFraction = when {
+            compactTv -> 0.96f
+            standardTv -> 0.95f
+            else -> 0.94f
         },
-        railCollapsedWidthDp = when {
-            compactTv -> 64f
-            standardTv -> 68f
-            else -> 72f
-        },
-        railItemMinHeightDp = when {
-            compactTv -> 44f
-            standardTv -> 48f
-            else -> 52f
-        },
-        railItemVerticalPaddingDp = when {
-            compactTv -> 8f
-            standardTv -> 9f
-            else -> 10f
-        },
+        railCollapsedWidthDp = railCollapsedWidth,
+        railExpandedWidthDp = railExpandedWidth,
+        railLogoSizeDp = railLogoSize,
+        railItemHeightDp = railItemHeight,
+        railIconSizeDp = railIconSize,
+        railLabelSizeSp = railLabelSize,
+        railOuterHorizontalPaddingDp = railOuterHorizontalPadding,
+        railItemHorizontalPaddingDp = railItemHorizontalPadding,
+        railIconLabelGapDp = railIconLabelGap,
+        railLogoItemGapDp = railLogoItemGap,
+        railItemGapDp = railItemGap,
+        railTopPaddingDp = railTopPadding,
+        railBottomPaddingDp = railBottomPadding,
+        railCornerRadiusDp = railCornerRadius,
         focusBorderWidthDp = 2f,
         focusScale = when {
             compactTv -> 1.02f

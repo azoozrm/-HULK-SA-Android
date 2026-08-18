@@ -117,49 +117,52 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
-    fun compactTvWindowGetsExtraSafeAreaAndCompactRailTokens() {
+    fun compactTvWindowGetsExtraSafeAreaAndQualifiedRailMetrics() {
         val policy = tvPremiumWindowPolicy(screenWidthDp = 960, screenHeightDp = 540)
 
         assertEquals(18f, policy.horizontalSafeInsetDp, 0.001f)
         assertEquals(16f, policy.verticalSafeInsetDp, 0.001f)
         assertEquals(0.96f, policy.contentWidthFraction, 0.001f)
-        assertEquals(30f, policy.railLogoSizeDp, 0.001f)
-        assertEquals(188f, policy.railExpandedWidthDp, 0.001f)
-        assertEquals(64f, policy.railCollapsedWidthDp, 0.001f)
-        assertEquals(44f, policy.railItemMinHeightDp, 0.001f)
-        assertEquals(8f, policy.railItemVerticalPaddingDp, 0.001f)
+        assertEquals(88f, policy.railCollapsedWidthDp, 0.001f)
+        assertEquals(194f, policy.railExpandedWidthDp, 0.001f)
+        assertEquals(54f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(46f, policy.railItemHeightDp, 0.001f)
+        assertEquals(23f, policy.railIconSizeDp, 0.001f)
+        assertEquals(14f, policy.railLabelSizeSp, 0.001f)
         assertEquals(2f, policy.focusBorderWidthDp, 0.001f)
         assertEquals(1.02f, policy.focusScale, 0.001f)
     }
 
     @Test
-    fun standardTvWindowUsesStableSafeAreaAndBalancedRailTokens() {
+    fun standardTvWindowPreservesQualifiedShellProportions() {
         val policy = tvPremiumWindowPolicy(screenWidthDp = 1280, screenHeightDp = 720)
 
         assertEquals(8f, policy.horizontalSafeInsetDp, 0.001f)
         assertEquals(8f, policy.verticalSafeInsetDp, 0.001f)
         assertEquals(0.95f, policy.contentWidthFraction, 0.001f)
-        assertEquals(40f, policy.railLogoSizeDp, 0.001f)
-        assertEquals(212f, policy.railExpandedWidthDp, 0.001f)
-        assertEquals(68f, policy.railCollapsedWidthDp, 0.001f)
-        assertEquals(48f, policy.railItemMinHeightDp, 0.001f)
-        assertEquals(9f, policy.railItemVerticalPaddingDp, 0.001f)
+        assertEquals(91.42857f, policy.railCollapsedWidthDp, 0.001f)
+        assertEquals(206.45161f, policy.railExpandedWidthDp, 0.001f)
+        assertEquals(72f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(49.65517f, policy.railItemHeightDp, 0.001f)
+        assertEquals(24f, policy.railIconSizeDp, 0.001f)
+        assertEquals(14.4f, policy.railLabelSizeSp, 0.001f)
         assertEquals(2f, policy.focusBorderWidthDp, 0.001f)
         assertEquals(1.025f, policy.focusScale, 0.001f)
     }
 
     @Test
-    fun largeTvWindowCapsIdentityAndKeepsPremiumRailComfort() {
+    fun largeTvWindowCapsRailIdentityAndSpacing() {
         val policy = tvPremiumWindowPolicy(screenWidthDp = 1920, screenHeightDp = 1080)
 
         assertEquals(8f, policy.horizontalSafeInsetDp, 0.001f)
         assertEquals(8f, policy.verticalSafeInsetDp, 0.001f)
         assertEquals(0.94f, policy.contentWidthFraction, 0.001f)
-        assertEquals(60f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(102f, policy.railCollapsedWidthDp, 0.001f)
         assertEquals(236f, policy.railExpandedWidthDp, 0.001f)
-        assertEquals(72f, policy.railCollapsedWidthDp, 0.001f)
-        assertEquals(52f, policy.railItemMinHeightDp, 0.001f)
-        assertEquals(10f, policy.railItemVerticalPaddingDp, 0.001f)
+        assertEquals(78f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(56f, policy.railItemHeightDp, 0.001f)
+        assertEquals(28f, policy.railIconSizeDp, 0.001f)
+        assertEquals(17f, policy.railLabelSizeSp, 0.001f)
         assertEquals(1.03f, policy.focusScale, 0.001f)
     }
 
