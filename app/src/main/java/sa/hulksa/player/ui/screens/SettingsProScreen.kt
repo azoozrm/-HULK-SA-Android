@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,7 +57,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
@@ -77,6 +81,12 @@ private const val SETTINGS_ACCOUNT_URL = "https://hulksa.com/account/login.php"
 private const val SETTINGS_APPS_URL = "https://hulksa.com/hulk-app/"
 private const val SETTINGS_SUPPORT_URL = "https://wa.me/966506349935"
 
+private enum class SettingsConfirmation {
+    CLEAR_HISTORY,
+    RESET_PLAYBACK,
+    LOGOUT,
+}
+
 private class SettingsFocusGraph {
     val refreshAccount = FocusRequester()
     val autoplayNext = FocusRequester()
@@ -84,6 +94,7 @@ private class SettingsFocusGraph {
     val seekStep = FocusRequester()
     val keepScreenOn = FocusRequester()
     val autoHideControls = FocusRequester()
+    val resetPlayback = FocusRequester()
     val wifiOnly = FocusRequester()
     val downloadSchedule = FocusRequester()
     val concurrentDownloads = FocusRequester()
@@ -121,6 +132,7 @@ internal fun SettingsProScreen(
     val focus = remember { SettingsFocusGraph() }
     var playback by remember(state.account?.username) { mutableStateOf(settingsStore.playbackSettings()) }
     var cacheBytes by remember { mutableLongStateOf(0L) }
+    var pendingConfirmation by remember { mutableStateOf<SettingsConfirmation?>(null) }
 
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -130,9 +142,29 @@ internal fun SettingsProScreen(
         runCatching { uriHandler.openUri(url) }
     }
 
+    fun restoreFocusAfterDialog(requester: FocusRequester) {
+        if (!isTv) return
+        scope.launch {
+            delay(90L)
+            runCatching { requester.requestFocus() }
+        }
+    }
+
     LaunchedEffect(Unit) {
-        scrollState.scrollTo(0)
         cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
+    }
+
+    LaunchedEffect(isTv) {
+        scrollState.scrollTo(0)
+        if (isTv) {
+            yield()
+            val focused = runCatching { focus.refreshAccount.requestFocus() }.getOrDefault(false)
+            if (!focused) {
+                delay(40L)
+                runCatching { focus.refreshAccount.requestFocus() }
+            }
+            scrollState.scrollTo(0)
+        }
     }
 
     val account = state.account
@@ -273,10 +305,20 @@ internal fun SettingsProScreen(
                     expanded = expandedLayout,
                     focusRequester = focus.autoHideControls,
                     upRequester = focus.keepScreenOn,
-                    downRequester = focus.wifiOnly,
+                    downRequester = focus.resetPlayback,
                     onClick = {
                         playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
                     },
+                )
+                SettingsDivider()
+                SettingsMenuRow(
+                    label = "إعادة ضبط إعدادات التشغيل",
+                    value = "",
+                    expanded = expandedLayout,
+                    focusRequester = focus.resetPlayback,
+                    upRequester = focus.autoHideControls,
+                    downRequester = focus.wifiOnly,
+                    onClick = { pendingConfirmation = SettingsConfirmation.RESET_PLAYBACK },
                 )
             }
 
@@ -295,7 +337,7 @@ internal fun SettingsProScreen(
                     accentValue = state.downloadSettings.wifiOnly,
                     expanded = expandedLayout,
                     focusRequester = focus.wifiOnly,
-                    upRequester = focus.autoHideControls,
+                    upRequester = focus.resetPlayback,
                     downRequester = focus.downloadSchedule,
                     onClick = onToggleWifiOnly,
                 )
@@ -378,10 +420,7 @@ internal fun SettingsProScreen(
                     focusRequester = focus.clearHistory,
                     upRequester = focus.refreshLibrary,
                     downRequester = focus.subscribe,
-                    onClick = {
-                        if (isTv) focus.refreshLibrary.requestFocus()
-                        onClearHistory()
-                    },
+                    onClick = { pendingConfirmation = SettingsConfirmation.CLEAR_HISTORY },
                 )
             }
 
@@ -446,10 +485,207 @@ internal fun SettingsProScreen(
                     focusRequester = focus.logout,
                     upRequester = focus.apps,
                     downRequester = FocusRequester.Cancel,
-                    onClick = onLogout,
+                    onClick = { pendingConfirmation = SettingsConfirmation.LOGOUT },
                 )
             }
         }
+
+        pendingConfirmation?.let { confirmation ->
+            val (title, message, confirmLabel) = when (confirmation) {
+                SettingsConfirmation.CLEAR_HISTORY -> Triple(
+                    "مسح سجل المشاهدة؟",
+                    "سيتم حذف سجل المشاهدة لهذا المستخدم، " +
+                        "ولا يمكن التراجع عن هذا الإجراء.",
+                    "مسح السجل",
+                )
+
+                SettingsConfirmation.RESET_PLAYBACK -> Triple(
+                    "إعادة ضبط إعدادات التشغيل؟",
+                    "ستعود إعدادات التشغيل إلى قيمها الافتراضية دون التأثير على الحساب " +
+                        "أو التنزيلات أو سجل المشاهدة.",
+                    "إعادة الضبط",
+                )
+
+                SettingsConfirmation.LOGOUT -> Triple(
+                    "تسجيل الخروج؟",
+                    "سيتم إنهاء جلسة هذا المستخدم وستحتاج إلى تسجيل الدخول مرة أخرى.",
+                    "تسجيل الخروج",
+                )
+            }
+
+            SettingsConfirmationDialog(
+                title = title,
+                message = message,
+                confirmLabel = confirmLabel,
+                isTv = isTv,
+                expanded = expandedLayout,
+                onDismiss = {
+                    pendingConfirmation = null
+                    val requester = when (confirmation) {
+                        SettingsConfirmation.CLEAR_HISTORY -> focus.clearHistory
+                        SettingsConfirmation.RESET_PLAYBACK -> focus.resetPlayback
+                        SettingsConfirmation.LOGOUT -> focus.logout
+                    }
+                    restoreFocusAfterDialog(requester)
+                },
+                onConfirm = {
+                    pendingConfirmation = null
+                    when (confirmation) {
+                        SettingsConfirmation.CLEAR_HISTORY -> {
+                            onClearHistory()
+                            restoreFocusAfterDialog(focus.refreshLibrary)
+                        }
+
+                        SettingsConfirmation.RESET_PLAYBACK -> {
+                            playback = settingsStore.resetPlaybackSettings()
+                            toast("تمت إعادة ضبط إعدادات التشغيل")
+                            restoreFocusAfterDialog(focus.resetPlayback)
+                        }
+
+                        SettingsConfirmation.LOGOUT -> onLogout()
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsConfirmationDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    isTv: Boolean,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val cancelRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isTv) {
+        if (isTv) {
+            delay(90L)
+            runCatching { cancelRequester.requestFocus() }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(if (expanded) 48.dp else 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val shape = RoundedCornerShape(if (expanded) 24.dp else 19.dp)
+            Column(
+                modifier = Modifier
+                    .widthIn(max = if (expanded) 620.dp else 460.dp)
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(Color(0xFF13140F))
+                    .border(1.dp, colors.gold.copy(alpha = .38f), shape)
+                    .padding(
+                        horizontal = if (expanded) 28.dp else 20.dp,
+                        vertical = if (expanded) 26.dp else 20.dp,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(if (expanded) 18.dp else 14.dp),
+            ) {
+                Text(
+                    text = title,
+                    color = colors.text,
+                    fontSize = if (expanded) 23.sp else 19.sp,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    text = message,
+                    color = colors.textMuted,
+                    fontSize = if (expanded) 15.sp else 14.sp,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(if (expanded) 12.dp else 9.dp),
+                ) {
+                    SettingsDialogAction(
+                        label = confirmLabel,
+                        primary = true,
+                        expanded = expanded,
+                        modifier = Modifier.weight(1f),
+                        onClick = onConfirm,
+                    )
+                    SettingsDialogAction(
+                        label = "إلغاء",
+                        primary = false,
+                        expanded = expanded,
+                        modifier = Modifier.weight(1f),
+                        focusRequester = cancelRequester,
+                        onClick = onDismiss,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsDialogAction(
+    label: String,
+    primary: Boolean,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (expanded) 13.dp else 11.dp)
+
+    Box(
+        modifier = modifier
+            .heightIn(min = if (expanded) 56.dp else 50.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                up = FocusRequester.Cancel
+                down = FocusRequester.Cancel
+            }
+            .clip(shape)
+            .background(
+                when {
+                    focused -> colors.gold.copy(alpha = .18f)
+                    primary -> colors.gold.copy(alpha = .10f)
+                    else -> Color.White.copy(alpha = .04f)
+                },
+            )
+            .border(
+                width = 1.dp,
+                color = when {
+                    focused -> colors.goldBright.copy(alpha = .90f)
+                    primary -> colors.gold.copy(alpha = .28f)
+                    else -> Color.White.copy(alpha = .07f)
+                },
+                shape = shape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = if (expanded) 16.dp else 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (primary || focused) colors.goldBright else colors.text,
+            fontSize = if (expanded) 15.sp else 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -479,7 +715,7 @@ private fun SettingsHeader(expanded: Boolean) {
             )
         }
         Text(
-            text = "الإعدادات",
+            text = "الاعدادات",
             color = colors.text,
             fontSize = if (expanded) 30.sp else 24.sp,
             fontWeight = FontWeight.Black,

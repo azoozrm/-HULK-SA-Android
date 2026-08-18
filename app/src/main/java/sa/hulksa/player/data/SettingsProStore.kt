@@ -72,6 +72,18 @@ class SettingsProStore(context: Context) {
         return playbackSettings()
     }
 
+    @Synchronized
+    fun resetPlaybackSettings(): SettingsProPlaybackSettings {
+        preferences.edit()
+            .remove(KEY_AUTOPLAY_NEXT)
+            .remove(KEY_RESUME_PLAYBACK)
+            .remove(KEY_SEEK_STEP_SECONDS)
+            .remove(KEY_KEEP_SCREEN_ON)
+            .remove(KEY_AUTO_HIDE_CONTROLS)
+            .commit()
+        return playbackSettings()
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "hulk_settings_pro_v1"
         const val KEY_AUTOPLAY_NEXT = "autoplay_next_episode"
