@@ -23,11 +23,12 @@ jobs:
           set -euo pipefail
           python3 tools/v190_settings_fix.py
           git diff --check
-          grep -q 'SettingsPanel(title = "بيانات الاشتراك"' app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt
-          grep -q '"البث النشط"' app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt
-          grep -q 'SimpleDateFormat("yyyy/MM/dd", Locale.US)' app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt
-          grep -q 'onFocused = {' app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt
-          grep -q 'enabled = account != null' app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt
+          file='app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt'
+          grep -q 'SettingsPanel(title = "بيانات الاشتراك"' "$file"
+          grep -q 'settingsConnectionUsage(account)' "$file"
+          grep -q 'SimpleDateFormat("yyyy/MM/dd", Locale.US)' "$file"
+          grep -q 'onFocused = {' "$file"
+          grep -q 'enabled = account != null' "$file"
 
       - name: Commit source fix and remove temporary helpers
         run: |
