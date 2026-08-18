@@ -729,7 +729,7 @@ private fun SmartSearchInput(
         HulkTextField(
             value = value,
             onValueChange = onValueChange,
-            label = "اكتب اسم فيلم او مسلسل او قناة…",
+            label = "قل اسم فيلم او مسلسل او اطلب ترشيحا",
             modifier = Modifier.fillMaxWidth().then(tvModifier),
             readOnly = isTv && !tvEditing,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
