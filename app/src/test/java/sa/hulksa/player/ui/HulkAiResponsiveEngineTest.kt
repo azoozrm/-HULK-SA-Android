@@ -83,11 +83,12 @@ class HulkAiResponsiveEngineTest {
         name = name,
         categoryId = "cat-${id % 10}",
         posterUrl = "https://example.com/$id.jpg",
-        backdropUrl = null,
         rating = rating,
         year = "2025",
-        genre = genre,
-        plot = "Real provider metadata",
+        containerExtension = null,
         addedAtEpochSeconds = added,
+        plot = "Real provider metadata",
+        genre = genre,
+        backdropUrl = null,
     )
 }
