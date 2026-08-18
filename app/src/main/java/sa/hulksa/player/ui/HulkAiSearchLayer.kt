@@ -64,7 +64,7 @@ import sa.hulksa.player.ui.screens.TvSearchFocusAction
 import sa.hulksa.player.ui.screens.tvSearchFocusAction
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
-private const val HULK_AI_QUERY_DEBOUNCE_MS = 180L
+private const val HULK_AI_QUERY_DEBOUNCE_MS = 140L
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -83,6 +83,8 @@ internal fun HulkAiSearchLayer(
     val imeVisible = WindowInsets.isImeVisible
     val query = state.searchQuery
     val trimmedQuery = query.trim()
+    val movieItems = state.catalogs[ContentType.MOVIE]?.items.orEmpty()
+    val seriesItems = state.catalogs[ContentType.SERIES]?.items.orEmpty()
     val inputRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
     val voiceRequester = remember { FocusRequester() }
@@ -90,9 +92,9 @@ internal fun HulkAiSearchLayer(
 
     val aiResult by produceState<HulkAiQueryResult?>(
         initialValue = null,
-        key1 = state.catalogs,
-        key2 = state.history,
-        key3 = state.favorites to trimmedQuery,
+        key1 = trimmedQuery,
+        key2 = movieItems,
+        key3 = Triple(seriesItems, state.history, state.favorites),
     ) {
         if (!isHulkAiRequest(trimmedQuery)) {
             value = null
@@ -102,8 +104,8 @@ internal fun HulkAiSearchLayer(
         value = withContext(Dispatchers.Default) {
             buildHulkAiQuerySuggestions(
                 rawQuery = trimmedQuery,
-                movies = state.catalogs[ContentType.MOVIE]?.items.orEmpty(),
-                series = state.catalogs[ContentType.SERIES]?.items.orEmpty(),
+                movies = movieItems,
+                series = seriesItems,
                 history = state.history,
                 favorites = state.favorites,
                 limit = if (isTv) 30 else 24,
@@ -113,7 +115,10 @@ internal fun HulkAiSearchLayer(
 
     val result = aiResult
     val suggestions = result?.suggestions.orEmpty()
-    val catalogLoading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
+    val catalogLoading =
+        ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
+    val waitingForInitialCatalog =
+        catalogLoading && movieItems.isEmpty() && seriesItems.isEmpty()
 
     BackHandler(enabled = true) {
         if (imeVisible) {
@@ -198,22 +203,27 @@ internal fun HulkAiSearchLayer(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "HULK AI",
+                    "البحث",
                     color = colors.text,
                     fontSize = if (isTv) 28.sp else 22.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "اطلب ترشيحا طبيعيا وسنستخدم مكتبتك وتفضيلاتك الحقيقية فقط",
+                    "بحث ذكي في القنوات والافلام والمسلسلات",
                     color = colors.textMuted,
                     fontSize = if (isTv) 11.sp else 10.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            FocusButton("بحث عادي", { onSearch("") }, primary = false, compact = true, outlined = true)
+            InfoPill("HULK AI")
             if (isTv) {
-                FocusButton("الرئيسية", { onSelectDestination(MainDestination.HOME) }, primary = false, compact = true)
+                FocusButton(
+                    "الرئيسية",
+                    { onSelectDestination(MainDestination.HOME) },
+                    primary = false,
+                    compact = true,
+                )
             }
         }
 
@@ -235,7 +245,7 @@ internal fun HulkAiSearchLayer(
             HulkTextField(
                 value = query,
                 onValueChange = onSearch,
-                label = "مثال: رشح لي فيلم اكشن جديد عالي التقييم",
+                label = "اكتب اسم محتوى او اطلب ترشيحا مثل: رشح لي فيلم اكشن",
                 modifier = Modifier
                     .weight(1f)
                     .then(inputFocusModifier),
@@ -277,17 +287,30 @@ internal fun HulkAiSearchLayer(
         }
 
         when {
-            result == null || (catalogLoading && suggestions.isEmpty()) -> {
+            result == null -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     LoadingRing(label = "HULK AI يحلل طلبك…")
+                }
+            }
+            waitingForInitialCatalog && suggestions.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    LoadingRing(label = "جاري تجهيز مكتبتك…")
                 }
             }
             suggestions.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("لا توجد نتائج حقيقية مطابقة في مكتبتك", color = colors.text, fontWeight = FontWeight.Bold)
+                        Text(
+                            "لا توجد نتائج حقيقية مطابقة في مكتبتك",
+                            color = colors.text,
+                            fontWeight = FontWeight.Bold,
+                        )
                         Spacer(Modifier.height(5.dp))
-                        Text("جرب طلبا ابسط او اضغط بحث عادي", color = colors.textMuted, fontSize = 11.sp)
+                        Text(
+                            "جرب صياغة ابسط او امسح الطلب للبحث بالاسم",
+                            color = colors.textMuted,
+                            fontSize = 11.sp,
+                        )
                     }
                 }
             }
@@ -297,7 +320,7 @@ internal fun HulkAiSearchLayer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "ترشيحات HULK AI",
+                        "النتائج المقترحة",
                         color = colors.text,
                         fontSize = if (isTv) 19.sp else 16.sp,
                         fontWeight = FontWeight.Bold,
