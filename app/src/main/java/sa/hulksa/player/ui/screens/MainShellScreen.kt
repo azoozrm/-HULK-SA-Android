@@ -495,6 +495,9 @@ private fun CinematicNavigationRail(
         screenWidthDp = adaptiveUi.screenWidthDp,
         screenHeightDp = adaptiveUi.screenHeightDp,
     )
+    val primaryEntries = destinations.filterNot { it.destination == MainDestination.SETTINGS }
+    val profileRequester = remember { FocusRequester() }
+    val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
     val selectedRequester = destinationFocusRequesters.getValue(selected)
     val railWidth by animateDpAsState(
         targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
@@ -527,14 +530,25 @@ private fun CinematicNavigationRail(
     ) {
         BrandLogo(Modifier.size(metrics.logoSizeDp.dp))
         Spacer(Modifier.height(metrics.logoItemGapDp.dp))
-        destinations.filterNot { it.destination == MainDestination.SETTINGS }.forEach { entry ->
+        primaryEntries.forEachIndexed { index, entry ->
+            val requester = destinationFocusRequesters.getValue(entry.destination)
+            val previousRequester = primaryEntries.getOrNull(index - 1)
+                ?.let { destinationFocusRequesters.getValue(it.destination) }
+            val nextRequester = primaryEntries.getOrNull(index + 1)
+                ?.let { destinationFocusRequesters.getValue(it.destination) }
+                ?: profileRequester
             NavigationItem(
                 entry = entry,
                 selected = selected == entry.destination,
                 expanded = expanded,
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
-                modifier = Modifier.focusRequester(destinationFocusRequesters.getValue(entry.destination)),
+                modifier = Modifier
+                    .focusRequester(requester)
+                    .focusProperties {
+                        previousRequester?.let { up = it }
+                        down = nextRequester
+                    },
             )
             Spacer(Modifier.height(metrics.itemGapDp.dp))
         }
@@ -548,6 +562,14 @@ private fun CinematicNavigationRail(
             expanded = expanded,
             metrics = metrics,
             onClick = onSwitchProfile,
+            modifier = Modifier
+                .focusRequester(profileRequester)
+                .focusProperties {
+                    primaryEntries.lastOrNull()?.let {
+                        up = destinationFocusRequesters.getValue(it.destination)
+                    }
+                    down = settingsRequester
+                },
         )
         Spacer(Modifier.height(metrics.itemGapDp.dp))
         Spacer(Modifier.weight(1f))
@@ -558,7 +580,9 @@ private fun CinematicNavigationRail(
                 expanded = expanded,
                 metrics = metrics,
                 onClick = { onSelect(entry.destination) },
-                modifier = Modifier.focusRequester(destinationFocusRequesters.getValue(entry.destination)),
+                modifier = Modifier
+                    .focusRequester(settingsRequester)
+                    .focusProperties { up = profileRequester },
             )
         }
         Spacer(Modifier.height((metrics.itemGapDp * 2f).dp))
@@ -579,18 +603,30 @@ private fun NavigationItem(
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val active = selected || showFocused
+    val shape = RoundedCornerShape(metrics.cornerRadiusDp.dp)
+    val focusBorderWidth = adaptiveUi.tvPremiumPolicy.focusBorderWidthDp.dp
+    val background = when {
+        showFocused -> colors.gold.copy(alpha = .19f)
+        selected -> colors.gold.copy(alpha = .11f)
+        else -> Color.Transparent
+    }
+    val borderWidth = when {
+        showFocused -> focusBorderWidth
+        selected -> 1.dp
+        else -> 0.dp
+    }
+    val borderColor = when {
+        showFocused -> colors.goldBright
+        selected -> colors.goldBright.copy(alpha = .38f)
+        else -> Color.Transparent
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(metrics.itemHeightDp.dp)
-            .clip(RoundedCornerShape(metrics.cornerRadiusDp.dp))
-            .background(
-                when {
-                    showFocused -> colors.gold
-                    selected -> colors.gold.copy(alpha = .13f)
-                    else -> Color.Transparent
-                },
-            )
+            .clip(shape)
+            .background(background)
+            .border(borderWidth, borderColor, shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = metrics.itemHorizontalPaddingDp.dp),
@@ -600,14 +636,14 @@ private fun NavigationItem(
         Icon(
             imageVector = entry.icon,
             contentDescription = entry.label,
-            tint = if (showFocused) Color.Black else if (active) colors.goldBright else colors.textMuted,
+            tint = if (active) colors.goldBright else colors.textMuted,
             modifier = Modifier.size(metrics.iconSizeDp.dp),
         )
         if (expanded) {
             Spacer(Modifier.width(metrics.iconLabelGapDp.dp))
             Text(
                 entry.label,
-                color = if (showFocused) Color.Black else if (active) colors.text else colors.textMuted,
+                color = if (active) colors.text else colors.textMuted,
                 fontSize = metrics.labelSizeSp.sp,
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
