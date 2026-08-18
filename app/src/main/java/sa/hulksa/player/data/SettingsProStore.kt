@@ -1,8 +1,6 @@
 package sa.hulksa.player.data
 
 import android.content.Context
-import sa.hulksa.player.model.ContentItem
-import sa.hulksa.player.model.ContentType
 
 data class SettingsProPlaybackSettings(
     val autoplayNextEpisode: Boolean = true,
@@ -23,14 +21,6 @@ internal fun nextSeekStepSeconds(current: Int): Int {
     return SETTINGS_PRO_SEEK_STEPS[(index + 1) % SETTINGS_PRO_SEEK_STEPS.size]
 }
 
-internal fun normalizedUserRating(value: Int?): Int? = value?.takeIf { it in 1..5 }
-
-internal fun userRatingPreferenceKey(
-    profileId: String,
-    type: ContentType,
-    contentId: Int,
-): String = "rating:${profileId.trim()}:${type.name}:$contentId"
-
 /**
  * v1.9 preferences that HULK SA can enforce locally without pretending to
  * control provider-side stream quality, audio or subtitle availability.
@@ -38,7 +28,6 @@ internal fun userRatingPreferenceKey(
 class SettingsProStore(context: Context) {
     private val appContext = context.applicationContext
     private val accountScope = AccountScopeStore(appContext)
-    private val profileStore = ProfileStore(appContext)
     private val preferences
         get() = accountScope.preferences(PREFERENCES_NAME)
 
@@ -82,34 +71,6 @@ class SettingsProStore(context: Context) {
         preferences.edit().putBoolean(KEY_AUTO_HIDE_CONTROLS, enabled).commit()
         return playbackSettings()
     }
-
-    fun userRating(item: ContentItem): Int? {
-        if (item.type == ContentType.LIVE) return null
-        val key = ratingKey(item)
-        if (!preferences.contains(key)) return null
-        return normalizedUserRating(preferences.getInt(key, 0))
-    }
-
-    /** Selecting the active score again clears it. */
-    @Synchronized
-    fun toggleUserRating(item: ContentItem, score: Int): Int? {
-        if (item.type == ContentType.LIVE) return null
-        val normalized = normalizedUserRating(score) ?: return userRating(item)
-        val key = ratingKey(item)
-        val current = userRating(item)
-        if (current == normalized) {
-            preferences.edit().remove(key).commit()
-            return null
-        }
-        preferences.edit().putInt(key, normalized).commit()
-        return normalized
-    }
-
-    private fun ratingKey(item: ContentItem): String = userRatingPreferenceKey(
-        profileId = profileStore.activeProfileId(),
-        type = item.type,
-        contentId = item.id,
-    )
 
     private companion object {
         const val PREFERENCES_NAME = "hulk_settings_pro_v1"

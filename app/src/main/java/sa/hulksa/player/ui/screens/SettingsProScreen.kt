@@ -5,19 +5,28 @@ import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,8 +39,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,13 +54,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
-import sa.hulksa.player.data.SettingsProPlaybackSettings
 import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.DownloadScheduleMode
 import sa.hulksa.player.ui.LocalProfileSwitchRequester
-import sa.hulksa.player.ui.components.BrandBadge
-import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.io.File
 import java.text.SimpleDateFormat
@@ -58,13 +68,6 @@ private const val SETTINGS_WEBSITE_URL = "https://hulksa.com/"
 private const val SETTINGS_ACCOUNT_URL = "https://hulksa.com/account/login.php"
 private const val SETTINGS_APPS_URL = "https://hulksa.com/hulk-app/"
 private const val SETTINGS_SUPPORT_URL = "https://wa.me/966506349935"
-
-private data class SettingsProAction(
-    val text: String,
-    val onClick: () -> Unit,
-    val primary: Boolean = false,
-    val enabled: Boolean = true,
-)
 
 @Composable
 internal fun SettingsProScreen(
@@ -86,9 +89,7 @@ internal fun SettingsProScreen(
     val settingsStore = remember(context) { SettingsProStore(context) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    var playback by remember(state.account?.username) {
-        mutableStateOf(settingsStore.playbackSettings())
-    }
+    var playback by remember(state.account?.username) { mutableStateOf(settingsStore.playbackSettings()) }
     var cacheBytes by remember { mutableLongStateOf(0L) }
 
     fun toast(message: String) {
@@ -99,12 +100,6 @@ internal fun SettingsProScreen(
         runCatching { uriHandler.openUri(url) }
     }
 
-    fun updateCacheSize() {
-        scope.launch {
-            cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
-        }
-    }
-
     LaunchedEffect(Unit) {
         listState.scrollToItem(0)
         cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
@@ -112,280 +107,254 @@ internal fun SettingsProScreen(
 
     val account = state.account
     val downloadedBytes = remember(state.downloads) {
-        state.downloads.sumOf { download ->
-            maxOf(download.bytesDownloaded, 0L)
-        }
+        state.downloads.sumOf { download -> maxOf(download.bytesDownloaded, 0L) }
     }
 
-    LazyColumn(
-        state = listState,
+    Box(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = if (isTv) 26.dp else 14.dp,
-            end = if (isTv) 26.dp else 14.dp,
-            top = if (isTv) 20.dp else 14.dp,
-            bottom = if (isTv) 38.dp else 78.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 18.dp else 14.dp),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        item(key = "settings_header") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                BrandBadge(Modifier.size(if (isTv) 58.dp else 46.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "الاعدادات",
-                        color = colors.text,
-                        fontSize = if (isTv) 28.sp else 23.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Text(
-                        "اشتراكك وتفضيلات المشاهدة والتخزين",
-                        color = colors.textMuted,
-                        fontSize = if (isTv) 12.sp else 10.sp,
-                    )
-                }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(if (isTv) .92f else 1f)
+                .widthIn(max = if (isTv) 1080.dp else 720.dp),
+            contentPadding = PaddingValues(
+                start = if (isTv) 22.dp else 14.dp,
+                end = if (isTv) 22.dp else 14.dp,
+                top = if (isTv) 22.dp else 16.dp,
+                bottom = if (isTv) 42.dp else 86.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+        ) {
+            item(key = "settings_header") {
+                SettingsHeader(isTv = isTv)
             }
-        }
 
-        item(key = "subscription") {
-            SettingsProSection(
-                title = "اشتراكي",
-                subtitle = "بيانات حقيقية من سيرفر HULK SA",
-                isTv = isTv,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            account?.username?.let(::maskedSettingsUsername) ?: "—",
-                            color = colors.text,
-                            fontSize = if (isTv) 16.sp else 14.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            if (account?.isTrial == true) "اشتراك تجريبي" else "اشتراك HULK SA",
-                            color = colors.goldBright,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    FocusButton(
-                        text = if (state.isAccountRefreshing) "جاري التحديث…" else "تحديث الاشتراك",
-                        onClick = onRefreshAccount,
+            item(key = "subscription") {
+                SettingsPanel(title = "اشتراكي", isTv = isTv) {
+                    SubscriptionSummary(account = account, isTv = isTv)
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = if (state.isAccountRefreshing) "جاري تحديث الاشتراك" else "تحديث بيانات الاشتراك",
+                        value = if (state.isAccountRefreshing) "..." else "تحديث",
                         enabled = !state.isAccountRefreshing && account != null,
-                        compact = true,
+                        isTv = isTv,
+                        onClick = onRefreshAccount,
                     )
                 }
-                Spacer(Modifier.height(12.dp))
-                SubscriptionMetricRows(account = account, isTv = isTv)
             }
-        }
 
-        item(key = "playback") {
-            SettingsProSection(
-                title = "التشغيل",
-                subtitle = "خيارات ينفذها المشغل داخل التطبيق فعليا",
-                isTv = isTv,
-            ) {
-                SettingsActionRows(
-                    isTv = isTv,
-                    actions = listOf(
-                        SettingsProAction(
-                            text = "الحلقة التالية: ${settingsToggleLabel(playback.autoplayNextEpisode)}",
-                            primary = playback.autoplayNextEpisode,
-                            onClick = {
-                                playback = settingsStore.setAutoplayNextEpisode(!playback.autoplayNextEpisode)
-                                toast("تم تحديث تشغيل الحلقة التالية.")
-                            },
-                        ),
-                        SettingsProAction(
-                            text = "استكمال المشاهدة: ${settingsToggleLabel(playback.resumePlayback)}",
-                            primary = playback.resumePlayback,
-                            onClick = {
-                                playback = settingsStore.setResumePlayback(!playback.resumePlayback)
-                                toast("تم تحديث استكمال المشاهدة.")
-                            },
-                        ),
-                        SettingsProAction(
-                            text = "التقديم والترجيع: ${playback.seekStepSeconds} ث",
-                            onClick = {
-                                playback = settingsStore.cycleSeekStep()
-                                toast("مدة التقديم والترجيع ${playback.seekStepSeconds} ثانية.")
-                            },
-                        ),
-                        SettingsProAction(
-                            text = "ابقاء الشاشة: ${settingsToggleLabel(playback.keepScreenOn)}",
-                            primary = playback.keepScreenOn,
-                            onClick = {
-                                playback = settingsStore.setKeepScreenOn(!playback.keepScreenOn)
-                                toast("تم تحديث ابقاء الشاشة اثناء المشاهدة.")
-                            },
-                        ),
-                        SettingsProAction(
-                            text = "اخفاء التحكم: ${settingsToggleLabel(playback.autoHideControls)}",
-                            primary = playback.autoHideControls,
-                            onClick = {
-                                playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
-                                toast("تم تحديث اخفاء عناصر التحكم.")
-                            },
-                        ),
-                    ),
-                )
-            }
-        }
-
-        item(key = "downloads_storage") {
-            SettingsProSection(
-                title = "التنزيلات والتخزين",
-                subtitle = "التحميلات محفوظة خارج الكاش ولا يحذفها مسح الكاش",
-                isTv = isTv,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    SettingsProMetric(
-                        label = "مساحة التنزيلات",
-                        value = settingsFormatBytes(downloadedBytes),
-                        modifier = Modifier.weight(1f),
+            item(key = "playback") {
+                SettingsPanel(title = "التشغيل", isTv = isTv) {
+                    SettingsMenuRow(
+                        label = "تشغيل الحلقة التالية",
+                        value = settingsToggleLabel(playback.autoplayNextEpisode),
+                        accentValue = playback.autoplayNextEpisode,
+                        isTv = isTv,
+                        onClick = {
+                            playback = settingsStore.setAutoplayNextEpisode(!playback.autoplayNextEpisode)
+                            toast("تم تحديث تشغيل الحلقة التالية")
+                        },
                     )
-                    SettingsProMetric(
-                        label = "حجم الكاش",
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "استكمال المشاهدة",
+                        value = settingsToggleLabel(playback.resumePlayback),
+                        accentValue = playback.resumePlayback,
+                        isTv = isTv,
+                        onClick = {
+                            playback = settingsStore.setResumePlayback(!playback.resumePlayback)
+                            toast("تم تحديث استكمال المشاهدة")
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "التقديم والترجيع",
+                        value = "${playback.seekStepSeconds} ث",
+                        isTv = isTv,
+                        onClick = {
+                            playback = settingsStore.cycleSeekStep()
+                            toast("التقديم والترجيع ${playback.seekStepSeconds} ثانية")
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "ابقاء الشاشة اثناء التشغيل",
+                        value = settingsToggleLabel(playback.keepScreenOn),
+                        accentValue = playback.keepScreenOn,
+                        isTv = isTv,
+                        onClick = {
+                            playback = settingsStore.setKeepScreenOn(!playback.keepScreenOn)
+                        },
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "اخفاء ادوات التحكم تلقائيا",
+                        value = settingsToggleLabel(playback.autoHideControls),
+                        accentValue = playback.autoHideControls,
+                        isTv = isTv,
+                        onClick = {
+                            playback = settingsStore.setAutoHideControls(!playback.autoHideControls)
+                        },
+                    )
+                }
+            }
+
+            item(key = "downloads_storage") {
+                SettingsPanel(title = "التنزيلات والتخزين", isTv = isTv) {
+                    StorageSummary(
+                        downloadedBytes = downloadedBytes,
+                        cacheBytes = cacheBytes,
+                        isTv = isTv,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "التنزيل عبر واي فاي فقط",
+                        value = settingsToggleLabel(state.downloadSettings.wifiOnly),
+                        accentValue = state.downloadSettings.wifiOnly,
+                        isTv = isTv,
+                        onClick = onToggleWifiOnly,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "جدولة التنزيل",
+                        value = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NIGHT) "2 ليلا" else "الان",
+                        isTv = isTv,
+                        onClick = onToggleDownloadSchedule,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "التنزيلات المتزامنة",
+                        value = state.downloadSettings.concurrentDownloads.toString(),
+                        isTv = isTv,
+                        onClick = onCycleConcurrentDownloads,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "ادارة التنزيلات",
+                        value = "فتح",
+                        accentValue = true,
+                        isTv = isTv,
+                        onClick = onOpenDownloads,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "مسح الكاش",
                         value = settingsFormatBytes(cacheBytes),
-                        modifier = Modifier.weight(1f),
+                        isTv = isTv,
+                        onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { clearSettingsCache(context) }
+                                cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
+                                toast("تم مسح الكاش")
+                            }
+                        },
                     )
                 }
-                Spacer(Modifier.height(12.dp))
-                SettingsActionRows(
-                    isTv = isTv,
-                    actions = listOf(
-                        SettingsProAction(
-                            text = "واي فاي فقط: ${settingsToggleLabel(state.downloadSettings.wifiOnly)}",
-                            primary = state.downloadSettings.wifiOnly,
-                            onClick = onToggleWifiOnly,
-                        ),
-                        SettingsProAction(
-                            text = if (state.downloadSettings.scheduleMode == DownloadScheduleMode.NIGHT) {
-                                "الجدولة: 2 ليلا"
-                            } else {
-                                "الجدولة: الان"
-                            },
-                            onClick = onToggleDownloadSchedule,
-                        ),
-                        SettingsProAction(
-                            text = "تحميلات متزامنة: ${state.downloadSettings.concurrentDownloads}",
-                            onClick = onCycleConcurrentDownloads,
-                        ),
-                        SettingsProAction(
-                            text = "ادارة التنزيلات",
-                            primary = true,
-                            onClick = onOpenDownloads,
-                        ),
-                        SettingsProAction(
-                            text = "مسح الكاش",
-                            onClick = {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { clearSettingsCache(context) }
-                                    cacheBytes = withContext(Dispatchers.IO) { settingsCacheBytes(context) }
-                                    toast("تم مسح الكاش بدون حذف التنزيلات او سجل المشاهدة.")
-                                }
-                            },
-                        ),
-                        SettingsProAction(
-                            text = "تحديث حجم الكاش",
-                            onClick = ::updateCacheSize,
-                        ),
-                    ),
-                )
             }
-        }
 
-        item(key = "profiles_content") {
-            SettingsProSection(
-                title = "الملفات والمحتوى",
-                subtitle = "ادارة الملف الشخصي والمكتبة المحلية",
-                isTv = isTv,
-            ) {
-                SettingsActionRows(
-                    isTv = isTv,
-                    actions = listOf(
-                        SettingsProAction("تغيير المستخدم", profileSwitch, primary = true),
-                        SettingsProAction("تحديث المكتبة", onRefreshLibrary),
-                        SettingsProAction(
-                            "مسح سجل المشاهدة",
-                            onClearHistory,
-                            enabled = state.history.isNotEmpty(),
-                        ),
-                    ),
-                )
+            item(key = "account_content") {
+                SettingsPanel(title = "الحساب والمحتوى", isTv = isTv) {
+                    SettingsMenuRow(
+                        label = "تغيير المستخدم",
+                        value = "فتح",
+                        accentValue = true,
+                        isTv = isTv,
+                        onClick = profileSwitch,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "تحديث المكتبة",
+                        value = "تحديث",
+                        isTv = isTv,
+                        onClick = onRefreshLibrary,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "مسح سجل المشاهدة",
+                        value = if (state.history.isEmpty()) "فارغ" else "مسح",
+                        enabled = state.history.isNotEmpty(),
+                        isTv = isTv,
+                        onClick = onClearHistory,
+                    )
+                }
             }
-        }
 
-        item(key = "ratings_help") {
-            SettingsProSection(
-                title = "تقييماتك",
-                subtitle = "تقييم 1 الى 5 لكل فيلم او مسلسل ومحفوظ بشكل مستقل لكل ملف شخصي",
-                isTv = isTv,
-            ) {
-                Text(
-                    "ستجد التقييم داخل صفحة تفاصيل الفيلم او المسلسل. اضغط نفس الدرجة مرة اخرى لمسح تقييمك.",
-                    color = colors.textMuted,
-                    fontSize = if (isTv) 12.sp else 10.sp,
-                    lineHeight = if (isTv) 19.sp else 16.sp,
-                )
+            item(key = "services") {
+                SettingsPanel(title = "خدمات HULK SA", isTv = isTv) {
+                    SettingsMenuRow("الاشتراك او التجديد", "فتح", true, true, isTv) { open(SETTINGS_WEBSITE_URL) }
+                    SettingsDivider()
+                    SettingsMenuRow("حساب العميل", "فتح", false, true, isTv) { open(SETTINGS_ACCOUNT_URL) }
+                    SettingsDivider()
+                    SettingsMenuRow("الدعم الفني", "فتح", false, true, isTv) { open(SETTINGS_SUPPORT_URL) }
+                    SettingsDivider()
+                    SettingsMenuRow("مركز التطبيقات", "فتح", false, true, isTv) { open(SETTINGS_APPS_URL) }
+                }
             }
-        }
 
-        item(key = "services") {
-            SettingsProSection(
-                title = "خدمات HULK SA",
-                subtitle = "روابط الخدمة الرسمية",
-                isTv = isTv,
-            ) {
-                SettingsActionRows(
-                    isTv = isTv,
-                    actions = listOf(
-                        SettingsProAction("اشتراك او تجديد", { open(SETTINGS_WEBSITE_URL) }, primary = true),
-                        SettingsProAction("حساب العميل", { open(SETTINGS_ACCOUNT_URL) }),
-                        SettingsProAction("الدعم الفني", { open(SETTINGS_SUPPORT_URL) }),
-                        SettingsProAction("مركز التطبيقات", { open(SETTINGS_APPS_URL) }),
-                    ),
-                )
-            }
-        }
-
-        item(key = "device_app") {
-            SettingsProSection(
-                title = "التطبيق والجهاز",
-                subtitle = "معلومات محلية فقط بدون عرض السيرفر او بيانات الدخول",
-                isTv = isTv,
-            ) {
-                SettingsProInfoLine("HULK SA", "${BuildConfig.VERSION_NAME}  •  ${BuildConfig.VERSION_CODE}")
-                SettingsProInfoLine("Android", "${Build.VERSION.RELEASE}  •  API ${Build.VERSION.SDK_INT}")
-                SettingsProInfoLine(
-                    "الجهاز",
-                    "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
-                )
-                Spacer(Modifier.height(10.dp))
-                SettingsActionRows(
-                    isTv = isTv,
-                    actions = listOf(SettingsProAction("تسجيل الخروج", onLogout)),
-                )
+            item(key = "device_app") {
+                SettingsPanel(title = "التطبيق والجهاز", isTv = isTv) {
+                    SettingsInfoRow("HULK SA", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", isTv)
+                    SettingsDivider()
+                    SettingsInfoRow("Android", "${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}", isTv)
+                    SettingsDivider()
+                    SettingsInfoRow(
+                        "الجهاز",
+                        "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
+                        isTv,
+                    )
+                    SettingsDivider()
+                    SettingsMenuRow(
+                        label = "تسجيل الخروج",
+                        value = "خروج",
+                        isTv = isTv,
+                        onClick = onLogout,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SettingsProSection(
+private fun SettingsHeader(isTv: Boolean) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = if (isTv) 4.dp else 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 11.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (isTv) 54.dp else 44.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF171812))
+                .border(1.dp, colors.gold.copy(alpha = .35f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Settings,
+                contentDescription = null,
+                tint = colors.goldBright,
+                modifier = Modifier.size(if (isTv) 29.dp else 24.dp),
+            )
+        }
+        Text(
+            text = "الاعدادات",
+            color = colors.text,
+            fontSize = if (isTv) 29.sp else 24.sp,
+            fontWeight = FontWeight.Black,
+        )
+    }
+}
+
+@Composable
+private fun SettingsPanel(
     title: String,
-    subtitle: String,
     isTv: Boolean,
     content: @Composable () -> Unit,
 ) {
@@ -393,77 +362,107 @@ private fun SettingsProSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(if (isTv) 20.dp else 16.dp))
-            .background(androidx.compose.ui.graphics.Color(0xFF11120E))
+            .clip(RoundedCornerShape(if (isTv) 18.dp else 15.dp))
+            .background(Color(0xFF11120E))
             .border(
-                1.dp,
-                colors.gold.copy(alpha = .22f),
-                RoundedCornerShape(if (isTv) 20.dp else 16.dp),
+                width = 1.dp,
+                color = colors.gold.copy(alpha = .20f),
+                shape = RoundedCornerShape(if (isTv) 18.dp else 15.dp),
             )
-            .padding(if (isTv) 20.dp else 15.dp),
+            .padding(horizontal = if (isTv) 20.dp else 14.dp, vertical = if (isTv) 16.dp else 13.dp),
     ) {
         Text(
-            title,
+            text = title,
             color = colors.text,
-            fontSize = if (isTv) 20.sp else 17.sp,
+            fontSize = if (isTv) 19.sp else 16.sp,
             fontWeight = FontWeight.Black,
         )
-        Text(
-            subtitle,
-            color = colors.textMuted,
-            fontSize = if (isTv) 11.sp else 9.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(if (isTv) 14.dp else 11.dp))
+        Spacer(Modifier.height(if (isTv) 11.dp else 8.dp))
         content()
     }
 }
 
 @Composable
-private fun SubscriptionMetricRows(account: AccountInfo?, isTv: Boolean) {
-    val values = listOf(
-        "الحالة" to settingsSubscriptionStatus(account),
+private fun SubscriptionSummary(account: AccountInfo?, isTv: Boolean) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = account?.username?.let(::maskedSettingsUsername) ?: "—",
+                color = colors.text,
+                fontSize = if (isTv) 16.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = if (account?.isTrial == true) "تجريبي" else "HULK SA",
+                color = colors.textMuted,
+                fontSize = if (isTv) 11.sp else 9.sp,
+            )
+        }
+        Text(
+            text = settingsSubscriptionStatus(account),
+            color = colors.goldBright,
+            fontSize = if (isTv) 14.sp else 12.sp,
+            fontWeight = FontWeight.Black,
+        )
+    }
+    Spacer(Modifier.height(if (isTv) 14.dp else 11.dp))
+    val metrics = listOf(
         "تاريخ الانتهاء" to settingsExpiryDate(account),
         "المتبقي" to settingsRemaining(account),
-        "الاتصالات" to account?.let { "${it.activeConnections} مستخدم · الحد ${it.maxConnections}" }.orEmpty().ifBlank { "—" },
+        "الاتصالات" to account?.let { "${it.activeConnections} / ${it.maxConnections}" }.orEmpty().ifBlank { "—" },
         "نوع الاشتراك" to when (account?.isTrial) {
             true -> "تجريبي"
             false -> "عادي"
             null -> "—"
         },
     )
-    val columns = if (isTv) 3 else 2
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        values.chunked(columns).forEach { rowValues ->
+    val columns = if (isTv) 4 else 2
+    Column(verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 8.dp)) {
+        metrics.chunked(columns).forEach { rowMetrics ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 9.dp),
             ) {
-                rowValues.forEach { (label, value) ->
-                    SettingsProMetric(label, value, Modifier.weight(1f))
+                rowMetrics.forEach { (label, value) ->
+                    SettingsMetric(label, value, isTv, Modifier.weight(1f))
                 }
-                repeat(columns - rowValues.size) { Spacer(Modifier.weight(1f)) }
+                repeat(columns - rowMetrics.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
 
 @Composable
-private fun SettingsProMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    val colors = LocalHulkColors.current
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(androidx.compose.ui.graphics.Color(0xFF191A15))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+private fun StorageSummary(downloadedBytes: Long, cacheBytes: Long, isTv: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 18.dp else 10.dp),
     ) {
-        Text(label, color = colors.textMuted, fontSize = 9.sp, maxLines = 1)
-        Spacer(Modifier.height(3.dp))
+        SettingsMetric("التنزيلات", settingsFormatBytes(downloadedBytes), isTv, Modifier.weight(1f))
+        SettingsMetric("الكاش", settingsFormatBytes(cacheBytes), isTv, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun SettingsMetric(label: String, value: String, isTv: Boolean, modifier: Modifier = Modifier) {
+    val colors = LocalHulkColors.current
+    Column(modifier = modifier.padding(vertical = 3.dp)) {
         Text(
-            value,
+            text = label,
+            color = colors.textMuted,
+            fontSize = if (isTv) 10.sp else 9.sp,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = value,
             color = colors.text,
-            fontSize = 12.sp,
+            fontSize = if (isTv) 13.sp else 12.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -472,49 +471,95 @@ private fun SettingsProMetric(label: String, value: String, modifier: Modifier =
 }
 
 @Composable
-private fun SettingsActionRows(isTv: Boolean, actions: List<SettingsProAction>) {
-    val columns = if (isTv) 3 else 2
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        actions.chunked(columns).forEach { rowActions ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
-            ) {
-                rowActions.forEach { action ->
-                    FocusButton(
-                        text = action.text,
-                        onClick = action.onClick,
-                        primary = action.primary,
-                        compact = true,
-                        enabled = action.enabled,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                repeat(columns - rowActions.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
+private fun SettingsMenuRow(
+    label: String,
+    value: String,
+    accentValue: Boolean = false,
+    enabled: Boolean = true,
+    isTv: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (isTv) 11.dp else 10.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
+            .clip(shape)
+            .background(if (focused) colors.gold.copy(alpha = .10f) else Color.Transparent)
+            .border(
+                width = 1.dp,
+                color = if (focused) colors.goldBright.copy(alpha = .85f) else Color.Transparent,
+                shape = shape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .focusable(enabled = enabled)
+            .padding(
+                horizontal = if (isTv) 14.dp else 10.dp,
+                vertical = if (isTv) 13.dp else 12.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = label,
+            color = colors.text,
+            fontSize = if (isTv) 14.sp else 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            color = if (accentValue) colors.goldBright else colors.textMuted,
+            fontSize = if (isTv) 12.sp else 11.sp,
+            fontWeight = if (accentValue) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
-private fun SettingsProInfoLine(label: String, value: String) {
+private fun SettingsInfoRow(label: String, value: String, isTv: Boolean) {
     val colors = LocalHulkColors.current
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (isTv) 14.dp else 10.dp, vertical = if (isTv) 12.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(label, color = colors.textMuted, fontSize = 10.sp, modifier = Modifier.weight(.35f))
         Text(
-            value,
+            text = label,
+            color = colors.textMuted,
+            fontSize = if (isTv) 12.sp else 11.sp,
+            modifier = Modifier.weight(.38f),
+        )
+        Text(
+            text = value,
             color = colors.text,
-            fontSize = 11.sp,
+            fontSize = if (isTv) 13.sp else 12.sp,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(.62f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(.65f),
         )
     }
+}
+
+@Composable
+private fun SettingsDivider() {
+    val colors = LocalHulkColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp)
+            .height(1.dp)
+            .background(colors.textMuted.copy(alpha = .10f)),
+    )
 }
 
 private fun settingsToggleLabel(enabled: Boolean): String = if (enabled) "مفعل" else "متوقف"
@@ -523,7 +568,7 @@ private fun maskedSettingsUsername(username: String): String {
     val clean = username.trim()
     if (clean.isBlank()) return "—"
     val visible = clean.takeLast(minOf(4, clean.length))
-    return "الحساب  ••••$visible"
+    return "الحساب ••••$visible"
 }
 
 private fun settingsSubscriptionStatus(account: AccountInfo?): String {

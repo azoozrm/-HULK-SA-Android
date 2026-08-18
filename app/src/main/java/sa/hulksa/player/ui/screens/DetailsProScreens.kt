@@ -143,7 +143,6 @@ fun MovieDetailsProScreen(
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
     val cancelDownloadRequester = remember(item.id) { FocusRequester() }
-    val ratingRequester = remember(item.id) { FocusRequester() }
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(relatedKeys) { List(relatedItems.size) { FocusRequester() } }
     var heroReturnRequester by remember(item.id) { mutableStateOf(playRequester) }
@@ -332,7 +331,7 @@ fun MovieDetailsProScreen(
                             actions = actions,
                             isTv = isTv,
                             upTarget = backRequester,
-                            downTarget = ratingRequester,
+                            downTarget = relatedRequesters.firstOrNull(),
                             onFocused = { heroReturnRequester = it },
                             wide = metrics.wideLayout,
                         )
@@ -370,17 +369,6 @@ fun MovieDetailsProScreen(
             }
         }
 
-        item(key = "movie_user_rating") {
-            UserRatingCard(
-                item = item,
-                isTv = isTv,
-                modifier = Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 8.dp),
-                firstFocusRequester = ratingRequester,
-                upRequester = heroReturnRequester,
-                downRequester = relatedRequesters.firstOrNull(),
-            )
-        }
-
         if (detailsProHasInformation(details)) {
             item(key = "movie_info") {
                 DetailsProInformationPanel(
@@ -402,7 +390,7 @@ fun MovieDetailsProScreen(
                     cardWidthDp = metrics.relatedCardWidthDp,
                     horizontalPaddingDp = metrics.horizontalPaddingDp,
                     requesters = relatedRequesters,
-                    upRequester = ratingRequester,
+                    upRequester = heroReturnRequester,
                     isFavorite = isRelatedFavorite,
                     onToggleFavorite = onToggleRelatedFavorite,
                     onOpen = onOpenRelated,
@@ -498,7 +486,6 @@ fun SeriesDetailsProScreen(
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
-    val ratingRequester = remember(series.id) { FocusRequester() }
     val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val seasonKeys = seasons.toList()
@@ -515,10 +502,9 @@ fun SeriesDetailsProScreen(
     val selectedSeasonRequester = seasonRequesters[selectedSeason]
         ?: seasons.firstOrNull()?.let(seasonRequesters::get)
     val firstEpisodeRequester = visibleEpisodes.firstOrNull()?.let { episodeTargets[it.id]?.card }
-    val ratingDownTarget = selectedSeasonRequester ?: firstEpisodeRequester
-    val heroDownTarget = ratingRequester
+    val heroDownTarget = selectedSeasonRequester ?: firstEpisodeRequester
     val hasMobileSeriesInfo = !isTv && detailsProHasInformation(details)
-    val episodeStartGridIndex = if (hasMobileSeriesInfo) 4 else 3
+    val episodeStartGridIndex = if (hasMobileSeriesInfo) 3 else 2
     val relatedGridIndex = episodeStartGridIndex + visibleEpisodes.size
 
     fun requestEpisodeAt(index: Int): Boolean {
@@ -764,20 +750,6 @@ fun SeriesDetailsProScreen(
                 }
             }
 
-            item(
-                key = "series_user_rating",
-                span = { GridItemSpan(maxLineSpan) },
-            ) {
-                UserRatingCard(
-                    item = series,
-                    isTv = isTv,
-                    modifier = Modifier.padding(horizontal = seriesHorizontalPaddingDp.dp, vertical = 8.dp),
-                    firstFocusRequester = ratingRequester,
-                    upRequester = heroReturnRequester,
-                    downRequester = ratingDownTarget,
-                )
-            }
-
             if (hasMobileSeriesInfo) {
                 item(
                     key = "series_info_mobile",
@@ -807,7 +779,7 @@ fun SeriesDetailsProScreen(
                     isTv = isTv,
                     horizontalPaddingDp = seriesHorizontalPaddingDp,
                     seasonRequesters = seasonRequesters,
-                    upRequester = ratingRequester,
+                    upRequester = heroReturnRequester,
                     downRequester = firstEpisodeRequester,
                     onSelectSeason = { selectedSeason = it },
                     errorMessage = errorMessage,
