@@ -1120,34 +1120,75 @@ private fun CinemaHero(
 ) {
     val colors = LocalHulkColors.current
     val configuration = LocalConfiguration.current
-    val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
+    val screenWidth = configuration.screenWidthDp
+    val screenHeight = configuration.screenHeightDp
+    val isPortraitPhone = !isTv && screenWidth < 600 && screenHeight > screenWidth
+    val isTablet = !isTv && screenWidth >= 600
+    val isLandscape = screenWidth > screenHeight
     val heroHeight = when {
-        isTv -> 374.dp
-        isPortraitPhone -> (configuration.screenHeightDp * .58f).coerceIn(420f, 520f).dp
-        else -> 288.dp
+        isTv -> (screenHeight * .57f).coerceIn(390f, 460f).dp
+        isPortraitPhone -> (screenHeight * .56f).coerceIn(430f, 520f).dp
+        isTablet && !isLandscape -> (screenHeight * .40f).coerceIn(370f, 440f).dp
+        isTablet -> (screenHeight * .66f).coerceIn(330f, 400f).dp
+        else -> (screenHeight * .78f).coerceIn(300f, 350f).dp
     }
+    val contentWidthFraction = when {
+        isTv -> .56f
+        isPortraitPhone -> 1f
+        isTablet && !isLandscape -> .72f
+        else -> .66f
+    }
+    val horizontalPadding = when {
+        isTv -> 30.dp
+        isTablet -> 24.dp
+        else -> 18.dp
+    }
+    val bottomPadding = if (isTv) 40.dp else 26.dp
+    val titleSize = when {
+        isTv -> 44.sp
+        isTablet -> 34.sp
+        else -> 30.sp
+    }
+    val titleLineHeight = when {
+        isTv -> 51.sp
+        isTablet -> 41.sp
+        else -> 36.sp
+    }
+    val actionHeight = if (isTv) 52.dp else 48.dp
+    val primaryMinWidth = if (isTv) 176.dp else 136.dp
+    val secondaryMinWidth = if (isTv) 154.dp else 126.dp
     val image = item.backdropUrl ?: item.posterUrl
+    val hasBackdrop = !item.backdropUrl.isNullOrBlank()
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
-            .background(Color(0xFF0A0B08)),
+            .background(Color(0xFF070805)),
     ) {
         if (!image.isNullOrBlank()) {
             AsyncImage(
                 model = image,
                 contentDescription = item.name,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = if (hasBackdrop) 1.025f else 1.06f
+                        scaleY = if (hasBackdrop) 1.025f else 1.06f
+                        alpha = if (hasBackdrop) 1f else .72f
+                    },
             )
         } else {
-            BrandLogo(Modifier.align(Alignment.Center).size(190.dp).graphicsLayer { alpha = .38f })
+            BrandLogo(Modifier.align(Alignment.Center).size(190.dp).graphicsLayer { alpha = .32f })
         }
+
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = .18f),
-                    .55f to Color.Transparent,
+                    0f to Color.Black.copy(alpha = .10f),
+                    .42f to Color.Transparent,
+                    .76f to Color.Black.copy(alpha = .28f),
                     1f to colors.background,
                 ),
             ),
@@ -1155,7 +1196,12 @@ private fun CinemaHero(
         Box(
             Modifier.fillMaxSize().background(
                 Brush.horizontalGradient(
-                    listOf(Color.Transparent, Color.Black.copy(alpha = .18f), colors.background.copy(alpha = .94f)),
+                    listOf(
+                        Color.Transparent,
+                        Color.Black.copy(alpha = .10f),
+                        Color.Black.copy(alpha = .50f),
+                        colors.background.copy(alpha = .98f),
+                    ),
                 ),
             ),
         )
@@ -1166,15 +1212,21 @@ private fun CinemaHero(
                 .fillMaxWidth()
                 .then(if (isTv) Modifier else Modifier.statusBarsPadding())
                 .padding(
-                    horizontal = if (isTv) 26.dp else 18.dp,
-                    vertical = if (isTv) 18.dp else 10.dp,
+                    horizontal = horizontalPadding,
+                    vertical = if (isTv) 20.dp else 11.dp,
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("الرئيسية", color = colors.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("توصيات ومحتوى جديد", color = colors.textMuted, fontSize = 11.sp)
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Black.copy(alpha = .26f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text("الرئيسية", color = Color.White, fontSize = if (isTv) 20.sp else 18.sp, fontWeight = FontWeight.Bold)
+                Text("تجربة HULK السينمائية", color = Color.White.copy(alpha = .70f), fontSize = 10.sp)
             }
+            Spacer(Modifier.weight(1f))
             if (isLoading) LoadingRing()
             Spacer(Modifier.width(10.dp))
             RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
@@ -1183,49 +1235,88 @@ private fun CinemaHero(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) .58f else 1f)
+                .fillMaxWidth(contentWidthFraction)
                 .padding(
-                    start = if (isTv) 27.dp else 18.dp,
-                    end = if (isTv) 27.dp else 18.dp,
-                    bottom = if (isTv) 38.dp else 24.dp,
+                    start = horizontalPadding,
+                    end = horizontalPadding,
+                    bottom = bottomPadding,
                 ),
         ) {
-            Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(5.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .width(if (isTv) 38.dp else 30.dp)
+                        .height(3.dp)
+                        .clip(CircleShape)
+                        .background(colors.goldBright),
+                )
+                Spacer(Modifier.width(9.dp))
+                Text("HULK CINEMA", color = Color.White.copy(alpha = .82f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(7.dp))
+                Text("•", color = colors.textMuted, fontSize = 10.sp)
+                Spacer(Modifier.width(7.dp))
+                Text("مختار لك", color = colors.goldBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(7.dp))
             Text(
                 item.name,
                 color = Color.White,
-                fontSize = if (isTv) 39.sp else 28.sp,
-                lineHeight = if (isTv) 47.sp else 34.sp,
+                fontSize = titleSize,
+                lineHeight = titleLineHeight,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(10.dp))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                maxItemsInEachRow = if (isTv) 5 else 3,
+                maxItemsInEachRow = if (isTv) 6 else 4,
             ) {
-                item.rating?.let { InfoPill("★ $it") }
-                item.genre?.takeIf(String::isNotBlank)?.let { InfoPill(it.take(27)) }
-                HomeHeroTechnicalPills(item, isTv = true)
+                InfoPill(if (item.type == ContentType.SERIES) "مسلسل" else "فيلم")
+                item.year?.takeIf(String::isNotBlank)?.let { InfoPill(it) }
+                item.rating?.takeIf(String::isNotBlank)?.let { InfoPill("★ $it") }
+                item.genre
+                    ?.split(',', '،', '/', '|')
+                    ?.firstOrNull { it.isNotBlank() }
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { InfoPill(it.take(24)) }
+                HomeHeroTechnicalPills(item, isTv = isTv)
             }
             item.plot?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.height(10.dp))
-                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(11.dp))
+                Text(
+                    it,
+                    color = Color.White.copy(alpha = .80f),
+                    fontSize = if (isTv) 13.sp else 12.sp,
+                    lineHeight = if (isTv) 20.sp else 18.sp,
+                    maxLines = if (isTv) 3 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.height(15.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FocusButton(
                     if (item.type == ContentType.SERIES) "عرض الحلقات" else "شاهد الان",
                     onOpen,
-                    modifier = watchModifier,
+                    modifier = watchModifier
+                        .height(actionHeight)
+                        .widthIn(min = primaryMinWidth),
                     compact = true,
                     onFocused = onFocused,
                 )
-                FocusButton(if (isFavorite) "★ في قائمتي" else "+ قائمتي", onToggleFavorite, primary = false, compact = true)
+                FocusButton(
+                    if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                    onToggleFavorite,
+                    modifier = Modifier
+                        .height(actionHeight)
+                        .widthIn(min = secondaryMinWidth),
+                    primary = false,
+                    compact = true,
+                    outlined = true,
+                )
             }
         }
     }
