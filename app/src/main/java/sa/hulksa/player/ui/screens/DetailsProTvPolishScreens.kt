@@ -211,10 +211,11 @@ private fun MovieDetailsProTvPolished(
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
     val cancelRequester = remember(item.id) { FocusRequester() }
+    val ratingRequester = remember(item.id) { FocusRequester() }
     val backRequester = remember(item.id) { FocusRequester() }
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(relatedKeys) { List(relatedItems.size) { FocusRequester() } }
-    val firstBelowRequester = relatedRequesters.firstOrNull()
+    val firstBelowRequester = ratingRequester
     val downloadFocusable = download?.status != OfflineStatus.COMPLETED
     val favoriteLeftTarget = when {
         downloadFocusable -> downloadRequester
@@ -454,6 +455,17 @@ private fun MovieDetailsProTvPolished(
             }
         }
 
+        item(key = "movie_tv_polished_rating") {
+            UserRatingCard(
+                item = item,
+                isTv = true,
+                modifier = Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 8.dp),
+                firstFocusRequester = ratingRequester,
+                upRequester = playRequester,
+                downRequester = relatedRequesters.firstOrNull(),
+            )
+        }
+
         if (detailsTvHasInformation(details)) {
             item(key = "movie_tv_polished_info") {
                 DetailsTvInformationPanel(
@@ -483,7 +495,7 @@ private fun MovieDetailsProTvPolished(
                     widthDp = metrics.relatedWidthDp,
                     horizontalPaddingDp = metrics.horizontalPaddingDp,
                     requesters = relatedRequesters,
-                    upRequester = playRequester,
+                    upRequester = ratingRequester,
                     isFavorite = isRelatedFavorite,
                     onToggleFavorite = onToggleRelatedFavorite,
                     onOpen = onOpenRelated,
@@ -623,6 +635,7 @@ private fun SeriesDetailsProTvPolished(
     val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
+    val ratingRequester = remember(series.id) { FocusRequester() }
     val seasonRequesters = remember(series.id, seasons) { List(seasons.size) { FocusRequester() } }
     val episodeKeys = visibleEpisodes.map(Episode::id)
     val episodeCardRequesters = remember(series.id, selectedSeason, episodeKeys) {
@@ -635,7 +648,8 @@ private fun SeriesDetailsProTvPolished(
     val relatedRequesters = remember(series.id, relatedKeys) { List(relatedItems.size) { FocusRequester() } }
     val firstEpisodeRequester = episodeCardRequesters.firstOrNull()
     val firstSeasonRequester = seasonRequesters.firstOrNull()
-    val heroDownTarget = firstSeasonRequester ?: firstEpisodeRequester
+    val ratingDownTarget = firstSeasonRequester ?: firstEpisodeRequester
+    val heroDownTarget = ratingRequester
 
     LaunchedEffect(series.id) {
         delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
@@ -870,6 +884,17 @@ private fun SeriesDetailsProTvPolished(
                     Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 10.dp),
                 )
             }
+        }
+
+        item(key = "series_tv_polished_rating") {
+            UserRatingCard(
+                item = series,
+                isTv = true,
+                modifier = Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 8.dp),
+                firstFocusRequester = ratingRequester,
+                upRequester = playRequester,
+                downRequester = ratingDownTarget,
+            )
         }
 
         if (detailsTvHasInformation(details)) {

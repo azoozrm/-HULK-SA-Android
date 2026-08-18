@@ -110,14 +110,14 @@ def player_surface_seek_contract(text: str) -> bool:
     left = re.search(
         r"KEYCODE_DPAD_LEFT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{"
         r"(?:(?!KEYCODE_DPAD_RIGHT).)*?"
-        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*SEEK_STEP_MS\s*else\s*-SEEK_STEP_MS\s*\)",
+        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*(?:SEEK_STEP_MS|seekStepMs)\s*else\s*-(?:SEEK_STEP_MS|seekStepMs)\s*\)",
         text,
         re.DOTALL,
     )
     right = re.search(
         r"KEYCODE_DPAD_RIGHT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{"
         r"(?:(?!KEYCODE_MEDIA_REWIND).)*?"
-        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*-SEEK_STEP_MS\s*else\s*SEEK_STEP_MS\s*\)",
+        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*-(?:SEEK_STEP_MS|seekStepMs)\s*else\s*(?:SEEK_STEP_MS|seekStepMs)\s*\)",
         text,
         re.DOTALL,
     )
@@ -127,15 +127,15 @@ def player_surface_seek_contract(text: str) -> bool:
 def player_seekbar_contract(text: str) -> bool:
     left = re.search(
         r"KEYCODE_DPAD_LEFT\s*->\s*\{\s*previewMs\s*=\s*if\s*\(\s*tvRemoteInput\s*\)\s*\{"
-        r"\s*\(previewMs\s*\+\s*SEEK_STEP_MS\)\.coerceAtMost\(durationMs\)"
-        r"\s*\}\s*else\s*\{\s*\(previewMs\s*-\s*SEEK_STEP_MS\)\.coerceAtLeast\(0L\)",
+        r"\s*\(previewMs\s*\+\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtMost\(durationMs\)"
+        r"\s*\}\s*else\s*\{\s*\(previewMs\s*-\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtLeast\(0L\)",
         text,
         re.DOTALL,
     )
     right = re.search(
         r"KEYCODE_DPAD_RIGHT\s*->\s*\{\s*previewMs\s*=\s*if\s*\(\s*tvRemoteInput\s*\)\s*\{"
-        r"\s*\(previewMs\s*-\s*SEEK_STEP_MS\)\.coerceAtLeast\(0L\)"
-        r"\s*\}\s*else\s*\{\s*\(previewMs\s*\+\s*SEEK_STEP_MS\)\.coerceAtMost\(durationMs\)",
+        r"\s*\(previewMs\s*-\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtLeast\(0L\)"
+        r"\s*\}\s*else\s*\{\s*\(previewMs\s*\+\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtMost\(durationMs\)",
         text,
         re.DOTALL,
     )

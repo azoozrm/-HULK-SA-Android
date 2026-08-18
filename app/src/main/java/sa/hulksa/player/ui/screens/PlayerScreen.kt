@@ -101,6 +101,7 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.PlaybackRequest
@@ -123,7 +124,6 @@ private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
 private const val LIVE_PLAYER_HISTORY_PREFS = "live_player_history"
 private const val PREF_IDS = "ids"
 private const val RESUME_PROMPT_THRESHOLD_MS = 30_000L
-private const val SEEK_STEP_MS = 10_000L
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
@@ -208,6 +208,9 @@ fun PlayerScreen(
     onPlayNextEpisode: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val settingsProStore = remember(context) { SettingsProStore(context) }
+    val playbackSettings = remember(context, request.historyKey) { settingsProStore.playbackSettings() }
+    val seekStepMs = playbackSettings.seekStepSeconds * 1_000L
     val adaptiveUi = LocalAdaptiveUi.current
     val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     val localPlayback = remember(request) { request.usesOnlyLocalMedia() }
@@ -238,7 +241,7 @@ fun PlayerScreen(
     var seekBarFocused by remember(request) { mutableStateOf(false) }
     var focusTimelineOnReveal by remember(request) { mutableStateOf(false) }
     var resumePromptVisible by remember(request) {
-        mutableStateOf(!request.isLive && request.resumePositionMs >= RESUME_PROMPT_THRESHOLD_MS)
+        mutableStateOf(playbackSettings.resumePlayback && !request.isLive && request.resumePositionMs >= RESUME_PROMPT_THRESHOLD_MS)
     }
     var nextCountdown by remember(request) { mutableIntStateOf(-1) }
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
@@ -313,7 +316,8 @@ fun PlayerScreen(
         manualSeekTargetMs = target
         currentPositionMs = target
         if (tvRemoteInput) player.seekTo(target)
-        seekFeedback = if (deltaMs > 0) "+10 ث" else "-10 ث"
+        val seconds = kotlin.math.abs(deltaMs) / 1_000L
+        seekFeedback = if (deltaMs > 0) "+$seconds ث" else "-$seconds ث"
         controlsVisible = true
     }
 
@@ -440,6 +444,7 @@ fun PlayerScreen(
                 if (
                     playbackState == Player.STATE_ENDED &&
                     !request.isLive &&
+                    playbackSettings.autoplayNextEpisode &&
                     onPlayNextEpisode != null &&
                     nextEpisodeTitle != null
                 ) {
@@ -539,7 +544,7 @@ fun PlayerScreen(
         player.setMediaItem(MediaItem.fromUri(url))
         val seekTarget = when {
             pendingSeekMs > 0L -> pendingSeekMs
-            !resumePromptVisible -> request.resumePositionMs
+            !resumePromptVisible && playbackSettings.resumePlayback -> request.resumePositionMs
             else -> 0L
         }
         if (seekTarget > 0L) player.seekTo(seekTarget)
@@ -660,6 +665,7 @@ fun PlayerScreen(
         manualSeekTargetMs,
     ) {
         if (
+            playbackSettings.autoHideControls &&
             controlsVisible && !browserVisible && activePanel == null && !resumePromptVisible &&
             !buffering && finalError == null && isPlaying && !controlsLocked &&
             manualSeekTargetMs == null
@@ -832,20 +838,20 @@ fun PlayerScreen(
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
                         focusTimelineOnReveal = true
                         controlsVisible = true
-                        seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS)
+                        seekBy(if (tvRemoteInput) seekStepMs else -seekStepMs)
                         true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
                         focusTimelineOnReveal = true
                         controlsVisible = true
-                        seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS)
+                        seekBy(if (tvRemoteInput) -seekStepMs else seekStepMs)
                         true
                     } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> if (!request.isLive && surfaceFocused) {
-                        seekBy(-SEEK_STEP_MS); true
+                        seekBy(-seekStepMs); true
                     } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> if (!request.isLive && surfaceFocused) {
-                        seekBy(SEEK_STEP_MS); true
+                        seekBy(seekStepMs); true
                     } else false
                     AndroidKeyEvent.KEYCODE_DPAD_CENTER,
                     AndroidKeyEvent.KEYCODE_ENTER,
@@ -865,7 +871,7 @@ fun PlayerScreen(
                     layoutDirection = View.LAYOUT_DIRECTION_LTR
                     resizeMode = resizeModes[resizeModeIndex]
                     setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                    keepScreenOn = true
+                    keepScreenOn = playbackSettings.keepScreenOn
                     isFocusable = false
                     isFocusableInTouchMode = false
                     descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
@@ -876,6 +882,7 @@ fun PlayerScreen(
                 view.player = player
                 view.useController = false
                 view.resizeMode = resizeModes[resizeModeIndex]
+                view.keepScreenOn = playbackSettings.keepScreenOn
                 view.subtitleView?.apply {
                     val sizes = floatArrayOf(16f, 21f, 27f)
                     setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, sizes[subtitleSizeIndex])
@@ -936,8 +943,8 @@ fun PlayerScreen(
                     hasMultipleQualities = videoTracks.distinctBy { it.label }.size > 1,
                     hasMultipleServers = request.candidates.size > 1,
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                    onRewind = { seekBy(-SEEK_STEP_MS) },
-                    onForward = { seekBy(SEEK_STEP_MS) },
+                    onRewind = { seekBy(-seekStepMs) },
+                    onForward = { seekBy(seekStepMs) },
                     onSeekTo = ::seekToPosition,
                     onSeekingChanged = { focused -> seekBarFocused = focused },
                     onSpeed = { activePanel = PlayerPanel.SPEED },
@@ -948,6 +955,7 @@ fun PlayerScreen(
                     primaryFocus = primaryFocus,
                     seekBarFocusRequester = seekBarFocus,
                     remoteSeekActive = focusTimelineOnReveal,
+                    seekStepMs = seekStepMs,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -1201,6 +1209,7 @@ private fun ModernVodControls(
     primaryFocus: FocusRequester,
     seekBarFocusRequester: FocusRequester,
     remoteSeekActive: Boolean,
+    seekStepMs: Long,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -1235,12 +1244,13 @@ private fun ModernVodControls(
             onSeekingChanged = onSeekingChanged,
             focusRequester = seekBarFocusRequester,
             remoteActive = remoteSeekActive,
+            seekStepMs = seekStepMs,
         )
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            item { FocusButton("-10 ث", onRewind, primary = false, compact = true) }
+            item { FocusButton("-${seekStepMs / 1_000L} ث", onRewind, primary = false, compact = true) }
             item { FocusButton(if (isPlaying) "ايقاف مؤقت" else "تشغيل", onPlayPause, modifier = Modifier.focusRequester(primaryFocus), compact = true) }
-            item { FocusButton("+10 ث", onForward, primary = false, compact = true) }
+            item { FocusButton("+${seekStepMs / 1_000L} ث", onForward, primary = false, compact = true) }
             item { FocusButton("السرعة ${speedLabel(speed)}", onSpeed, primary = false, compact = true) }
             item { FocusButton("حجم الصورة", onResize, primary = false, compact = true) }
             if (hasMultipleQualities) item { FocusButton("الجودة", onQuality, primary = false, compact = true) }
@@ -1366,6 +1376,7 @@ private fun SeekableProgressBar(
     onSeekingChanged: (Boolean) -> Unit,
     focusRequester: FocusRequester,
     remoteActive: Boolean,
+    seekStepMs: Long,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1394,7 +1405,7 @@ private fun SeekableProgressBar(
         if (active) {
             Text(
                 if (tvRemoteInput) {
-                    "يسار +10 ث  •  يمين -10 ث"
+                    "يسار +${seekStepMs / 1_000L} ث  •  يمين -${seekStepMs / 1_000L} ث"
                 } else {
                     "حرك يمين ويسار للتقديم والترجيع"
                 },
@@ -1445,18 +1456,18 @@ private fun SeekableProgressBar(
                     when (event.nativeKeyEvent.keyCode) {
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
                             previewMs = if (tvRemoteInput) {
-                                (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                                (previewMs + seekStepMs).coerceAtMost(durationMs)
                             } else {
-                                (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                                (previewMs - seekStepMs).coerceAtLeast(0L)
                             }
                             onSeekTo(previewMs)
                             true
                         }
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
                             previewMs = if (tvRemoteInput) {
-                                (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+                                (previewMs - seekStepMs).coerceAtLeast(0L)
                             } else {
-                                (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+                                (previewMs + seekStepMs).coerceAtMost(durationMs)
                             }
                             onSeekTo(previewMs)
                             true

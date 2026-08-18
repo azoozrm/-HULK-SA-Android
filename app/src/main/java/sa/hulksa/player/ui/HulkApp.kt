@@ -216,6 +216,7 @@ fun HulkApp(
                                     onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
                                     onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
                                     onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
+                                    onRefreshAccount = { viewModel.refreshAccount(notify) },
                                     onRunDiagnostics = viewModel::runDiagnostics,
                                     onLogout = viewModel::logout,
                                 )

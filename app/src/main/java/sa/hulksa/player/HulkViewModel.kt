@@ -65,6 +65,7 @@ data class HulkUiState(
     val loadingTypes: Set<ContentType> = emptySet(),
     val errorMessage: String? = null,
     val account: AccountInfo? = null,
+    val isAccountRefreshing: Boolean = false,
     val destination: MainDestination = MainDestination.HOME,
     val selectedType: ContentType = ContentType.MOVIE,
     val catalogs: Map<ContentType, Catalog> = emptyMap(),
@@ -111,6 +112,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
     private var detailsJob: Job? = null
+    private var accountRefreshJob: Job? = null
     private var diagnosticsJob: Job? = null
     private var profileLibraryRefreshJob: Job? = null
     private var playerReturnScreen = HulkScreen.MAIN
@@ -716,6 +718,47 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(history = userLibrary.clearHistory()) }
     }
 
+    fun refreshAccount(onResult: (String) -> Unit) {
+        val activeSession = session ?: run {
+            onResult("سجل الدخول اولا لتحديث بيانات الاشتراك.")
+            return
+        }
+        if (accountRefreshJob?.isActive == true) {
+            onResult("تحديث بيانات الاشتراك يعمل حاليا.")
+            return
+        }
+        mutableState.update { it.copy(isAccountRefreshing = true, errorMessage = null) }
+        accountRefreshJob = viewModelScope.launch {
+            runCatching { repository.reauthenticate(activeSession) }
+                .onSuccess { refreshed ->
+                    session = refreshed
+                    mutableState.update {
+                        it.copy(
+                            account = refreshed.account,
+                            isAccountRefreshing = false,
+                            errorMessage = null,
+                        )
+                    }
+                    onResult("تم تحديث بيانات الاشتراك من السيرفر.")
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(isAccountRefreshing = false) }
+                    val invalidSession = error is XtreamException.InvalidCredentials ||
+                        error is XtreamException.SubscriptionInactive ||
+                        error is PortalException.InvalidAccessCode ||
+                        error is PortalException.ResellerInactive
+                    if (invalidSession) showFailure(error)
+                    onResult(
+                        if (invalidSession) {
+                            "تعذر تحديث الاشتراك. اعد تسجيل الدخول."
+                        } else {
+                            error.message ?: "تعذر تحديث بيانات الاشتراك."
+                        },
+                    )
+                }
+        }
+    }
+
     fun runDiagnostics() {
         val activeSession = session ?: run {
             mutableState.update {
@@ -815,6 +858,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         session = null
         clearCatalogMemory()
         detailsJob?.cancel()
+        accountRefreshJob?.cancel()
         diagnosticsJob?.cancel()
         catalogJobs.values.forEach(Job::cancel)
         catalogJobs.clear()
@@ -855,6 +899,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             destination = MainDestination.HOME,
                             isLoading = false,
                             account = authenticated.account,
+                            isAccountRefreshing = false,
                             catalogs = emptyMap(),
                             selectedCategoryId = null,
                             searchQuery = "",
@@ -968,6 +1013,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 screen = if (invalidSession) HulkScreen.LOGIN else it.screen,
                 isStarting = false,
                 isLoading = false,
+                isAccountRefreshing = false,
                 errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
             )
         }
