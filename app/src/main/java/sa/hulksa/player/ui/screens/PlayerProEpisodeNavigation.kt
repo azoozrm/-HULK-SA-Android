@@ -43,8 +43,10 @@ import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import kotlin.math.roundToInt
 
 private const val LIVE_TV_PRO_HISTORY_PREFS = "live_player_history"
 private const val LIVE_TV_PRO_HISTORY_IDS = "ids"
@@ -57,6 +59,54 @@ internal data class PlayerProEpisodeNeighbors(
     val previous: Episode?,
     val next: Episode?,
 )
+
+internal data class PlayerTvPremiumOverlayMetrics(
+    val safeHorizontalPaddingDp: Int,
+    val safeBottomPaddingDp: Int,
+    val zapMinWidthDp: Int,
+    val zapMaxWidthDp: Int,
+    val zapLogoSizeDp: Int,
+    val zapHorizontalPaddingDp: Int,
+    val zapVerticalPaddingDp: Int,
+    val zapTitleSizeSp: Int,
+)
+
+internal fun playerTvPremiumOverlayMetrics(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+): PlayerTvPremiumOverlayMetrics {
+    val width = screenWidthDp.coerceAtLeast(1)
+    val height = screenHeightDp.coerceAtLeast(1)
+    val premium = tvPremiumWindowPolicy(width, height)
+    val compact = width <= 960 || height <= 540
+    val large = width >= 1600 && height >= 900
+
+    val safeHorizontal = maxOf(
+        premium.horizontalSafeInsetDp,
+        if (compact) 24f else 30f,
+    ).roundToInt()
+    val safeBottom = maxOf(
+        premium.verticalSafeInsetDp + if (compact) 20f else 28f,
+        if (compact) 36f else 44f,
+    ).roundToInt()
+    val minWidth = (width * .30f).roundToInt().coerceIn(320, 430)
+    val maxWidth = (width * .40f).roundToInt().coerceIn(470, 660).coerceAtLeast(minWidth)
+
+    return PlayerTvPremiumOverlayMetrics(
+        safeHorizontalPaddingDp = safeHorizontal,
+        safeBottomPaddingDp = safeBottom,
+        zapMinWidthDp = minWidth,
+        zapMaxWidthDp = maxWidth,
+        zapLogoSizeDp = (height * .082f).roundToInt().coerceIn(64, 92),
+        zapHorizontalPaddingDp = (width * .012f).roundToInt().coerceIn(14, 24),
+        zapVerticalPaddingDp = (height * .016f).roundToInt().coerceIn(12, 20),
+        zapTitleSizeSp = when {
+            large -> 26
+            compact -> 20
+            else -> 23
+        },
+    )
+}
 
 internal fun playerProEpisodeNeighbors(
     episodes: List<Episode>,
@@ -134,6 +184,9 @@ fun PlayerProScreen(
 ) {
     val context = LocalContext.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val tvOverlayMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        playerTvPremiumOverlayMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    }
     val liveChannels = liveCatalog?.items.orEmpty()
     val liveHistoryPrefs = remember(context) {
         context.getSharedPreferences(LIVE_TV_PRO_HISTORY_PREFS, Context.MODE_PRIVATE)
@@ -388,10 +441,12 @@ fun PlayerProScreen(
                             if (childControlSelectionPending) {
                                 liveControlsLikelyVisible = true
                                 liveControlsInteractionTick += 1
-                            } else {
-                                liveControlsLikelyVisible = false
+                                return@onPreviewKeyEvent false
                             }
-                            return@onPreviewKeyEvent false
+                            liveControlsLikelyVisible = false
+                            return@onPreviewKeyEvent queueLiveRelative(
+                                if (keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP) 1 else -1,
+                            )
                         }
 
                         AndroidKeyEvent.KEYCODE_BACK,
@@ -458,9 +513,9 @@ fun PlayerProScreen(
                         },
                     )
                     .padding(
-                        start = if (adaptiveUi.isTelevision) 42.dp else 16.dp,
-                        end = if (adaptiveUi.isTelevision) 42.dp else 16.dp,
-                        bottom = if (adaptiveUi.isTelevision) 48.dp else 94.dp,
+                        start = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeHorizontalPaddingDp.dp else 16.dp,
+                        end = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeHorizontalPaddingDp.dp else 16.dp,
+                        bottom = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeBottomPaddingDp.dp else 94.dp,
                     ),
             )
         }
@@ -499,29 +554,32 @@ private fun LiveZapIndicator(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val isTv = adaptiveUi.isTelevision
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        playerTvPremiumOverlayMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    }
     val shape = RoundedCornerShape(if (isTv) 26.dp else 22.dp)
     val logoShape = RoundedCornerShape(if (isTv) 18.dp else 15.dp)
 
     Row(
         modifier = modifier
             .widthIn(
-                min = if (isTv) 430.dp else 300.dp,
-                max = if (isTv) 620.dp else 370.dp,
+                min = if (isTv) metrics.zapMinWidthDp.dp else 300.dp,
+                max = if (isTv) metrics.zapMaxWidthDp.dp else 370.dp,
             )
             .shadow(if (isTv) 20.dp else 14.dp, shape, clip = false)
             .clip(shape)
             .background(Color(0xF2141612))
             .border(1.dp, colors.gold.copy(alpha = .72f), shape)
             .padding(
-                horizontal = if (isTv) 22.dp else 16.dp,
-                vertical = if (isTv) 18.dp else 14.dp,
+                horizontal = if (isTv) metrics.zapHorizontalPaddingDp.dp else 16.dp,
+                vertical = if (isTv) metrics.zapVerticalPaddingDp.dp else 14.dp,
             ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (isTv) 18.dp else 14.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(if (isTv) 88.dp else 70.dp)
+                .size(if (isTv) metrics.zapLogoSizeDp.dp else 70.dp)
                 .clip(logoShape)
                 .background(Color.White.copy(alpha = .96f))
                 .padding(if (isTv) 7.dp else 6.dp),
@@ -552,7 +610,7 @@ private fun LiveZapIndicator(
             Text(
                 text = channel.name,
                 color = Color.White,
-                fontSize = if (isTv) 24.sp else 20.sp,
+                fontSize = if (isTv) metrics.zapTitleSizeSp.sp else 20.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -568,7 +626,7 @@ private fun LiveZapIndicator(
         Box(
             modifier = Modifier
                 .width(4.dp)
-                .height(if (isTv) 58.dp else 50.dp)
+                .height(if (isTv) (metrics.zapLogoSizeDp * .66f).dp else 50.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(colors.goldBright),
         )

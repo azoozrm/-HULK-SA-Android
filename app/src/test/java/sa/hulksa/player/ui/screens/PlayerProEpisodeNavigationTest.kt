@@ -2,6 +2,7 @@ package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -92,6 +93,35 @@ class PlayerProEpisodeNavigationTest {
     }
 
     @Test
+    fun rapidLiveZappingUsesPendingTargetAsTheNextAnchor() {
+        val sequence = listOf(
+            channel(1, "news"),
+            channel(2, "news"),
+            channel(3, "news"),
+            channel(4, "news"),
+        )
+
+        assertEquals(
+            3,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = 2,
+                delta = 1,
+            )?.id,
+        )
+        assertEquals(
+            2,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = 3,
+                delta = -1,
+            )?.id,
+        )
+    }
+
+    @Test
     fun explicitCategoryNavigationNeverLeaksIntoAnotherCategory() {
         val channels = listOf(
             channel(1, "news"),
@@ -116,6 +146,28 @@ class PlayerProEpisodeNavigationTest {
                 delta = 1,
             )?.id,
         )
+    }
+
+    @Test
+    fun tvPremiumPlayerOverlayProtectsCompactSafeAreaAndScalesOnLargeTv() {
+        val compact = playerTvPremiumOverlayMetrics(screenWidthDp = 960, screenHeightDp = 540)
+        val standard = playerTvPremiumOverlayMetrics(screenWidthDp = 1280, screenHeightDp = 720)
+        val large = playerTvPremiumOverlayMetrics(screenWidthDp = 1920, screenHeightDp = 1080)
+
+        assertEquals(24, compact.safeHorizontalPaddingDp)
+        assertEquals(36, compact.safeBottomPaddingDp)
+        assertEquals(320, compact.zapMinWidthDp)
+        assertEquals(470, compact.zapMaxWidthDp)
+        assertEquals(64, compact.zapLogoSizeDp)
+        assertEquals(20, compact.zapTitleSizeSp)
+
+        assertEquals(30, standard.safeHorizontalPaddingDp)
+        assertEquals(44, standard.safeBottomPaddingDp)
+        assertEquals(23, standard.zapTitleSizeSp)
+
+        assertTrue(large.zapMaxWidthDp > standard.zapMaxWidthDp)
+        assertTrue(large.zapLogoSizeDp > standard.zapLogoSizeDp)
+        assertEquals(26, large.zapTitleSizeSp)
     }
 
     private fun episode(
