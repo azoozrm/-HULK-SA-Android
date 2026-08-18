@@ -1,0 +1,75 @@
+name: v1.9 Settings Self Patch
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  patch-settings:
+    if: github.head_ref == 'feature/v190-settings-pro'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout v1.9 branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/v190-settings-pro
+          fetch-depth: 0
+
+      - name: Remove Engineering Operations room from Settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          text = path.read_text(encoding='utf-8')
+
+          requester = '    val diagnosticsTopRequester = remember { FocusRequester() }\n'
+          effect = '''    LaunchedEffect(state.diagnostics.report?.generatedAtEpochMs) {
+              if (state.diagnostics.report != null) {
+                  settingsListState.scrollToItem(2)
+                  delay(120L)
+                  diagnosticsTopRequester.requestFocus()
+              }
+          }
+          '''
+          room = '''        item {
+              DiagnosticsCenter(
+                  state = state.diagnostics,
+                  isTv = isTv,
+                  onRun = onRunDiagnostics,
+                  onShare = { report -> shareDiagnosticsReport(context, report) },
+                  topRequester = diagnosticsTopRequester,
+              )
+          }
+          '''
+
+          for label, needle in [('requester', requester), ('effect', effect), ('room', room)]:
+              count = text.count(needle)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(needle, '', 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/v190-settings-selfpatch.yml
+          git diff --check
+          git diff -- app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt
+          test -n "$(git status --porcelain)"
+
+      - name: Commit v1.9 Settings foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'azoozrm'
+          git config user.email '116194689+azoozrm@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt .github/workflows/v190-settings-selfpatch.yml
+          git commit -m 'Start v1.9 Settings Pro'
+          git push origin HEAD:feature/v190-settings-pro
+          git push origin --delete automation/v190-settings-patch || true
