@@ -29,10 +29,10 @@ class VoiceSearchFoundationTest {
     }
 
     @Test
-    fun emptyQueryFallsBackToArabicOrEnglishDeviceLanguage() {
+    fun emptyQueryStartsInArabicForSaudiVoiceSearch() {
         assertEquals("ar-SA", preferredVoiceSearchLanguageTag("", "ar-EG"))
-        assertEquals("en-US", preferredVoiceSearchLanguageTag("", "en-GB"))
-        assertNull(preferredVoiceSearchLanguageTag("", "fr-FR"))
+        assertEquals("ar-SA", preferredVoiceSearchLanguageTag("", "en-GB"))
+        assertEquals("ar-SA", preferredVoiceSearchLanguageTag("", "fr-FR"))
     }
 
     @Test

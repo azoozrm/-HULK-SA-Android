@@ -64,7 +64,7 @@ import sa.hulksa.player.ui.screens.TvSearchFocusAction
 import sa.hulksa.player.ui.screens.tvSearchFocusAction
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
-private const val HULK_AI_QUERY_DEBOUNCE_MS = 140L
+private const val HULK_AI_QUERY_DEBOUNCE_MS = 100L
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -102,7 +102,7 @@ internal fun HulkAiSearchLayer(
         }
         delay(HULK_AI_QUERY_DEBOUNCE_MS)
         value = withContext(Dispatchers.Default) {
-            buildHulkAiQuerySuggestions(
+            buildResponsiveHulkAiQuerySuggestions(
                 rawQuery = trimmedQuery,
                 movies = movieItems,
                 series = seriesItems,
@@ -216,7 +216,6 @@ internal fun HulkAiSearchLayer(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            InfoPill("HULK AI")
             if (isTv) {
                 FocusButton(
                     "الرئيسية",
@@ -245,7 +244,7 @@ internal fun HulkAiSearchLayer(
             HulkTextField(
                 value = query,
                 onValueChange = onSearch,
-                label = "اكتب اسم محتوى او اطلب ترشيحا مثل: رشح لي فيلم اكشن",
+                label = "قل اسم فيلم او مسلسل او اطلب ترشيحا",
                 modifier = Modifier
                     .weight(1f)
                     .then(inputFocusModifier),
@@ -287,14 +286,14 @@ internal fun HulkAiSearchLayer(
         }
 
         when {
-            result == null -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    LoadingRing(label = "HULK AI يحلل طلبك…")
-                }
-            }
-            waitingForInitialCatalog && suggestions.isEmpty() -> {
+            waitingForInitialCatalog -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     LoadingRing(label = "جاري تجهيز مكتبتك…")
+                }
+            }
+            result == null -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    LoadingRing(label = "جاري تجهيز النتائج…")
                 }
             }
             suggestions.isEmpty() -> {

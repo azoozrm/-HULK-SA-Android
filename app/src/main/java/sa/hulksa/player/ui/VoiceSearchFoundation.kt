@@ -1,7 +1,6 @@
 package sa.hulksa.player.ui
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -78,29 +77,10 @@ internal class VoiceSearchDelegate(
         }
     }
 
-    private val systemSpeechLauncher = activity.registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val transcript = if (result.resultCode == Activity.RESULT_OK) {
-            firstVoiceSearchTranscript(
-                result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS),
-            )
-        } else {
-            null
-        }
-        val fallbackTranscript = transcript ?: lastPartialTranscript
-        lastPartialTranscript = null
-        if (fallbackTranscript == null) {
-            showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
-        } else {
-            onTranscript(fallbackTranscript)
-        }
-    }
-
     fun launch(currentQuery: String) {
         lastPartialTranscript = null
         if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
-            launchSystemRecognition(currentQuery)
+            showMessage("البحث الصوتي غير متاح على هذا الجهاز.")
             return
         }
 
@@ -124,7 +104,7 @@ internal class VoiceSearchDelegate(
         val recognizer = try {
             SpeechRecognizer.createSpeechRecognizer(activity)
         } catch (_: RuntimeException) {
-            launchSystemRecognition(currentQuery)
+            showMessage("تعذر تشغيل خدمة البحث الصوتي على هذا الجهاز.")
             return
         }
 
@@ -145,23 +125,23 @@ internal class VoiceSearchDelegate(
                     if (activeRecognizer !== recognizer) return
                     val partial = lastPartialTranscript
                     releaseRecognizer(cancel = false)
+                    lastPartialTranscript = null
+
                     if (!partial.isNullOrBlank()) {
-                        lastPartialTranscript = null
                         onTranscript(partial)
                         return
                     }
+
                     when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                            showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
+
                         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
                             showMessage("تعذر استخدام الميكروفون. تحقق من صلاحية الميكروفون.")
 
-                        SpeechRecognizer.ERROR_NO_MATCH,
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-                        SpeechRecognizer.ERROR_CLIENT,
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-                        SpeechRecognizer.ERROR_NETWORK,
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
-                        SpeechRecognizer.ERROR_SERVER ->
-                            launchSystemRecognition(currentQuery)
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                            showMessage("الميكروفون مشغول. حاول مرة اخرى.")
 
                         else -> showMessage("تعذر اكمال البحث الصوتي. حاول مرة اخرى.")
                     }
@@ -175,7 +155,7 @@ internal class VoiceSearchDelegate(
                     releaseRecognizer(cancel = false)
                     lastPartialTranscript = null
                     if (transcript == null) {
-                        launchSystemRecognition(currentQuery)
+                        showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
                     } else {
                         onTranscript(transcript)
                     }
@@ -195,48 +175,26 @@ internal class VoiceSearchDelegate(
             },
         )
 
-        val intent = recognitionIntent(
-            currentQuery = currentQuery,
-            includePartialResults = true,
-        )
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            preferredVoiceSearchLanguageTag(
+                query = currentQuery,
+                deviceLanguageTag = Locale.getDefault().toLanguageTag(),
+            )?.let { languageTag ->
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            }
+        }
 
         try {
             recognizer.startListening(intent)
         } catch (_: RuntimeException) {
             releaseRecognizer(cancel = false)
-            launchSystemRecognition(currentQuery)
-        }
-    }
-
-    private fun launchSystemRecognition(currentQuery: String) {
-        releaseRecognizer(cancel = true)
-        val intent = recognitionIntent(
-            currentQuery = currentQuery,
-            includePartialResults = false,
-        )
-        runCatching {
-            systemSpeechLauncher.launch(intent)
-        }.onFailure {
-            showMessage("تعذر تشغيل البحث الصوتي على هذا الجهاز.")
-        }
-    }
-
-    private fun recognitionIntent(
-        currentQuery: String,
-        includePartialResults: Boolean,
-    ): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(
-            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-        )
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, includePartialResults)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-        putExtra(RecognizerIntent.EXTRA_PROMPT, "قل اسم فيلم او مسلسل او اطلب ترشيحا")
-        preferredVoiceSearchLanguageTag(
-            query = currentQuery,
-            deviceLanguageTag = Locale.getDefault().toLanguageTag(),
-        )?.let { languageTag ->
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            showMessage("تعذر تشغيل البحث الصوتي. حاول مرة اخرى.")
         }
     }
 
@@ -266,13 +224,14 @@ internal fun preferredVoiceSearchLanguageTag(
     deviceLanguageTag: String,
 ): String? {
     val value = query.trim()
+    if (value.isBlank()) return "ar-SA"
     if (value.any(::isArabicVoiceCharacter)) return "ar-SA"
     if (value.any(::isLatinVoiceCharacter)) return "en-US"
 
     return when (Locale.forLanguageTag(deviceLanguageTag).language.lowercase(Locale.ROOT)) {
         "ar" -> "ar-SA"
         "en" -> "en-US"
-        else -> null
+        else -> "ar-SA"
     }
 }
 
