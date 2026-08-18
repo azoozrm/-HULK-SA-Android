@@ -25,35 +25,23 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
           text = path.read_text(encoding='utf-8')
 
-          requester = '    val diagnosticsTopRequester = remember { FocusRequester() }\n'
-          effect = '''    LaunchedEffect(state.diagnostics.report?.generatedAtEpochMs) {
-              if (state.diagnostics.report != null) {
-                  settingsListState.scrollToItem(2)
-                  delay(120L)
-                  diagnosticsTopRequester.requestFocus()
-              }
-          }
-          '''
-          room = '''        item {
-              DiagnosticsCenter(
-                  state = state.diagnostics,
-                  isTv = isTv,
-                  onRun = onRunDiagnostics,
-                  onShare = { report -> shareDiagnosticsReport(context, report) },
-                  topRequester = diagnosticsTopRequester,
-              )
-          }
-          '''
-
-          for label, needle in [('requester', requester), ('effect', effect), ('room', room)]:
-              count = text.count(needle)
+          patterns = [
+              ('requester', r'(?m)^    val diagnosticsTopRequester = remember \{ FocusRequester\(\) \}\n'),
+              ('effect', r'(?ms)^    LaunchedEffect\(state\.diagnostics\.report\?\.generatedAtEpochMs\) \{\n.*?^    \}\n'),
+              ('room', r'(?ms)^        item \{\n            DiagnosticsCenter\(\n.*?^        \}\n'),
+          ]
+          for label, pattern in patterns:
+              text, count = re.subn(pattern, '', text, count=1)
               if count != 1:
                   raise SystemExit(f'{label}: expected exactly one match, found {count}')
-              text = text.replace(needle, '', 1)
+
+          if 'DiagnosticsCenter(' in text[text.index('private fun SettingsScreen('):text.index('@Composable\nprivate fun DiagnosticsCenter(')]:
+              raise SystemExit('DiagnosticsCenter is still referenced from SettingsScreen')
 
           path.write_text(text, encoding='utf-8')
           PY
