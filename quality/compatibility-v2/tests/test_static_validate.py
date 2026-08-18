@@ -182,6 +182,35 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             )
             self.assertEqual("FAIL", result.status)
 
+    def test_dynamic_rtl_player_seek_contract_passes(self) -> None:
+        text = """
+val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
+    seekBy(if (tvRemoteInput) seekStepMs else -seekStepMs); true
+} else false
+KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
+    seekBy(if (tvRemoteInput) -seekStepMs else seekStepMs); true
+} else false
+KEYCODE_DPAD_LEFT -> {
+    previewMs = if (tvRemoteInput) {
+        (previewMs + seekStepMs).coerceAtMost(durationMs)
+    } else {
+        (previewMs - seekStepMs).coerceAtLeast(0L)
+    }
+    true
+}
+KEYCODE_DPAD_RIGHT -> {
+    previewMs = if (tvRemoteInput) {
+        (previewMs - seekStepMs).coerceAtLeast(0L)
+    } else {
+        (previewMs + seekStepMs).coerceAtMost(durationMs)
+    }
+    true
+}
+"""
+        self.assertTrue(MODULE.player_surface_seek_contract(text))
+        self.assertTrue(MODULE.player_seekbar_contract(text))
+
     def test_legacy_ltr_player_seek_contract_fails(self) -> None:
         text = """
 val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE

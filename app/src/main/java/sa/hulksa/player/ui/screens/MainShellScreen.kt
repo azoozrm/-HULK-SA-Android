@@ -348,6 +348,7 @@ fun MainShellScreen(
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
     onCycleDownloadPriority: (OfflineDownload) -> Unit,
+    onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -440,6 +441,7 @@ fun MainShellScreen(
                         onToggleDownloadSchedule = onToggleDownloadSchedule,
                         onCycleConcurrentDownloads = onCycleConcurrentDownloads,
                         onCycleDownloadPriority = onCycleDownloadPriority,
+                        onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
                         onLogout = onLogout,
                     )
@@ -468,6 +470,7 @@ fun MainShellScreen(
                         onToggleDownloadSchedule = onToggleDownloadSchedule,
                         onCycleConcurrentDownloads = onCycleConcurrentDownloads,
                         onCycleDownloadPriority = onCycleDownloadPriority,
+                        onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
                         onLogout = onLogout,
                     )
@@ -886,6 +889,7 @@ private fun DestinationContent(
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
     onCycleDownloadPriority: (OfflineDownload) -> Unit,
+    onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -909,15 +913,19 @@ private fun DestinationContent(
             onCycleConcurrent = onCycleConcurrentDownloads,
             onCyclePriority = onCycleDownloadPriority,
         )
-        MainDestination.SETTINGS -> SettingsScreen(
+        MainDestination.SETTINGS -> SettingsProScreen(
             state = state,
             isTv = isTv,
-            onRefreshAll = {
+            onRefreshAccount = onRefreshAccount,
+            onRefreshLibrary = {
                 onSelectDestination(MainDestination.HOME)
                 onRefresh()
             },
             onClearHistory = onClearHistory,
-            onRunDiagnostics = onRunDiagnostics,
+            onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
+            onToggleWifiOnly = onToggleWifiOnly,
+            onToggleDownloadSchedule = onToggleDownloadSchedule,
+            onCycleConcurrentDownloads = onCycleConcurrentDownloads,
             onLogout = onLogout,
         )
     }
@@ -2411,16 +2419,8 @@ private fun SettingsScreen(
     val open: (String) -> Unit = { url -> runCatching { uriHandler.openUri(url) }; Unit }
     val account = state.account
     val settingsListState = rememberLazyListState()
-    val diagnosticsTopRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         settingsListState.scrollToItem(0)
-    }
-    LaunchedEffect(state.diagnostics.report?.generatedAtEpochMs) {
-        if (state.diagnostics.report != null) {
-            settingsListState.scrollToItem(2)
-            delay(120L)
-            diagnosticsTopRequester.requestFocus()
-        }
     }
     LazyColumn(
         state = settingsListState,
@@ -2442,15 +2442,6 @@ private fun SettingsScreen(
                 AccountMetric("الصلاحية", account?.let(::accountExpiry) ?: "—", Modifier.weight(1f))
                 AccountMetric("الاتصالات", account?.let { "${it.activeConnections} / ${it.maxConnections}" } ?: "—", Modifier.weight(1f))
             }
-        }
-        item {
-            DiagnosticsCenter(
-                state = state.diagnostics,
-                isTv = isTv,
-                onRun = onRunDiagnostics,
-                onShare = { report -> shareDiagnosticsReport(context, report) },
-                topRequester = diagnosticsTopRequester,
-            )
         }
         item {
             Column {
