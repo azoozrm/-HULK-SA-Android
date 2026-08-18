@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.adaptive
 
 import android.view.InputDevice
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
@@ -60,9 +61,9 @@ data class AdaptiveUiState(
 /**
  * Shared Android TV / Google TV presentation policy for v2.0.
  *
- * This keeps TV-safe gutters, rail identity sizing and focus chrome deterministic from the
- * current Compose window instead of relying on physical-panel resolution or device-specific
- * constants. Screens can adopt these tokens progressively without changing mobile behavior.
+ * The policy is based on the current Compose window, not the physical panel resolution. This is
+ * important for TV boxes whose density reporting can vary between 720p, 1080p and 4K displays.
+ * Screens can adopt these tokens progressively without changing mobile or tablet behavior.
  */
 @Immutable
 data class TvPremiumWindowPolicy(
@@ -70,7 +71,12 @@ data class TvPremiumWindowPolicy(
     val verticalSafeInsetDp: Float,
     val contentWidthFraction: Float,
     val railLogoSizeDp: Float,
+    val railExpandedWidthDp: Float,
+    val railCollapsedWidthDp: Float,
+    val railItemMinHeightDp: Float,
+    val railItemVerticalPaddingDp: Float,
     val focusBorderWidthDp: Float,
+    val focusScale: Float,
 )
 
 fun tvPremiumWindowPolicy(
@@ -80,15 +86,18 @@ fun tvPremiumWindowPolicy(
     val width = screenWidthDp.coerceAtLeast(1).toFloat()
     val height = screenHeightDp.coerceAtLeast(1).toFloat()
 
-    // Preserve the proven compact-TV protection already used by the shell, but make it a
-    // single adaptive policy that every v2.0 TV surface can share.
+    // Compact TV canvases need extra protection from overscan. Larger canvases keep a stable
+    // living-room margin while allowing the content to use most of the available width.
     val widthPressure = ((1280f - width) / 320f).coerceIn(0f, 1f)
     val heightPressure = ((720f - height) / 180f).coerceIn(0f, 1f)
     val compactPressure = maxOf(widthPressure, heightPressure)
 
+    val compactTv = width <= 960f || height <= 540f
+    val standardTv = !compactTv && (width <= 1280f || height <= 720f)
+
     val contentWidthFraction = when {
-        width <= 960f || height <= 540f -> 0.96f
-        width <= 1280f || height <= 720f -> 0.95f
+        compactTv -> 0.96f
+        standardTv -> 0.95f
         else -> 0.94f
     }
 
@@ -97,12 +106,40 @@ fun tvPremiumWindowPolicy(
         verticalSafeInsetDp = 8f + (8f * compactPressure),
         contentWidthFraction = contentWidthFraction,
         railLogoSizeDp = (width / 32f).coerceIn(28f, 60f),
+        railExpandedWidthDp = when {
+            compactTv -> 188f
+            standardTv -> 212f
+            else -> 236f
+        },
+        railCollapsedWidthDp = when {
+            compactTv -> 64f
+            standardTv -> 68f
+            else -> 72f
+        },
+        railItemMinHeightDp = when {
+            compactTv -> 44f
+            standardTv -> 48f
+            else -> 52f
+        },
+        railItemVerticalPaddingDp = when {
+            compactTv -> 8f
+            standardTv -> 9f
+            else -> 10f
+        },
         focusBorderWidthDp = 2f,
+        focusScale = when {
+            compactTv -> 1.02f
+            standardTv -> 1.025f
+            else -> 1.03f
+        },
     )
 }
 
 @Stable
-class AdaptiveInputController internal constructor(initialMode: HulkInputMode) {
+class AdaptiveInputController internal constructor(
+    initialMode: HulkInputMode,
+    private val isTelevisionDevice: Boolean = false,
+) {
     var mode by mutableStateOf(initialMode)
         private set
 
@@ -112,6 +149,15 @@ class AdaptiveInputController internal constructor(initialMode: HulkInputMode) {
 
     fun recordKeyInput(source: Int) {
         val nextMode = classifyInputSource(source)
+        if (mode != nextMode) mode = nextMode
+    }
+
+    fun recordKeyInput(source: Int, keyCode: Int) {
+        val nextMode = classifyInputEvent(
+            source = source,
+            keyCode = keyCode,
+            isTelevisionDevice = isTelevisionDevice,
+        )
         if (mode != nextMode) mode = nextMode
     }
 }
@@ -143,7 +189,8 @@ fun rememberAdaptiveUiState(
     val windowWidthClass = classifyWindowWidth(widthDp)
     val controller = remember(isTelevisionDevice) {
         AdaptiveInputController(
-            if (isTelevisionDevice) HulkInputMode.REMOTE else HulkInputMode.TOUCH,
+            initialMode = if (isTelevisionDevice) HulkInputMode.REMOTE else HulkInputMode.TOUCH,
+            isTelevisionDevice = isTelevisionDevice,
         )
     }
     val state = AdaptiveUiState(
@@ -166,7 +213,10 @@ fun Modifier.trackAdaptiveInput(controller: AdaptiveInputController): Modifier =
             }
         }
     }.onPreviewKeyEvent { event ->
-        controller.recordKeyInput(event.nativeKeyEvent.source)
+        controller.recordKeyInput(
+            source = event.nativeKeyEvent.source,
+            keyCode = event.nativeKeyEvent.keyCode,
+        )
         false
     }
 
@@ -176,6 +226,38 @@ fun classifyInputSource(source: Int): HulkInputMode {
             source and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
             source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
     return if (isRemote) HulkInputMode.REMOTE else HulkInputMode.KEYBOARD
+}
+
+/**
+ * Some Android TV remotes report DPAD keys with SOURCE_KEYBOARD. On a television we still treat
+ * those navigation key codes as REMOTE so downstream TV surfaces do not flip interaction models
+ * while the user is moving through the rail. Non-TV devices keep normal keyboard semantics.
+ */
+fun classifyInputEvent(
+    source: Int,
+    keyCode: Int,
+    isTelevisionDevice: Boolean,
+): HulkInputMode {
+    val sourceMode = classifyInputSource(source)
+    if (sourceMode == HulkInputMode.REMOTE) return HulkInputMode.REMOTE
+
+    return if (isTelevisionDevice && isTvNavigationKey(keyCode)) {
+        HulkInputMode.REMOTE
+    } else {
+        sourceMode
+    }
+}
+
+private fun isTvNavigationKey(keyCode: Int): Boolean = when (keyCode) {
+    AndroidKeyEvent.KEYCODE_DPAD_UP,
+    AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+    AndroidKeyEvent.KEYCODE_DPAD_LEFT,
+    AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
+    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+    AndroidKeyEvent.KEYCODE_PAGE_UP,
+    AndroidKeyEvent.KEYCODE_PAGE_DOWN,
+    -> true
+    else -> false
 }
 
 fun classifyWindowWidth(widthDp: Int): HulkWindowWidthClass = when {

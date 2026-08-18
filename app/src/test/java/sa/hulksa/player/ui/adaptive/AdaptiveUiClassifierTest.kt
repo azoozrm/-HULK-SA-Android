@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.adaptive
 
 import android.view.InputDevice
+import android.view.KeyEvent as AndroidKeyEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -116,35 +117,50 @@ class AdaptiveUiClassifierTest {
     }
 
     @Test
-    fun compactTvWindowGetsExtraSafeAreaWithoutShrinkingIdentity() {
+    fun compactTvWindowGetsExtraSafeAreaAndCompactRailTokens() {
         val policy = tvPremiumWindowPolicy(screenWidthDp = 960, screenHeightDp = 540)
 
         assertEquals(18f, policy.horizontalSafeInsetDp, 0.001f)
         assertEquals(16f, policy.verticalSafeInsetDp, 0.001f)
         assertEquals(0.96f, policy.contentWidthFraction, 0.001f)
         assertEquals(30f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(188f, policy.railExpandedWidthDp, 0.001f)
+        assertEquals(64f, policy.railCollapsedWidthDp, 0.001f)
+        assertEquals(44f, policy.railItemMinHeightDp, 0.001f)
+        assertEquals(8f, policy.railItemVerticalPaddingDp, 0.001f)
         assertEquals(2f, policy.focusBorderWidthDp, 0.001f)
+        assertEquals(1.02f, policy.focusScale, 0.001f)
     }
 
     @Test
-    fun standardTvWindowUsesStableSafeAreaAndBalancedContentWidth() {
+    fun standardTvWindowUsesStableSafeAreaAndBalancedRailTokens() {
         val policy = tvPremiumWindowPolicy(screenWidthDp = 1280, screenHeightDp = 720)
 
         assertEquals(8f, policy.horizontalSafeInsetDp, 0.001f)
         assertEquals(8f, policy.verticalSafeInsetDp, 0.001f)
         assertEquals(0.95f, policy.contentWidthFraction, 0.001f)
         assertEquals(40f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(212f, policy.railExpandedWidthDp, 0.001f)
+        assertEquals(68f, policy.railCollapsedWidthDp, 0.001f)
+        assertEquals(48f, policy.railItemMinHeightDp, 0.001f)
+        assertEquals(9f, policy.railItemVerticalPaddingDp, 0.001f)
         assertEquals(2f, policy.focusBorderWidthDp, 0.001f)
+        assertEquals(1.025f, policy.focusScale, 0.001f)
     }
 
     @Test
-    fun largeTvWindowCapsRailIdentityAndKeepsSafeMarginsDeterministic() {
+    fun largeTvWindowCapsIdentityAndKeepsPremiumRailComfort() {
         val policy = tvPremiumWindowPolicy(screenWidthDp = 1920, screenHeightDp = 1080)
 
         assertEquals(8f, policy.horizontalSafeInsetDp, 0.001f)
         assertEquals(8f, policy.verticalSafeInsetDp, 0.001f)
         assertEquals(0.94f, policy.contentWidthFraction, 0.001f)
         assertEquals(60f, policy.railLogoSizeDp, 0.001f)
+        assertEquals(236f, policy.railExpandedWidthDp, 0.001f)
+        assertEquals(72f, policy.railCollapsedWidthDp, 0.001f)
+        assertEquals(52f, policy.railItemMinHeightDp, 0.001f)
+        assertEquals(10f, policy.railItemVerticalPaddingDp, 0.001f)
+        assertEquals(1.03f, policy.focusScale, 0.001f)
     }
 
     @Test
@@ -166,6 +182,50 @@ class AdaptiveUiClassifierTest {
         assertEquals(HulkInputMode.KEYBOARD, classifyInputSource(InputDevice.SOURCE_KEYBOARD))
         assertEquals(HulkInputMode.REMOTE, classifyInputSource(InputDevice.SOURCE_DPAD))
         assertEquals(HulkInputMode.REMOTE, classifyInputSource(InputDevice.SOURCE_GAMEPAD))
+    }
+
+    @Test
+    fun televisionTreatsKeyboardReportedDpadKeysAsRemoteNavigation() {
+        assertEquals(
+            HulkInputMode.REMOTE,
+            classifyInputEvent(
+                source = InputDevice.SOURCE_KEYBOARD,
+                keyCode = AndroidKeyEvent.KEYCODE_DPAD_UP,
+                isTelevisionDevice = true,
+            ),
+        )
+        assertEquals(
+            HulkInputMode.REMOTE,
+            classifyInputEvent(
+                source = InputDevice.SOURCE_KEYBOARD,
+                keyCode = AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                isTelevisionDevice = true,
+            ),
+        )
+    }
+
+    @Test
+    fun nonTvKeyboardKeepsKeyboardInteractionModelForArrowKeys() {
+        assertEquals(
+            HulkInputMode.KEYBOARD,
+            classifyInputEvent(
+                source = InputDevice.SOURCE_KEYBOARD,
+                keyCode = AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
+                isTelevisionDevice = false,
+            ),
+        )
+    }
+
+    @Test
+    fun trueRemoteSourceStaysRemoteEvenForNonNavigationKeys() {
+        assertEquals(
+            HulkInputMode.REMOTE,
+            classifyInputEvent(
+                source = InputDevice.SOURCE_DPAD,
+                keyCode = AndroidKeyEvent.KEYCODE_BACK,
+                isTelevisionDevice = true,
+            ),
+        )
     }
 
     @Test
