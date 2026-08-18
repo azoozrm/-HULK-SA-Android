@@ -150,6 +150,11 @@ internal fun SettingsProScreen(
                         focusRequester = subscriptionRefreshRequester,
                         upRequester = FocusRequester.Cancel,
                         downRequester = playbackFirstRequester,
+                        onFocused = {
+                            if (isTv) {
+                                scope.launch { listState.animateScrollToItem(0) }
+                            }
+                        },
                         onClick = {
                             if (!state.isAccountRefreshing) onRefreshAccount()
                         },
@@ -533,6 +538,7 @@ private fun SettingsMenuRow(
     focusRequester: FocusRequester? = null,
     upRequester: FocusRequester? = null,
     downRequester: FocusRequester? = null,
+    onFocused: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -557,7 +563,11 @@ private fun SettingsMenuRow(
                 color = if (focused) colors.goldBright.copy(alpha = .80f) else Color.Transparent,
                 shape = shape,
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { state ->
+                val nowFocused = state.isFocused
+                if (nowFocused && !focused) onFocused?.invoke()
+                focused = nowFocused
+            }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .focusable(enabled = enabled)
             .padding(
