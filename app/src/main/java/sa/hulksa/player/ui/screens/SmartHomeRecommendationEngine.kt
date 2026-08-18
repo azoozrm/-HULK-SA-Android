@@ -190,7 +190,7 @@ internal fun buildSmartHomeRecommendations(
             .thenBy { it.id },
     ).take(22)
 
-    val featuredPool = sequenceOf(
+    val rawFeaturedPool = sequenceOf(
         suggested,
         becauseYouWatched,
         popularMovies,
@@ -201,14 +201,42 @@ internal fun buildSmartHomeRecommendations(
         .filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
         .distinctBy { it.smartHomeKey() }
         .toList()
-    val rankedFeatured = featuredPool.sortedWith(
-        compareByDescending<ContentItem> { it.smartHomeHeroQualityScore() }
-            .thenByDescending { totalScores[it.smartHomeKey()] ?: 0 }
+
+    // Cinema Mode keeps the hero fresh when enough alternatives exist. A watched title
+    // can still be used as a fail-safe when the catalog is small, but it will not crowd
+    // out undiscovered content on normal catalogs.
+    val unwatchedFeaturedPool = rawFeaturedPool.filterNot { it.smartHomeKey() in watchedKeys }
+    val freshFeaturedPool = if (unwatchedFeaturedPool.size >= 8) {
+        unwatchedFeaturedPool
+    } else {
+        rawFeaturedPool
+    }
+
+    // Backdrops are preferred by the quality score, but never globally filter the pool by
+    // artwork shape. Some providers expose backdrops for series while movies have poster
+    // artwork only; filtering the whole pool would silently remove movies from the hero.
+    // Keeping the full fresh pool lets the final type balancer preserve Movies / Series
+    // representation while still ranking real backdrops first whenever they are available.
+    val cinemaFeaturedPool = freshFeaturedPool
+
+    val heroScores = cinemaFeaturedPool.associate { item ->
+        val recommendationScore = (totalScores[item.smartHomeKey()] ?: 0) / 6
+        item.smartHomeKey() to (item.smartHomeHeroQualityScore() + recommendationScore)
+    }
+    val rankedFeatured = cinemaFeaturedPool.sortedWith(
+        compareByDescending<ContentItem> { heroScores[it.smartHomeKey()] ?: 0 }
             .thenByDescending { it.rating?.toDoubleOrNull() ?: 0.0 }
-            .thenByDescending { it.addedAtEpochSeconds ?: 0L },
+            .thenByDescending { it.addedAtEpochSeconds ?: 0L }
+            .thenBy { it.smartHomeKey() },
+    )
+    val diversifiedFeatured = smartHomeDiversify(
+        candidates = rankedFeatured,
+        baseScores = heroScores,
+        limit = minOf(24, rankedFeatured.size),
+        maxPerCategory = 2,
     )
     val featuredCandidates = smartHomeBalanceContentTypes(
-        candidates = rankedFeatured,
+        candidates = diversifiedFeatured + rankedFeatured,
         limit = 8,
         minimumPerType = 4,
     ).map(ContentItem::withHomeHeroMetadataToken)
@@ -364,12 +392,21 @@ private fun smartHomeRotationSeed(
     return result
 }
 
-private fun ContentItem.smartHomeHeroQualityScore(): Int =
-    (if (!backdropUrl.isNullOrBlank()) 6_000 else 0) +
-        (if (!plot.isNullOrBlank()) 2_200 else 0) +
-        (if (!genre.isNullOrBlank()) 900 else 0) +
-        (if (!year.isNullOrBlank()) 450 else 0) +
-        (if (!posterUrl.isNullOrBlank()) 200 else 0)
+private fun ContentItem.smartHomeHeroQualityScore(): Int {
+    val plotLength = plot?.trim().orEmpty().length
+    val plotScore = when {
+        plotLength >= 90 -> 3_200
+        plotLength > 0 -> 1_900
+        else -> 0
+    }
+    val ratingScore = (((rating?.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 10.0)) * 140.0).toInt()
+    return (if (!backdropUrl.isNullOrBlank()) 9_000 else 0) +
+        plotScore +
+        (if (!genre.isNullOrBlank()) 1_200 else 0) +
+        (if (!year.isNullOrBlank()) 700 else 0) +
+        ratingScore +
+        (if (!posterUrl.isNullOrBlank()) 250 else 0)
+}
 
 private fun smartHomeFreshness(index: Int): Int = (720 - index * 18).coerceAtLeast(0)
 

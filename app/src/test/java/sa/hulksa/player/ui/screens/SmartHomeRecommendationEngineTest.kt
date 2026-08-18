@@ -239,6 +239,121 @@ class SmartHomeRecommendationEngineTest {
         assertEquals(4, result.featuredCandidates.count { it.type == ContentType.SERIES })
     }
 
+    @Test
+    fun cinemaHeroPrefersBackdropPoolWhenEnoughBackdropsExist() {
+        val posterOnly = movie(
+            id = 99,
+            name = "Poster Only",
+            category = "poster",
+            genre = "Action",
+            rating = "10.0",
+            added = 9_999L,
+            artwork = true,
+            backdrop = false,
+            plot = "High rated but without a cinematic backdrop.",
+        )
+        val backdrops = (1..8).map { id ->
+            movie(
+                id = id,
+                name = "Backdrop $id",
+                category = "category-$id",
+                genre = "Drama",
+                rating = "8.0",
+                added = (1_000 - id).toLong(),
+                artwork = true,
+                plot = "A complete cinematic story for backdrop candidate number $id with useful metadata.",
+            )
+        }
+
+        val result = buildSmartHomeRecommendations(
+            movies = listOf(posterOnly) + backdrops,
+            series = emptyList(),
+            live = emptyList(),
+            history = emptyList(),
+            favorites = emptySet(),
+        )
+
+        assertEquals(8, result.featuredCandidates.size)
+        assertFalse(result.featuredCandidates.any { it.id == posterOnly.id })
+        assertTrue(result.featuredCandidates.all { !it.backdropUrl.isNullOrBlank() })
+    }
+
+    @Test
+    fun cinemaHeroAvoidsRecentlyWatchedWhenEightAlternativesExist() {
+        val watched = movie(
+            id = 1,
+            name = "Already Watched",
+            category = "action",
+            genre = "Action",
+            rating = "10.0",
+            added = 2_000L,
+            artwork = true,
+            plot = "A high quality title that should not occupy the discovery hero after being watched.",
+        )
+        val alternatives = (2..9).map { id ->
+            movie(
+                id = id,
+                name = "Fresh $id",
+                category = "category-$id",
+                genre = "Drama",
+                rating = "8.0",
+                added = (1_500 - id).toLong(),
+                artwork = true,
+                plot = "Fresh cinematic alternative $id with complete provider metadata for the hero.",
+            )
+        }
+
+        val result = buildSmartHomeRecommendations(
+            movies = listOf(watched) + alternatives,
+            series = emptyList(),
+            live = emptyList(),
+            history = listOf(historyForMovie(watched, updatedAt = 50_000L)),
+            favorites = emptySet(),
+        )
+
+        assertEquals(8, result.featuredCandidates.size)
+        assertFalse(result.featuredCandidates.any { it.id == watched.id })
+    }
+
+    @Test
+    fun cinemaHeroDiversifiesCategoriesWhenAlternativesExist() {
+        val dominant = (1..8).map { id ->
+            movie(
+                id = id,
+                name = "Sports $id",
+                category = "sports",
+                genre = "Sports",
+                rating = "10.0",
+                added = (3_000 - id).toLong(),
+                artwork = true,
+                plot = "Premium sports cinematic metadata $id with a complete description for ranking.",
+            )
+        }
+        val alternatives = (20..27).map { id ->
+            movie(
+                id = id,
+                name = "Alternative $id",
+                category = "alternative-$id",
+                genre = "Drama",
+                rating = "8.5",
+                added = (2_000 - id).toLong(),
+                artwork = true,
+                plot = "Alternative cinematic title $id with a complete description and backdrop.",
+            )
+        }
+
+        val result = buildSmartHomeRecommendations(
+            movies = dominant + alternatives,
+            series = emptyList(),
+            live = emptyList(),
+            history = emptyList(),
+            favorites = emptySet(),
+        )
+
+        assertEquals(8, result.featuredCandidates.size)
+        assertTrue(result.featuredCandidates.count { it.categoryId == "sports" } <= 2)
+    }
+
     private fun movie(
         id: Int,
         name: String,
@@ -247,6 +362,7 @@ class SmartHomeRecommendationEngineTest {
         rating: String,
         added: Long,
         artwork: Boolean = false,
+        backdrop: Boolean = artwork,
         plot: String? = null,
     ): ContentItem = ContentItem(
         id = id,
@@ -260,7 +376,7 @@ class SmartHomeRecommendationEngineTest {
         addedAtEpochSeconds = added,
         plot = plot,
         genre = genre,
-        backdropUrl = if (artwork) "https://example.com/$id-backdrop.jpg" else null,
+        backdropUrl = if (backdrop) "https://example.com/$id-backdrop.jpg" else null,
     )
 
     private fun series(
@@ -271,6 +387,7 @@ class SmartHomeRecommendationEngineTest {
         rating: String,
         added: Long,
         artwork: Boolean = false,
+        backdrop: Boolean = artwork,
         plot: String? = null,
     ): ContentItem = ContentItem(
         id = id,
@@ -284,7 +401,7 @@ class SmartHomeRecommendationEngineTest {
         addedAtEpochSeconds = added,
         plot = plot,
         genre = genre,
-        backdropUrl = if (artwork) "https://example.com/$id-backdrop.jpg" else null,
+        backdropUrl = if (backdrop) "https://example.com/$id-backdrop.jpg" else null,
     )
 
     private fun historyForMovie(item: ContentItem, updatedAt: Long): HistoryEntry = HistoryEntry(
