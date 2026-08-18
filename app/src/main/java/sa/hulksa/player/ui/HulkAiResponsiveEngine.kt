@@ -63,14 +63,18 @@ private fun responsiveHulkAiCandidates(
         return source
     }
 
+    val weakestFirst = compareBy<ResponsiveCandidate> { it.score }.thenBy { it.item.id }
     val recent = PriorityQueue<ResponsiveCandidate>(
-        compareBy<ResponsiveCandidate> { it.score }.thenBy { it.item.id },
+        HULK_AI_RECENT_POOL_PER_TYPE + 1,
+        weakestFirst,
     )
     val rated = PriorityQueue<ResponsiveCandidate>(
-        compareBy<ResponsiveCandidate> { it.score }.thenBy { it.item.id },
+        HULK_AI_RATED_POOL_PER_TYPE + 1,
+        weakestFirst,
     )
     val queryMatches = PriorityQueue<ResponsiveCandidate>(
-        compareBy<ResponsiveCandidate> { it.score }.thenBy { it.item.id },
+        HULK_AI_QUERY_POOL_PER_TYPE + 1,
+        weakestFirst,
     )
     val pinned = ArrayList<ContentItem>()
 
