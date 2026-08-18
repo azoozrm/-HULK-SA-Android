@@ -2411,16 +2411,8 @@ private fun SettingsScreen(
     val open: (String) -> Unit = { url -> runCatching { uriHandler.openUri(url) }; Unit }
     val account = state.account
     val settingsListState = rememberLazyListState()
-    val diagnosticsTopRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         settingsListState.scrollToItem(0)
-    }
-    LaunchedEffect(state.diagnostics.report?.generatedAtEpochMs) {
-        if (state.diagnostics.report != null) {
-            settingsListState.scrollToItem(2)
-            delay(120L)
-            diagnosticsTopRequester.requestFocus()
-        }
     }
     LazyColumn(
         state = settingsListState,
@@ -2442,15 +2434,6 @@ private fun SettingsScreen(
                 AccountMetric("الصلاحية", account?.let(::accountExpiry) ?: "—", Modifier.weight(1f))
                 AccountMetric("الاتصالات", account?.let { "${it.activeConnections} / ${it.maxConnections}" } ?: "—", Modifier.weight(1f))
             }
-        }
-        item {
-            DiagnosticsCenter(
-                state = state.diagnostics,
-                isTv = isTv,
-                onRun = onRunDiagnostics,
-                onShare = { report -> shareDiagnosticsReport(context, report) },
-                topRequester = diagnosticsTopRequester,
-            )
         }
         item {
             Column {
