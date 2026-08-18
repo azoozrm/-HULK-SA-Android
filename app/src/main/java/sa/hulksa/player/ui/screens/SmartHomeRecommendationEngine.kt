@@ -212,14 +212,12 @@ internal fun buildSmartHomeRecommendations(
         rawFeaturedPool
     }
 
-    // Backdrops are the preferred cinematic surface. Poster-only artwork remains a
-    // fallback for small/incomplete provider catalogs instead of producing an empty hero.
-    val backdropFeaturedPool = freshFeaturedPool.filter { !it.backdropUrl.isNullOrBlank() }
-    val cinemaFeaturedPool = if (backdropFeaturedPool.size >= 8) {
-        backdropFeaturedPool
-    } else {
-        freshFeaturedPool
-    }
+    // Backdrops are preferred by the quality score, but never globally filter the pool by
+    // artwork shape. Some providers expose backdrops for series while movies have poster
+    // artwork only; filtering the whole pool would silently remove movies from the hero.
+    // Keeping the full fresh pool lets the final type balancer preserve Movies / Series
+    // representation while still ranking real backdrops first whenever they are available.
+    val cinemaFeaturedPool = freshFeaturedPool
 
     val heroScores = cinemaFeaturedPool.associate { item ->
         val recommendationScore = (totalScores[item.smartHomeKey()] ?: 0) / 6
