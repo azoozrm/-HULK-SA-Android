@@ -69,12 +69,6 @@ fun HulkApp(
         !isTv && state.screen == HulkScreen.MAIN && state.destination == MainDestination.HOME
     val applySafeDrawingInsets =
         !isTv && !isPhoneHome && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN
-    val safeDrawingInsets =
-        if (!isTv && state.screen == HulkScreen.MAIN) {
-            WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical)
-        } else {
-            WindowInsets.safeDrawing
-        }
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
@@ -144,7 +138,13 @@ fun HulkApp(
                     .fillMaxSize()
                     .then(
                         if (applySafeDrawingInsets) {
-                            Modifier.windowInsetsPadding(safeDrawingInsets)
+                            if (state.screen == HulkScreen.MAIN) {
+                                Modifier.windowInsetsPadding(
+                                    WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical),
+                                )
+                            } else {
+                                Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+                            }
                         } else {
                             Modifier
                         },
