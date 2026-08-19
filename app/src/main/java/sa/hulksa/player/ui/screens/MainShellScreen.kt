@@ -1512,6 +1512,13 @@ private fun LiveCatalogScreen(
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvPageSafeInsets(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+        )
+    }
     LaunchedEffect(listState, visible) {
         snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
@@ -1528,23 +1535,37 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .liveCatalogEdgeToEdge(isTv),
-    ) {
-        CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
-        if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
-        Spacer(Modifier.height(10.dp))
-        ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory)
-        LiveInteractionHints(isTv)
-        Spacer(Modifier.height(8.dp))
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isTv) {
+                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
+            if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
+            Spacer(Modifier.height(10.dp))
+            ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory)
+            LiveInteractionHints(isTv)
+            Spacer(Modifier.height(8.dp))
+        }
         if (catalog == null && ContentType.LIVE in state.loadingTypes) {
             LoadingRing(label = "جاري تحميل القنوات…", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp))
         } else if (visible.isEmpty()) {
             EmptyState("لا توجد قنوات مطابقة")
         } else if (isTv) {
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
                 Column(
                     modifier = Modifier.width(408.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp))
                         .background(Color(0xA30D0E0B)).padding(9.dp),
@@ -1710,7 +1731,7 @@ private fun FavoritesScreen(
                     },
                 ),
         ) {
-            PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
+            PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star, isTv)
             Spacer(Modifier.height(18.dp))
         }
         if (content.isEmpty() && state.loadingTypes.isEmpty()) {
@@ -1740,41 +1761,67 @@ private fun UnifiedSearchScreen(
             .filter { it.matchesSearch(query) }
             .distinctBy { "${it.type}:${it.id}" }
     }
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvPageSafeInsets(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+        )
+    }
     Column(
         Modifier
             .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp),
+            .then(if (isTv) Modifier else Modifier.padding(13.dp)),
     ) {
-        PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search)
-        Spacer(Modifier.height(14.dp))
-        TvSearchField(
-            value = state.searchQuery,
-            onValueChange = onSearch,
-            isTv = isTv,
-            hasResults = results.isNotEmpty(),
-            fieldRequester = searchFieldRequester,
-            firstResultRequester = firstResultRequester,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(16.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isTv) {
+                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            PageTitle("البحث", "القنوات والافلام والمسلسلات", results.size, Icons.Rounded.Search, isTv)
+            Spacer(Modifier.height(14.dp))
+            TvSearchField(
+                value = state.searchQuery,
+                onValueChange = onSearch,
+                isTv = isTv,
+                hasResults = results.isNotEmpty(),
+                fieldRequester = searchFieldRequester,
+                firstResultRequester = firstResultRequester,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+        }
         if (state.searchQuery.isBlank()) {
             EmptyState("ابدا بكتابة الاسم او السنة او النوع او وصف المحتوى")
         } else if (results.isEmpty()) {
             EmptyState("لا توجد نتائج مطابقة")
         } else {
-            Text("${results.size} نتيجة", color = colors.textMuted, fontSize = 11.sp)
-            Spacer(Modifier.height(9.dp))
-            ContentGrid(
-                content = results,
-                isTv = isTv,
-                destination = MainDestination.SEARCH,
-                navigationMemory = navigationMemory,
-                isFavorite = isFavorite,
-                onOpen = onOpen,
-                onToggleFavorite = onToggleFavorite,
-                firstItemFocusRequester = if (isTv) firstResultRequester else null,
-                firstItemUpRequester = if (isTv) searchFieldRequester else null,
+            Text(
+                "${results.size} نتيجة",
+                color = colors.textMuted,
+                fontSize = 11.sp,
+                modifier = if (isTv) Modifier.padding(horizontal = 14.dp) else Modifier,
             )
+            Spacer(Modifier.height(9.dp))
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                ContentGrid(
+                    content = results,
+                    isTv = isTv,
+                    destination = MainDestination.SEARCH,
+                    navigationMemory = navigationMemory,
+                    isFavorite = isFavorite,
+                    onOpen = onOpen,
+                    onToggleFavorite = onToggleFavorite,
+                    firstItemFocusRequester = if (isTv) firstResultRequester else null,
+                    firstItemUpRequester = if (isTv) searchFieldRequester else null,
+                )
+            }
         }
     }
 }
@@ -1925,76 +1972,95 @@ private fun DownloadsScreen(
     val availableBytes = remember(downloads) {
         (context.getExternalFilesDir(null) ?: context.filesDir).usableSpace.coerceAtLeast(0L)
     }
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvPageSafeInsets(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+        )
+    }
 
     Column(
         Modifier
             .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp),
+            .then(if (isTv) Modifier else Modifier.padding(13.dp)),
     ) {
-        PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download)
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoPill("مكتمل  $completed")
-            if (active > 0) InfoPill("نشط ومجدول  $active")
-            if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
-            InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}")
-        }
-        Spacer(Modifier.height(11.dp))
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-            modifier = Modifier.focusGroup(),
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isTv) {
+                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
         ) {
-            item {
-                FocusButton(
-                    if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
-                    onToggleWifiOnly,
-                    primary = settings.wifiOnly,
-                    compact = true,
-                    outlined = !settings.wifiOnly,
-                    modifier = Modifier
-                        .focusRequester(toolbarFocus.wifi)
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
-                            downloads.size,
-                            resolveDownloadFocus,
-                        ),
-                )
+            PageTitle("التنزيلات", "ادارة كاملة للمشاهدة بدون انترنت", downloads.size, Icons.Rounded.Download, isTv)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoPill("مكتمل  $completed")
+                if (active > 0) InfoPill("نشط ومجدول  $active")
+                if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
+                InfoPill("المساحة المتاحة بالجهاز  ${formatBytes(availableBytes)}")
             }
-            item {
-                FocusButton(
-                    if (settings.scheduleMode == DownloadScheduleMode.NIGHT) "الجدولة 02:00" else "الجدولة الان",
-                    onToggleSchedule,
-                    primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
-                    compact = true,
-                    outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
-                    modifier = Modifier
-                        .focusRequester(toolbarFocus.schedule)
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
-                            downloads.size,
-                            resolveDownloadFocus,
-                        ),
-                )
+            Spacer(Modifier.height(11.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+                modifier = Modifier.focusGroup(),
+            ) {
+                item {
+                    FocusButton(
+                        if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
+                        onToggleWifiOnly,
+                        primary = settings.wifiOnly,
+                        compact = true,
+                        outlined = !settings.wifiOnly,
+                        modifier = Modifier
+                            .focusRequester(toolbarFocus.wifi)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.toolbar(DownloadFocusSlot.WIFI),
+                                downloads.size,
+                                resolveDownloadFocus,
+                            ),
+                    )
+                }
+                item {
+                    FocusButton(
+                        if (settings.scheduleMode == DownloadScheduleMode.NIGHT) "الجدولة 02:00" else "الجدولة الان",
+                        onToggleSchedule,
+                        primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
+                        compact = true,
+                        outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
+                        modifier = Modifier
+                            .focusRequester(toolbarFocus.schedule)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.toolbar(DownloadFocusSlot.SCHEDULE),
+                                downloads.size,
+                                resolveDownloadFocus,
+                            ),
+                    )
+                }
+                item {
+                    FocusButton(
+                        "متزامنة  ${settings.concurrentDownloads}",
+                        onCycleConcurrent,
+                        primary = false,
+                        compact = true,
+                        outlined = true,
+                        modifier = Modifier
+                            .focusRequester(toolbarFocus.concurrent)
+                            .applyDownloadFocusPolicy(
+                                DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
+                                downloads.size,
+                                resolveDownloadFocus,
+                            ),
+                    )
+                }
             }
-            item {
-                FocusButton(
-                    "متزامنة  ${settings.concurrentDownloads}",
-                    onCycleConcurrent,
-                    primary = false,
-                    compact = true,
-                    outlined = true,
-                    modifier = Modifier
-                        .focusRequester(toolbarFocus.concurrent)
-                        .applyDownloadFocusPolicy(
-                            DownloadFocusLocation.toolbar(DownloadFocusSlot.CONCURRENT),
-                            downloads.size,
-                            resolveDownloadFocus,
-                        ),
-                )
-            }
+            Spacer(Modifier.height(12.dp))
         }
-        Spacer(Modifier.height(12.dp))
         if (downloads.isEmpty()) {
             EmptyState("ستظهر هنا الافلام والحلقات التي تختار تحميلها")
         } else {
@@ -2003,7 +2069,11 @@ private fun DownloadsScreen(
                 verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
                 horizontalAlignment = Alignment.Start,
                 contentPadding = PaddingValues(bottom = 28.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = if (isTv) {
+                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp)
+                } else {
+                    Modifier.fillMaxSize()
+                },
             ) {
                 itemsIndexed(downloads, key = { _, item -> item.downloadId }) { index, item ->
                     val requesters = checkNotNull(cardFocus[item.downloadId])
@@ -2408,7 +2478,9 @@ private fun ContentGrid(
             runCatching { targetRequester.requestFocus() }
         }
     }
-    val horizontalGridPadding = if (isTv && destination == MainDestination.FAVORITES) 12.dp else 5.dp
+    val horizontalGridPadding = if (
+        isTv && (destination == MainDestination.FAVORITES || destination == MainDestination.SEARCH)
+    ) 12.dp else 5.dp
     LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Adaptive(if (isTv) 132.dp else 105.dp),
@@ -3358,7 +3430,13 @@ private fun FavoriteHint(isTv: Boolean) {
 }
 
 @Composable
-private fun PageTitle(title: String, subtitle: String, count: Int, icon: ImageVector) {
+private fun PageTitle(
+    title: String,
+    subtitle: String,
+    count: Int,
+    icon: ImageVector,
+    isTv: Boolean = false,
+) {
     val colors = LocalHulkColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(42.dp).clip(CircleShape).background(colors.gold.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
@@ -3366,7 +3444,7 @@ private fun PageTitle(title: String, subtitle: String, count: Int, icon: ImageVe
         }
         Spacer(Modifier.width(11.dp))
         Column {
-            Text(title, color = colors.text, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = colors.text, fontSize = if (isTv) 27.sp else 25.sp, fontWeight = FontWeight.Bold)
             Text(if (count > 0) "$subtitle  •  $count" else subtitle, color = colors.textMuted, fontSize = 11.sp)
         }
     }
