@@ -1444,7 +1444,7 @@ private fun PosterCatalogScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
                     } else {
                         Modifier
                     },
@@ -1704,7 +1704,7 @@ private fun FavoritesScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
                     } else {
                         Modifier
                     },
@@ -1848,7 +1848,7 @@ private fun TvSearchField(
 
     HulkTextField(
         value = value,
-        onValueChange = onValueChange,
+        onValueChange = onSearch,
         label = "ابحث بالاسم او السنة او النوع…",
         modifier = modifier.then(tvModifier),
         readOnly = isTv && !tvSearchEditing,
@@ -2408,12 +2408,18 @@ private fun ContentGrid(
             runCatching { targetRequester.requestFocus() }
         }
     }
+    val horizontalGridPadding = if (isTv && destination == MainDestination.FAVORITES) 12.dp else 5.dp
     LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Adaptive(if (isTv) 132.dp else 105.dp),
         horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 9.dp),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 15.dp else 10.dp),
-        contentPadding = PaddingValues(5.dp, 5.dp, 5.dp, 28.dp),
+        contentPadding = PaddingValues(
+            start = horizontalGridPadding,
+            top = 5.dp,
+            end = horizontalGridPadding,
+            bottom = 28.dp,
+        ),
         modifier = Modifier.fillMaxSize(),
     ) {
         itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
@@ -2948,7 +2954,11 @@ private fun CatalogHeader(
     isTv: Boolean,
 ) {
     val colors = LocalHulkColors.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
         Column(Modifier.width(if (isTv) 185.dp else 105.dp)) {
             Text(title, color = colors.text, fontSize = if (isTv) 27.sp else 20.sp, fontWeight = FontWeight.Bold)
             Text("$resultCount عنصر", color = colors.textMuted, fontSize = 10.sp)
