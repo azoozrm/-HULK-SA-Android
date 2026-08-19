@@ -449,7 +449,17 @@ fun MainShellScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f)) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .then(
+                            if (state.destination == MainDestination.HOME) {
+                                Modifier
+                            } else {
+                                Modifier.statusBarsPadding().padding(top = MOBILE_SECTION_TOP_GAP)
+                            },
+                        ),
+                ) {
                     DestinationContent(
                         state = state,
                         isTv = false,
@@ -1435,7 +1445,7 @@ private fun PosterCatalogScreen(
                 if (isTv) {
                     Modifier
                 } else {
-                    Modifier.padding(horizontal = 13.dp, vertical = 12.dp)
+                    Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)
                 },
             ),
     ) {
@@ -1543,7 +1553,7 @@ private fun LiveCatalogScreen(
                     if (isTv) {
                         Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
                     } else {
-                        Modifier
+                        Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)
                     },
                 ),
         ) {
@@ -1716,7 +1726,7 @@ private fun FavoritesScreen(
                 if (isTv) {
                     Modifier
                 } else {
-                    Modifier.padding(13.dp)
+                    Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)
                 },
             ),
     ) {
@@ -1771,7 +1781,7 @@ private fun UnifiedSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .then(if (isTv) Modifier else Modifier.padding(13.dp)),
+            .then(if (isTv) Modifier else Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)),
     ) {
         Column(
             Modifier
@@ -1983,7 +1993,7 @@ private fun DownloadsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .then(if (isTv) Modifier else Modifier.padding(13.dp)),
+            .then(if (isTv) Modifier else Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)),
     ) {
         Column(
             Modifier
@@ -3032,8 +3042,8 @@ private fun CatalogHeader(
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         Column(Modifier.width(if (isTv) 185.dp else 105.dp)) {
-            Text(title, color = colors.text, fontSize = if (isTv) 27.sp else 20.sp, fontWeight = FontWeight.Bold)
-            Text("$resultCount عنصر", color = colors.textMuted, fontSize = 10.sp)
+            Text(title, color = colors.text, fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE, fontWeight = FontWeight.Bold)
+            Text("$resultCount عنصر", color = colors.textMuted, fontSize = if (isTv) 10.sp else MOBILE_SECTION_COUNT_SIZE)
         }
         HulkTextField(query, onSearch, "ابحث في $title…", Modifier.weight(1f).widthIn(max = 630.dp))
         RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh)
@@ -3439,13 +3449,23 @@ private fun PageTitle(
 ) {
     val colors = LocalHulkColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(42.dp).clip(CircleShape).background(colors.gold.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
-            Icon(icon, title, tint = colors.goldBright, modifier = Modifier.size(21.dp))
+        if (isTv) {
+            Box(Modifier.size(42.dp).clip(CircleShape).background(colors.gold.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
+                Icon(icon, title, tint = colors.goldBright, modifier = Modifier.size(21.dp))
+            }
+            Spacer(Modifier.width(11.dp))
         }
-        Spacer(Modifier.width(11.dp))
         Column {
-            Text(title, color = colors.text, fontSize = if (isTv) 27.sp else 25.sp, fontWeight = FontWeight.Bold)
-            Text(if (count > 0) "$subtitle  •  $count" else subtitle, color = colors.textMuted, fontSize = 11.sp)
+            Text(title, color = colors.text, fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE, fontWeight = FontWeight.Bold)
+            Text(
+                text = if (isTv) {
+                    if (count > 0) "$subtitle  •  $count" else subtitle
+                } else {
+                    "$count عنصر"
+                },
+                color = colors.textMuted,
+                fontSize = if (isTv) 11.sp else MOBILE_SECTION_COUNT_SIZE,
+            )
         }
     }
 }
