@@ -68,9 +68,9 @@ internal fun tvCatalogMetrics(
         horizontalSpacingDp = (14f * densityScale).coerceIn(12f, 16f),
         verticalSpacingDp = (15f * densityScale).coerceIn(13f, 17f),
         horizontalContentPaddingDp = when {
-            compact -> 6f
-            large -> 8f
-            else -> 5f
+            compact -> 12f
+            large -> 12f
+            else -> 10f
         },
         bottomContentPaddingDp = maxOf(44f, policy.verticalSafeInsetDp + 30f),
         focusViewportInsetDp = when {
