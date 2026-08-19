@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -217,6 +220,7 @@ fun LoginScreen(
                         rememberAccount = rememberAccount,
                         onRememberChange = { rememberAccount = !rememberAccount },
                         isLoading = isLoading,
+                        isTv = isTv,
                         errorMessage = errorMessage,
                         onSubmit = submit,
                         onOpenWebsite = openWebsite,
@@ -302,6 +306,7 @@ fun LoginScreen(
                     rememberAccount = rememberAccount,
                     onRememberChange = { rememberAccount = !rememberAccount },
                     isLoading = isLoading,
+                    isTv = false,
                     errorMessage = errorMessage,
                     onSubmit = submit,
                     onOpenWebsite = openWebsite,
@@ -403,6 +408,7 @@ private fun LoginPanel(
     rememberAccount: Boolean,
     onRememberChange: () -> Unit,
     isLoading: Boolean,
+    isTv: Boolean,
     errorMessage: String?,
     onSubmit: () -> Unit,
     onOpenWebsite: () -> Unit,
@@ -475,7 +481,12 @@ private fun LoginPanel(
         Text(
             text = "ادخل بيانات الاشتراك الخاص بك",
             color = colors.textMuted,
-            fontSize = if (compact) 10.sp else 13.sp,
+            fontSize = when {
+                isTv && compact -> 13.sp
+                isTv -> 15.sp
+                compact -> 10.sp
+                else -> 13.sp
+            },
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -728,20 +739,26 @@ private fun LoginOption(
             .padding(horizontal = if (compact) 6.dp else 8.dp, vertical = if (compact) 3.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val checkShape = RoundedCornerShape(if (compact) 5.dp else 6.dp)
         Box(
             modifier = Modifier
                 .size(if (compact) 18.dp else 20.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(checkShape)
                 .background(if (checked) colors.gold else Color(0xFF1B1C17))
                 .border(
                     1.dp,
-                    if (checked) colors.goldBright.copy(alpha = .75f) else Color.White.copy(alpha = .18f),
-                    RoundedCornerShape(6.dp),
+                    if (checked) colors.goldBright.copy(alpha = .90f) else Color.White.copy(alpha = .22f),
+                    checkShape,
                 ),
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {
-                Text("✓", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(if (compact) 14.dp else 16.dp),
+                )
             }
         }
         Spacer(Modifier.width(if (compact) 7.dp else 10.dp))
