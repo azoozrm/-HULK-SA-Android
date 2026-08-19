@@ -1594,7 +1594,7 @@ private fun LiveCatalogScreen(
                     ChannelListItem(
                         item = channel,
                         selected = false,
-                        onFocused = { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) },
+                        onFocused = { navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index) },
                         onClick = { onOpen(channel) },
                         isFavorite = isFavorite(channel),
                         onLongClick = { onToggleFavorite(channel) },
@@ -2416,7 +2416,7 @@ private fun ContentGrid(
         contentPadding = PaddingValues(5.dp, 5.dp, 5.dp, 28.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        itemsIndexed(content, key = { _, item -> "${item.type}:${it.id}" }) { index, item ->
+        itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
             val key = "${item.type}:${item.id}"
             val restore = remembered.itemKey == key || index == targetIndex
             UniversalPosterCard(
