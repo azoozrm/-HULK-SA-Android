@@ -1444,11 +1444,7 @@ private fun PosterCatalogScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(
-                            start = tvSafeInsets.horizontalDp.dp,
-                            top = tvSafeInsets.verticalDp.dp,
-                            end = tvSafeInsets.horizontalDp.dp,
-                        )
+                        Modifier.padding(top = tvSafeInsets.verticalDp.dp)
                     } else {
                         Modifier
                     },
@@ -1598,7 +1594,7 @@ private fun LiveCatalogScreen(
                     ChannelListItem(
                         item = channel,
                         selected = false,
-                        onFocused = { navigationMemory.save(MainDestination.LIVE, "${channel.type}:${channel.id}", index) },
+                        onFocused = { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) },
                         onClick = { onOpen(channel) },
                         isFavorite = isFavorite(channel),
                         onLongClick = { onToggleFavorite(channel) },
@@ -1708,11 +1704,7 @@ private fun FavoritesScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(
-                            start = tvSafeInsets.horizontalDp.dp,
-                            top = tvSafeInsets.verticalDp.dp,
-                            end = tvSafeInsets.horizontalDp.dp,
-                        )
+                        Modifier.padding(top = tvSafeInsets.verticalDp.dp)
                     } else {
                         Modifier
                     },
@@ -2424,7 +2416,7 @@ private fun ContentGrid(
         contentPadding = PaddingValues(5.dp, 5.dp, 5.dp, 28.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
+        itemsIndexed(content, key = { _, item -> "${item.type}:${it.id}" }) { index, item ->
             val key = "${item.type}:${item.id}"
             val restore = remembered.itemKey == key || index == targetIndex
             UniversalPosterCard(
