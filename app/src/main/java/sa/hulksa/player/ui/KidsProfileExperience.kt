@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
@@ -327,8 +328,14 @@ private fun KidsSourceGate(
     Box(
         Modifier
             .fillMaxSize()
-            .safeDrawingPadding()
-            .padding(horizontal = if (isTv) 48.dp else 18.dp, vertical = if (isTv) 32.dp else 20.dp),
+            .then(
+                if (isTv) {
+                    Modifier.safeDrawingPadding()
+                } else {
+                    Modifier.statusBarsPadding().navigationBarsPadding()
+                },
+            )
+            .padding(horizontal = if (isTv) 48.dp else 14.dp, vertical = if (isTv) 32.dp else 18.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -412,21 +419,44 @@ private fun KidsMainScreen(
                     radius = if (isTv) 1260f else 780f,
                 ),
             )
-            .safeDrawingPadding(),
+            .then(
+                if (isTv) {
+                    Modifier.safeDrawingPadding()
+                } else {
+                    Modifier.statusBarsPadding().navigationBarsPadding()
+                },
+            ),
     ) {
+        val compactTv = isTv && (maxWidth <= 960.dp || maxHeight <= 540.dp)
+        val largeTv = isTv && maxWidth >= 1600.dp && maxHeight >= 900.dp
+        val phoneLandscape = !isTv && maxWidth > maxHeight
         val wide = isTv || maxWidth >= 840.dp
-        val edgePadding = if (isTv) 14.dp else 0.dp
+        val edgePadding = when {
+            compactTv -> 8.dp
+            largeTv -> 18.dp
+            isTv -> 12.dp
+            else -> 0.dp
+        }
         val contentPadding = when {
-            isTv -> 18.dp
-            maxWidth >= 600.dp -> 20.dp
-            else -> 14.dp
+            compactTv -> 12.dp
+            largeTv -> 22.dp
+            isTv -> 16.dp
+            maxWidth >= 600.dp -> 16.dp
+            phoneLandscape -> 10.dp
+            else -> 10.dp
+        }
+        val railGap = when {
+            compactTv -> 9.dp
+            largeTv -> 16.dp
+            isTv -> 12.dp
+            else -> 10.dp
         }
 
         if (wide) {
             Row(
                 Modifier
                     .fillMaxSize()
-                    .padding(horizontal = edgePadding, vertical = if (isTv) 10.dp else 0.dp),
+                    .padding(horizontal = edgePadding, vertical = if (isTv) 8.dp else 0.dp),
             ) {
                 KidsSideRail(
                     profile = profile,
@@ -436,7 +466,7 @@ private fun KidsMainScreen(
                     onSelect = { onSelectedSectionChange(it); query = ""; categoryId = null },
                     onSwitchProfile = onSwitchProfile,
                 )
-                Spacer(Modifier.width(if (isTv) 14.dp else 10.dp))
+                Spacer(Modifier.width(railGap))
                 KidsContentPane(
                     modifier = Modifier.weight(1f).fillMaxHeight().padding(contentPadding),
                     profile = profile,
@@ -492,6 +522,51 @@ private fun KidsContentPane(
     onOpen: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactTv = isTv && (adaptiveUi.screenWidthDp <= 960 || adaptiveUi.screenHeightDp <= 540)
+    val largeTv = isTv && adaptiveUi.screenWidthDp >= 1600 && adaptiveUi.screenHeightDp >= 900
+    val phoneLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
+    val tablet = !isTv && adaptiveUi.screenWidthDp >= 600
+    val titleSize = when {
+        compactTv -> 26.sp
+        largeTv -> 34.sp
+        isTv -> 30.sp
+        tablet -> 26.sp
+        phoneLandscape -> 20.sp
+        else -> 22.sp
+    }
+    val headerAvatarSize = when {
+        tablet -> 48.dp
+        phoneLandscape -> 40.dp
+        else -> 44.dp
+    }
+    val gridMinSize = when {
+        compactTv -> 132.dp
+        largeTv -> 170.dp
+        isTv -> 154.dp
+        tablet -> 138.dp
+        phoneLandscape -> 112.dp
+        else -> 116.dp
+    }
+    val gridHorizontalGap = when {
+        compactTv -> 10.dp
+        largeTv -> 16.dp
+        isTv -> 13.dp
+        else -> 8.dp
+    }
+    val gridVerticalGap = when {
+        compactTv -> 11.dp
+        largeTv -> 17.dp
+        isTv -> 14.dp
+        phoneLandscape -> 9.dp
+        else -> 11.dp
+    }
+    val sectionGap = when {
+        compactTv -> 12.dp
+        isTv -> 16.dp
+        phoneLandscape -> 8.dp
+        else -> 12.dp
+    }
     val selectedType = when (selected) {
         KidsSection.LIVE -> ContentType.LIVE
         KidsSection.MOVIES -> ContentType.MOVIE
@@ -520,18 +595,18 @@ private fun KidsContentPane(
                 title,
                 modifier = if (showProfileAvatar) Modifier.weight(1f) else Modifier,
                 color = colors.text,
-                fontSize = if (isTv) 30.sp else 22.sp,
+                fontSize = titleSize,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (showProfileAvatar) {
-                Spacer(Modifier.width(12.dp))
-                ProfileAvatarArtwork(profile.avatarKey, profile.displayName, 44.dp, true)
+                Spacer(Modifier.width(10.dp))
+                ProfileAvatarArtwork(profile.avatarKey, profile.displayName, headerAvatarSize, true)
             }
         }
 
-        Spacer(Modifier.height(if (isTv) 16.dp else 12.dp))
+        Spacer(Modifier.height(sectionGap))
 
         if (selected == KidsSection.SEARCH) {
             HulkTextField(
@@ -540,13 +615,13 @@ private fun KidsContentPane(
                 label = "ابحث عن فيلم أو مسلسل أو قناة",
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(if (isTv) 15.dp else 11.dp))
+            Spacer(Modifier.height(if (compactTv) 11.dp else if (isTv) 15.dp else if (phoneLandscape) 8.dp else 11.dp))
         }
 
         if (categories.isNotEmpty()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 8.dp else 6.dp),
             ) {
                 item {
                     KidsCategoryChip("الكل", categoryId == null, isTv) { onCategoryChange(null) }
@@ -557,7 +632,7 @@ private fun KidsContentPane(
                     }
                 }
             }
-            Spacer(Modifier.height(if (isTv) 15.dp else 11.dp))
+            Spacer(Modifier.height(if (compactTv) 11.dp else if (isTv) 15.dp else if (phoneLandscape) 8.dp else 11.dp))
         }
 
         if (items.isEmpty()) {
@@ -575,11 +650,11 @@ private fun KidsContentPane(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = if (isTv) 154.dp else 126.dp),
+                columns = GridCells.Adaptive(minSize = gridMinSize),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = if (isTv) 22.dp else 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 13.dp else 10.dp),
-                verticalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 11.dp),
+                contentPadding = PaddingValues(bottom = if (largeTv) 28.dp else if (isTv) 22.dp else 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(gridHorizontalGap),
+                verticalArrangement = Arrangement.spacedBy(gridVerticalGap),
             ) {
                 items(items, key = { "${it.type.name}:${it.id}" }) { item ->
                     KidsContentCard(item = item, isTv = isTv, onClick = { onOpen(item) })
@@ -596,6 +671,33 @@ private fun KidsContentCard(
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactTv = isTv && (adaptiveUi.screenWidthDp <= 960 || adaptiveUi.screenHeightDp <= 540)
+    val largeTv = isTv && adaptiveUi.screenWidthDp >= 1600 && adaptiveUi.screenHeightDp >= 900
+    val phoneLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
+    val tablet = !isTv && adaptiveUi.screenWidthDp >= 600
+    val posterHeight = when {
+        compactTv -> 150.dp
+        largeTv -> 206.dp
+        isTv -> 180.dp
+        tablet -> 176.dp
+        phoneLandscape -> 132.dp
+        else -> 158.dp
+    }
+    val cardPadding = when {
+        compactTv -> 6.dp
+        largeTv -> 8.dp
+        isTv -> 7.dp
+        else -> 6.dp
+    }
+    val titleSize = when {
+        compactTv -> 12.sp
+        largeTv -> 15.sp
+        isTv -> 14.sp
+        tablet -> 13.sp
+        phoneLandscape -> 11.sp
+        else -> 12.sp
+    }
     var focused by remember(item.id, item.type) { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (isTv) 15.dp else 13.dp)
     Column(
@@ -618,12 +720,12 @@ private fun KidsContentCard(
             }
             .clickable(onClick = onClick)
             .focusable()
-            .padding(if (isTv) 7.dp else 6.dp),
+            .padding(cardPadding),
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (isTv) 180.dp else 158.dp)
+                .height(posterHeight)
                 .clip(RoundedCornerShape(if (isTv) 11.dp else 10.dp))
                 .background(colors.surfaceRaised),
         ) {
@@ -636,7 +738,7 @@ private fun KidsContentCard(
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
-                    .padding(6.dp)
+                    .padding(if (compactTv || phoneLandscape) 5.dp else 6.dp)
                     .clip(RoundedCornerShape(50))
                     .background(Color.Black.copy(alpha = .70f))
                     .padding(horizontal = 7.dp, vertical = 3.dp),
@@ -648,17 +750,17 @@ private fun KidsContentCard(
                         ContentType.SERIES -> "مسلسل"
                     },
                     color = colors.goldBright,
-                    fontSize = if (isTv) 10.sp else 9.sp,
+                    fontSize = if (largeTv) 11.sp else if (isTv) 10.sp else 9.sp,
                     fontWeight = FontWeight.Bold,
                 )
             }
         }
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(if (phoneLandscape) 5.dp else 7.dp))
         Text(
             item.name,
             color = if (focused) colors.goldBright else colors.text,
-            fontSize = if (isTv) 14.sp else 12.sp,
-            lineHeight = if (isTv) 18.sp else 16.sp,
+            fontSize = titleSize,
+            lineHeight = (titleSize.value + 4f).sp,
             fontWeight = FontWeight.Bold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -674,6 +776,9 @@ private fun KidsCategoryChip(
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactTv = isTv && (adaptiveUi.screenWidthDp <= 960 || adaptiveUi.screenHeightDp <= 540)
+    val phoneLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
     var focused by remember(text) { mutableStateOf(false) }
     Box(
         Modifier
@@ -687,12 +792,15 @@ private fun KidsCategoryChip(
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .focusable()
-            .padding(horizontal = if (isTv) 15.dp else 13.dp, vertical = if (isTv) 8.dp else 8.dp),
+            .padding(
+                horizontal = if (compactTv) 12.dp else if (isTv) 15.dp else if (phoneLandscape) 10.dp else 13.dp,
+                vertical = if (compactTv || phoneLandscape) 7.dp else 8.dp,
+            ),
     ) {
         Text(
             text,
             color = if (selected) Color.Black else if (focused) colors.goldBright else colors.text,
-            fontSize = if (isTv) 12.sp else 11.sp,
+            fontSize = if (compactTv) 11.sp else if (isTv) 12.sp else if (phoneLandscape) 10.sp else 11.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -709,21 +817,44 @@ private fun KidsSideRail(
     onSwitchProfile: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactTv = isTv && (adaptiveUi.screenWidthDp <= 960 || adaptiveUi.screenHeightDp <= 540)
+    val largeTv = isTv && adaptiveUi.screenWidthDp >= 1600 && adaptiveUi.screenHeightDp >= 900
+    val railWidth = when {
+        compactTv -> 112.dp
+        largeTv -> 140.dp
+        isTv -> 126.dp
+        else -> 114.dp
+    }
+    val avatarSize = when {
+        compactTv -> 40.dp
+        largeTv -> 52.dp
+        isTv -> 46.dp
+        else -> 42.dp
+    }
     val railShape = RoundedCornerShape(if (isTv) 20.dp else 17.dp)
     Column(
         Modifier
-            .width(if (isTv) 126.dp else 114.dp)
+            .width(railWidth)
             .fillMaxHeight()
             .clip(railShape)
             .background(Color(0xF6090A07))
             .border(1.dp, Color.White.copy(alpha = .06f), railShape)
-            .padding(horizontal = if (isTv) 9.dp else 8.dp, vertical = if (isTv) 16.dp else 14.dp),
+            .padding(
+                horizontal = if (compactTv) 7.dp else if (isTv) 9.dp else 8.dp,
+                vertical = if (compactTv) 11.dp else if (largeTv) 18.dp else if (isTv) 16.dp else 14.dp,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ProfileAvatarArtwork(profile.avatarKey, profile.displayName, if (isTv) 46.dp else 42.dp, true)
+        ProfileAvatarArtwork(profile.avatarKey, profile.displayName, avatarSize, true)
         Spacer(Modifier.height(5.dp))
-        Text("KIDS", color = colors.goldBright, fontSize = if (isTv) 13.sp else 12.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(if (isTv) 13.dp else 10.dp))
+        Text(
+            "KIDS",
+            color = colors.goldBright,
+            fontSize = if (compactTv) 11.sp else if (largeTv) 14.sp else if (isTv) 13.sp else 12.sp,
+            fontWeight = FontWeight.Black,
+        )
+        Spacer(Modifier.height(if (compactTv) 8.dp else if (isTv) 13.dp else 10.dp))
         entries.forEach { entry ->
             KidsNavButton(
                 entry = entry,
@@ -732,7 +863,7 @@ private fun KidsSideRail(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = { onSelect(entry.section) },
             )
-            Spacer(Modifier.height(if (isTv) 4.dp else 3.dp))
+            Spacer(Modifier.height(if (compactTv) 2.dp else if (isTv) 4.dp else 3.dp))
         }
         Spacer(Modifier.weight(1f))
         KidsNavButton(
@@ -756,10 +887,9 @@ private fun KidsBottomBar(
         Modifier
             .fillMaxWidth()
             .background(Color(0xFF090A07))
-            .navigationBarsPadding()
-            .padding(vertical = 5.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(vertical = 4.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         items(entries, key = { it.section.name }) { entry ->
             KidsNavButton(entry, selected == entry.section, false) { onSelect(entry.section) }
@@ -784,12 +914,41 @@ private fun KidsNavButton(
     onClick: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val compactTv = isTv && (adaptiveUi.screenWidthDp <= 960 || adaptiveUi.screenHeightDp <= 540)
+    val largeTv = isTv && adaptiveUi.screenWidthDp >= 1600 && adaptiveUi.screenHeightDp >= 900
+    val phoneLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
+    val phoneButtonWidth = when {
+        adaptiveUi.screenWidthDp < 360 -> 62.dp
+        phoneLandscape -> 64.dp
+        else -> 68.dp
+    }
+    val minHeight = when {
+        compactTv -> 48.dp
+        largeTv -> 58.dp
+        isTv -> 54.dp
+        phoneLandscape -> 46.dp
+        else -> 50.dp
+    }
+    val iconSize = when {
+        compactTv -> 19.dp
+        largeTv -> 24.dp
+        isTv -> 22.dp
+        phoneLandscape -> 18.dp
+        else -> 19.dp
+    }
+    val labelSize = when {
+        compactTv -> 9.sp
+        largeTv -> 11.sp
+        isTv -> 10.sp
+        else -> 9.sp
+    }
     var focused by remember(entry.label) { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (isTv) 13.dp else 12.dp)
     Column(
         modifier
-            .then(if (isTv) Modifier else Modifier.width(82.dp))
-            .heightIn(min = if (isTv) 54.dp else 52.dp)
+            .then(if (isTv) Modifier else Modifier.width(phoneButtonWidth))
+            .heightIn(min = minHeight)
             .clip(shape)
             .background(
                 when {
@@ -818,7 +977,7 @@ private fun KidsNavButton(
             }
             .clickable(onClick = onClick)
             .focusable()
-            .padding(horizontal = 4.dp, vertical = if (isTv) 7.dp else 6.dp),
+            .padding(horizontal = 4.dp, vertical = if (compactTv) 5.dp else if (isTv) 7.dp else 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -826,14 +985,14 @@ private fun KidsNavButton(
             entry.icon,
             contentDescription = entry.label,
             tint = if (selected || focused) colors.goldBright else colors.textMuted,
-            modifier = Modifier.size(if (isTv) 22.dp else 20.dp),
+            modifier = Modifier.size(iconSize),
         )
         Spacer(Modifier.height(3.dp))
         Text(
             entry.label,
             color = if (selected || focused) colors.text else colors.textMuted,
-            fontSize = if (isTv) 10.sp else 9.sp,
-            lineHeight = if (isTv) 12.sp else 11.sp,
+            fontSize = labelSize,
+            lineHeight = (labelSize.value + 2f).sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             textAlign = TextAlign.Center,
             maxLines = 2,
