@@ -287,7 +287,7 @@ fun ProfilePickerScreen(
                 Spacer(Modifier.height(if (isTv) 13.dp else if (compactMobile) 6.dp else 10.dp))
 
                 Text(
-                    text = "من يشاهد الان؟",
+                    text = "من يشاهد الان ؟",
                     color = colors.text,
                     fontSize = if (isTv) tvMetrics.titleSizeSp.sp else if (compactMobile) 23.sp else 26.sp,
                     lineHeight = if (isTv) (tvMetrics.titleSizeSp + 7f).sp else if (compactMobile) 28.sp else 32.sp,
@@ -320,6 +320,13 @@ fun ProfilePickerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     items(items = profiles, key = UserProfile::id) { profile ->
+                        val mobileProfileAvatarSize = if (
+                            profile.kind == ProfileKind.KIDS && profile.id != activeProfileId
+                        ) {
+                            (mobileAvatarSize * .82f).coerceAtLeast(44f)
+                        } else {
+                            mobileAvatarSize
+                        }
                         ProfilePickerCard(
                             profile = profile,
                             isActive = profile.id == activeProfileId,
@@ -327,7 +334,7 @@ fun ProfilePickerScreen(
                             enabled = !isSwitching,
                             focusRequester = focusRequesters.getValue(profile.id),
                             cardWidthDp = if (isTv) tvMetrics.cardWidthDp else mobileCardWidth,
-                            avatarSizeDp = if (isTv) tvMetrics.avatarSizeDp else mobileAvatarSize,
+                            avatarSizeDp = if (isTv) tvMetrics.avatarSizeDp else mobileProfileAvatarSize,
                             focusBorderDp = if (isTv) tvMetrics.focusBorderDp else 2f,
                             onClick = { onSelectProfile(profile) },
                         )
