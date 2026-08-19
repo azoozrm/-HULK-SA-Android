@@ -1421,17 +1421,46 @@ private fun PosterCatalogScreen(
     }
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvPageSafeInsets(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+        )
+    }
     Column(
         Modifier
             .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp, mobileVertical = 12.dp),
+            .then(
+                if (isTv) {
+                    Modifier
+                } else {
+                    Modifier.padding(horizontal = 13.dp, vertical = 12.dp)
+                },
+            ),
     ) {
-        CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
-        if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
-        Spacer(Modifier.height(11.dp))
-        ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory, isTv)
-        CatalogInteractionHints(isTv)
-        Spacer(Modifier.height(9.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isTv) {
+                        Modifier.padding(
+                            start = tvSafeInsets.horizontalDp.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                            end = tvSafeInsets.horizontalDp.dp,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
+            if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
+            Spacer(Modifier.height(11.dp))
+            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory, isTv)
+            CatalogInteractionHints(isTv)
+            Spacer(Modifier.height(9.dp))
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (showingContinue && continueWatching.isNotEmpty()) {
                 HistoryGrid(continueWatching, isTv, destination, navigationMemory, onOpenHistory)
@@ -1656,13 +1685,42 @@ private fun FavoritesScreen(
     val content = remember(state.catalogs, state.favorites) {
         state.catalogs.values.flatMap { it.items }.filter(isFavorite).distinctBy { "${it.type}:${it.id}" }
     }
+    val adaptiveUi = LocalAdaptiveUi.current
+    val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvPageSafeInsets(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+        )
+    }
     Column(
         Modifier
             .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 13.dp),
+            .then(
+                if (isTv) {
+                    Modifier
+                } else {
+                    Modifier.padding(13.dp)
+                },
+            ),
     ) {
-        PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
-        Spacer(Modifier.height(18.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isTv) {
+                        Modifier.padding(
+                            start = tvSafeInsets.horizontalDp.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                            end = tvSafeInsets.horizontalDp.dp,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star)
+            Spacer(Modifier.height(18.dp))
+        }
         if (content.isEmpty() && state.loadingTypes.isEmpty()) {
             EmptyState("لم تضف اي محتوى الى قائمتك بعد")
         } else {
