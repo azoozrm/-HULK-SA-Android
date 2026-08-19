@@ -174,26 +174,26 @@ internal fun SettingsProScreen(
     val historyAvailable = state.history.isNotEmpty()
 
     BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .then(
-                if (isTv) {
-                    Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
-                } else {
-                    Modifier
-                },
-            ),
+        modifier = Modifier.fillMaxSize(),
     ) {
         val expandedLayout = isTv || maxWidth >= 720.dp
         val metricColumns = if (maxWidth >= 720.dp) 4 else 2
+        val tvTopInset = if (isTv) {
+            tvPageSafeInsets(
+                screenWidthDp = maxWidth.value.toInt(),
+                screenHeightDp = maxHeight.value.toInt(),
+            ).verticalDp.dp
+        } else {
+            0.dp
+        }
         val horizontalPadding = when {
-            isTv -> (maxWidth * .035f).coerceIn(24.dp, 64.dp)
+            isTv -> 12.dp
             maxWidth >= 1000.dp -> 40.dp
             maxWidth >= 600.dp -> 24.dp
             else -> 14.dp
         }
-        val topPadding = if (expandedLayout) 24.dp else 16.dp
-        val bottomPadding = if (isTv) 56.dp else 96.dp
+        val topPadding = if (isTv) 0.dp else if (expandedLayout) 24.dp else 0.dp
+        val bottomPadding = if (isTv) 24.dp else 96.dp
 
         Column(
             modifier = Modifier
@@ -207,7 +207,19 @@ internal fun SettingsProScreen(
                 ),
             verticalArrangement = Arrangement.spacedBy(if (expandedLayout) 18.dp else 12.dp),
         ) {
-            SettingsHeader(expanded = expandedLayout)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isTv) {
+                            Modifier.padding(start = 2.dp, top = tvTopInset, end = 2.dp)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                SettingsHeader(expanded = expandedLayout, isTv = isTv)
+            }
 
             SettingsPanel(title = "بيانات الاشتراك", expanded = expandedLayout, emphasized = true) {
                 SubscriptionSummary(
@@ -690,18 +702,28 @@ private fun SettingsDialogAction(
 }
 
 @Composable
-private fun SettingsHeader(expanded: Boolean) {
+private fun SettingsHeader(expanded: Boolean, isTv: Boolean) {
     val colors = LocalHulkColors.current
+    if (!isTv && !expanded) {
+        Text(
+            text = "الاعدادات",
+            color = colors.text,
+            fontSize = MOBILE_SECTION_TITLE_SIZE,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        return
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = if (expanded) 5.dp else 2.dp),
+            .padding(vertical = if (isTv) 0.dp else 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (expanded) 14.dp else 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 11.dp else 14.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(if (expanded) 54.dp else 44.dp)
+                .size(if (isTv) 42.dp else 54.dp)
                 .clip(CircleShape)
                 .background(Color(0xFF171812))
                 .border(1.dp, colors.gold.copy(alpha = .34f), CircleShape),
@@ -711,14 +733,14 @@ private fun SettingsHeader(expanded: Boolean) {
                 imageVector = Icons.Rounded.Settings,
                 contentDescription = null,
                 tint = colors.goldBright,
-                modifier = Modifier.size(if (expanded) 28.dp else 23.dp),
+                modifier = Modifier.size(if (isTv) 21.dp else 28.dp),
             )
         }
         Text(
             text = "الاعدادات",
             color = colors.text,
-            fontSize = if (expanded) 30.sp else 24.sp,
-            fontWeight = FontWeight.Black,
+            fontSize = if (isTv) 27.sp else 30.sp,
+            fontWeight = if (isTv) FontWeight.Bold else FontWeight.Black,
         )
     }
 }

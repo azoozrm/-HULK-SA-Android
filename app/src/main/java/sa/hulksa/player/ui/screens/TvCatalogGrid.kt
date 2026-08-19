@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -27,21 +28,66 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.CompactPosterCard
 import sa.hulksa.player.ui.components.SeriesPosterCard
 
-private val TV_GRID_MIN_CELL_WIDTH = 132.dp
-private val TV_GRID_HORIZONTAL_SPACING = 14.dp
-private val TV_GRID_VERTICAL_SPACING = 15.dp
-private val TV_GRID_HORIZONTAL_CONTENT_PADDING = 5.dp
-private val TV_GRID_BOTTOM_CONTENT_PADDING = 44.dp
-private val TV_GRID_FOCUS_VIEWPORT_INSET = 10.dp
+internal data class TvCatalogMetrics(
+    val minCellWidthDp: Float,
+    val horizontalSpacingDp: Float,
+    val verticalSpacingDp: Float,
+    val horizontalContentPaddingDp: Float,
+    val bottomContentPaddingDp: Float,
+    val focusViewportInsetDp: Float,
+)
+
+internal fun tvCatalogMetrics(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+): TvCatalogMetrics {
+    val width = screenWidthDp.coerceAtLeast(1)
+    val height = screenHeightDp.coerceAtLeast(1)
+    val policy = tvPremiumWindowPolicy(width, height)
+    val compact = width <= 960 || height <= 540
+    val large = width >= 1600 && height >= 900
+
+    val densityScale = when {
+        compact -> .94f
+        large -> 1.10f
+        else -> 1f
+    }
+
+    return TvCatalogMetrics(
+        minCellWidthDp = (132f * densityScale).coerceIn(124f, 146f),
+        horizontalSpacingDp = (14f * densityScale).coerceIn(12f, 16f),
+        verticalSpacingDp = (15f * densityScale).coerceIn(13f, 17f),
+        horizontalContentPaddingDp = when {
+            compact -> 12f
+            large -> 12f
+            else -> 10f
+        },
+        bottomContentPaddingDp = maxOf(44f, policy.verticalSafeInsetDp + 30f),
+        focusViewportInsetDp = when {
+            compact -> 9f
+            large -> 12f
+            else -> 10f
+        },
+    )
+}
+
+// Symmetric horizontal spacing plus a top-only inset is used by the TV
+// catalog headers so controls stay inside the content viewport without
+// reintroducing the large side gutters removed from the catalog body.
+internal fun Modifier.padding(horizontal: Dp, top: Dp): Modifier =
+    padding(start = horizontal, top = top, end = horizontal, bottom = 0.dp)
 
 @Composable
 internal fun TvCatalogGrid(
@@ -55,6 +101,20 @@ internal fun TvCatalogGrid(
 ) {
     require(destination == MainDestination.MOVIES || destination == MainDestination.SERIES)
 
+    val adaptiveUi = LocalAdaptiveUi.current
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvCatalogMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+        )
+    }
+    val minCellWidth = metrics.minCellWidthDp.dp
+    val horizontalSpacing = metrics.horizontalSpacingDp.dp
+    val verticalSpacing = metrics.verticalSpacingDp.dp
+    val horizontalContentPadding = metrics.horizontalContentPaddingDp.dp
+    val bottomContentPadding = metrics.bottomContentPaddingDp.dp
+    val focusViewportInset = metrics.focusViewportInsetDp.dp
+
     val contentKeys = remember(content) { content.map { "${it.type}:${it.id}" } }
     val remembered = navigationMemory.position(destination)
     val rememberedKeyIndex = contentKeys.indexOf(remembered.itemKey)
@@ -67,7 +127,7 @@ internal fun TvCatalogGrid(
     }
     val focusScope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val focusViewportInsetPx = with(density) { TV_GRID_FOCUS_VIEWPORT_INSET.roundToPx() }
+    val focusViewportInsetPx = with(density) { focusViewportInset.roundToPx() }
     var focusMoveJob by remember { mutableStateOf<Job?>(null) }
     var pendingTargetIndex by remember(contentKeys, destination) { mutableStateOf<Int?>(null) }
 
@@ -129,22 +189,22 @@ internal fun TvCatalogGrid(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val availableGridWidth = (maxWidth - (TV_GRID_HORIZONTAL_CONTENT_PADDING * 2)).coerceAtLeast(TV_GRID_MIN_CELL_WIDTH)
-        val columnCount = (((availableGridWidth + TV_GRID_HORIZONTAL_SPACING).value) /
-            (TV_GRID_MIN_CELL_WIDTH + TV_GRID_HORIZONTAL_SPACING).value)
+        val availableGridWidth = (maxWidth - (horizontalContentPadding * 2)).coerceAtLeast(minCellWidth)
+        val columnCount = (((availableGridWidth + horizontalSpacing).value) /
+            (minCellWidth + horizontalSpacing).value)
             .toInt()
             .coerceAtLeast(1)
 
         LazyVerticalGrid(
             state = gridState,
-            columns = GridCells.Adaptive(TV_GRID_MIN_CELL_WIDTH),
-            horizontalArrangement = Arrangement.spacedBy(TV_GRID_HORIZONTAL_SPACING),
-            verticalArrangement = Arrangement.spacedBy(TV_GRID_VERTICAL_SPACING),
+            columns = GridCells.Adaptive(minCellWidth),
+            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+            verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             contentPadding = PaddingValues(
-                start = TV_GRID_HORIZONTAL_CONTENT_PADDING,
-                top = 5.dp,
-                end = TV_GRID_HORIZONTAL_CONTENT_PADDING,
-                bottom = TV_GRID_BOTTOM_CONTENT_PADDING,
+                start = horizontalContentPadding,
+                top = horizontalContentPadding,
+                end = horizontalContentPadding,
+                bottom = bottomContentPadding,
             ),
             modifier = Modifier.fillMaxSize(),
         ) {
