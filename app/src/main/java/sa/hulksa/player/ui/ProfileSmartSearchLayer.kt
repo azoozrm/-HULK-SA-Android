@@ -432,11 +432,10 @@ private fun SmartSearchContent(
     val screenWidth = adaptiveUi.screenWidthDp
     val screenHeight = adaptiveUi.screenHeightDp
     val compactHeight = !isTv && screenHeight < 600
-    val horizontalPadding = when {
-        isTv -> (screenWidth / 46f).coerceIn(18f, 34f).dp
-        screenWidth >= 840 -> 28.dp
-        screenWidth >= 600 -> 22.dp
-        else -> 14.dp
+    val horizontalPadding = if (isTv) {
+        (screenWidth / 46f).coerceIn(18f, 34f).dp
+    } else {
+        0.dp
     }
     val verticalPadding = when {
         isTv -> (screenHeight / 42f).coerceIn(14f, 24f).dp
