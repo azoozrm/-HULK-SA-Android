@@ -1848,7 +1848,7 @@ private fun TvSearchField(
 
     HulkTextField(
         value = value,
-        onValueChange = onSearch,
+        onValueChange = onValueChange,
         label = "ابحث بالاسم او السنة او النوع…",
         modifier = modifier.then(tvModifier),
         readOnly = isTv && !tvSearchEditing,
