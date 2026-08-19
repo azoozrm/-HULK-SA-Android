@@ -233,7 +233,7 @@ fun ProfilePickerScreen(
             val horizontalPadding = when {
                 isTv -> tvMetrics.horizontalPaddingDp.dp
                 mobileLandscape -> 12.dp
-                else -> 16.dp
+                else -> 8.dp
             }
             val verticalPadding = when {
                 isTv -> tvMetrics.verticalPaddingDp.dp
@@ -243,11 +243,24 @@ fun ProfilePickerScreen(
             val cardGap = when {
                 isTv -> tvMetrics.cardGapDp.dp
                 compactMobile -> 10.dp
-                else -> 14.dp
+                else -> 8.dp
             }
-            val rowPadding = if (isTv) tvMetrics.rowPaddingDp.dp else 4.dp
-            val mobileCardWidth = if (compactMobile) 126f else 140f
-            val mobileAvatarSize = if (compactMobile) 68f else 76f
+            val rowPadding = if (isTv) tvMetrics.rowPaddingDp.dp else 0.dp
+            val mobilePickerItemCount = (
+                profiles.size + if (profiles.size < ProfileStore.MAX_PROFILES) 1 else 0
+            ).coerceAtLeast(1)
+            val mobileVisibleCardCount = mobilePickerItemCount.coerceAtMost(3)
+            val mobileCardWidth = when {
+                mobileLandscape -> 126f
+                else -> (
+                    (adaptiveUi.screenWidthDp - 16f - ((mobileVisibleCardCount - 1) * 8f)) /
+                        mobileVisibleCardCount
+                    ).coerceIn(92f, 124f)
+            }
+            val mobileAvatarSize = when {
+                mobileLandscape -> 68f
+                else -> (mobileCardWidth * .57f).coerceIn(54f, 70f)
+            }
 
             Column(
                 modifier = Modifier
@@ -274,7 +287,7 @@ fun ProfilePickerScreen(
                 Spacer(Modifier.height(if (isTv) 13.dp else if (compactMobile) 6.dp else 10.dp))
 
                 Text(
-                    text = "من يشاهد الآن ؟",
+                    text = "من يشاهد الان؟",
                     color = colors.text,
                     fontSize = if (isTv) tvMetrics.titleSizeSp.sp else if (compactMobile) 23.sp else 26.sp,
                     lineHeight = if (isTv) (tvMetrics.titleSizeSp + 7f).sp else if (compactMobile) 28.sp else 32.sp,
