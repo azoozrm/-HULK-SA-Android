@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -27,6 +28,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
@@ -80,6 +82,12 @@ internal fun tvCatalogMetrics(
         },
     )
 }
+
+// Symmetric horizontal spacing plus a top-only inset is used by the TV
+// catalog headers so controls stay inside the content viewport without
+// reintroducing the large side gutters removed from the catalog body.
+internal fun Modifier.padding(horizontal: Dp, top: Dp): Modifier =
+    padding(start = horizontal, top = top, end = horizontal, bottom = 0.dp)
 
 @Composable
 internal fun TvCatalogGrid(
