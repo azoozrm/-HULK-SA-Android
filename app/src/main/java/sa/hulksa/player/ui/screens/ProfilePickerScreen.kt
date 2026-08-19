@@ -14,9 +14,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -167,6 +168,8 @@ fun ProfilePickerScreen(
     val tvMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         profilePickerTvMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     }
+    val mobileLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
+    val compactMobile = !isTv && (mobileLandscape || adaptiveUi.screenHeightDp < 620)
 
     LaunchedEffect(profiles) {
         routingPreferences = profilePreferencesStore.routing()
@@ -224,12 +227,27 @@ fun ProfilePickerScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .safeDrawingPadding(),
+                .statusBarsPadding()
+                .navigationBarsPadding(),
         ) {
-            val horizontalPadding = if (isTv) tvMetrics.horizontalPaddingDp.dp else 18.dp
-            val verticalPadding = if (isTv) tvMetrics.verticalPaddingDp.dp else 20.dp
-            val cardGap = if (isTv) tvMetrics.cardGapDp.dp else 14.dp
-            val rowPadding = if (isTv) tvMetrics.rowPaddingDp.dp else 6.dp
+            val horizontalPadding = when {
+                isTv -> tvMetrics.horizontalPaddingDp.dp
+                mobileLandscape -> 12.dp
+                else -> 16.dp
+            }
+            val verticalPadding = when {
+                isTv -> tvMetrics.verticalPaddingDp.dp
+                compactMobile -> 8.dp
+                else -> 14.dp
+            }
+            val cardGap = when {
+                isTv -> tvMetrics.cardGapDp.dp
+                compactMobile -> 10.dp
+                else -> 14.dp
+            }
+            val rowPadding = if (isTv) tvMetrics.rowPaddingDp.dp else 4.dp
+            val mobileCardWidth = if (compactMobile) 126f else 140f
+            val mobileAvatarSize = if (compactMobile) 68f else 76f
 
             Column(
                 modifier = Modifier
@@ -242,37 +260,46 @@ fun ProfilePickerScreen(
                     painter = painterResource(R.drawable.hulk_sa_logo),
                     contentDescription = "HULK SA",
                     modifier = Modifier
-                        .width(if (isTv) tvMetrics.logoWidthDp.dp else 104.dp)
-                        .height(if (isTv) tvMetrics.logoHeightDp.dp else 62.dp),
+                        .width(
+                            if (isTv) tvMetrics.logoWidthDp.dp
+                            else if (compactMobile) 88.dp else 104.dp,
+                        )
+                        .height(
+                            if (isTv) tvMetrics.logoHeightDp.dp
+                            else if (compactMobile) 52.dp else 62.dp,
+                        ),
                     contentScale = ContentScale.Fit,
                 )
 
-                Spacer(Modifier.height(if (isTv) 13.dp else 10.dp))
+                Spacer(Modifier.height(if (isTv) 13.dp else if (compactMobile) 6.dp else 10.dp))
 
                 Text(
                     text = "من يشاهد الآن ؟",
                     color = colors.text,
-                    fontSize = if (isTv) tvMetrics.titleSizeSp.sp else 26.sp,
-                    lineHeight = if (isTv) (tvMetrics.titleSizeSp + 7f).sp else 32.sp,
+                    fontSize = if (isTv) tvMetrics.titleSizeSp.sp else if (compactMobile) 23.sp else 26.sp,
+                    lineHeight = if (isTv) (tvMetrics.titleSizeSp + 7f).sp else if (compactMobile) 28.sp else 32.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                 )
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(if (compactMobile) 3.dp else 6.dp))
 
                 Text(
                     text = "اختر ملفك الشخصي للمتابعة",
                     color = colors.textMuted,
-                    fontSize = if (isTv) tvMetrics.subtitleSizeSp.sp else 13.sp,
+                    fontSize = if (isTv) tvMetrics.subtitleSizeSp.sp else if (compactMobile) 11.sp else 13.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                 )
 
-                Spacer(Modifier.height(if (isTv) 24.dp else 22.dp))
+                Spacer(Modifier.height(if (isTv) 24.dp else if (compactMobile) 12.dp else 22.dp))
 
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = rowPadding, vertical = if (isTv) 6.dp else 2.dp),
+                    contentPadding = PaddingValues(
+                        horizontal = rowPadding,
+                        vertical = if (isTv) 6.dp else if (compactMobile) 4.dp else 2.dp,
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(
                         space = cardGap,
                         alignment = Alignment.CenterHorizontally,
@@ -286,8 +313,8 @@ fun ProfilePickerScreen(
                             isTv = isTv,
                             enabled = !isSwitching,
                             focusRequester = focusRequesters.getValue(profile.id),
-                            cardWidthDp = if (isTv) tvMetrics.cardWidthDp else 140f,
-                            avatarSizeDp = if (isTv) tvMetrics.avatarSizeDp else 76f,
+                            cardWidthDp = if (isTv) tvMetrics.cardWidthDp else mobileCardWidth,
+                            avatarSizeDp = if (isTv) tvMetrics.avatarSizeDp else mobileAvatarSize,
                             focusBorderDp = if (isTv) tvMetrics.focusBorderDp else 2f,
                             onClick = { onSelectProfile(profile) },
                         )
@@ -297,8 +324,8 @@ fun ProfilePickerScreen(
                             AddProfileCard(
                                 isTv = isTv,
                                 enabled = !isSwitching,
-                                cardWidthDp = if (isTv) tvMetrics.cardWidthDp else 140f,
-                                avatarSizeDp = if (isTv) tvMetrics.avatarSizeDp else 76f,
+                                cardWidthDp = if (isTv) tvMetrics.cardWidthDp else mobileCardWidth,
+                                avatarSizeDp = if (isTv) tvMetrics.avatarSizeDp else mobileAvatarSize,
                                 focusBorderDp = if (isTv) tvMetrics.focusBorderDp else 2f,
                                 onClick = onCreateProfile,
                             )
@@ -306,7 +333,7 @@ fun ProfilePickerScreen(
                     }
                 }
 
-                Spacer(Modifier.height(if (isTv) 24.dp else 18.dp))
+                Spacer(Modifier.height(if (isTv) 24.dp else if (compactMobile) 10.dp else 18.dp))
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 8.dp),
@@ -328,7 +355,7 @@ fun ProfilePickerScreen(
                     )
                 }
 
-                Spacer(Modifier.height(if (isTv) 13.dp else 10.dp))
+                Spacer(Modifier.height(if (isTv) 13.dp else if (compactMobile) 6.dp else 10.dp))
 
                 when {
                     isSwitching -> Text(
@@ -348,7 +375,7 @@ fun ProfilePickerScreen(
                     else -> Text(
                         text = if (isTv) "حرّك بالأسهم واضغط OK مرة واحدة" else "المس الملف الشخصي للمتابعة",
                         color = colors.textMuted.copy(alpha = .78f),
-                        fontSize = if (isTv) 12.sp else 11.sp,
+                        fontSize = if (isTv) 12.sp else if (compactMobile) 10.sp else 11.sp,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -369,7 +396,11 @@ private fun ProfileEntryOptionsPanel(
     onClose: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
     val firstFocusRequester = remember { FocusRequester() }
+    val compactMobile = !isTv && (
+        adaptiveUi.screenHeightDp < 620 || adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
+    )
     val defaultProfileName = defaultProfileId
         ?.let { id -> profiles.firstOrNull { it.id == id }?.displayName }
         ?: "آخر مستخدم"
@@ -383,10 +414,11 @@ private fun ProfileEntryOptionsPanel(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .safeDrawingPadding()
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(
-                horizontal = if (isTv) metrics.horizontalPaddingDp.dp else 20.dp,
-                vertical = if (isTv) metrics.verticalPaddingDp.dp else 24.dp,
+                horizontal = if (isTv) metrics.horizontalPaddingDp.dp else 16.dp,
+                vertical = if (isTv) metrics.verticalPaddingDp.dp else if (compactMobile) 12.dp else 20.dp,
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -394,18 +426,18 @@ private fun ProfileEntryOptionsPanel(
         Text(
             text = "خيارات الدخول",
             color = colors.text,
-            fontSize = if (isTv) metrics.titleSizeSp.sp else 25.sp,
+            fontSize = if (isTv) metrics.titleSizeSp.sp else if (compactMobile) 22.sp else 25.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (compactMobile) 5.dp else 8.dp))
         Text(
             text = "حدد هل تريد اختيار المستخدم عند كل تشغيل أو الدخول مباشرة",
             color = colors.textMuted,
             fontSize = if (isTv) metrics.subtitleSizeSp.sp else 12.sp,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(if (isTv) 22.dp else 18.dp))
+        Spacer(Modifier.height(if (isTv) 22.dp else if (compactMobile) 12.dp else 18.dp))
 
         ProfilePreferenceButton(
             text = if (directEntryEnabled) "الدخول المباشر: مفعّل" else "الدخول المباشر: متوقف",
@@ -416,7 +448,7 @@ private fun ProfileEntryOptionsPanel(
             onClick = onToggleDirectEntry,
         )
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(if (compactMobile) 6.dp else 10.dp))
         Text(
             text = if (directEntryEnabled) {
                 "عند تشغيل التطبيق سيتم تجاوز صفحة اختيار المستخدم."
@@ -428,7 +460,7 @@ private fun ProfileEntryOptionsPanel(
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.height(if (isTv) 24.dp else 20.dp))
+        Spacer(Modifier.height(if (isTv) 24.dp else if (compactMobile) 12.dp else 20.dp))
         Text(
             text = "المستخدم الافتراضي: $defaultProfileName",
             color = colors.text,
@@ -443,7 +475,7 @@ private fun ProfileEntryOptionsPanel(
             fontSize = if (isTv) 12.sp else 11.sp,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(if (isTv) 15.dp else 12.dp))
+        Spacer(Modifier.height(if (isTv) 15.dp else if (compactMobile) 8.dp else 12.dp))
 
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
@@ -474,7 +506,7 @@ private fun ProfileEntryOptionsPanel(
             }
         }
 
-        Spacer(Modifier.height(if (isTv) 26.dp else 22.dp))
+        Spacer(Modifier.height(if (isTv) 26.dp else if (compactMobile) 12.dp else 22.dp))
         ProfileFooterButton(
             text = "رجوع",
             isTv = isTv,
