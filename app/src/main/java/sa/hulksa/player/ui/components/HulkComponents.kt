@@ -151,6 +151,7 @@ private fun MovieMetadataBadge(
     modifier: Modifier = Modifier,
     filledAccent: Boolean = false,
     accentText: Boolean = false,
+    compactHorizontalPadding: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(7.dp)
@@ -170,7 +171,7 @@ private fun MovieMetadataBadge(
                 if (filledAccent) colors.goldBright.copy(alpha = .38f) else Color.White.copy(alpha = .22f),
                 shape,
             )
-            .padding(horizontal = 7.dp),
+            .padding(horizontal = if (compactHorizontalPadding) 5.dp else 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -697,6 +698,7 @@ fun CompactPosterCard(
                                     MovieMetadataBadge(
                                         text = "★ $it",
                                         accentText = true,
+                                        compactHorizontalPadding = !adaptiveUi.isTelevision,
                                     )
                                 }
                             }
@@ -705,7 +707,10 @@ fun CompactPosterCard(
                                 contentAlignment = Alignment.CenterEnd,
                             ) {
                                 duration?.let {
-                                    MovieMetadataBadge(text = it)
+                                    MovieMetadataBadge(
+                                        text = it,
+                                        compactHorizontalPadding = !adaptiveUi.isTelevision,
+                                    )
                                 }
                             }
                         }
