@@ -1047,13 +1047,22 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun confirmNotificationPopupPresented() {
+        val popup = mutableState.value.notificationPopup ?: return
+        if (!notificationUiReady) return
+        persistNotificationPopupShown(popup)
+    }
+
     fun dismissNotificationPopup() {
+        val popup = mutableState.value.notificationPopup
+        val persisted = popup == null || persistNotificationPopupShown(popup)
         mutableState.update { it.copy(notificationPopup = null) }
-        maybeShowPendingNotificationPopup()
+        if (persisted) maybeShowPendingNotificationPopup()
     }
 
     fun activateNotificationPopup(onResult: (String?) -> Unit = {}) {
         val popup = mutableState.value.notificationPopup ?: return
+        persistNotificationPopupShown(popup)
         if (popup.summary) {
             mutableState.update { it.copy(notificationPopup = null) }
             openNotificationCenter()
@@ -1362,10 +1371,16 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val popup = buildEpisodeNotificationPopups(state.localNotifications).firstOrNull()
             ?.takeIf { it.profileId == profileId }
             ?: return
-        val accountId = popup.notifications.firstOrNull()?.accountId ?: return
-        if (!localEpisodeNotificationStore.markPopupShown(profileId, popup.eventIds, accountId)) return
-        refreshNotificationState(clearPopup = false)
         mutableState.update { it.copy(notificationPopup = popup) }
+    }
+
+    private fun persistNotificationPopupShown(popup: EpisodeNotificationPopup): Boolean {
+        val profileId = profileStore.activeProfileId()
+        if (popup.profileId != profileId) return false
+        val accountId = popup.notifications.firstOrNull()?.accountId ?: return false
+        if (!localEpisodeNotificationStore.markPopupShown(profileId, popup.eventIds, accountId)) return false
+        refreshNotificationState(clearPopup = false)
+        return true
     }
 
     private fun canUseSeriesNotifications(profileKind: ProfileKind, seriesId: Int): Boolean =
