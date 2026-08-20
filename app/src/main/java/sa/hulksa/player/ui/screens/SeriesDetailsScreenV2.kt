@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,6 +27,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -83,6 +86,11 @@ fun SeriesDetailsScreenV2(
     errorMessage: String?,
     isTv: Boolean,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
+    targetEpisodeId: Int?,
+    targetSeason: Int?,
+    targetEpisodeNumber: Int?,
     downloads: List<OfflineDownload>,
     history: List<HistoryEntry>,
     relatedItems: List<ContentItem>,
@@ -92,6 +100,7 @@ fun SeriesDetailsScreenV2(
     onDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
 ) {
@@ -116,6 +125,7 @@ fun SeriesDetailsScreenV2(
     val orderedEpisodes = remember(episodes) {
         episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
     }
+    val gridState = rememberLazyGridState()
     val seasons = remember(orderedEpisodes) { orderedEpisodes.map(Episode::season).filter { it > 0 }.distinct() }
     val historyByKey = remember(history) { history.associateBy(HistoryEntry::key) }
     val resumePair = remember(orderedEpisodes, history) {
@@ -128,24 +138,65 @@ fun SeriesDetailsScreenV2(
     val completedCount = remember(orderedEpisodes, history) {
         orderedEpisodes.count { episode -> historyByKey["SERIES:${episode.id}"]?.seriesCompleted() == true }
     }
-    var selectedSeason by rememberSaveable(series.id, seasons) {
-        mutableIntStateOf(resumePair?.first?.season ?: seasons.firstOrNull() ?: 0)
+    val targetEpisode = remember(orderedEpisodes, targetEpisodeId, targetSeason, targetEpisodeNumber) {
+        if (targetEpisodeId != null) {
+            orderedEpisodes.firstOrNull { it.id == targetEpisodeId }
+        } else {
+            orderedEpisodes.firstOrNull {
+                targetSeason != null &&
+                    targetEpisodeNumber != null &&
+                    it.season == targetSeason &&
+                    it.episodeNumber == targetEpisodeNumber
+            }
+        }
     }
-    LaunchedEffect(resumePair?.first?.id) {
-        resumePair?.first?.let { latest -> selectedSeason = latest.season }
+    var selectedSeason by rememberSaveable(
+        series.id,
+        seasons,
+        targetEpisodeId,
+        targetSeason,
+        targetEpisodeNumber,
+    ) {
+        mutableIntStateOf(
+            targetEpisode?.season
+                ?: targetSeason?.takeIf { it in seasons }
+                ?: resumePair?.first?.season
+                ?: seasons.firstOrNull()
+                ?: 0,
+        )
+    }
+    LaunchedEffect(targetEpisode?.id, targetSeason, seasons, resumePair?.first?.id) {
+        selectedSeason = targetEpisode?.season
+            ?: targetSeason?.takeIf { it in seasons }
+            ?: resumePair?.first?.season
+            ?: selectedSeason
     }
     val visibleEpisodes = remember(orderedEpisodes, selectedSeason) {
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
     val primaryRequester = remember(series.id) { FocusRequester() }
+    val favoriteRequester = remember(series.id) { FocusRequester() }
+    val notificationRequester = remember(series.id) { FocusRequester() }
+    val targetEpisodeRequester = remember(series.id, targetEpisodeId, targetEpisodeNumber) { FocusRequester() }
     var initialFocusRequested by remember(series.id) { mutableStateOf(false) }
-    val heroEpisode = resumePair?.first ?: orderedEpisodes.firstOrNull()
-    LaunchedEffect(isTv, heroEpisode?.id, series.id) {
-        if (isTv && heroEpisode != null && !initialFocusRequested) {
+    val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
+    LaunchedEffect(isTv, heroEpisode?.id, series.id, targetEpisode?.id) {
+        if (isTv && targetEpisode == null && heroEpisode != null && !initialFocusRequested) {
             delay(180L)
             if (runCatching { primaryRequester.requestFocus() }.isSuccess) {
                 initialFocusRequested = true
+            }
+        }
+    }
+    LaunchedEffect(isTv, targetEpisode?.id, selectedSeason, visibleEpisodes) {
+        val targetIndex = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
+        if (targetIndex >= 0) {
+            delay(180L)
+            runCatching { gridState.scrollToItem(targetIndex + 2) }
+            if (isTv) {
+                delay(80L)
+                runCatching { targetEpisodeRequester.requestFocus() }
             }
         }
     }
@@ -154,6 +205,7 @@ fun SeriesDetailsScreenV2(
     Box(Modifier.fillMaxSize().background(colors.background)) {
         LazyVerticalGrid(
             columns = columns,
+            state = gridState,
             contentPadding = if (isTv) PaddingValues(0.dp) else PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
             verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 9.dp),
@@ -165,16 +217,22 @@ fun SeriesDetailsScreenV2(
                     details = details,
                     technicalMetadata = technicalMetadata,
                     firstEpisode = orderedEpisodes.firstOrNull(),
+                    targetEpisode = targetEpisode,
                     resumeEpisode = resumePair?.first,
                     resumeEntry = resumePair?.second,
                     totalEpisodes = orderedEpisodes.size,
                     completedEpisodes = completedCount,
                     isTv = isTv,
                     isFavorite = isFavorite,
+                    notificationsEnabled = notificationsEnabled,
+                    notificationToggleAvailable = notificationToggleAvailable,
                     primaryRequester = primaryRequester,
+                    favoriteRequester = favoriteRequester,
+                    notificationRequester = notificationRequester,
                     onBack = onBack,
                     onPlay = onPlay,
                     onToggleFavorite = onToggleFavorite,
+                    onToggleNotifications = onToggleNotifications,
                 )
             }
 
@@ -200,6 +258,8 @@ fun SeriesDetailsScreenV2(
                 val download = downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
                 EpisodeCardV2(
                     episode = episode,
+                    highlighted = targetEpisode?.id == episode.id,
+                    targetFocusRequester = targetEpisodeRequester.takeIf { targetEpisode?.id == episode.id },
                     fallbackBackdrop = backdrop,
                     download = download,
                     historyEntry = historyByKey["SERIES:${episode.id}"],
@@ -244,20 +304,26 @@ private fun SeriesHeroV2(
     details: ContentDetails?,
     technicalMetadata: SeriesCardTechnicalMetadata,
     firstEpisode: Episode?,
+    targetEpisode: Episode?,
     resumeEpisode: Episode?,
     resumeEntry: HistoryEntry?,
     totalEpisodes: Int,
     completedEpisodes: Int,
     isTv: Boolean,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
     primaryRequester: FocusRequester,
+    favoriteRequester: FocusRequester,
+    notificationRequester: FocusRequester,
     onBack: () -> Unit,
     onPlay: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
-    val heroEpisode = resumeEpisode ?: firstEpisode
+    val heroEpisode = targetEpisode ?: resumeEpisode ?: firstEpisode
     val progress = resumeEntry?.seriesWatchProgress()
     val seasonCount = technicalMetadata.seasonCount
         ?: listOfNotNull(firstEpisode?.season, resumeEpisode?.season).maxOrNull()
@@ -265,7 +331,7 @@ private fun SeriesHeroV2(
     Box(
         Modifier
             .fillMaxWidth()
-            .height(if (isTv) 410.dp else 400.dp)
+            .height(if (isTv) 466.dp else 456.dp)
             .background(Color(0xFF090A08)),
     ) {
         if (!backdrop.isNullOrBlank()) {
@@ -390,9 +456,14 @@ private fun SeriesHeroV2(
                     }
                 }
                 Spacer(Modifier.height(13.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
                     FocusButton(
-                        text = if (resumeEpisode != null && resumeEntry != null) {
+                        text = if (targetEpisode != null) {
+                            "▶ مشاهدة الحلقة الجديدة"
+                        } else if (resumeEpisode != null && resumeEntry != null) {
                             "▶ استكمال المشاهدة"
                         } else {
                             "▶ ابدأ المشاهدة"
@@ -400,13 +471,55 @@ private fun SeriesHeroV2(
                         onClick = { heroEpisode?.let(onPlay) },
                         enabled = heroEpisode != null,
                         compact = true,
-                        modifier = Modifier.focusRequester(primaryRequester),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(primaryRequester)
+                            .focusProperties {
+                                down = favoriteRequester
+                                left = FocusRequester.Cancel
+                                right = FocusRequester.Cancel
+                            },
                     )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
                     FocusButton(
-                        if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                        onToggleFavorite,
+                        text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                        onClick = onToggleFavorite,
                         primary = false,
                         compact = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(favoriteRequester)
+                            .focusProperties {
+                                up = primaryRequester
+                                right = FocusRequester.Cancel
+                                left = notificationRequester
+                            },
+                    )
+                    FocusButton(
+                        text = if (notificationsEnabled) {
+                            "🔔 التنبيهات مفعلة"
+                        } else {
+                            "🔔 نبهني عند نزول حلقة جديدة"
+                        },
+                        onClick = onToggleNotifications,
+                        enabled = notificationsEnabled || notificationToggleAvailable,
+                        primary = notificationsEnabled,
+                        compact = true,
+                        scaleOnFocus = false,
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .heightIn(min = 48.dp)
+                            .focusRequester(notificationRequester)
+                            .focusProperties {
+                                up = primaryRequester
+                                right = favoriteRequester
+                                left = FocusRequester.Cancel
+                            },
                     )
                 }
             }
@@ -517,6 +630,8 @@ private fun SeriesEpisodesHeaderV2(
 @Composable
 private fun EpisodeCardV2(
     episode: Episode,
+    highlighted: Boolean,
+    targetFocusRequester: FocusRequester?,
     fallbackBackdrop: String?,
     download: OfflineDownload?,
     historyEntry: HistoryEntry?,
@@ -548,11 +663,14 @@ private fun EpisodeCardV2(
                 .clip(shape)
                 .background(Color(0xFF13140F))
                 .border(
-                    if (focused) 3.dp else 1.dp,
-                    if (focused) colors.goldBright else colors.line.copy(alpha = .40f),
+                    if (focused) 3.dp else if (highlighted) 2.dp else 1.dp,
+                    if (focused || highlighted) colors.goldBright else colors.line.copy(alpha = .40f),
                     shape,
                 )
                 .onFocusChanged { focused = it.isFocused }
+                .then(
+                    targetFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier,
+                )
                 .clickable(role = Role.Button, onClick = onClick),
         ) {
             if (!artwork.isNullOrBlank()) {

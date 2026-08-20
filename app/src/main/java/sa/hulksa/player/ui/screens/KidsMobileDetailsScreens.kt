@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +48,7 @@ import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
+import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandBadge
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.CompactPosterCard
@@ -240,6 +243,11 @@ fun KidsMobileSeriesDetailsScreen(
     isLoading: Boolean,
     errorMessage: String?,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
+    targetEpisodeId: Int?,
+    targetSeason: Int?,
+    targetEpisodeNumber: Int?,
     downloads: List<OfflineDownload>,
     history: List<HistoryEntry>,
     relatedItems: List<ContentItem>,
@@ -249,10 +257,12 @@ fun KidsMobileSeriesDetailsScreen(
     onDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
     val orderedEpisodes = remember(episodes) {
         episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
     }
@@ -263,20 +273,56 @@ fun KidsMobileSeriesDetailsScreen(
             historyByKey["SERIES:${episode.id}"]?.let { entry -> episode to entry }
         }.maxByOrNull { it.second.updatedAtEpochMs }?.first
     }
-    var selectedSeason by rememberSaveable(series.id, seasons) {
-        mutableIntStateOf(resumeEpisode?.season ?: seasons.firstOrNull() ?: 0)
+    val targetEpisode = remember(orderedEpisodes, targetEpisodeId, targetSeason, targetEpisodeNumber) {
+        if (targetEpisodeId != null) {
+            orderedEpisodes.firstOrNull { it.id == targetEpisodeId }
+        } else {
+            orderedEpisodes.firstOrNull {
+                targetSeason != null &&
+                    targetEpisodeNumber != null &&
+                    it.season == targetSeason &&
+                    it.episodeNumber == targetEpisodeNumber
+            }
+        }
     }
-    LaunchedEffect(resumeEpisode?.id) {
-        resumeEpisode?.let { selectedSeason = it.season }
+    var selectedSeason by rememberSaveable(
+        series.id,
+        seasons,
+        targetEpisodeId,
+        targetSeason,
+        targetEpisodeNumber,
+    ) {
+        mutableIntStateOf(
+            targetEpisode?.season
+                ?: targetSeason?.takeIf { it in seasons }
+                ?: resumeEpisode?.season
+                ?: seasons.firstOrNull()
+                ?: 0,
+        )
+    }
+    LaunchedEffect(targetEpisode?.id, targetSeason, seasons, resumeEpisode?.id) {
+        selectedSeason = targetEpisode?.season
+            ?: targetSeason?.takeIf { it in seasons }
+            ?: resumeEpisode?.season
+            ?: selectedSeason
     }
     val visibleEpisodes = remember(orderedEpisodes, selectedSeason) {
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
-    val heroEpisode = resumeEpisode ?: orderedEpisodes.firstOrNull()
+    val heroEpisode = targetEpisode ?: resumeEpisode ?: orderedEpisodes.firstOrNull()
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
+    val listState = rememberLazyListState()
+    LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes) {
+        val targetIndex = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
+        if (targetIndex >= 0) {
+            val episodeStartIndex = if (seasons.isNotEmpty()) 3 else 2
+            listState.scrollToItem(episodeStartIndex + targetIndex)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(colors.background)) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .safeDrawingPadding(),
@@ -330,19 +376,66 @@ fun KidsMobileSeriesDetailsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         FocusButton(
-                            text = if (resumeEpisode != null) "▶ استكمال المشاهدة" else "▶ ابدأ المشاهدة",
+                            text = when {
+                                targetEpisode != null -> "▶ مشاهدة الحلقة الجديدة"
+                                resumeEpisode != null -> "▶ استكمال المشاهدة"
+                                else -> "▶ ابدأ المشاهدة"
+                            },
                             onClick = { heroEpisode?.let(onPlay) },
                             enabled = heroEpisode != null,
                             compact = true,
                             modifier = Modifier.weight(1f),
                         )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (detailsProMobileActionColumns(adaptiveUi.screenWidthDp) == 1) {
                         FocusButton(
                             text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                             onClick = onToggleFavorite,
                             primary = false,
                             compact = true,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         )
+                        Spacer(Modifier.height(8.dp))
+                        FocusButton(
+                            text = if (notificationsEnabled) {
+                                "🔔 التنبيهات مفعلة"
+                            } else {
+                                "🔔 نبهني عند نزول حلقة جديدة"
+                            },
+                            onClick = onToggleNotifications,
+                            enabled = notificationsEnabled || notificationToggleAvailable,
+                            primary = notificationsEnabled,
+                            compact = true,
+                            scaleOnFocus = false,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        )
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            FocusButton(
+                                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                                onClick = onToggleFavorite,
+                                primary = false,
+                                compact = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            FocusButton(
+                                text = if (notificationsEnabled) {
+                                    "🔔 التنبيهات مفعلة"
+                                } else {
+                                    "🔔 نبهني عند نزول حلقة جديدة"
+                                },
+                                onClick = onToggleNotifications,
+                                enabled = notificationsEnabled || notificationToggleAvailable,
+                                primary = notificationsEnabled,
+                                compact = true,
+                                scaleOnFocus = false,
+                                modifier = Modifier.weight(1.35f).heightIn(min = 48.dp),
+                            )
+                        }
                     }
                     if (errorMessage != null) {
                         Spacer(Modifier.height(12.dp))
@@ -374,6 +467,7 @@ fun KidsMobileSeriesDetailsScreen(
                 val download = downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
                 KidsMobileEpisodeCard(
                     episode = episode,
+                    highlighted = targetEpisode?.id == episode.id,
                     fallbackArtwork = backdrop,
                     download = download,
                     historyEntry = historyByKey["SERIES:${episode.id}"],
@@ -478,6 +572,7 @@ private fun KidsMobileHero(
 @Composable
 private fun KidsMobileEpisodeCard(
     episode: Episode,
+    highlighted: Boolean,
     fallbackArtwork: String?,
     download: OfflineDownload?,
     historyEntry: HistoryEntry?,
@@ -494,7 +589,11 @@ private fun KidsMobileEpisodeCard(
             .padding(horizontal = 16.dp, vertical = 9.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(colors.surface.copy(alpha = .94f))
-            .border(1.dp, colors.line.copy(alpha = .55f), RoundedCornerShape(16.dp))
+            .border(
+                if (highlighted) 2.dp else 1.dp,
+                if (highlighted) colors.goldBright else colors.line.copy(alpha = .55f),
+                RoundedCornerShape(16.dp),
+            )
             .padding(10.dp),
     ) {
         Box(

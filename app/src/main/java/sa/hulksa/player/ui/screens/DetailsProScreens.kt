@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -101,7 +102,15 @@ private data class DetailsProAction(
     val primary: Boolean = false,
     val enabled: Boolean = true,
     val mobileWeight: Float = 1f,
+    val scaleOnFocus: Boolean = true,
+    val minimumHeightDp: Int = 0,
 )
+
+internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
+    if (screenWidthDp < 360) 1 else 2
+
+internal fun detailsProActionsUseSingleRow(isTv: Boolean, wide: Boolean, actionCount: Int): Boolean =
+    isTv || (wide && actionCount <= 2)
 
 private data class EpisodeFocusTargets(
     val card: FocusRequester = FocusRequester(),
@@ -421,6 +430,11 @@ fun SeriesDetailsProScreen(
     errorMessage: String?,
     isTv: Boolean,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
+    targetEpisodeId: Int?,
+    targetSeason: Int?,
+    targetEpisodeNumber: Int?,
     downloads: List<OfflineDownload>,
     history: List<HistoryEntry>,
     relatedItems: List<ContentItem>,
@@ -430,6 +444,7 @@ fun SeriesDetailsProScreen(
     onDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
 ) {
@@ -462,23 +477,51 @@ fun SeriesDetailsProScreen(
         }.maxByOrNull { it.second.updatedAtEpochMs }
     }
     val mobileResumeHeroExtraDp = if (!isTv && resumePair != null) 30 else 0
+    val seriesNotificationActionExtraDp = if (isTv) 0 else 56
     val completedCount = remember(orderedEpisodes, historyByKey) {
         orderedEpisodes.count { episode ->
             historyByKey["SERIES:${episode.id}"]?.detailsProCompleted() == true
         }
     }
 
-    var selectedSeason by rememberSaveable(series.id, seasons) {
-        mutableIntStateOf(resumePair?.first?.season ?: seasons.firstOrNull() ?: 0)
+    val targetEpisode = remember(orderedEpisodes, targetEpisodeId, targetSeason, targetEpisodeNumber) {
+        if (targetEpisodeId != null) {
+            orderedEpisodes.firstOrNull { it.id == targetEpisodeId }
+        } else {
+            orderedEpisodes.firstOrNull {
+                targetSeason != null &&
+                    targetEpisodeNumber != null &&
+                    it.season == targetSeason &&
+                    it.episodeNumber == targetEpisodeNumber
+            }
+        }
     }
-    LaunchedEffect(resumePair?.first?.id) {
-        resumePair?.first?.let { selectedSeason = it.season }
+    var selectedSeason by rememberSaveable(
+        series.id,
+        seasons,
+        targetEpisodeId,
+        targetSeason,
+        targetEpisodeNumber,
+    ) {
+        mutableIntStateOf(
+            targetEpisode?.season
+                ?: targetSeason?.takeIf { it in seasons }
+                ?: resumePair?.first?.season
+                ?: seasons.firstOrNull()
+                ?: 0,
+        )
+    }
+    LaunchedEffect(targetEpisode?.id, targetSeason, seasons, resumePair?.first?.id) {
+        selectedSeason = targetEpisode?.season
+            ?: targetSeason?.takeIf { it in seasons }
+            ?: resumePair?.first?.season
+            ?: selectedSeason
     }
 
     val visibleEpisodes = remember(orderedEpisodes, selectedSeason) {
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
-    val heroEpisode = resumePair?.first ?: orderedEpisodes.firstOrNull()
+    val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
     val previousEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, -1)
     val nextEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, 1)
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
@@ -486,6 +529,7 @@ fun SeriesDetailsProScreen(
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
+    val notificationRequester = remember(series.id) { FocusRequester() }
     val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val seasonKeys = seasons.toList()
@@ -532,6 +576,14 @@ fun SeriesDetailsProScreen(
             runCatching { requester.requestFocus() }
         }
         return true
+    }
+
+    LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes) {
+        val index = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
+        if (index >= 0) {
+            delay(DETAILS_PRO_GRID_FOCUS_DELAY_MS)
+            requestEpisodeAt(index)
+        }
     }
 
     LaunchedEffect(series.id, isTv, heroEpisode?.id) {
@@ -585,6 +637,22 @@ fun SeriesDetailsProScreen(
                 requester = favoriteRequester,
             ),
         )
+        add(
+            DetailsProAction(
+                text = if (notificationsEnabled) {
+                    "🔔 التنبيهات مفعلة"
+                } else {
+                    "🔔 نبهني عند نزول حلقة جديدة"
+                },
+                onClick = onToggleNotifications,
+                requester = notificationRequester,
+                primary = notificationsEnabled,
+                enabled = notificationsEnabled || notificationToggleAvailable,
+                mobileWeight = 1.35f,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+            ),
+        )
     }
 
     Box(
@@ -607,7 +675,10 @@ fun SeriesDetailsProScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((metrics.heroHeightDp + mobileResumeHeroExtraDp).dp)
+                        .height(
+                            (metrics.heroHeightDp + mobileResumeHeroExtraDp +
+                                seriesNotificationActionExtraDp).dp,
+                        )
                         .background(colors.background),
                 ) {
                     if (!backdrop.isNullOrBlank()) {
@@ -815,6 +886,7 @@ fun SeriesDetailsProScreen(
 
                 EpisodeDetailsProCard(
                     episode = episode,
+                    highlighted = targetEpisode?.id == episode.id,
                     fallbackBackdrop = backdrop,
                     download = download,
                     historyEntry = historyByKey["SERIES:${episode.id}"],
@@ -1082,7 +1154,8 @@ private fun DetailsProActions(
     onFocused: (FocusRequester) -> Unit,
     wide: Boolean,
 ) {
-    if (isTv || wide) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    if (detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
         Row(
             modifier = Modifier.fillMaxWidth().focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1098,8 +1171,16 @@ private fun DetailsProActions(
                     enabled = action.enabled,
                     compact = true,
                     outlined = !action.primary,
+                    scaleOnFocus = action.scaleOnFocus,
                     modifier = Modifier
                         .weight(if (action.primary) 1.18f else 1f)
+                        .then(
+                            if (action.minimumHeightDp > 0) {
+                                Modifier.heightIn(min = action.minimumHeightDp.dp)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .detailsProTvTarget(
                             isTv = isTv,
                             requester = action.requester,
@@ -1113,8 +1194,9 @@ private fun DetailsProActions(
             }
         }
     } else {
+        val actionColumns = detailsProMobileActionColumns(adaptiveUi.screenWidthDp)
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            actions.chunked(2).forEach { row ->
+            actions.chunked(actionColumns).forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -1127,10 +1209,21 @@ private fun DetailsProActions(
                             enabled = action.enabled,
                             compact = true,
                             outlined = !action.primary,
-                            modifier = Modifier.weight(action.mobileWeight),
+                            scaleOnFocus = action.scaleOnFocus,
+                            modifier = Modifier
+                                .weight(action.mobileWeight)
+                                .then(
+                                    if (action.minimumHeightDp > 0) {
+                                        Modifier.heightIn(min = action.minimumHeightDp.dp)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                         )
                     }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                    repeat(actionColumns - row.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -1251,6 +1344,7 @@ private fun SeriesDetailsProHeader(
 @Composable
 private fun EpisodeDetailsProCard(
     episode: Episode,
+    highlighted: Boolean,
     fallbackBackdrop: String?,
     download: OfflineDownload?,
     historyEntry: HistoryEntry?,
@@ -1290,8 +1384,8 @@ private fun EpisodeDetailsProCard(
                 .clip(RoundedCornerShape(13.dp))
                 .background(Color(0xFF13140F))
                 .border(
-                    if (showFocused) 3.dp else 1.dp,
-                    if (showFocused) colors.goldBright else colors.line.copy(alpha = .38f),
+                    if (showFocused) 3.dp else if (highlighted) 2.dp else 1.dp,
+                    if (showFocused || highlighted) colors.goldBright else colors.line.copy(alpha = .38f),
                     RoundedCornerShape(13.dp),
                 )
                 .onFocusChanged { focused = it.isFocused }

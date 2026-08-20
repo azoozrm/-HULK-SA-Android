@@ -213,6 +213,7 @@ fun HulkApp(
                                     },
                                     onToggleFavorite = viewModel::toggleFavorite,
                                     onRefresh = viewModel::refresh,
+                                    onOpenNotifications = viewModel::openNotificationCenter,
                                     onClearHistory = viewModel::clearHistory,
                                     onPlayDownload = viewModel::playDownload,
                                     onDeleteDownload = { item ->
@@ -223,6 +224,9 @@ fun HulkApp(
                                     onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
                                     onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
                                     onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
+                                    onToggleEpisodeNotificationMaster = {
+                                        viewModel.toggleEpisodeNotificationMaster(notify)
+                                    },
                                     onCycleDownloadPriority = { item -> notify(viewModel.cycleDownloadPriority(item)) },
                                     onRefreshAccount = { viewModel.refreshAccount(notify) },
                                     onRunDiagnostics = viewModel::runDiagnostics,
@@ -302,6 +306,17 @@ fun HulkApp(
                                 errorMessage = state.errorMessage,
                                 isTv = isTv,
                                 isFavorite = viewModel.isFavorite(series),
+                                notificationsEnabled = viewModel.isSeriesNotificationsEnabled(series),
+                                notificationToggleAvailable = !state.isLoading && state.errorMessage == null,
+                                targetEpisodeId = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.episodeId,
+                                targetSeason = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.seasonNumber,
+                                targetEpisodeNumber = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.episodeNumber,
                                 downloads = state.downloads,
                                 history = state.history,
                                 relatedItems = relatedSeries,
@@ -329,6 +344,9 @@ fun HulkApp(
                                     }
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(series) },
+                                onToggleNotifications = {
+                                    viewModel.toggleSeriesNotifications(series, notify)
+                                },
                                 onToggleRelatedFavorite = { related ->
                                     val wasFavorite = viewModel.isFavorite(related)
                                     viewModel.toggleFavorite(related)
@@ -346,6 +364,8 @@ fun HulkApp(
                             LaunchedEffect(state.screen) { viewModel.back() }
                         }
                     }
+
+                    HulkScreen.NOTIFICATION_CENTER -> Unit
 
                     HulkScreen.PLAYER -> {
                         val playback = state.playback

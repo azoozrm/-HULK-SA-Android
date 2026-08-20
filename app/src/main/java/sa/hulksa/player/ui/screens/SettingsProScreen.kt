@@ -95,6 +95,7 @@ private class SettingsFocusGraph {
     val keepScreenOn = FocusRequester()
     val autoHideControls = FocusRequester()
     val resetPlayback = FocusRequester()
+    val episodeNotifications = FocusRequester()
     val wifiOnly = FocusRequester()
     val downloadSchedule = FocusRequester()
     val concurrentDownloads = FocusRequester()
@@ -121,6 +122,8 @@ internal fun SettingsProScreen(
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
+    notificationMasterEnabled: Boolean,
+    onToggleEpisodeNotificationMaster: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -329,8 +332,21 @@ internal fun SettingsProScreen(
                     expanded = expandedLayout,
                     focusRequester = focus.resetPlayback,
                     upRequester = focus.autoHideControls,
-                    downRequester = focus.wifiOnly,
+                    downRequester = focus.episodeNotifications,
                     onClick = { pendingConfirmation = SettingsConfirmation.RESET_PLAYBACK },
+                )
+            }
+
+            SettingsPanel(title = "الإشعارات", expanded = expandedLayout) {
+                SettingsMenuRow(
+                    label = "تنبيهات الحلقات الجديدة",
+                    value = settingsToggleLabel(notificationMasterEnabled),
+                    accentValue = notificationMasterEnabled,
+                    expanded = expandedLayout,
+                    focusRequester = focus.episodeNotifications,
+                    upRequester = focus.resetPlayback,
+                    downRequester = focus.wifiOnly,
+                    onClick = onToggleEpisodeNotificationMaster,
                 )
             }
 
@@ -349,7 +365,7 @@ internal fun SettingsProScreen(
                     accentValue = state.downloadSettings.wifiOnly,
                     expanded = expandedLayout,
                     focusRequester = focus.wifiOnly,
-                    upRequester = focus.resetPlayback,
+                    upRequester = focus.episodeNotifications,
                     downRequester = focus.downloadSchedule,
                     onClick = onToggleWifiOnly,
                 )

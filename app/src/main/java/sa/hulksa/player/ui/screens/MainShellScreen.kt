@@ -340,6 +340,7 @@ fun MainShellScreen(
     onOpenHistory: (HistoryEntry) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    onOpenNotifications: () -> Unit,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
     onDeleteDownload: (OfflineDownload) -> Unit,
@@ -347,6 +348,7 @@ fun MainShellScreen(
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
+    onToggleEpisodeNotificationMaster: () -> Unit,
     onCycleDownloadPriority: (OfflineDownload) -> Unit,
     onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
@@ -432,6 +434,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
+                        onOpenNotifications = onOpenNotifications,
                         onSelectDestination = rememberingSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
@@ -440,6 +443,7 @@ fun MainShellScreen(
                         onToggleWifiOnly = onToggleWifiOnly,
                         onToggleDownloadSchedule = onToggleDownloadSchedule,
                         onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+                        onToggleEpisodeNotificationMaster = onToggleEpisodeNotificationMaster,
                         onCycleDownloadPriority = onCycleDownloadPriority,
                         onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
@@ -471,6 +475,7 @@ fun MainShellScreen(
                         onOpenHistory = onOpenHistory,
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
+                        onOpenNotifications = onOpenNotifications,
                         onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
@@ -479,6 +484,7 @@ fun MainShellScreen(
                         onToggleWifiOnly = onToggleWifiOnly,
                         onToggleDownloadSchedule = onToggleDownloadSchedule,
                         onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+                        onToggleEpisodeNotificationMaster = onToggleEpisodeNotificationMaster,
                         onCycleDownloadPriority = onCycleDownloadPriority,
                         onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
@@ -926,6 +932,7 @@ private fun DestinationContent(
     onOpenHistory: (HistoryEntry) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    onOpenNotifications: () -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
@@ -934,13 +941,25 @@ private fun DestinationContent(
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
+    onToggleEpisodeNotificationMaster: () -> Unit,
     onCycleDownloadPriority: (OfflineDownload) -> Unit,
     onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onLogout: () -> Unit,
 ) {
     when (state.destination) {
-        MainDestination.HOME -> CinemaHomeScreen(state, isTv, navigationMemory, isFavorite, onOpen, onOpenHistory, onToggleFavorite, onRefresh) { onSelectDestination(MainDestination.DOWNLOADS) }
+        MainDestination.HOME -> CinemaHomeScreen(
+            state = state,
+            isTv = isTv,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onOpen = onOpen,
+            onOpenHistory = onOpenHistory,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            onOpenNotifications = onOpenNotifications,
+            onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
+        )
         MainDestination.LIVE -> LiveCatalogScreen(state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onToggleFavorite, onRefresh)
         MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
         MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
@@ -972,6 +991,8 @@ private fun DestinationContent(
             onToggleWifiOnly = onToggleWifiOnly,
             onToggleDownloadSchedule = onToggleDownloadSchedule,
             onCycleConcurrentDownloads = onCycleConcurrentDownloads,
+            notificationMasterEnabled = state.episodeNotificationsEnabled,
+            onToggleEpisodeNotificationMaster = onToggleEpisodeNotificationMaster,
             onLogout = onLogout,
         )
     }
@@ -987,6 +1008,7 @@ private fun CinemaHomeScreen(
     onOpenHistory: (HistoryEntry) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    onOpenNotifications: () -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
     val homeContent = navigationMemory.homeContent(state)
@@ -1062,10 +1084,20 @@ private fun CinemaHomeScreen(
                 CinemaHero(
                     featured, isTv, isFavorite(featured), { onOpen(featured) },
                     { onToggleFavorite(featured) }, onRefresh, loading,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
                     watchModifier = Modifier.restoreFocus(remembered.rowKey == "hero", heroRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
                 )
-            } else HomePlaceholder(loading, onRefresh, isTv)
+            } else {
+                HomePlaceholder(
+                    loading = loading,
+                    onRefresh = onRefresh,
+                    isTv = isTv,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
+                )
+            }
         }
         if (state.errorMessage != null) {
             item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
@@ -1169,6 +1201,8 @@ private fun CinemaHero(
     onToggleFavorite: () -> Unit,
     onRefresh: () -> Unit,
     isLoading: Boolean,
+    unreadNotificationCount: Int,
+    onOpenNotifications: () -> Unit,
     watchModifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
 ) {
@@ -1231,6 +1265,12 @@ private fun CinemaHero(
             }
             if (isLoading) LoadingRing()
             Spacer(Modifier.width(10.dp))
+            NotificationBellButton(
+                unreadCount = unreadNotificationCount,
+                isTv = isTv,
+                onClick = onOpenNotifications,
+            )
+            Spacer(Modifier.width(8.dp))
             RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
         }
 
@@ -1286,12 +1326,30 @@ private fun CinemaHero(
 }
 
 @Composable
-private fun HomePlaceholder(loading: Boolean, onRefresh: () -> Unit, isTv: Boolean) {
+private fun HomePlaceholder(
+    loading: Boolean,
+    onRefresh: () -> Unit,
+    isTv: Boolean,
+    unreadNotificationCount: Int,
+    onOpenNotifications: () -> Unit,
+) {
     val colors = LocalHulkColors.current
     Box(
         Modifier.fillMaxWidth().height(if (isTv) 360.dp else 270.dp).background(colors.surface),
         contentAlignment = Alignment.Center,
     ) {
+        NotificationBellButton(
+            unreadCount = unreadNotificationCount,
+            isTv = isTv,
+            onClick = onOpenNotifications,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+                .padding(
+                    horizontal = if (isTv) 26.dp else 18.dp,
+                    vertical = if (isTv) 18.dp else 10.dp,
+                ),
+        )
         if (loading) LoadingRing(label = "نجهز احدث الاضافات…")
         else Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)

@@ -278,12 +278,16 @@ fun FocusButton(
     outlined: Boolean = false,
     onFocused: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    scaleOnFocus: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "buttonScale")
+    val scale by animateFloatAsState(
+        if (showFocused && scaleOnFocus) 1.035f else 1f,
+        label = "buttonScale",
+    )
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)

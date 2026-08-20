@@ -1,6 +1,10 @@
 package sa.hulksa.player.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -9,10 +13,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
@@ -24,7 +35,9 @@ import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.screens.AdaptiveProfileManagementScreen
+import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
+import sa.hulksa.player.ui.screens.NewEpisodeAlertOverlay
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
@@ -191,6 +204,7 @@ fun ProfileAwareHulkApp(
         if (profile.id == currentProfileId) {
             if (profile.kind == ProfileKind.KIDS) viewModel.selectDestination(MainDestination.HOME)
             viewModel.refreshProfileLibrary()
+            viewModel.onProfileChanged()
             switchError = null
             resolvedForSession = true
             managingProfiles = false
@@ -236,6 +250,7 @@ fun ProfileAwareHulkApp(
             viewModel.selectCategory(null)
         }
         viewModel.refreshProfileLibrary()
+        viewModel.onProfileChanged()
         profileRevision++
         switching = false
         resolvedForSession = true
@@ -345,8 +360,57 @@ fun ProfileAwareHulkApp(
     val securityProfile = pinSecurityProfileId
         ?.let { profileId -> profiles.firstOrNull { it.id == profileId } }
 
-    when {
-        unlockProfile != null -> ProfilePinUnlockScreen(
+    LaunchedEffect(
+        authenticated,
+        resolvedForSession,
+        showPicker,
+        managingProfiles,
+        unlockProfile?.id,
+        securityProfile?.id,
+        activeProfile?.id,
+        activeProfile?.kind,
+        kidsSnapshot?.isAvailable,
+    ) {
+        viewModel.setNotificationUiReady(
+            ready = authenticated &&
+                resolvedForSession &&
+                !showPicker &&
+                !managingProfiles &&
+                unlockProfile == null &&
+                securityProfile == null &&
+                (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true),
+        )
+    }
+
+    val appContentFocusRequester = remember { FocusRequester() }
+    val notificationFocusScope = rememberCoroutineScope()
+
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .focusRequester(appContentFocusRequester)
+                .focusRestorer()
+                .focusGroup(),
+        ) {
+            when {
+            state.screen == HulkScreen.NOTIFICATION_CENTER -> LocalNotificationCenterScreen(
+                notifications = state.localNotifications,
+                unreadCount = state.unreadNotificationCount,
+                isTv = isTelevisionDevice,
+                onBack = viewModel::back,
+                onOpen = { notification ->
+                    viewModel.openNotification(notification.id) { message ->
+                        message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                    }
+                },
+                onMarkRead = { notification -> viewModel.markNotificationRead(notification.id) },
+                onReadAll = viewModel::markAllNotificationsRead,
+                onDelete = { notification -> viewModel.deleteNotification(notification.id) },
+                onClearAll = viewModel::clearNotifications,
+            )
+
+            unlockProfile != null -> ProfilePinUnlockScreen(
             profile = unlockProfile,
             isTv = isTelevisionDevice,
             onVerify = { pin -> profilePinCredentialStore.verifyPin(unlockProfile.id, pin) },
@@ -360,7 +424,7 @@ fun ProfileAwareHulkApp(
             },
         )
 
-        managingProfiles && securityProfile != null -> ProfilePinProtectionScreen(
+            managingProfiles && securityProfile != null -> ProfilePinProtectionScreen(
             profile = securityProfile,
             isTv = isTelevisionDevice,
             isProtected = securityProfile.id in protectedProfileIds,
@@ -400,7 +464,7 @@ fun ProfileAwareHulkApp(
             },
         )
 
-        managingProfiles -> AdaptiveProfileManagementScreen(
+            managingProfiles -> AdaptiveProfileManagementScreen(
             profiles = profiles,
             activeProfileId = activeProfileId,
             isTv = isTelevisionDevice,
@@ -438,6 +502,7 @@ fun ProfileAwareHulkApp(
                     navigationMemoryByProfile.remove(profileId)
                     destinationMemoryByProfile.remove(profileId)
                     catalogNavigationMemoryByProfile.remove(profileId)
+                    viewModel.removeNotificationProfileData(profileId)
                     if (pinSecurityProfileId == profileId) pinSecurityProfileId = null
                     profileRevision++
                     pinRevision++
@@ -457,7 +522,7 @@ fun ProfileAwareHulkApp(
             },
         )
 
-        showPicker -> ProfilePickerScreen(
+            showPicker -> ProfilePickerScreen(
             profiles = profiles,
             activeProfileId = activeProfileId,
             isTv = isTelevisionDevice,
@@ -477,7 +542,7 @@ fun ProfileAwareHulkApp(
             },
         )
 
-        activeProfile?.kind == ProfileKind.KIDS -> KidsProfileExperience(
+            activeProfile?.kind == ProfileKind.KIDS -> KidsProfileExperience(
             viewModel = viewModel,
             isTelevisionDevice = isTelevisionDevice,
             profile = activeProfile,
@@ -488,14 +553,37 @@ fun ProfileAwareHulkApp(
             onSwitchProfile = ::openProfilePickerFromApp,
         )
 
-        else -> CompositionLocalProvider(
-            LocalProfileSwitchRequester provides ::openProfilePickerFromApp,
-        ) {
-            HulkApp(
-                viewModel = viewModel,
-                isTelevisionDevice = isTelevisionDevice,
-                navigationMemory = activeNavigationMemory,
-                catalogNavigationMemory = activeCatalogNavigationMemory,
+            else -> CompositionLocalProvider(
+                LocalProfileSwitchRequester provides ::openProfilePickerFromApp,
+            ) {
+                HulkApp(
+                    viewModel = viewModel,
+                    isTelevisionDevice = isTelevisionDevice,
+                    navigationMemory = activeNavigationMemory,
+                    catalogNavigationMemory = activeCatalogNavigationMemory,
+                )
+            }
+            }
+        }
+
+        state.notificationPopup?.let { popup ->
+            NewEpisodeAlertOverlay(
+                popup = popup,
+                isTv = isTelevisionDevice,
+                onPrimary = {
+                    viewModel.activateNotificationPopup { message ->
+                        message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                    }
+                },
+                onLater = {
+                    viewModel.dismissNotificationPopup()
+                    if (isTelevisionDevice) {
+                        notificationFocusScope.launch {
+                            delay(90L)
+                            runCatching { appContentFocusRequester.requestFocus() }
+                        }
+                    }
+                },
             )
         }
     }

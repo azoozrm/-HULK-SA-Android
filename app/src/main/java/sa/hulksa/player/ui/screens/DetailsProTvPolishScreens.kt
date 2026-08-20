@@ -16,12 +16,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -502,6 +504,11 @@ fun SeriesDetailsProPolishedScreen(
     errorMessage: String?,
     isTv: Boolean,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
+    targetEpisodeId: Int?,
+    targetSeason: Int?,
+    targetEpisodeNumber: Int?,
     downloads: List<OfflineDownload>,
     history: List<HistoryEntry>,
     relatedItems: List<ContentItem>,
@@ -511,6 +518,7 @@ fun SeriesDetailsProPolishedScreen(
     onDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
 ) {
@@ -523,6 +531,11 @@ fun SeriesDetailsProPolishedScreen(
             errorMessage = errorMessage,
             isTv = false,
             isFavorite = isFavorite,
+            notificationsEnabled = notificationsEnabled,
+            notificationToggleAvailable = notificationToggleAvailable,
+            targetEpisodeId = targetEpisodeId,
+            targetSeason = targetSeason,
+            targetEpisodeNumber = targetEpisodeNumber,
             downloads = downloads,
             history = history,
             relatedItems = relatedItems,
@@ -532,6 +545,7 @@ fun SeriesDetailsProPolishedScreen(
             onDownload = onDownload,
             onCancelDownload = onCancelDownload,
             onToggleFavorite = onToggleFavorite,
+            onToggleNotifications = onToggleNotifications,
             onToggleRelatedFavorite = onToggleRelatedFavorite,
             onOpenRelated = onOpenRelated,
         )
@@ -545,6 +559,11 @@ fun SeriesDetailsProPolishedScreen(
         isLoading = isLoading,
         errorMessage = errorMessage,
         isFavorite = isFavorite,
+        notificationsEnabled = notificationsEnabled,
+        notificationToggleAvailable = notificationToggleAvailable,
+        targetEpisodeId = targetEpisodeId,
+        targetSeason = targetSeason,
+        targetEpisodeNumber = targetEpisodeNumber,
         downloads = downloads,
         history = history,
         relatedItems = relatedItems,
@@ -554,6 +573,7 @@ fun SeriesDetailsProPolishedScreen(
         onDownload = onDownload,
         onCancelDownload = onCancelDownload,
         onToggleFavorite = onToggleFavorite,
+        onToggleNotifications = onToggleNotifications,
         onToggleRelatedFavorite = onToggleRelatedFavorite,
         onOpenRelated = onOpenRelated,
     )
@@ -567,6 +587,11 @@ private fun SeriesDetailsProTvPolished(
     isLoading: Boolean,
     errorMessage: String?,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
+    targetEpisodeId: Int?,
+    targetSeason: Int?,
+    targetEpisodeNumber: Int?,
     downloads: List<OfflineDownload>,
     history: List<HistoryEntry>,
     relatedItems: List<ContentItem>,
@@ -576,6 +601,7 @@ private fun SeriesDetailsProTvPolished(
     onDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
 ) {
@@ -599,11 +625,32 @@ private fun SeriesDetailsProTvPolished(
             Triple(episode, entry, progress)
         }.maxByOrNull { it.second.updatedAtEpochMs }
     }
-    var selectedSeason by rememberSaveable(series.id) {
-        mutableIntStateOf(resumePair?.first?.season ?: seasons.firstOrNull() ?: 0)
+    val targetEpisode = remember(ordered, targetEpisodeId, targetSeason, targetEpisodeNumber) {
+        if (targetEpisodeId != null) {
+            ordered.firstOrNull { it.id == targetEpisodeId }
+        } else {
+            ordered.firstOrNull {
+                targetSeason != null &&
+                    targetEpisodeNumber != null &&
+                    it.season == targetSeason &&
+                    it.episodeNumber == targetEpisodeNumber
+            }
+        }
     }
-    LaunchedEffect(resumePair?.first?.id) {
-        resumePair?.first?.let { selectedSeason = it.season }
+    var selectedSeason by rememberSaveable(series.id, targetEpisodeId, targetSeason, targetEpisodeNumber) {
+        mutableIntStateOf(
+            targetEpisode?.season
+                ?: targetSeason?.takeIf { it in seasons }
+                ?: resumePair?.first?.season
+                ?: seasons.firstOrNull()
+                ?: 0,
+        )
+    }
+    LaunchedEffect(targetEpisode?.id, targetSeason, seasons, resumePair?.first?.id) {
+        selectedSeason = targetEpisode?.season
+            ?: targetSeason?.takeIf { it in seasons }
+            ?: resumePair?.first?.season
+            ?: selectedSeason
     }
     val visibleEpisodes = remember(ordered, selectedSeason) {
         if (selectedSeason == 0) ordered else ordered.filter { it.season == selectedSeason }
@@ -611,18 +658,19 @@ private fun SeriesDetailsProTvPolished(
     val completedCount = remember(ordered, historyByKey) {
         ordered.count { historyByKey["SERIES:${it.id}"]?.detailsTvCompleted() == true }
     }
-    val currentEpisode = resumePair?.first ?: ordered.firstOrNull()
+    val currentEpisode = targetEpisode ?: resumePair?.first ?: ordered.firstOrNull()
     val currentIndex = ordered.indexOfFirst { it.id == currentEpisode?.id }
     val previousEpisode = ordered.getOrNull(currentIndex - 1)
     val nextEpisode = if (currentEpisode != null) ordered.getOrNull(currentIndex + 1) else null
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
-    val seriesResumeHeroExtraDp = if (resumePair != null) 34 else 0
+    val seriesResumeHeroExtraDp = (if (resumePair != null) 34 else 0) + 64
 
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
     val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
+    val notificationRequester = remember(series.id) { FocusRequester() }
     val seasonRequesters = remember(series.id, seasons) { List(seasons.size) { FocusRequester() } }
     val episodeKeys = visibleEpisodes.map(Episode::id)
     val episodeCardRequesters = remember(series.id, selectedSeason, episodeKeys) {
@@ -636,13 +684,30 @@ private fun SeriesDetailsProTvPolished(
     val firstEpisodeRequester = episodeCardRequesters.firstOrNull()
     val firstSeasonRequester = seasonRequesters.firstOrNull()
     val heroDownTarget = firstSeasonRequester ?: firstEpisodeRequester
+    val listState = rememberLazyListState()
 
-    LaunchedEffect(series.id) {
-        delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
-        if (currentEpisode != null) runCatching { playRequester.requestFocus() }
+    LaunchedEffect(series.id, targetEpisode?.id) {
+        if (targetEpisode == null) {
+            delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
+            if (currentEpisode != null) runCatching { playRequester.requestFocus() }
+        }
+    }
+    LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes, metrics.episodeColumns) {
+        val targetIndex = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
+        if (targetIndex >= 0) {
+            val episodeRowStartIndex = 2 +
+                (if (errorMessage != null) 1 else 0) +
+                (if (detailsTvHasInformation(details)) 1 else 0)
+            listState.scrollToItem(episodeRowStartIndex + targetIndex / metrics.episodeColumns)
+            delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
+            episodeCardRequesters.getOrNull(targetIndex)?.let { requester ->
+                runCatching { requester.requestFocus() }
+            }
+        }
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().background(colors.background),
         contentPadding = PaddingValues(bottom = 30.dp),
     ) {
@@ -762,85 +827,105 @@ private fun SeriesDetailsProTvPolished(
                             )
                         }
                         Spacer(Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        ) {
-                            FocusButton(
-                                text = if (resumePair != null) "▶ متابعة المشاهدة" else "▶ ابدا المشاهدة",
-                                onClick = { currentEpisode?.let(onPlay) },
-                                enabled = currentEpisode != null,
-                                compact = true,
-                                modifier = Modifier
-                                    .weight(1.08f)
-                                    .focusRequester(playRequester)
-                                    .focusProperties {
-                                        up = backRequester
-                                        down = heroDownTarget ?: FocusRequester.Cancel
-                                        right = FocusRequester.Cancel
-                                        left = when {
-                                            previousEpisode != null -> previousRequester
-                                            nextEpisode != null -> nextRequester
-                                            else -> favoriteRequester
-                                        }
-                                    },
-                            )
-                            if (previousEpisode != null) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            ) {
                                 FocusButton(
-                                    text = "السابق · S${previousEpisode.season} E${previousEpisode.episodeNumber}",
-                                    onClick = { onPlay(previousEpisode) },
+                                    text = if (resumePair != null) "▶ متابعة المشاهدة" else "▶ ابدا المشاهدة",
+                                    onClick = { currentEpisode?.let(onPlay) },
+                                    enabled = currentEpisode != null,
+                                    compact = true,
+                                    modifier = Modifier
+                                        .weight(1.08f)
+                                        .focusRequester(playRequester)
+                                        .focusProperties {
+                                            up = backRequester
+                                            down = favoriteRequester
+                                            right = FocusRequester.Cancel
+                                            left = previousEpisode?.let { previousRequester }
+                                                ?: nextEpisode?.let { nextRequester }
+                                                ?: FocusRequester.Cancel
+                                        },
+                                )
+                                if (previousEpisode != null) {
+                                    FocusButton(
+                                        text = "السابق · S${previousEpisode.season} E${previousEpisode.episodeNumber}",
+                                        onClick = { onPlay(previousEpisode) },
+                                        primary = false,
+                                        outlined = true,
+                                        compact = true,
+                                        modifier = Modifier
+                                            .weight(.88f)
+                                            .focusRequester(previousRequester)
+                                            .focusProperties {
+                                                up = backRequester
+                                                down = favoriteRequester
+                                                right = playRequester
+                                                left = if (nextEpisode != null) nextRequester else FocusRequester.Cancel
+                                            },
+                                    )
+                                }
+                                if (nextEpisode != null) {
+                                    FocusButton(
+                                        text = "التالي · S${nextEpisode.season} E${nextEpisode.episodeNumber}",
+                                        onClick = { onPlay(nextEpisode) },
+                                        primary = false,
+                                        outlined = true,
+                                        compact = true,
+                                        modifier = Modifier
+                                            .weight(.88f)
+                                            .focusRequester(nextRequester)
+                                            .focusProperties {
+                                                up = backRequester
+                                                down = notificationRequester
+                                                right = if (previousEpisode != null) previousRequester else playRequester
+                                                left = FocusRequester.Cancel
+                                            },
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            ) {
+                                FocusButton(
+                                    text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                                    onClick = onToggleFavorite,
                                     primary = false,
                                     outlined = true,
                                     compact = true,
                                     modifier = Modifier
-                                        .weight(.88f)
-                                        .focusRequester(previousRequester)
+                                        .weight(1f)
+                                        .focusRequester(favoriteRequester)
                                         .focusProperties {
-                                            up = backRequester
+                                            up = playRequester
                                             down = heroDownTarget ?: FocusRequester.Cancel
-                                            right = playRequester
-                                            left = if (nextEpisode != null) nextRequester else favoriteRequester
+                                            right = FocusRequester.Cancel
+                                            left = notificationRequester
                                         },
                                 )
-                            }
-                            if (nextEpisode != null) {
                                 FocusButton(
-                                    text = "التالي · S${nextEpisode.season} E${nextEpisode.episodeNumber}",
-                                    onClick = { onPlay(nextEpisode) },
-                                    primary = false,
-                                    outlined = true,
+                                    text = if (notificationsEnabled) "🔔 التنبيهات مفعلة" else "🔔 نبهني عند نزول حلقة جديدة",
+                                    onClick = onToggleNotifications,
+                                    enabled = notificationsEnabled || notificationToggleAvailable,
+                                    primary = notificationsEnabled,
+                                    outlined = !notificationsEnabled,
                                     compact = true,
+                                    scaleOnFocus = false,
                                     modifier = Modifier
-                                        .weight(.88f)
-                                        .focusRequester(nextRequester)
+                                        .weight(1.35f)
+                                        .heightIn(min = 48.dp)
+                                        .focusRequester(notificationRequester)
                                         .focusProperties {
-                                            up = backRequester
+                                            up = nextEpisode?.let { nextRequester } ?: playRequester
                                             down = heroDownTarget ?: FocusRequester.Cancel
-                                            right = if (previousEpisode != null) previousRequester else playRequester
-                                            left = favoriteRequester
+                                            right = favoriteRequester
+                                            left = FocusRequester.Cancel
                                         },
                                 )
                             }
-                            FocusButton(
-                                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                                onClick = onToggleFavorite,
-                                primary = false,
-                                outlined = true,
-                                compact = true,
-                                modifier = Modifier
-                                    .weight(.78f)
-                                    .focusRequester(favoriteRequester)
-                                    .focusProperties {
-                                        up = backRequester
-                                        down = heroDownTarget ?: FocusRequester.Cancel
-                                        right = when {
-                                            nextEpisode != null -> nextRequester
-                                            previousEpisode != null -> previousRequester
-                                            else -> playRequester
-                                        }
-                                        left = FocusRequester.Cancel
-                                    },
-                            )
                         }
                     }
 
@@ -991,6 +1076,7 @@ private fun SeriesDetailsProTvPolished(
                         }
                         DetailsTvEpisodeUnit(
                             episode = episode,
+                            highlighted = targetEpisode?.id == episode.id,
                             fallbackArtwork = backdrop,
                             historyEntry = historyEntry,
                             download = download,
@@ -1036,6 +1122,7 @@ private fun SeriesDetailsProTvPolished(
 @Composable
 private fun DetailsTvEpisodeUnit(
     episode: Episode,
+    highlighted: Boolean,
     fallbackArtwork: String?,
     historyEntry: HistoryEntry?,
     download: OfflineDownload?,
@@ -1075,7 +1162,11 @@ private fun DetailsTvEpisodeUnit(
                 }
                 .clip(shape)
                 .background(Color(0xFF15160F))
-                .border(if (focused) 3.dp else 1.dp, if (focused) colors.goldBright else colors.line.copy(alpha = .42f), shape)
+                .border(
+                    if (focused) 3.dp else if (highlighted) 2.dp else 1.dp,
+                    if (focused || highlighted) colors.goldBright else colors.line.copy(alpha = .42f),
+                    shape,
+                )
                 .focusRequester(cardRequester)
                 .focusProperties {
                     up = upCard
