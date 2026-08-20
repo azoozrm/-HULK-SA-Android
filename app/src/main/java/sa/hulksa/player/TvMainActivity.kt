@@ -57,6 +57,7 @@ class TvMainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        viewModel.onAppResumed()
         window.decorView.post { enterImmersiveModeSafely() }
     }
 

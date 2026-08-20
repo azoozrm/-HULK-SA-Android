@@ -90,6 +90,11 @@ class MainActivity : ComponentActivity() {
         applyPhoneOrientationPolicy(currentScreen, newConfig)
     }
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.onAppResumed()
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus && isTelevisionDevice()) enterImmersiveMode()

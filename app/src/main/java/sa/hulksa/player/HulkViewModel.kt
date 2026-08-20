@@ -5,6 +5,11 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -18,11 +23,22 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.DownloadRepository
+import sa.hulksa.player.data.EpisodeNotificationPopup
+import sa.hulksa.player.data.EpisodeNotificationSubscription
+import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.HulkRepository
+import sa.hulksa.player.data.KidsContentFilterStore
+import sa.hulksa.player.data.LocalEpisodeNotification
+import sa.hulksa.player.data.LocalEpisodeNotificationStore
 import sa.hulksa.player.data.PortalException
+import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
+import sa.hulksa.player.data.buildEpisodeNotificationPopups
+import sa.hulksa.player.data.canUseSeriesEpisodeNotifications
 import sa.hulksa.player.data.normalizeResellerAccessCode
+import sa.hulksa.player.data.reliableEpisodeKeys
+import sa.hulksa.player.data.resolveLocalNotificationSeriesTarget
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
@@ -38,12 +54,14 @@ import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.model.ProfileKind
 
 enum class HulkScreen {
     LOGIN,
     MAIN,
     MOVIE_DETAILS,
     SERIES,
+    NOTIFICATION_CENTER,
     PLAYER,
 }
 
@@ -79,11 +97,34 @@ data class HulkUiState(
     val selectedSeries: ContentItem? = null,
     val selectedDetails: ContentDetails? = null,
     val episodes: List<Episode> = emptyList(),
+    val seriesEpisodeTarget: SeriesEpisodeTarget? = null,
+    val notificationSubscribedSeriesIds: Set<Int> = emptySet(),
+    val localNotifications: List<LocalEpisodeNotification> = emptyList(),
+    val unreadNotificationCount: Int = 0,
+    val episodeNotificationsEnabled: Boolean = true,
+    val notificationPopup: EpisodeNotificationPopup? = null,
     val playback: PlaybackRequest? = null,
     val diagnostics: DiagnosticsState = DiagnosticsState(),
 ) {
     companion object {
     }
+}
+
+data class SeriesEpisodeTarget(
+    val seriesId: Int,
+    val seasonNumber: Int,
+    val episodeNumber: Int,
+    val episodeId: Int?,
+)
+
+private enum class NotificationScanTrigger(val minimumAgeMs: Long) {
+    APP_START(5 * 60_000L),
+    APP_RESUME(10 * 60_000L),
+    PROFILE_SWITCH(5 * 60_000L),
+    LIBRARY_REFRESH(5 * 60_000L),
+    MANUAL_REFRESH(60_000L),
+    NOTIFICATION_CENTER(2 * 60_000L),
+    MASTER_REENABLE(0L),
 }
 
 private data class MovieCardProbeMetadata(
@@ -96,12 +137,22 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = HulkRepository(application)
     private val userLibrary = UserLibrary(application)
     private val downloadRepository = DownloadRepository(application)
+    private val profileStore = ProfileStore(application)
+    private val kidsContentFilterStore = KidsContentFilterStore(application)
+    private val localEpisodeNotificationStore = LocalEpisodeNotificationStore(application)
+    private val initialNotificationSnapshot = localEpisodeNotificationStore.snapshot(
+        profileStore.activeProfileId(),
+    )
     private val mutableState = MutableStateFlow(
         HulkUiState(
             favorites = userLibrary.favorites(),
             history = userLibrary.history(),
             downloads = downloadRepository.downloads(),
             downloadSettings = downloadRepository.settings(),
+            notificationSubscribedSeriesIds = initialNotificationSnapshot.subscribedSeriesIds,
+            localNotifications = initialNotificationSnapshot.notifications,
+            unreadNotificationCount = initialNotificationSnapshot.unreadCount,
+            episodeNotificationsEnabled = initialNotificationSnapshot.settings.enabled,
         ),
     )
     val state: StateFlow<HulkUiState> = mutableState.asStateFlow()
@@ -115,12 +166,16 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var accountRefreshJob: Job? = null
     private var diagnosticsJob: Job? = null
     private var profileLibraryRefreshJob: Job? = null
+    private var notificationScanJob: Job? = null
+    private var notificationUiReady: Boolean = false
+    private var notificationCenterReturnScreen = HulkScreen.MAIN
     private var playerReturnScreen = HulkScreen.MAIN
     private val movieCardMetadataPrefs = application.getSharedPreferences(
         MOVIE_CARD_METADATA_PREFS,
         Context.MODE_PRIVATE,
     )
     private val movieCardProbeSemaphore = Semaphore(MOVIE_CARD_PROBE_CONCURRENCY)
+    private val episodeNotificationScanSemaphore = Semaphore(EPISODE_NOTIFICATION_SCAN_CONCURRENCY)
     private val movieCardProbeCallbacks =
         mutableMapOf<Int, MutableList<(String?, Long?) -> Unit>>()
     private val movieCardProbeInFlight = mutableSetOf<Int>()
@@ -222,6 +277,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = null,
             )
         }
+        refreshNotificationState(clearPopup = false)
+        scanSubscribedSeries(NotificationScanTrigger.LIBRARY_REFRESH)
 
         profileLibraryRefreshJob?.cancel()
         val sourceCatalogs = loadedCatalogs
@@ -366,6 +423,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         mutableState.update { it.copy(catalogs = it.catalogs - types, errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
+        scanSubscribedSeries(NotificationScanTrigger.MANUAL_REFRESH)
     }
 
     fun prefetchMovieCardMetadata(
@@ -483,40 +541,76 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         .onFailure(::showFailure)
                 }
             }
-            ContentType.SERIES -> {
-                mutableState.update {
-                    it.copy(
-                        screen = HulkScreen.SERIES,
-                        selectedSeries = item,
-                        selectedDetails = ContentDetails(
-                            plot = item.plot,
-                            genre = item.genre,
-                            backdropUrl = item.backdropUrl,
-                        ),
-                        episodes = emptyList(),
-                        isLoading = true,
-                        errorMessage = null,
+            ContentType.SERIES -> openSeries(item = item, target = null, activeSession = activeSession)
+        }
+    }
+
+    private fun openSeries(
+        item: ContentItem,
+        target: SeriesEpisodeTarget?,
+        activeSession: AuthenticatedSession,
+    ) {
+        val notificationAccountId = localEpisodeNotificationStore.activeAccountId()
+        val notificationProfile = profileStore.activeProfile()
+        detailsJob?.cancel()
+        mutableState.update {
+            it.copy(
+                screen = HulkScreen.SERIES,
+                selectedSeries = item,
+                selectedDetails = ContentDetails(
+                    plot = item.plot,
+                    genre = item.genre,
+                    backdropUrl = item.backdropUrl,
+                ),
+                episodes = emptyList(),
+                seriesEpisodeTarget = target,
+                isLoading = true,
+                errorMessage = null,
+            )
+        }
+        detailsJob = viewModelScope.launch {
+            runCatching { repository.seriesBundle(activeSession, item.id) }
+                .onSuccess { bundle ->
+                    val targetAvailable = target == null || if (target.episodeId != null) {
+                        bundle.episodes.any { it.id == target.episodeId }
+                    } else {
+                        bundle.episodes.any {
+                            it.season == target.seasonNumber &&
+                                it.episodeNumber == target.episodeNumber
+                        }
+                    }
+                    mutableState.update {
+                        it.copy(
+                            selectedDetails = bundle.details,
+                            episodes = bundle.episodes,
+                            isLoading = false,
+                            errorMessage = when {
+                                bundle.episodes.isEmpty() -> "لم نجد حلقات لهذا المسلسل."
+                                !targetAvailable -> "هذه الحلقة لم تعد متاحة، وتم فتح المسلسل بدلًا منها."
+                                else -> null
+                            },
+                        )
+                    }
+                    processOpenedSeriesForNotifications(
+                        series = item,
+                        episodes = bundle.episodes,
+                        expectedAccountId = notificationAccountId,
+                        expectedProfileId = notificationProfile.id,
+                        expectedProfileKind = notificationProfile.kind,
                     )
                 }
-                detailsJob = viewModelScope.launch {
-                    runCatching { repository.seriesBundle(activeSession, item.id) }
-                        .onSuccess { bundle ->
-                            mutableState.update {
-                                it.copy(
-                                    selectedDetails = bundle.details,
-                                    episodes = bundle.episodes,
-                                    isLoading = false,
-                                    errorMessage = if (bundle.episodes.isEmpty()) {
-                                        "لم نجد حلقات لهذا المسلسل."
-                                    } else {
-                                        null
-                                    },
-                                )
-                            }
+                .onFailure { error ->
+                    if (target != null) {
+                        mutableState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "هذا المحتوى لم يعد متاحًا.",
+                            )
                         }
-                        .onFailure(::showFailure)
+                    } else {
+                        showFailure(error)
+                    }
                 }
-            }
         }
     }
 
@@ -714,6 +808,577 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun isFavorite(item: ContentItem): Boolean = userLibrary.isFavorite(item, mutableState.value.favorites)
 
+    fun isSeriesNotificationsEnabled(series: ContentItem): Boolean =
+        series.id in mutableState.value.notificationSubscribedSeriesIds
+
+    fun toggleSeriesNotifications(
+        series: ContentItem,
+        onResult: (String) -> Unit,
+    ) {
+        if (series.type != ContentType.SERIES || series.id <= 0) {
+            onResult("تعذر تفعيل تنبيهات هذا المسلسل.")
+            return
+        }
+        val profile = profileStore.activeProfile()
+        val accountId = localEpisodeNotificationStore.activeAccountId()
+        if (accountId == null) {
+            onResult("سجل الدخول أولًا.")
+            return
+        }
+        if (!canUseSeriesNotifications(profile.kind, series.id)) {
+            onResult("لا يمكن تفعيل التنبيه لأن المسلسل غير موثّق ضمن محتوى الأطفال.")
+            return
+        }
+        val currentlyEnabled = isSeriesNotificationsEnabled(series)
+        val currentState = mutableState.value
+        if (
+            !currentlyEnabled &&
+            (
+                currentState.selectedSeries?.id != series.id ||
+                    currentState.isLoading ||
+                    (currentState.episodes.isEmpty() && currentState.errorMessage != null)
+                )
+        ) {
+            onResult("انتظر حتى يكتمل تحميل الحلقات ثم حاول مرة أخرى.")
+            return
+        }
+
+        viewModelScope.launch {
+            if (
+                localEpisodeNotificationStore.activeAccountId() != accountId ||
+                profileStore.activeProfileId() != profile.id
+            ) {
+                onResult("تغيّر الحساب أو الملف الشخصي. حاول مرة أخرى.")
+                return@launch
+            }
+            var enabledBaselineEpisodes: List<Episode>? = null
+            val result = if (currentlyEnabled) {
+                withContext(Dispatchers.IO) {
+                    localEpisodeNotificationStore.disableSubscription(
+                        profileId = profile.id,
+                        seriesId = series.id,
+                        expectedAccountId = accountId,
+                    )
+                }
+            } else {
+                val activeSession = session
+                    ?: return@launch onResult("سجل الدخول أولًا.")
+                val episodes = try {
+                    repository.seriesBundle(activeSession, series.id).episodes
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    onResult("تعذر جلب الحلقات الحالية. لم يتم تفعيل التنبيهات.")
+                    return@launch
+                }
+                val displayedKeys = reliableEpisodeKeys(currentState.episodes)
+                val freshKeys = reliableEpisodeKeys(episodes)
+                if (displayedKeys.isNotEmpty() && !freshKeys.containsAll(displayedKeys)) {
+                    onResult("وصلت بيانات حلقات غير مكتملة. لم يتم تفعيل التنبيهات.")
+                    return@launch
+                }
+                if (
+                    localEpisodeNotificationStore.activeAccountId() != accountId ||
+                    profileStore.activeProfileId() != profile.id ||
+                    !canUseSeriesNotifications(profile.kind, series.id)
+                ) {
+                    onResult("تغيّر الملف الشخصي أو نطاق المحتوى. حاول مرة أخرى.")
+                    return@launch
+                }
+                enabledBaselineEpisodes = episodes
+                withContext(Dispatchers.IO) {
+                    localEpisodeNotificationStore.enableSubscription(
+                        profileId = profile.id,
+                        series = series,
+                        episodes = episodes,
+                        expectedAccountId = accountId,
+                    )
+                }
+            }
+            if (result == EpisodeNotificationStoreResult.SUCCESS && !currentlyEnabled) {
+                val refreshedEpisodes = enabledBaselineEpisodes.orEmpty()
+                mutableState.update { state ->
+                    if (state.selectedSeries?.id == series.id) {
+                        state.copy(episodes = refreshedEpisodes)
+                    } else {
+                        state
+                    }
+                }
+            }
+            refreshNotificationState(clearPopup = false)
+            onResult(
+                when (result) {
+                    EpisodeNotificationStoreResult.SUCCESS -> if (currentlyEnabled) {
+                        "تم إيقاف تنبيهات الحلقات لهذا المسلسل."
+                    } else {
+                        "تم تفعيل التنبيهات. ستصلك الحلقات الجديدة فقط."
+                    }
+                    EpisodeNotificationStoreResult.INVALID_EPISODES ->
+                        "تعذر إنشاء خط أساس موثوق للحلقات. حاول لاحقًا."
+                    EpisodeNotificationStoreResult.MISSING_ACCOUNT -> "سجل الدخول أولًا."
+                    else -> "تعذر حفظ إعداد التنبيهات. حاول مرة أخرى."
+                },
+            )
+        }
+    }
+
+    fun toggleEpisodeNotificationMaster(onResult: (String) -> Unit) {
+        val profileId = profileStore.activeProfileId()
+        val accountId = localEpisodeNotificationStore.activeAccountId()
+        if (accountId == null) {
+            onResult("سجل الدخول أولًا.")
+            return
+        }
+        val enable = !mutableState.value.episodeNotificationsEnabled
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.setMasterEnabled(
+                    profileId = profileId,
+                    enabled = enable,
+                    expectedAccountId = accountId,
+                )
+            }
+            if (result == EpisodeNotificationStoreResult.SUCCESS) {
+                if (!enable) {
+                    notificationScanJob?.cancel()
+                    mutableState.update { it.copy(notificationPopup = null) }
+                }
+                refreshNotificationState(clearPopup = !enable)
+                if (enable) scanSubscribedSeries(NotificationScanTrigger.MASTER_REENABLE)
+            }
+            onResult(
+                if (result != EpisodeNotificationStoreResult.SUCCESS) {
+                    "تعذر تحديث إعداد التنبيهات."
+                } else if (enable) {
+                    "تم التشغيل. سيُحدّث خط الأساس بأمان قبل استئناف التنبيهات."
+                } else {
+                    "تم إيقاف تنبيهات الحلقات دون حذف اشتراكاتك."
+                },
+            )
+        }
+    }
+
+    fun openNotificationCenter() {
+        val current = mutableState.value
+        if (current.screen == HulkScreen.LOGIN || current.account == null) return
+        if (current.screen != HulkScreen.NOTIFICATION_CENTER) {
+            notificationCenterReturnScreen = current.screen.takeUnless { it == HulkScreen.PLAYER }
+                ?: HulkScreen.MAIN
+        }
+        mutableState.update {
+            it.copy(
+                screen = HulkScreen.NOTIFICATION_CENTER,
+                notificationPopup = null,
+                errorMessage = null,
+            )
+        }
+        refreshNotificationState(clearPopup = true)
+        scanSubscribedSeries(NotificationScanTrigger.NOTIFICATION_CENTER)
+    }
+
+    fun markNotificationRead(notificationId: String) {
+        val profileId = profileStore.activeProfileId()
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.markRead(profileId, notificationId, accountId)
+            }
+            refreshNotificationState(clearPopup = false)
+        }
+    }
+
+    fun markAllNotificationsRead() {
+        val profileId = profileStore.activeProfileId()
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.markAllRead(profileId, accountId)
+            }
+            refreshNotificationState(clearPopup = false)
+        }
+    }
+
+    fun deleteNotification(notificationId: String) {
+        val profileId = profileStore.activeProfileId()
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.deleteNotification(profileId, notificationId, accountId)
+            }
+            refreshNotificationState(clearPopup = false)
+        }
+    }
+
+    fun clearNotifications() {
+        val profileId = profileStore.activeProfileId()
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.clearNotifications(profileId, accountId)
+            }
+            refreshNotificationState(clearPopup = true)
+        }
+    }
+
+    fun openNotification(
+        notificationId: String,
+        onResult: (String?) -> Unit = {},
+    ) {
+        val profileId = profileStore.activeProfileId()
+        val accountId = localEpisodeNotificationStore.activeAccountId()
+        if (accountId == null) {
+            onResult("سجل الدخول لفتح هذا المحتوى.")
+            return
+        }
+        viewModelScope.launch {
+            val notification = localEpisodeNotificationStore.snapshot(profileId)
+                .notifications
+                .firstOrNull { it.id == notificationId }
+            if (notification == null) {
+                onResult("هذا الإشعار لم يعد متاحًا.")
+                return@launch
+            }
+            val targetError = openNotificationTarget(notification)
+            if (targetError != null) {
+                onResult(targetError)
+                return@launch
+            }
+            withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.markRead(profileId, notification.id, accountId)
+            }
+            refreshNotificationState(clearPopup = false)
+            onResult(null)
+        }
+    }
+
+    fun dismissNotificationPopup() {
+        mutableState.update { it.copy(notificationPopup = null) }
+        maybeShowPendingNotificationPopup()
+    }
+
+    fun activateNotificationPopup(onResult: (String?) -> Unit = {}) {
+        val popup = mutableState.value.notificationPopup ?: return
+        if (popup.summary) {
+            mutableState.update { it.copy(notificationPopup = null) }
+            openNotificationCenter()
+            return
+        }
+        val target = popup.notifications.maxWithOrNull(
+            compareBy(LocalEpisodeNotification::seasonNumber, LocalEpisodeNotification::episodeNumber),
+        ) ?: return
+        viewModelScope.launch {
+            val targetError = openNotificationTarget(target)
+            if (targetError != null) {
+                mutableState.update { it.copy(notificationPopup = null) }
+                onResult(targetError)
+                return@launch
+            }
+            withContext(Dispatchers.IO) {
+                popup.eventIds.forEach { id ->
+                    localEpisodeNotificationStore.markRead(
+                        profileId = popup.profileId,
+                        notificationId = id,
+                        expectedAccountId = target.accountId,
+                    )
+                }
+            }
+            mutableState.update { it.copy(notificationPopup = null) }
+            refreshNotificationState(clearPopup = false)
+            onResult(null)
+        }
+    }
+
+    fun onProfileChanged() {
+        notificationScanJob?.cancel()
+        mutableState.update { it.copy(notificationPopup = null) }
+        refreshNotificationState(clearPopup = true)
+        scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
+    }
+
+    fun removeNotificationProfileData(profileId: String) {
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            localEpisodeNotificationStore.removeProfile(profileId, accountId)
+        }
+    }
+
+    fun onAppResumed() {
+        scanSubscribedSeries(NotificationScanTrigger.APP_RESUME)
+    }
+
+    fun setNotificationUiReady(ready: Boolean) {
+        val becameReady = ready && !notificationUiReady
+        notificationUiReady = ready
+        if (ready) {
+            maybeShowPendingNotificationPopup()
+            if (becameReady && profileStore.activeProfile().kind == ProfileKind.KIDS) {
+                scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
+            }
+        } else {
+            mutableState.update { it.copy(notificationPopup = null) }
+        }
+    }
+
+    private fun refreshNotificationState(clearPopup: Boolean) {
+        val profile = profileStore.activeProfile()
+        val snapshot = localEpisodeNotificationStore.snapshot(profile.id)
+        val allowedSeriesIds = if (profile.kind == ProfileKind.KIDS) {
+            snapshot.subscriptions.asSequence()
+                .map(EpisodeNotificationSubscription::seriesId)
+                .filter { seriesId -> canUseSeriesNotifications(profile.kind, seriesId) }
+                .toSet()
+        } else {
+            snapshot.subscriptions.mapTo(linkedSetOf(), EpisodeNotificationSubscription::seriesId)
+        }
+        val safeNotifications = if (profile.kind == ProfileKind.KIDS) {
+            snapshot.notifications.filter { it.seriesId in allowedSeriesIds }
+        } else {
+            snapshot.notifications
+        }
+        val safeSubscribed = snapshot.subscriptions.asSequence()
+            .filter(EpisodeNotificationSubscription::enabled)
+            .map(EpisodeNotificationSubscription::seriesId)
+            .filter { it in allowedSeriesIds }
+            .toSet()
+        mutableState.update { state ->
+            val retainedPopup = state.notificationPopup
+                ?.takeIf { !clearPopup && it.profileId == profile.id }
+            state.copy(
+                notificationSubscribedSeriesIds = safeSubscribed,
+                localNotifications = safeNotifications,
+                unreadNotificationCount = safeNotifications.count { !it.read },
+                episodeNotificationsEnabled = snapshot.settings.enabled,
+                notificationPopup = retainedPopup,
+            )
+        }
+    }
+
+    private fun openNotificationTarget(notification: LocalEpisodeNotification): String? {
+        val activeSession = session ?: return "سجل الدخول لفتح هذا المحتوى."
+        val profile = profileStore.activeProfile()
+        if (notification.accountId != localEpisodeNotificationStore.activeAccountId()) {
+            return "هذا الإشعار يخص حسابًا آخر."
+        }
+        if (notification.profileId != profile.id) return "هذا الإشعار يخص ملفًا شخصيًا آخر."
+        if (!canUseSeriesNotifications(profile.kind, notification.seriesId)) {
+            return "هذا المحتوى غير متاح في ملف الأطفال."
+        }
+        val series = resolveLocalNotificationSeriesTarget(
+            profileKind = profile.kind,
+            notification = notification,
+            generalSeries = loadedCatalogs[ContentType.SERIES]?.items.orEmpty(),
+        )
+        openSeries(
+            item = series,
+            target = SeriesEpisodeTarget(
+                seriesId = notification.seriesId,
+                seasonNumber = notification.seasonNumber,
+                episodeNumber = notification.episodeNumber,
+                episodeId = notification.episodeId,
+            ),
+            activeSession = activeSession,
+        )
+        return null
+    }
+
+    private suspend fun processOpenedSeriesForNotifications(
+        series: ContentItem,
+        episodes: List<Episode>,
+        expectedAccountId: String?,
+        expectedProfileId: String,
+        expectedProfileKind: ProfileKind,
+    ) {
+        if (
+            expectedAccountId == null ||
+            localEpisodeNotificationStore.activeAccountId() != expectedAccountId ||
+            profileStore.activeProfileId() != expectedProfileId
+        ) return
+        val snapshot = localEpisodeNotificationStore.snapshot(expectedProfileId)
+        val subscription = snapshot.subscriptions.firstOrNull {
+            it.enabled && it.seriesId == series.id
+        } ?: return
+        if (!snapshot.settings.enabled) return
+        if (!canUseSeriesNotifications(expectedProfileKind, series.id)) return
+
+        val checkedAt = System.currentTimeMillis()
+        withContext(Dispatchers.IO) {
+            if (snapshot.settings.baselineRefreshRequired) {
+                localEpisodeNotificationStore.replaceBaseline(
+                    profileId = expectedProfileId,
+                    seriesId = series.id,
+                    episodes = episodes,
+                    checkedAtEpochMs = checkedAt,
+                    expectedAccountId = subscription.accountId,
+                )
+            } else {
+                localEpisodeNotificationStore.recordSuccessfulScan(
+                    profileId = expectedProfileId,
+                    seriesId = series.id,
+                    episodes = episodes,
+                    detectedAtEpochMs = checkedAt,
+                    batchId = UUID.randomUUID().toString(),
+                    expectedAccountId = subscription.accountId,
+                )
+            }
+        }
+        if (
+            localEpisodeNotificationStore.activeAccountId() == expectedAccountId &&
+            profileStore.activeProfileId() == expectedProfileId
+        ) {
+            refreshNotificationState(clearPopup = false)
+            maybeShowPendingNotificationPopup()
+        }
+    }
+
+    private fun scanSubscribedSeries(trigger: NotificationScanTrigger) {
+        val activeSession = session ?: return
+        val profile = profileStore.activeProfile()
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        val snapshot = localEpisodeNotificationStore.snapshot(profile.id)
+        if (
+            !snapshot.settings.enabled ||
+            notificationScanJob?.isActive == true ||
+            (profile.kind == ProfileKind.KIDS && !notificationUiReady)
+        ) return
+
+        notificationScanJob = viewModelScope.launch {
+            if (snapshot.settings.baselineRefreshRequired) {
+                refreshMasterNotificationBaselines(activeSession, accountId, profile.id, profile.kind)
+                return@launch
+            }
+            val now = System.currentTimeMillis()
+            val eligible = snapshot.subscriptions.filter { subscription ->
+                val lastCheckedAt = subscription.lastCheckedAtEpochMs
+                subscription.enabled && (
+                    lastCheckedAt <= 0L ||
+                        now < lastCheckedAt ||
+                        now - lastCheckedAt >= trigger.minimumAgeMs
+                    )
+            }
+            if (eligible.isEmpty()) {
+                if (profileStore.activeProfileId() == profile.id) maybeShowPendingNotificationPopup()
+                return@launch
+            }
+
+            val batchId = UUID.randomUUID().toString()
+            coroutineScope {
+                eligible.map { subscription ->
+                    async {
+                        episodeNotificationScanSemaphore.withPermit {
+                            if (!canUseSeriesNotifications(profile.kind, subscription.seriesId)) {
+                                return@withPermit
+                            }
+                            try {
+                                val bundle = repository.seriesBundle(activeSession, subscription.seriesId)
+                                if (!canUseSeriesNotifications(profile.kind, subscription.seriesId)) {
+                                    return@withPermit
+                                }
+                                withContext(Dispatchers.IO) {
+                                    localEpisodeNotificationStore.recordSuccessfulScan(
+                                        profileId = profile.id,
+                                        seriesId = subscription.seriesId,
+                                        episodes = bundle.episodes,
+                                        detectedAtEpochMs = System.currentTimeMillis(),
+                                        batchId = batchId,
+                                        expectedAccountId = subscription.accountId,
+                                    )
+                                }
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                // A failed request must leave both the baseline and event history unchanged.
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+            if (profileStore.activeProfileId() == profile.id) {
+                refreshNotificationState(clearPopup = false)
+                maybeShowPendingNotificationPopup()
+            }
+        }
+    }
+
+    private suspend fun refreshMasterNotificationBaselines(
+        activeSession: AuthenticatedSession,
+        accountId: String,
+        profileId: String,
+        profileKind: ProfileKind,
+    ) {
+        val subscriptions = localEpisodeNotificationStore.snapshot(profileId)
+            .subscriptions
+            .filter(EpisodeNotificationSubscription::enabled)
+            .filter { subscription ->
+                canUseSeriesNotifications(profileKind, subscription.seriesId)
+            }
+        val results = coroutineScope {
+            subscriptions.map { subscription ->
+                async {
+                    episodeNotificationScanSemaphore.withPermit {
+                        try {
+                            val episodes = repository.seriesBundle(activeSession, subscription.seriesId).episodes
+                            if (!canUseSeriesNotifications(profileKind, subscription.seriesId)) {
+                                return@withPermit false
+                            }
+                            withContext(Dispatchers.IO) {
+                                localEpisodeNotificationStore.replaceBaseline(
+                                    profileId = profileId,
+                                    seriesId = subscription.seriesId,
+                                    episodes = episodes,
+                                    checkedAtEpochMs = System.currentTimeMillis(),
+                                    expectedAccountId = subscription.accountId,
+                                ) == EpisodeNotificationStoreResult.SUCCESS
+                            }
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            false
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+        if (results.all { it }) {
+            withContext(Dispatchers.IO) {
+                localEpisodeNotificationStore.completeMasterBaselineRefresh(
+                    profileId = profileId,
+                    expectedAccountId = accountId,
+                )
+            }
+        }
+        if (profileStore.activeProfileId() == profileId) {
+            refreshNotificationState(clearPopup = false)
+            maybeShowPendingNotificationPopup()
+        }
+    }
+
+    private fun maybeShowPendingNotificationPopup() {
+        val state = mutableState.value
+        if (
+            !notificationUiReady ||
+            state.notificationPopup != null ||
+            !state.episodeNotificationsEnabled ||
+            state.screen == HulkScreen.PLAYER ||
+            state.screen == HulkScreen.LOGIN ||
+            state.screen == HulkScreen.NOTIFICATION_CENTER
+        ) return
+        val profileId = profileStore.activeProfileId()
+        val popup = buildEpisodeNotificationPopups(state.localNotifications).firstOrNull()
+            ?.takeIf { it.profileId == profileId }
+            ?: return
+        val accountId = popup.notifications.firstOrNull()?.accountId ?: return
+        if (!localEpisodeNotificationStore.markPopupShown(profileId, popup.eventIds, accountId)) return
+        refreshNotificationState(clearPopup = false)
+        mutableState.update { it.copy(notificationPopup = popup) }
+    }
+
+    private fun canUseSeriesNotifications(profileKind: ProfileKind, seriesId: Int): Boolean =
+        canUseSeriesEpisodeNotifications(
+            profileKind = profileKind,
+            seriesId = seriesId,
+            verifiedKidsContentKeys = kidsContentFilterStore.allowedKeys(),
+        )
+
     fun clearHistory() {
         mutableState.update { it.copy(history = userLibrary.clearHistory()) }
     }
@@ -818,8 +1483,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun back() {
         when (mutableState.value.screen) {
-            HulkScreen.PLAYER -> mutableState.update {
-                it.copy(screen = playerReturnScreen, playback = null, errorMessage = null)
+            HulkScreen.PLAYER -> {
+                mutableState.update {
+                    it.copy(screen = playerReturnScreen, playback = null, errorMessage = null)
+                }
+                maybeShowPendingNotificationPopup()
             }
             HulkScreen.MOVIE_DETAILS -> mutableState.update {
                 it.copy(
@@ -835,8 +1503,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     selectedSeries = null,
                     selectedDetails = null,
                     episodes = emptyList(),
+                    seriesEpisodeTarget = null,
                     errorMessage = null,
                 )
+            }
+            HulkScreen.NOTIFICATION_CENTER -> {
+                mutableState.update {
+                    it.copy(screen = notificationCenterReturnScreen, errorMessage = null)
+                }
+                maybeShowPendingNotificationPopup()
             }
             else -> Unit
         }
@@ -856,6 +1531,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun logout() {
         repository.logout()
         session = null
+        notificationScanJob?.cancel()
+        notificationScanJob = null
+        notificationUiReady = false
         clearCatalogMemory()
         detailsJob?.cancel()
         accountRefreshJob?.cancel()
@@ -868,6 +1546,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             history = userLibrary.history(),
             downloads = downloadRepository.downloads(),
             downloadSettings = downloadRepository.settings(),
+            notificationSubscribedSeriesIds = emptySet(),
+            localNotifications = emptyList(),
+            unreadNotificationCount = 0,
+            episodeNotificationsEnabled = true,
+            notificationPopup = null,
         )
     }
 
@@ -908,6 +1591,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     ensureCatalog(ContentType.MOVIE)
                     ensureCatalog(ContentType.SERIES)
+                    refreshNotificationState(clearPopup = true)
+                    scanSubscribedSeries(NotificationScanTrigger.APP_START)
                 }
                 .onFailure(::showFailure)
         }
@@ -1006,6 +1691,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (invalidSession) {
             repository.logout()
             session = null
+            notificationScanJob?.cancel()
+            notificationScanJob = null
+            notificationUiReady = false
             clearCatalogMemory()
         }
         mutableState.update {
@@ -1014,6 +1702,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 isStarting = false,
                 isLoading = false,
                 isAccountRefreshing = false,
+                notificationPopup = if (invalidSession) null else it.notificationPopup,
                 errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
             )
         }
@@ -1026,5 +1715,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         private const val HOME_CATALOG_LIMIT = 320
         private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
         private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
+        private const val EPISODE_NOTIFICATION_SCAN_CONCURRENCY = 3
     }
 }

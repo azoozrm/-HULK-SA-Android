@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -61,6 +62,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,6 +83,7 @@ import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.screens.KidsMobileMovieDetailsScreen
 import sa.hulksa.player.ui.screens.KidsMobileSeriesDetailsScreen
 import sa.hulksa.player.ui.screens.MovieDetailsScreen
+import sa.hulksa.player.ui.screens.NotificationBellButton
 import sa.hulksa.player.ui.screens.PlayerScreen
 import sa.hulksa.player.ui.screens.ProfileAvatarArtwork
 import sa.hulksa.player.ui.screens.SeriesDetailsScreenV2
@@ -101,6 +104,7 @@ fun KidsProfileExperience(
     val (adaptiveUi, inputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val colors = LocalHulkColors.current
+    val context = LocalContext.current
 
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
@@ -148,6 +152,8 @@ fun KidsProfileExperience(
                     selectedSection = selectedKidsSection,
                     onSelectedSectionChange = { selectedKidsSectionName = it.name },
                     onOpen = safeOpen,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    onOpenNotifications = viewModel::openNotificationCenter,
                     onSwitchProfile = onSwitchProfile,
                 )
 
@@ -228,6 +234,17 @@ fun KidsProfileExperience(
                                 errorMessage = state.errorMessage,
                                 isTv = true,
                                 isFavorite = viewModel.isFavorite(series),
+                                notificationsEnabled = viewModel.isSeriesNotificationsEnabled(series),
+                                notificationToggleAvailable = !state.isLoading && state.errorMessage == null,
+                                targetEpisodeId = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.episodeId,
+                                targetSeason = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.seasonNumber,
+                                targetEpisodeNumber = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.episodeNumber,
                                 downloads = state.downloads,
                                 history = state.history,
                                 relatedItems = related,
@@ -243,6 +260,11 @@ fun KidsProfileExperience(
                                         ?.let(viewModel::deleteDownload)
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(series) },
+                                onToggleNotifications = {
+                                    viewModel.toggleSeriesNotifications(series) { message ->
+                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                                 onToggleRelatedFavorite = viewModel::toggleFavorite,
                                 onOpenRelated = safeOpen,
                             )
@@ -254,6 +276,17 @@ fun KidsProfileExperience(
                                 isLoading = state.isLoading,
                                 errorMessage = state.errorMessage,
                                 isFavorite = viewModel.isFavorite(series),
+                                notificationsEnabled = viewModel.isSeriesNotificationsEnabled(series),
+                                notificationToggleAvailable = !state.isLoading && state.errorMessage == null,
+                                targetEpisodeId = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.episodeId,
+                                targetSeason = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.seasonNumber,
+                                targetEpisodeNumber = state.seriesEpisodeTarget
+                                    ?.takeIf { it.seriesId == series.id }
+                                    ?.episodeNumber,
                                 downloads = state.downloads,
                                 history = state.history,
                                 relatedItems = related,
@@ -269,6 +302,11 @@ fun KidsProfileExperience(
                                         ?.let(viewModel::deleteDownload)
                                 },
                                 onToggleFavorite = { viewModel.toggleFavorite(series) },
+                                onToggleNotifications = {
+                                    viewModel.toggleSeriesNotifications(series) { message ->
+                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                                 onToggleRelatedFavorite = viewModel::toggleFavorite,
                                 onOpenRelated = safeOpen,
                             )
@@ -387,6 +425,8 @@ private fun KidsMainScreen(
     selectedSection: KidsSection,
     onSelectedSectionChange: (KidsSection) -> Unit,
     onOpen: (ContentItem) -> Unit,
+    unreadNotificationCount: Int,
+    onOpenNotifications: () -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -479,6 +519,8 @@ private fun KidsMainScreen(
                     onQueryChange = { query = it },
                     onCategoryChange = { categoryId = it },
                     onOpen = onOpen,
+                    unreadNotificationCount = unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
                 )
             }
         } else {
@@ -495,6 +537,8 @@ private fun KidsMainScreen(
                     onQueryChange = { query = it },
                     onCategoryChange = { categoryId = it },
                     onOpen = onOpen,
+                    unreadNotificationCount = unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
                 )
                 KidsBottomBar(
                     entries = entries,
@@ -520,6 +564,8 @@ private fun KidsContentPane(
     onQueryChange: (String) -> Unit,
     onCategoryChange: (String?) -> Unit,
     onOpen: (ContentItem) -> Unit,
+    unreadNotificationCount: Int,
+    onOpenNotifications: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -593,13 +639,21 @@ private fun KidsContentPane(
         ) {
             Text(
                 title,
-                modifier = if (showProfileAvatar) Modifier.weight(1f) else Modifier,
+                modifier = Modifier.weight(1f),
                 color = colors.text,
                 fontSize = titleSize,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (selected == KidsSection.HOME) {
+                Spacer(Modifier.width(10.dp))
+                NotificationBellButton(
+                    unreadCount = unreadNotificationCount,
+                    isTv = isTv,
+                    onClick = onOpenNotifications,
+                )
+            }
             if (showProfileAvatar) {
                 Spacer(Modifier.width(10.dp))
                 ProfileAvatarArtwork(profile.avatarKey, profile.displayName, headerAvatarSize, true)

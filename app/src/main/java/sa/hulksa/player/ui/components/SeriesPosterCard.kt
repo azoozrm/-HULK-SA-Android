@@ -276,32 +276,34 @@ private fun SeriesMetadataBadge(
 @Composable
 private fun SeriesSeasonBadge(seasonCount: Int) {
     val shape = RoundedCornerShape(7.dp)
-    Row(
-        modifier = Modifier
-            .height(21.dp)
-            .clip(shape)
-            .background(Color.Black.copy(alpha = .78f))
-            .border(1.dp, Color.White.copy(alpha = .22f), shape)
-            .padding(horizontal = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = String.format(Locale.US, "%d", seasonCount),
-            color = Color.White,
-            fontSize = 9.sp,
-            lineHeight = 10.sp,
-            fontWeight = FontWeight.Black,
-            maxLines = 1,
-        )
-        Spacer(Modifier.size(3.dp))
-        Text(
-            text = if (seasonCount == 1) "موسم" else "مواسم",
-            color = Color.White,
-            fontSize = 9.sp,
-            lineHeight = 10.sp,
-            fontWeight = FontWeight.Black,
-            maxLines = 1,
-        )
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Row(
+            modifier = Modifier
+                .height(21.dp)
+                .clip(shape)
+                .background(Color.Black.copy(alpha = .78f))
+                .border(1.dp, Color.White.copy(alpha = .22f), shape)
+                .padding(horizontal = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = String.format(Locale.US, "%d", seasonCount),
+                color = Color.White,
+                fontSize = 9.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+            Spacer(Modifier.size(3.dp))
+            Text(
+                text = "موسم",
+                color = Color.White,
+                fontSize = 9.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
+        }
     }
 }
 

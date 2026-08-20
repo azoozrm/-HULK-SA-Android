@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,6 +30,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +53,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -101,7 +105,35 @@ private data class DetailsProAction(
     val primary: Boolean = false,
     val enabled: Boolean = true,
     val mobileWeight: Float = 1f,
+    val scaleOnFocus: Boolean = true,
+    val minimumHeightDp: Int = 0,
+    val accent: Boolean = false,
+    val leadingIcon: ImageVector? = null,
+    val textMaxLines: Int = 1,
+    val textSizeSp: Int? = null,
 )
+
+internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
+    if (screenWidthDp < 360) 1 else 2
+
+internal fun detailsProActionsUseSingleRow(isTv: Boolean, wide: Boolean, actionCount: Int): Boolean =
+    isTv || (wide && actionCount <= 2)
+
+internal fun seriesDetailsActionColumns(isTv: Boolean): Int = if (isTv) 3 else 2
+
+internal fun seriesDetailsActionCount(): Int = 5
+
+internal fun seriesDetailsPrimarySpansFullWidth(isTv: Boolean): Boolean = !isTv
+
+internal fun seriesDetailsActionHeightDp(): Int = 50
+
+internal fun seriesNotificationButtonLabel(enabled: Boolean, isTv: Boolean): String = when {
+    enabled -> "التنبيهات مفعلة"
+    isTv -> "نبهني عند نزول حلقة جديدة"
+    else -> "تنبيهات الحلقات"
+}
+
+internal fun seriesNotificationButtonTextSizeSp(isTv: Boolean): Int? = if (isTv) null else 12
 
 private data class EpisodeFocusTargets(
     val card: FocusRequester = FocusRequester(),
@@ -236,8 +268,6 @@ fun MovieDetailsProScreen(
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
-                    Spacer(Modifier.weight(1f))
                     FocusButton(
                         text = "رجوع",
                         onClick = onBack,
@@ -250,6 +280,8 @@ fun MovieDetailsProScreen(
                             downTarget = playRequester,
                         ),
                     )
+                    Spacer(Modifier.weight(1f))
+                    BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
                 }
 
                 Row(
@@ -421,6 +453,11 @@ fun SeriesDetailsProScreen(
     errorMessage: String?,
     isTv: Boolean,
     isFavorite: Boolean,
+    notificationsEnabled: Boolean,
+    notificationToggleAvailable: Boolean,
+    targetEpisodeId: Int?,
+    targetSeason: Int?,
+    targetEpisodeNumber: Int?,
     downloads: List<OfflineDownload>,
     history: List<HistoryEntry>,
     relatedItems: List<ContentItem>,
@@ -430,6 +467,7 @@ fun SeriesDetailsProScreen(
     onDownload: (Episode) -> Unit,
     onCancelDownload: (Episode) -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleNotifications: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
 ) {
@@ -462,23 +500,51 @@ fun SeriesDetailsProScreen(
         }.maxByOrNull { it.second.updatedAtEpochMs }
     }
     val mobileResumeHeroExtraDp = if (!isTv && resumePair != null) 30 else 0
+    val seriesNotificationActionExtraDp = 56
     val completedCount = remember(orderedEpisodes, historyByKey) {
         orderedEpisodes.count { episode ->
             historyByKey["SERIES:${episode.id}"]?.detailsProCompleted() == true
         }
     }
 
-    var selectedSeason by rememberSaveable(series.id, seasons) {
-        mutableIntStateOf(resumePair?.first?.season ?: seasons.firstOrNull() ?: 0)
+    val targetEpisode = remember(orderedEpisodes, targetEpisodeId, targetSeason, targetEpisodeNumber) {
+        if (targetEpisodeId != null) {
+            orderedEpisodes.firstOrNull { it.id == targetEpisodeId }
+        } else {
+            orderedEpisodes.firstOrNull {
+                targetSeason != null &&
+                    targetEpisodeNumber != null &&
+                    it.season == targetSeason &&
+                    it.episodeNumber == targetEpisodeNumber
+            }
+        }
     }
-    LaunchedEffect(resumePair?.first?.id) {
-        resumePair?.first?.let { selectedSeason = it.season }
+    var selectedSeason by rememberSaveable(
+        series.id,
+        seasons,
+        targetEpisodeId,
+        targetSeason,
+        targetEpisodeNumber,
+    ) {
+        mutableIntStateOf(
+            targetEpisode?.season
+                ?: targetSeason?.takeIf { it in seasons }
+                ?: resumePair?.first?.season
+                ?: seasons.firstOrNull()
+                ?: 0,
+        )
+    }
+    LaunchedEffect(targetEpisode?.id, targetSeason, seasons, resumePair?.first?.id) {
+        selectedSeason = targetEpisode?.season
+            ?: targetSeason?.takeIf { it in seasons }
+            ?: resumePair?.first?.season
+            ?: selectedSeason
     }
 
     val visibleEpisodes = remember(orderedEpisodes, selectedSeason) {
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
-    val heroEpisode = resumePair?.first ?: orderedEpisodes.firstOrNull()
+    val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
     val previousEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, -1)
     val nextEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, 1)
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
@@ -486,6 +552,7 @@ fun SeriesDetailsProScreen(
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
+    val notificationRequester = remember(series.id) { FocusRequester() }
     val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val seasonKeys = seasons.toList()
@@ -534,6 +601,14 @@ fun SeriesDetailsProScreen(
         return true
     }
 
+    LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes) {
+        val index = visibleEpisodes.indexOfFirst { it.id == targetEpisode?.id }
+        if (index >= 0) {
+            delay(DETAILS_PRO_GRID_FOCUS_DELAY_MS)
+            requestEpisodeAt(index)
+        }
+    }
+
     LaunchedEffect(series.id, isTv, heroEpisode?.id) {
         if (isTv && heroEpisode != null) {
             delay(DETAILS_PRO_FOCUS_DELAY_MS)
@@ -549,40 +624,63 @@ fun SeriesDetailsProScreen(
                 requester = playRequester,
                 primary = true,
                 enabled = heroEpisode != null,
-                mobileWeight = 1.5f,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
             ),
         )
-        previousEpisode?.let { episode ->
-            add(
-                DetailsProAction(
-                    text = if (isTv || episode.season != heroEpisode?.season) {
+        add(
+            DetailsProAction(
+                text = previousEpisode?.let { episode ->
+                    if (isTv || episode.season != heroEpisode?.season) {
                         "السابق S${episode.season} E${episode.episodeNumber}"
                     } else {
                         "السابق · E${episode.episodeNumber}"
-                    },
-                    onClick = { onPlay(episode) },
-                    requester = previousRequester,
-                ),
-            )
-        }
-        nextEpisode?.let { episode ->
-            add(
-                DetailsProAction(
-                    text = if (isTv || episode.season != heroEpisode?.season) {
+                    }
+                } ?: "السابق",
+                onClick = { previousEpisode?.let(onPlay) },
+                requester = previousRequester,
+                enabled = previousEpisode != null,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+            ),
+        )
+        add(
+            DetailsProAction(
+                text = nextEpisode?.let { episode ->
+                    if (isTv || episode.season != heroEpisode?.season) {
                         "التالي S${episode.season} E${episode.episodeNumber}"
                     } else {
                         "التالي · E${episode.episodeNumber}"
-                    },
-                    onClick = { onPlay(episode) },
-                    requester = nextRequester,
-                ),
-            )
-        }
+                    }
+                } ?: "التالي",
+                onClick = { nextEpisode?.let(onPlay) },
+                requester = nextRequester,
+                enabled = nextEpisode != null,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+            ),
+        )
         add(
             DetailsProAction(
                 text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                 onClick = onToggleFavorite,
                 requester = favoriteRequester,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+            ),
+        )
+        add(
+            DetailsProAction(
+                text = seriesNotificationButtonLabel(notificationsEnabled, isTv),
+                onClick = onToggleNotifications,
+                requester = notificationRequester,
+                enabled = notificationsEnabled || notificationToggleAvailable,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+                accent = notificationsEnabled,
+                leadingIcon = Icons.Rounded.Notifications,
+                textMaxLines = 2,
+                textSizeSp = seriesNotificationButtonTextSizeSp(isTv),
             ),
         )
     }
@@ -607,7 +705,10 @@ fun SeriesDetailsProScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((metrics.heroHeightDp + mobileResumeHeroExtraDp).dp)
+                        .height(
+                            (metrics.heroHeightDp + mobileResumeHeroExtraDp +
+                                seriesNotificationActionExtraDp).dp,
+                        )
                         .background(colors.background),
                 ) {
                     if (!backdrop.isNullOrBlank()) {
@@ -637,8 +738,6 @@ fun SeriesDetailsProScreen(
                             ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
-                        Spacer(Modifier.weight(1f))
                         FocusButton(
                             text = "رجوع",
                             onClick = onBack,
@@ -651,6 +750,8 @@ fun SeriesDetailsProScreen(
                                 downTarget = playRequester,
                             ),
                         )
+                        Spacer(Modifier.weight(1f))
+                        BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
                     }
 
                     Row(
@@ -738,6 +839,7 @@ fun SeriesDetailsProScreen(
                                 downTarget = heroDownTarget,
                                 onFocused = { heroReturnRequester = it },
                                 wide = metrics.wideLayout,
+                                seriesActionLayout = true,
                             )
                         }
 
@@ -815,6 +917,7 @@ fun SeriesDetailsProScreen(
 
                 EpisodeDetailsProCard(
                     episode = episode,
+                    highlighted = targetEpisode?.id == episode.id,
                     fallbackBackdrop = backdrop,
                     download = download,
                     historyEntry = historyByKey["SERIES:${episode.id}"],
@@ -990,7 +1093,7 @@ private fun DetailsProSeriesPills(
     compact: Boolean,
 ) {
     val verifiedSeasonCount = technicalMetadata.seasonCount?.takeIf { it > 0 } ?: seasonCount.takeIf { it > 0 }
-    val seasonLabel = verifiedSeasonCount?.let { if (it == 1) "1 موسم" else "$it مواسم" }
+    val seasonLabel = verifiedSeasonCount?.let { "$it موسم" }
     val episodeLabel = episodeCount.takeIf { it > 0 }?.let { "$it حلقة" }
     val values = if (compact) {
         buildList {
@@ -1081,8 +1184,10 @@ private fun DetailsProActions(
     downTarget: FocusRequester?,
     onFocused: (FocusRequester) -> Unit,
     wide: Boolean,
+    seriesActionLayout: Boolean = false,
 ) {
-    if (isTv || wide) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    if (!seriesActionLayout && detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
         Row(
             modifier = Modifier.fillMaxWidth().focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1098,8 +1203,20 @@ private fun DetailsProActions(
                     enabled = action.enabled,
                     compact = true,
                     outlined = !action.primary,
+                    scaleOnFocus = action.scaleOnFocus,
+                    accent = action.accent,
+                    leadingIcon = action.leadingIcon,
+                    textMaxLines = action.textMaxLines,
+                    textSizeSp = action.textSizeSp,
                     modifier = Modifier
                         .weight(if (action.primary) 1.18f else 1f)
+                        .then(
+                            if (action.minimumHeightDp > 0) {
+                                Modifier.heightIn(min = action.minimumHeightDp.dp)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .detailsProTvTarget(
                             isTv = isTv,
                             requester = action.requester,
@@ -1113,13 +1230,63 @@ private fun DetailsProActions(
             }
         }
     } else {
+        val actionColumns = if (seriesActionLayout) {
+            seriesDetailsActionColumns(isTv)
+        } else {
+            detailsProMobileActionColumns(adaptiveUi.screenWidthDp)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            actions.chunked(2).forEach { row ->
+            if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
+                actions.firstOrNull()?.let { action ->
+                    FocusButton(
+                        text = action.text,
+                        onClick = action.onClick,
+                        primary = action.primary,
+                        enabled = action.enabled,
+                        compact = true,
+                        outlined = !action.primary,
+                        scaleOnFocus = action.scaleOnFocus,
+                        accent = action.accent,
+                        leadingIcon = action.leadingIcon,
+                        textMaxLines = action.textMaxLines,
+                        textSizeSp = action.textSizeSp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(seriesDetailsActionHeightDp().dp)
+                            .detailsProTvTarget(
+                                isTv = false,
+                                requester = action.requester,
+                                upTarget = upTarget,
+                                downTarget = actions.getOrNull(1)?.requester ?: downTarget,
+                                leftTarget = null,
+                                rightTarget = null,
+                                onFocused = { onFocused(action.requester) },
+                            ),
+                    )
+                }
+            }
+            val gridActions = if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
+                actions.drop(1)
+            } else {
+                actions
+            }
+            gridActions.chunked(actionColumns).forEachIndexed { rowIndex, row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    row.forEach { action ->
+                    row.forEachIndexed { columnIndex, action ->
+                        val actionIndex = rowIndex * actionColumns + columnIndex
+                        val previousRowTarget = gridActions.getOrNull(actionIndex - actionColumns)?.requester
+                            ?: if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
+                                actions.firstOrNull()?.requester
+                            } else {
+                                upTarget
+                            }
+                        val nextRowTarget = gridActions.getOrNull(actionIndex + actionColumns)?.requester
+                            ?: downTarget
+                        val leftTarget = row.getOrNull(columnIndex + 1)?.requester
+                        val rightTarget = row.getOrNull(columnIndex - 1)?.requester
                         FocusButton(
                             text = action.text,
                             onClick = action.onClick,
@@ -1127,10 +1294,36 @@ private fun DetailsProActions(
                             enabled = action.enabled,
                             compact = true,
                             outlined = !action.primary,
-                            modifier = Modifier.weight(action.mobileWeight),
+                            scaleOnFocus = action.scaleOnFocus,
+                            accent = action.accent,
+                            leadingIcon = action.leadingIcon,
+                            textMaxLines = action.textMaxLines,
+                            textSizeSp = action.textSizeSp,
+                            modifier = Modifier
+                                .weight(action.mobileWeight)
+                                .then(
+                                    if (seriesActionLayout) {
+                                        Modifier.height(seriesDetailsActionHeightDp().dp)
+                                    } else if (action.minimumHeightDp > 0) {
+                                        Modifier.heightIn(min = action.minimumHeightDp.dp)
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .detailsProTvTarget(
+                                    isTv = isTv,
+                                    requester = action.requester,
+                                    upTarget = previousRowTarget,
+                                    downTarget = nextRowTarget,
+                                    leftTarget = leftTarget,
+                                    rightTarget = rightTarget,
+                                    onFocused = { onFocused(action.requester) },
+                                ),
                         )
                     }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                    repeat(actionColumns - row.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -1251,6 +1444,7 @@ private fun SeriesDetailsProHeader(
 @Composable
 private fun EpisodeDetailsProCard(
     episode: Episode,
+    highlighted: Boolean,
     fallbackBackdrop: String?,
     download: OfflineDownload?,
     historyEntry: HistoryEntry?,
@@ -1290,8 +1484,8 @@ private fun EpisodeDetailsProCard(
                 .clip(RoundedCornerShape(13.dp))
                 .background(Color(0xFF13140F))
                 .border(
-                    if (showFocused) 3.dp else 1.dp,
-                    if (showFocused) colors.goldBright else colors.line.copy(alpha = .38f),
+                    if (showFocused) 3.dp else if (highlighted) 2.dp else 1.dp,
+                    if (showFocused || highlighted) colors.goldBright else colors.line.copy(alpha = .38f),
                     RoundedCornerShape(13.dp),
                 )
                 .onFocusChanged { focused = it.isFocused }

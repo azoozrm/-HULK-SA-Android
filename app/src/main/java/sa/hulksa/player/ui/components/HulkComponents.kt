@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -150,6 +151,7 @@ private fun MovieMetadataBadge(
     modifier: Modifier = Modifier,
     filledAccent: Boolean = false,
     accentText: Boolean = false,
+    compactHorizontalPadding: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(7.dp)
@@ -169,7 +171,7 @@ private fun MovieMetadataBadge(
                 if (filledAccent) colors.goldBright.copy(alpha = .38f) else Color.White.copy(alpha = .22f),
                 shape,
             )
-            .padding(horizontal = 7.dp),
+            .padding(horizontal = if (compactHorizontalPadding) 5.dp else 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -278,12 +280,20 @@ fun FocusButton(
     outlined: Boolean = false,
     onFocused: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    scaleOnFocus: Boolean = true,
+    accent: Boolean = false,
+    leadingIcon: ImageVector? = null,
+    textMaxLines: Int = 1,
+    textSizeSp: Int? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "buttonScale")
+    val scale by animateFloatAsState(
+        if (showFocused && scaleOnFocus) 1.035f else 1f,
+        label = "buttonScale",
+    )
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
@@ -293,7 +303,11 @@ fun FocusButton(
         outlined -> Color(0xFF151711)
         else -> Color(0xFF181914)
     }
-    val textColor = if (primary) Color.Black else colors.text
+    val textColor = when {
+        primary -> Color.Black
+        accent -> colors.goldBright
+        else -> colors.text
+    }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -307,11 +321,13 @@ fun FocusButton(
             .border(
                 width = when {
                     showFocused -> 2.dp
+                    accent -> 1.5.dp
                     outlined -> 1.dp
                     else -> 0.dp
                 },
                 color = when {
                     showFocused -> colors.goldBright
+                    accent -> colors.goldBright.copy(alpha = .88f)
                     outlined -> colors.gold.copy(alpha = .42f)
                     else -> Color.Transparent
                 },
@@ -329,13 +345,37 @@ fun FocusButton(
                 vertical = if (compact) 9.dp else 12.dp,
             ),
     ) {
-        Text(
-            text = text,
-            color = textColor,
-            fontSize = if (compact) 13.sp else 15.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+        val icon = leadingIcon
+        if (icon == null) {
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = (textSizeSp ?: if (compact) 13 else 15).sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = textMaxLines,
+            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(if (compact) 17.dp else 19.dp),
+                )
+                Text(
+                    text = text,
+                    color = textColor,
+                    fontSize = (textSizeSp ?: if (compact) 13 else 15).sp,
+                    lineHeight = if (compact) 15.sp else 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = textMaxLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -658,6 +698,7 @@ fun CompactPosterCard(
                                     MovieMetadataBadge(
                                         text = "★ $it",
                                         accentText = true,
+                                        compactHorizontalPadding = !adaptiveUi.isTelevision,
                                     )
                                 }
                             }
@@ -666,7 +707,10 @@ fun CompactPosterCard(
                                 contentAlignment = Alignment.CenterEnd,
                             ) {
                                 duration?.let {
-                                    MovieMetadataBadge(text = it)
+                                    MovieMetadataBadge(
+                                        text = it,
+                                        compactHorizontalPadding = !adaptiveUi.isTelevision,
+                                    )
                                 }
                             }
                         }
