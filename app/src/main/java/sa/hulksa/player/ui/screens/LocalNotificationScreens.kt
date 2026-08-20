@@ -109,7 +109,12 @@ internal fun nextLocalNotificationFocusIndex(
     return candidate.takeIf { it in 0 until itemCount }
 }
 
-internal fun notificationBellSizeDp(isTv: Boolean): Int = if (isTv) 54 else 48
+internal fun homeHeaderActionVisualSizeDp(): Int = 44
+
+internal fun homeHeaderActionTouchSizeDp(): Int = 48
+
+@Suppress("UNUSED_PARAMETER")
+internal fun notificationBellSizeDp(isTv: Boolean): Int = homeHeaderActionVisualSizeDp()
 
 @Composable
 fun NotificationBellButton(
@@ -120,44 +125,50 @@ fun NotificationBellButton(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val size = notificationBellSizeDp(isTv).dp
+    val visualSize = notificationBellSizeDp(isTv).dp
     Box(
         modifier = modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(if (focused) colors.gold.copy(alpha = .16f) else Color.Black.copy(alpha = .52f))
-            .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) colors.goldBright else colors.line.copy(alpha = .56f),
-                shape = CircleShape,
-            )
+            .size(homeHeaderActionTouchSizeDp().dp)
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = Icons.Rounded.Notifications,
-            contentDescription = "مركز الإشعارات",
-            tint = if (focused) colors.goldBright else Color.White,
-            modifier = Modifier.size(if (isTv) 25.dp else 23.dp),
-        )
-        if (unreadCount > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(if (unreadCount > 99) 24.dp else 21.dp)
-                    .clip(CircleShape)
-                    .background(colors.goldBright)
-                    .border(1.dp, colors.background, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (unreadCount > 99) "99+" else unreadCount.toString(),
-                    color = Color.Black,
-                    fontSize = if (unreadCount > 99) 7.sp else 9.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                )
+        Box(
+            modifier = Modifier
+                .size(visualSize)
+                .clip(CircleShape)
+                .background(if (focused) colors.gold else Color.Black.copy(alpha = .46f))
+                .border(
+                    width = if (focused) 2.dp else 1.dp,
+                    color = if (focused) colors.goldBright else colors.line,
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Notifications,
+                contentDescription = "مركز الإشعارات",
+                tint = if (focused) Color.Black else colors.text,
+                modifier = Modifier.size(21.dp),
+            )
+            if (unreadCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(if (unreadCount > 99) 20.dp else 18.dp)
+                        .clip(CircleShape)
+                        .background(colors.goldBright)
+                        .border(1.dp, colors.background, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                        color = Color.Black,
+                        fontSize = if (unreadCount > 99) 6.sp else 8.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

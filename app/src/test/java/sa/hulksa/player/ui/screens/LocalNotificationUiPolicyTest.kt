@@ -41,19 +41,23 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun phoneDetailsNotificationButtonStacksOnVeryNarrowWindows() {
+    fun seriesDetailsActionsRemainTwoByTwoAtEveryWindowWidth() {
         assertEquals(1, detailsProMobileActionColumns(320))
         assertEquals(1, detailsProMobileActionColumns(359))
         assertEquals(2, detailsProMobileActionColumns(360))
         assertEquals(2, detailsProMobileActionColumns(840))
+        assertEquals(2, seriesDetailsActionColumns())
+        assertEquals(50, seriesDetailsActionHeightDp())
         assertTrue(!detailsProActionsUseSingleRow(isTv = false, wide = true, actionCount = 3))
         assertTrue(detailsProActionsUseSingleRow(isTv = true, wide = true, actionCount = 5))
     }
 
     @Test
-    fun homeBellMeetsTouchAndTvFocusTargetMinimums() {
-        assertEquals(48, notificationBellSizeDp(isTv = false))
-        assertTrue(notificationBellSizeDp(isTv = true) >= 48)
+    fun homeBellMatchesRefreshVisualSizeWithSafeTouchTarget() {
+        assertEquals(44, homeHeaderActionVisualSizeDp())
+        assertEquals(48, homeHeaderActionTouchSizeDp())
+        assertEquals(homeHeaderActionVisualSizeDp(), notificationBellSizeDp(isTv = false))
+        assertEquals(homeHeaderActionVisualSizeDp(), notificationBellSizeDp(isTv = true))
     }
 
     @Test

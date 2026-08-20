@@ -30,6 +30,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +53,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -104,6 +107,9 @@ private data class DetailsProAction(
     val mobileWeight: Float = 1f,
     val scaleOnFocus: Boolean = true,
     val minimumHeightDp: Int = 0,
+    val accent: Boolean = false,
+    val leadingIcon: ImageVector? = null,
+    val textMaxLines: Int = 1,
 )
 
 internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
@@ -111,6 +117,10 @@ internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
 
 internal fun detailsProActionsUseSingleRow(isTv: Boolean, wide: Boolean, actionCount: Int): Boolean =
     isTv || (wide && actionCount <= 2)
+
+internal fun seriesDetailsActionColumns(): Int = 2
+
+internal fun seriesDetailsActionHeightDp(): Int = 50
 
 private data class EpisodeFocusTargets(
     val card: FocusRequester = FocusRequester(),
@@ -477,7 +487,7 @@ fun SeriesDetailsProScreen(
         }.maxByOrNull { it.second.updatedAtEpochMs }
     }
     val mobileResumeHeroExtraDp = if (!isTv && resumePair != null) 30 else 0
-    val seriesNotificationActionExtraDp = if (isTv) 0 else 56
+    val seriesNotificationActionExtraDp = 56
     val completedCount = remember(orderedEpisodes, historyByKey) {
         orderedEpisodes.count { episode ->
             historyByKey["SERIES:${episode.id}"]?.detailsProCompleted() == true
@@ -522,7 +532,6 @@ fun SeriesDetailsProScreen(
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
     val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
-    val previousEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, -1)
     val nextEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, 1)
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
 
@@ -530,7 +539,6 @@ fun SeriesDetailsProScreen(
     val playRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
-    val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val seasonKeys = seasons.toList()
     val seasonRequesters = remember(seasonKeys) {
@@ -601,56 +609,50 @@ fun SeriesDetailsProScreen(
                 requester = playRequester,
                 primary = true,
                 enabled = heroEpisode != null,
-                mobileWeight = 1.5f,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
             ),
         )
-        previousEpisode?.let { episode ->
-            add(
-                DetailsProAction(
-                    text = if (isTv || episode.season != heroEpisode?.season) {
-                        "السابق S${episode.season} E${episode.episodeNumber}"
-                    } else {
-                        "السابق · E${episode.episodeNumber}"
-                    },
-                    onClick = { onPlay(episode) },
-                    requester = previousRequester,
-                ),
-            )
-        }
-        nextEpisode?.let { episode ->
-            add(
-                DetailsProAction(
-                    text = if (isTv || episode.season != heroEpisode?.season) {
+        add(
+            DetailsProAction(
+                text = nextEpisode?.let { episode ->
+                    if (isTv || episode.season != heroEpisode?.season) {
                         "التالي S${episode.season} E${episode.episodeNumber}"
                     } else {
                         "التالي · E${episode.episodeNumber}"
-                    },
-                    onClick = { onPlay(episode) },
-                    requester = nextRequester,
-                ),
-            )
-        }
+                    }
+                } ?: "التالي",
+                onClick = { nextEpisode?.let(onPlay) },
+                requester = nextRequester,
+                enabled = nextEpisode != null,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+            ),
+        )
         add(
             DetailsProAction(
                 text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                 onClick = onToggleFavorite,
                 requester = favoriteRequester,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
             ),
         )
         add(
             DetailsProAction(
                 text = if (notificationsEnabled) {
-                    "🔔 التنبيهات مفعلة"
+                    "التنبيهات مفعلة"
                 } else {
-                    "🔔 نبهني عند نزول حلقة جديدة"
+                    "نبهني عند نزول حلقة جديدة"
                 },
                 onClick = onToggleNotifications,
                 requester = notificationRequester,
-                primary = notificationsEnabled,
                 enabled = notificationsEnabled || notificationToggleAvailable,
-                mobileWeight = 1.35f,
                 scaleOnFocus = false,
                 minimumHeightDp = 48,
+                accent = notificationsEnabled,
+                leadingIcon = Icons.Rounded.Notifications,
+                textMaxLines = 2,
             ),
         )
     }
@@ -809,6 +811,7 @@ fun SeriesDetailsProScreen(
                                 downTarget = heroDownTarget,
                                 onFocused = { heroReturnRequester = it },
                                 wide = metrics.wideLayout,
+                                forceTwoByTwo = true,
                             )
                         }
 
@@ -1153,9 +1156,10 @@ private fun DetailsProActions(
     downTarget: FocusRequester?,
     onFocused: (FocusRequester) -> Unit,
     wide: Boolean,
+    forceTwoByTwo: Boolean = false,
 ) {
     val adaptiveUi = LocalAdaptiveUi.current
-    if (detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
+    if (!forceTwoByTwo && detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
         Row(
             modifier = Modifier.fillMaxWidth().focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1172,6 +1176,9 @@ private fun DetailsProActions(
                     compact = true,
                     outlined = !action.primary,
                     scaleOnFocus = action.scaleOnFocus,
+                    accent = action.accent,
+                    leadingIcon = action.leadingIcon,
+                    textMaxLines = action.textMaxLines,
                     modifier = Modifier
                         .weight(if (action.primary) 1.18f else 1f)
                         .then(
@@ -1194,14 +1201,25 @@ private fun DetailsProActions(
             }
         }
     } else {
-        val actionColumns = detailsProMobileActionColumns(adaptiveUi.screenWidthDp)
+        val actionColumns = if (forceTwoByTwo) {
+            seriesDetailsActionColumns()
+        } else {
+            detailsProMobileActionColumns(adaptiveUi.screenWidthDp)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            actions.chunked(actionColumns).forEach { row ->
+            actions.chunked(actionColumns).forEachIndexed { rowIndex, row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    row.forEach { action ->
+                    row.forEachIndexed { columnIndex, action ->
+                        val actionIndex = rowIndex * actionColumns + columnIndex
+                        val previousRowTarget = actions.getOrNull(actionIndex - actionColumns)?.requester
+                            ?: upTarget
+                        val nextRowTarget = actions.getOrNull(actionIndex + actionColumns)?.requester
+                            ?: downTarget
+                        val leftTarget = row.getOrNull(columnIndex + 1)?.requester
+                        val rightTarget = row.getOrNull(columnIndex - 1)?.requester
                         FocusButton(
                             text = action.text,
                             onClick = action.onClick,
@@ -1210,14 +1228,28 @@ private fun DetailsProActions(
                             compact = true,
                             outlined = !action.primary,
                             scaleOnFocus = action.scaleOnFocus,
+                            accent = action.accent,
+                            leadingIcon = action.leadingIcon,
+                            textMaxLines = action.textMaxLines,
                             modifier = Modifier
                                 .weight(action.mobileWeight)
                                 .then(
-                                    if (action.minimumHeightDp > 0) {
+                                    if (forceTwoByTwo) {
+                                        Modifier.height(seriesDetailsActionHeightDp().dp)
+                                    } else if (action.minimumHeightDp > 0) {
                                         Modifier.heightIn(min = action.minimumHeightDp.dp)
                                     } else {
                                         Modifier
                                     },
+                                )
+                                .detailsProTvTarget(
+                                    isTv = isTv,
+                                    requester = action.requester,
+                                    upTarget = previousRowTarget,
+                                    downTarget = nextRowTarget,
+                                    leftTarget = leftTarget,
+                                    rightTarget = rightTarget,
+                                    onFocused = { onFocused(action.requester) },
                                 ),
                         )
                     }

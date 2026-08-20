@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -279,6 +280,9 @@ fun FocusButton(
     onFocused: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     scaleOnFocus: Boolean = true,
+    accent: Boolean = false,
+    leadingIcon: ImageVector? = null,
+    textMaxLines: Int = 1,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -297,7 +301,11 @@ fun FocusButton(
         outlined -> Color(0xFF151711)
         else -> Color(0xFF181914)
     }
-    val textColor = if (primary) Color.Black else colors.text
+    val textColor = when {
+        primary -> Color.Black
+        accent -> colors.goldBright
+        else -> colors.text
+    }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -311,11 +319,13 @@ fun FocusButton(
             .border(
                 width = when {
                     showFocused -> 2.dp
+                    accent -> 1.5.dp
                     outlined -> 1.dp
                     else -> 0.dp
                 },
                 color = when {
                     showFocused -> colors.goldBright
+                    accent -> colors.goldBright.copy(alpha = .88f)
                     outlined -> colors.gold.copy(alpha = .42f)
                     else -> Color.Transparent
                 },
@@ -333,13 +343,37 @@ fun FocusButton(
                 vertical = if (compact) 9.dp else 12.dp,
             ),
     ) {
-        Text(
-            text = text,
-            color = textColor,
-            fontSize = if (compact) 13.sp else 15.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+        val icon = leadingIcon
+        if (icon == null) {
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = if (compact) 13.sp else 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = textMaxLines,
+            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(if (compact) 17.dp else 19.dp),
+                )
+                Text(
+                    text = text,
+                    color = textColor,
+                    fontSize = if (compact) 13.sp else 15.sp,
+                    lineHeight = if (compact) 15.sp else 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = textMaxLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

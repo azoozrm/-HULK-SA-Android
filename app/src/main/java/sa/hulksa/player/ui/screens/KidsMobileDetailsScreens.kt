@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -22,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,7 +49,6 @@ import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
-import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandBadge
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.CompactPosterCard
@@ -262,7 +262,6 @@ fun KidsMobileSeriesDetailsScreen(
     onOpenRelated: (ContentItem) -> Unit,
 ) {
     val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
     val orderedEpisodes = remember(episodes) {
         episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
     }
@@ -310,6 +309,8 @@ fun KidsMobileSeriesDetailsScreen(
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
     val heroEpisode = targetEpisode ?: resumeEpisode ?: orderedEpisodes.firstOrNull()
+    val heroEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == heroEpisode?.id }
+    val nextEpisode = if (heroEpisodeIndex >= 0) orderedEpisodes.getOrNull(heroEpisodeIndex + 1) else null
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
     val listState = rememberLazyListState()
     LaunchedEffect(targetEpisode?.id, selectedSeason, visibleEpisodes) {
@@ -384,58 +385,61 @@ fun KidsMobileSeriesDetailsScreen(
                             onClick = { heroEpisode?.let(onPlay) },
                             enabled = heroEpisode != null,
                             compact = true,
-                            modifier = Modifier.weight(1f),
+                            scaleOnFocus = false,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(seriesDetailsActionHeightDp().dp),
+                        )
+                        FocusButton(
+                            text = nextEpisode?.let {
+                                "التالي · S${it.season} E${it.episodeNumber}"
+                            } ?: "التالي",
+                            onClick = { nextEpisode?.let(onPlay) },
+                            enabled = nextEpisode != null,
+                            primary = false,
+                            outlined = true,
+                            compact = true,
+                            scaleOnFocus = false,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(seriesDetailsActionHeightDp().dp),
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    if (detailsProMobileActionColumns(adaptiveUi.screenWidthDp) == 1) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         FocusButton(
                             text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                             onClick = onToggleFavorite,
                             primary = false,
+                            outlined = true,
                             compact = true,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            scaleOnFocus = false,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(seriesDetailsActionHeightDp().dp),
                         )
-                        Spacer(Modifier.height(8.dp))
                         FocusButton(
                             text = if (notificationsEnabled) {
-                                "🔔 التنبيهات مفعلة"
+                                "التنبيهات مفعلة"
                             } else {
-                                "🔔 نبهني عند نزول حلقة جديدة"
+                                "نبهني عند نزول حلقة جديدة"
                             },
                             onClick = onToggleNotifications,
                             enabled = notificationsEnabled || notificationToggleAvailable,
-                            primary = notificationsEnabled,
+                            primary = false,
+                            outlined = true,
                             compact = true,
                             scaleOnFocus = false,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            accent = notificationsEnabled,
+                            leadingIcon = Icons.Rounded.Notifications,
+                            textMaxLines = 2,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(seriesDetailsActionHeightDp().dp),
                         )
-                    } else {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            FocusButton(
-                                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                                onClick = onToggleFavorite,
-                                primary = false,
-                                compact = true,
-                                modifier = Modifier.weight(1f),
-                            )
-                            FocusButton(
-                                text = if (notificationsEnabled) {
-                                    "🔔 التنبيهات مفعلة"
-                                } else {
-                                    "🔔 نبهني عند نزول حلقة جديدة"
-                                },
-                                onClick = onToggleNotifications,
-                                enabled = notificationsEnabled || notificationToggleAvailable,
-                                primary = notificationsEnabled,
-                                compact = true,
-                                scaleOnFocus = false,
-                                modifier = Modifier.weight(1.35f).heightIn(min = 48.dp),
-                            )
-                        }
                     }
                     if (errorMessage != null) {
                         Spacer(Modifier.height(12.dp))

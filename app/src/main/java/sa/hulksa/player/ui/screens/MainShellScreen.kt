@@ -3534,15 +3534,25 @@ private fun RoundAction(icon: ImageVector, description: String, onClick: () -> U
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(if (focused) colors.gold else Color.Black.copy(alpha = .46f))
-            .border(if (focused) 2.dp else 1.dp, if (focused) colors.goldBright else colors.line, CircleShape)
+            .size(homeHeaderActionTouchSizeDp().dp)
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, description, tint = if (focused) Color.Black else colors.text, modifier = Modifier.size(21.dp))
+        Box(
+            modifier = Modifier
+                .size(homeHeaderActionVisualSizeDp().dp)
+                .clip(CircleShape)
+                .background(if (focused) colors.gold else Color.Black.copy(alpha = .46f))
+                .border(
+                    if (focused) 2.dp else 1.dp,
+                    if (focused) colors.goldBright else colors.line,
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, description, tint = if (focused) Color.Black else colors.text, modifier = Modifier.size(21.dp))
+        }
     }
 }
 

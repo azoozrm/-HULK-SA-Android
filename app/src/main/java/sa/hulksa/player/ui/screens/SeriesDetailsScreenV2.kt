@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -29,6 +28,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -178,9 +179,12 @@ fun SeriesDetailsScreenV2(
     val primaryRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
+    val nextRequester = remember(series.id) { FocusRequester() }
     val targetEpisodeRequester = remember(series.id, targetEpisodeId, targetEpisodeNumber) { FocusRequester() }
     var initialFocusRequested by remember(series.id) { mutableStateOf(false) }
     val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
+    val heroEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == heroEpisode?.id }
+    val nextEpisode = if (heroEpisodeIndex >= 0) orderedEpisodes.getOrNull(heroEpisodeIndex + 1) else null
     LaunchedEffect(isTv, heroEpisode?.id, series.id, targetEpisode?.id) {
         if (isTv && targetEpisode == null && heroEpisode != null && !initialFocusRequested) {
             delay(180L)
@@ -218,6 +222,7 @@ fun SeriesDetailsScreenV2(
                     technicalMetadata = technicalMetadata,
                     firstEpisode = orderedEpisodes.firstOrNull(),
                     targetEpisode = targetEpisode,
+                    nextEpisode = nextEpisode,
                     resumeEpisode = resumePair?.first,
                     resumeEntry = resumePair?.second,
                     totalEpisodes = orderedEpisodes.size,
@@ -227,6 +232,7 @@ fun SeriesDetailsScreenV2(
                     notificationsEnabled = notificationsEnabled,
                     notificationToggleAvailable = notificationToggleAvailable,
                     primaryRequester = primaryRequester,
+                    nextRequester = nextRequester,
                     favoriteRequester = favoriteRequester,
                     notificationRequester = notificationRequester,
                     onBack = onBack,
@@ -305,6 +311,7 @@ private fun SeriesHeroV2(
     technicalMetadata: SeriesCardTechnicalMetadata,
     firstEpisode: Episode?,
     targetEpisode: Episode?,
+    nextEpisode: Episode?,
     resumeEpisode: Episode?,
     resumeEntry: HistoryEntry?,
     totalEpisodes: Int,
@@ -314,6 +321,7 @@ private fun SeriesHeroV2(
     notificationsEnabled: Boolean,
     notificationToggleAvailable: Boolean,
     primaryRequester: FocusRequester,
+    nextRequester: FocusRequester,
     favoriteRequester: FocusRequester,
     notificationRequester: FocusRequester,
     onBack: () -> Unit,
@@ -471,13 +479,35 @@ private fun SeriesHeroV2(
                         onClick = { heroEpisode?.let(onPlay) },
                         enabled = heroEpisode != null,
                         compact = true,
+                        scaleOnFocus = false,
                         modifier = Modifier
                             .weight(1f)
+                            .height(seriesDetailsActionHeightDp().dp)
                             .focusRequester(primaryRequester)
                             .focusProperties {
                                 down = favoriteRequester
-                                left = FocusRequester.Cancel
+                                left = nextRequester
                                 right = FocusRequester.Cancel
+                            },
+                    )
+                    FocusButton(
+                        text = nextEpisode?.let {
+                            "التالي · S${it.season} E${it.episodeNumber}"
+                        } ?: "التالي",
+                        onClick = { nextEpisode?.let(onPlay) },
+                        enabled = nextEpisode != null,
+                        primary = false,
+                        outlined = true,
+                        compact = true,
+                        scaleOnFocus = false,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(seriesDetailsActionHeightDp().dp)
+                            .focusRequester(nextRequester)
+                            .focusProperties {
+                                down = notificationRequester
+                                right = primaryRequester
+                                left = FocusRequester.Cancel
                             },
                     )
                 }
@@ -490,9 +520,12 @@ private fun SeriesHeroV2(
                         text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
                         onClick = onToggleFavorite,
                         primary = false,
+                        outlined = true,
                         compact = true,
+                        scaleOnFocus = false,
                         modifier = Modifier
                             .weight(1f)
+                            .height(seriesDetailsActionHeightDp().dp)
                             .focusRequester(favoriteRequester)
                             .focusProperties {
                                 up = primaryRequester
@@ -502,21 +535,25 @@ private fun SeriesHeroV2(
                     )
                     FocusButton(
                         text = if (notificationsEnabled) {
-                            "🔔 التنبيهات مفعلة"
+                            "التنبيهات مفعلة"
                         } else {
-                            "🔔 نبهني عند نزول حلقة جديدة"
+                            "نبهني عند نزول حلقة جديدة"
                         },
                         onClick = onToggleNotifications,
                         enabled = notificationsEnabled || notificationToggleAvailable,
-                        primary = notificationsEnabled,
+                        primary = false,
+                        outlined = true,
                         compact = true,
                         scaleOnFocus = false,
+                        accent = notificationsEnabled,
+                        leadingIcon = Icons.Rounded.Notifications,
+                        textMaxLines = 2,
                         modifier = Modifier
-                            .weight(1.35f)
-                            .heightIn(min = 48.dp)
+                            .weight(1f)
+                            .height(seriesDetailsActionHeightDp().dp)
                             .focusRequester(notificationRequester)
                             .focusProperties {
-                                up = primaryRequester
+                                up = nextRequester
                                 right = favoriteRequester
                                 left = FocusRequester.Cancel
                             },
