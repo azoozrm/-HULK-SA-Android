@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import sa.hulksa.player.ui.adaptive.HulkNavigationType
@@ -61,7 +62,12 @@ fun BrandLogo(modifier: Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             BrandLogo(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = 1.18f
+                        scaleY = 1.18f
+                    },
                 contentScale = ContentScale.Fit,
             )
         }
