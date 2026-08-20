@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -22,6 +23,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.HulkScreen
@@ -51,6 +56,7 @@ fun ProfileAwareHulkApp(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalView.current.findViewTreeLifecycleOwner()
     val profileStore = remember(context) { ProfileStore(context) }
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
     val profilePinCredentialStore = remember(context) { ProfilePinCredentialStore(context) }
@@ -59,6 +65,26 @@ fun ProfileAwareHulkApp(
     val destinationMemoryByProfile = remember { mutableMapOf<String, MainDestination>() }
     val catalogNavigationMemoryByProfile = remember {
         mutableMapOf<String, ProfileCatalogNavigationMemory>()
+    }
+
+    var appResumed by remember(lifecycleOwner) {
+        mutableStateOf(
+            lifecycleOwner?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true,
+        )
+    }
+    DisposableEffect(lifecycleOwner) {
+        val owner = lifecycleOwner
+        if (owner == null) {
+            appResumed = false
+            onDispose { }
+        } else {
+            val observer = LifecycleEventObserver { _, _ ->
+                appResumed = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            }
+            owner.lifecycle.addObserver(observer)
+            appResumed = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            onDispose { owner.lifecycle.removeObserver(observer) }
+        }
     }
 
     var resolvedForSession by rememberSaveable { mutableStateOf(false) }
@@ -361,6 +387,7 @@ fun ProfileAwareHulkApp(
         ?.let { profileId -> profiles.firstOrNull { it.id == profileId } }
 
     LaunchedEffect(
+        appResumed,
         authenticated,
         resolvedForSession,
         showPicker,
@@ -370,10 +397,15 @@ fun ProfileAwareHulkApp(
         activeProfile?.id,
         activeProfile?.kind,
         kidsSnapshot?.isAvailable,
+        state.isStarting,
+        state.isLoading,
     ) {
         viewModel.setNotificationUiReady(
-            ready = authenticated &&
+            ready = appResumed &&
+                authenticated &&
                 resolvedForSession &&
+                !state.isStarting &&
+                !state.isLoading &&
                 !showPicker &&
                 !managingProfiles &&
                 unlockProfile == null &&
