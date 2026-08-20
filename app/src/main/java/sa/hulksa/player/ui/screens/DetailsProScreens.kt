@@ -268,8 +268,6 @@ fun MovieDetailsProScreen(
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
-                    Spacer(Modifier.weight(1f))
                     FocusButton(
                         text = "رجوع",
                         onClick = onBack,
@@ -282,6 +280,8 @@ fun MovieDetailsProScreen(
                             downTarget = playRequester,
                         ),
                     )
+                    Spacer(Modifier.weight(1f))
+                    BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
                 }
 
                 Row(
@@ -738,8 +738,6 @@ fun SeriesDetailsProScreen(
                             ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
-                        Spacer(Modifier.weight(1f))
                         FocusButton(
                             text = "رجوع",
                             onClick = onBack,
@@ -752,6 +750,8 @@ fun SeriesDetailsProScreen(
                                 downTarget = playRequester,
                             ),
                         )
+                        Spacer(Modifier.weight(1f))
+                        BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
                     }
 
                     Row(
@@ -1093,7 +1093,7 @@ private fun DetailsProSeriesPills(
     compact: Boolean,
 ) {
     val verifiedSeasonCount = technicalMetadata.seasonCount?.takeIf { it > 0 } ?: seasonCount.takeIf { it > 0 }
-    val seasonLabel = verifiedSeasonCount?.let { if (it == 1) "1 موسم" else "$it مواسم" }
+    val seasonLabel = verifiedSeasonCount?.let { "$it موسم" }
     val episodeLabel = episodeCount.takeIf { it > 0 }?.let { "$it حلقة" }
     val values = if (compact) {
         buildList {
