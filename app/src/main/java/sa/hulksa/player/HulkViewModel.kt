@@ -417,11 +417,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             MainDestination.SETTINGS -> emptySet()
         }
         if (types.isEmpty()) return
-        types.forEach {
-            loadedCatalogs.remove(it)
-            homeCatalogs.remove(it)
-        }
-        mutableState.update { it.copy(catalogs = it.catalogs - types, errorMessage = null) }
+        mutableState.update { it.copy(errorMessage = null) }
         types.forEach { ensureCatalog(it, force = true) }
         scanSubscribedSeries(NotificationScanTrigger.MANUAL_REFRESH)
     }
