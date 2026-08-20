@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -183,6 +185,7 @@ fun MovieDetailsProPolishedScreen(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MovieDetailsProTvPolished(
     item: ContentItem,
@@ -313,23 +316,21 @@ private fun MovieDetailsProTvPolished(
                             modifier = Modifier.fillMaxWidth(.90f),
                         )
                         Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            technical.quality?.let { DetailsTvPill(it) }
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(.94f),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            maxItemsInEachRow = 4,
+                        ) {
+                            detailsTvRating(item.rating)?.let { DetailsTvPill("★ $it") }
+                            (details?.genre ?: item.genre)
+                                ?.trim()
+                                ?.takeIf(String::isNotBlank)
+                                ?.let { DetailsTvPill(it.take(27)) }
+                            technical.quality?.takeIf(String::isNotBlank)?.let { DetailsTvPill(it) }
                             detailsTvDuration(technical.durationMs ?: detailsTvParseDurationMs(details?.duration))?.let {
                                 DetailsTvPill(it)
                             }
-                            detailsTvRating(item.rating)?.let { DetailsTvPill("★ $it") }
-                            item.year?.trim()?.takeIf(String::isNotBlank)?.let { DetailsTvPill(it) }
-                        }
-                        (details?.genre ?: item.genre)?.takeIf { !it.isNullOrBlank() }?.let { genre ->
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = genre,
-                                color = colors.goldBright.copy(alpha = .92f),
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                         val plot = details?.plot ?: item.plot
                         if (!plot.isNullOrBlank()) {
@@ -580,6 +581,7 @@ fun SeriesDetailsProPolishedScreen(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SeriesDetailsProTvPolished(
     series: ContentItem,
@@ -790,23 +792,21 @@ private fun SeriesDetailsProTvPolished(
                             modifier = Modifier.fillMaxWidth(.90f),
                         )
                         Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(.94f),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            maxItemsInEachRow = 5,
+                        ) {
+                            detailsTvRating(series.rating)?.let { DetailsTvPill("★ $it") }
+                            (details?.genre ?: series.genre)
+                                ?.trim()
+                                ?.takeIf(String::isNotBlank)
+                                ?.let { DetailsTvPill(it.take(27)) }
                             technical.quality?.takeIf(String::isNotBlank)?.let { DetailsTvPill(it) }
                             val seasonCount = technical.seasonCount ?: seasons.size.takeIf { it > 0 }
                             seasonCount?.let { DetailsTvPill("$it موسم") }
                             if (ordered.isNotEmpty()) DetailsTvPill("${ordered.size} حلقة")
-                            detailsTvRating(series.rating)?.let { DetailsTvPill("★ $it") }
-                            if (completedCount > 0) DetailsTvPill("✓ $completedCount مكتملة")
-                        }
-                        (details?.genre ?: series.genre)?.takeIf { !it.isNullOrBlank() }?.let { genre ->
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                genre,
-                                color = colors.goldBright.copy(alpha = .92f),
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                         val plot = details?.plot ?: series.plot
                         if (!plot.isNullOrBlank()) {
