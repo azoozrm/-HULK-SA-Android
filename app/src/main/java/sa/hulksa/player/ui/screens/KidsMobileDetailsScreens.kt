@@ -438,11 +438,7 @@ fun KidsMobileSeriesDetailsScreen(
                                 .height(seriesDetailsActionHeightDp().dp),
                         )
                         FocusButton(
-                            text = if (notificationsEnabled) {
-                                "التنبيهات مفعلة"
-                            } else {
-                                "نبهني عند نزول حلقة جديدة"
-                            },
+                            text = seriesNotificationButtonLabel(notificationsEnabled, isTv = false),
                             onClick = onToggleNotifications,
                             enabled = notificationsEnabled || notificationToggleAvailable,
                             primary = false,
@@ -452,6 +448,7 @@ fun KidsMobileSeriesDetailsScreen(
                             accent = notificationsEnabled,
                             leadingIcon = Icons.Rounded.Notifications,
                             textMaxLines = 2,
+                            textSizeSp = seriesNotificationButtonTextSizeSp(isTv = false),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(seriesDetailsActionHeightDp().dp),

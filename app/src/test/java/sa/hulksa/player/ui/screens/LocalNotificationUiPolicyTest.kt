@@ -65,6 +65,17 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
+    fun mobileNotificationButtonUsesCompleteCompactLabelsWithoutChangingTvCopy() {
+        assertEquals("تنبيهات الحلقات", seriesNotificationButtonLabel(enabled = false, isTv = false))
+        assertEquals("التنبيهات مفعلة", seriesNotificationButtonLabel(enabled = true, isTv = false))
+        assertEquals("نبهني عند نزول حلقة جديدة", seriesNotificationButtonLabel(enabled = false, isTv = true))
+        assertEquals(12, seriesNotificationButtonTextSizeSp(isTv = false))
+        assertNull(seriesNotificationButtonTextSizeSp(isTv = true))
+        assertEquals(50, seriesDetailsActionHeightDp())
+        assertEquals(2, seriesDetailsActionColumns(isTv = false))
+    }
+
+    @Test
     fun phoneTabletAndFoldableCenterMetricsStayResponsive() {
         val phone = localNotificationCenterMetrics(360, 800, isTv = false)
         val landscape = localNotificationCenterMetrics(800, 360, isTv = false)

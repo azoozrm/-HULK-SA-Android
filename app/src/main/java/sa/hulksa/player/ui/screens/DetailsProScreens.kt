@@ -110,6 +110,7 @@ private data class DetailsProAction(
     val accent: Boolean = false,
     val leadingIcon: ImageVector? = null,
     val textMaxLines: Int = 1,
+    val textSizeSp: Int? = null,
 )
 
 internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
@@ -125,6 +126,14 @@ internal fun seriesDetailsActionCount(): Int = 5
 internal fun seriesDetailsPrimarySpansFullWidth(isTv: Boolean): Boolean = !isTv
 
 internal fun seriesDetailsActionHeightDp(): Int = 50
+
+internal fun seriesNotificationButtonLabel(enabled: Boolean, isTv: Boolean): String = when {
+    enabled -> "التنبيهات مفعلة"
+    isTv -> "نبهني عند نزول حلقة جديدة"
+    else -> "تنبيهات الحلقات"
+}
+
+internal fun seriesNotificationButtonTextSizeSp(isTv: Boolean): Int? = if (isTv) null else 12
 
 private data class EpisodeFocusTargets(
     val card: FocusRequester = FocusRequester(),
@@ -662,11 +671,7 @@ fun SeriesDetailsProScreen(
         )
         add(
             DetailsProAction(
-                text = if (notificationsEnabled) {
-                    "التنبيهات مفعلة"
-                } else {
-                    "نبهني عند نزول حلقة جديدة"
-                },
+                text = seriesNotificationButtonLabel(notificationsEnabled, isTv),
                 onClick = onToggleNotifications,
                 requester = notificationRequester,
                 enabled = notificationsEnabled || notificationToggleAvailable,
@@ -675,6 +680,7 @@ fun SeriesDetailsProScreen(
                 accent = notificationsEnabled,
                 leadingIcon = Icons.Rounded.Notifications,
                 textMaxLines = 2,
+                textSizeSp = seriesNotificationButtonTextSizeSp(isTv),
             ),
         )
     }
@@ -1201,6 +1207,7 @@ private fun DetailsProActions(
                     accent = action.accent,
                     leadingIcon = action.leadingIcon,
                     textMaxLines = action.textMaxLines,
+                    textSizeSp = action.textSizeSp,
                     modifier = Modifier
                         .weight(if (action.primary) 1.18f else 1f)
                         .then(
@@ -1242,6 +1249,7 @@ private fun DetailsProActions(
                         accent = action.accent,
                         leadingIcon = action.leadingIcon,
                         textMaxLines = action.textMaxLines,
+                        textSizeSp = action.textSizeSp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(seriesDetailsActionHeightDp().dp)
@@ -1290,6 +1298,7 @@ private fun DetailsProActions(
                             accent = action.accent,
                             leadingIcon = action.leadingIcon,
                             textMaxLines = action.textMaxLines,
+                            textSizeSp = action.textSizeSp,
                             modifier = Modifier
                                 .weight(action.mobileWeight)
                                 .then(

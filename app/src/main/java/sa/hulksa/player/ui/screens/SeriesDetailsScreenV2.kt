@@ -589,11 +589,7 @@ private fun SeriesHeroV2(
                             },
                     )
                     FocusButton(
-                        text = if (notificationsEnabled) {
-                            "التنبيهات مفعلة"
-                        } else {
-                            "نبهني عند نزول حلقة جديدة"
-                        },
+                        text = seriesNotificationButtonLabel(notificationsEnabled, isTv),
                         onClick = onToggleNotifications,
                         enabled = notificationsEnabled || notificationToggleAvailable,
                         primary = false,
@@ -603,6 +599,7 @@ private fun SeriesHeroV2(
                         accent = notificationsEnabled,
                         leadingIcon = Icons.Rounded.Notifications,
                         textMaxLines = 2,
+                        textSizeSp = seriesNotificationButtonTextSizeSp(isTv),
                         modifier = Modifier
                             .weight(1f)
                             .height(seriesDetailsActionHeightDp().dp)

@@ -283,6 +283,7 @@ fun FocusButton(
     accent: Boolean = false,
     leadingIcon: ImageVector? = null,
     textMaxLines: Int = 1,
+    textSizeSp: Int? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -348,7 +349,7 @@ fun FocusButton(
             Text(
                 text = text,
                 color = textColor,
-                fontSize = if (compact) 13.sp else 15.sp,
+                fontSize = (textSizeSp ?: if (compact) 13 else 15).sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = textMaxLines,
             )
@@ -366,7 +367,7 @@ fun FocusButton(
                 Text(
                     text = text,
                     color = textColor,
-                    fontSize = if (compact) 13.sp else 15.sp,
+                    fontSize = (textSizeSp ?: if (compact) 13 else 15).sp,
                     lineHeight = if (compact) 15.sp else 18.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = textMaxLines,
