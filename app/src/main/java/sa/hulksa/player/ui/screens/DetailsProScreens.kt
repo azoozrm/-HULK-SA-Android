@@ -9,6 +9,8 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -322,18 +324,6 @@ fun MovieDetailsProScreen(
                             technical = technical,
                             compact = !metrics.wideLayout,
                         )
-                        (details?.genre ?: item.genre)
-                            ?.takeIf(String::isNotBlank)
-                            ?.let { genre ->
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    text = genre,
-                                    color = colors.goldBright.copy(alpha = .92f),
-                                    fontSize = if (isTv) 11.sp else 10.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
                         val plot = details?.plot ?: item.plot
                         if (!plot.isNullOrBlank()) {
                             Spacer(Modifier.height(7.dp))
@@ -788,24 +778,12 @@ fun SeriesDetailsProScreen(
                             Spacer(Modifier.height(7.dp))
                             DetailsProSeriesPills(
                                 series = series,
+                                genre = details?.genre ?: series.genre,
                                 technicalMetadata = technicalMetadata,
                                 seasonCount = seasons.size,
                                 episodeCount = orderedEpisodes.size,
-                                completedCount = completedCount,
                                 compact = !metrics.wideLayout,
                             )
-                            (details?.genre ?: series.genre)
-                                ?.takeIf(String::isNotBlank)
-                                ?.let { genre ->
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = genre,
-                                        color = colors.goldBright.copy(alpha = .92f),
-                                        fontSize = if (isTv) 11.sp else 10.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
                             val plot = details?.plot ?: series.plot
                             if (!plot.isNullOrBlank()) {
                                 Spacer(Modifier.height(7.dp))
@@ -1064,6 +1042,7 @@ private fun DetailsProPoster(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailsProMoviePills(
     item: ContentItem,
@@ -1072,48 +1051,53 @@ private fun DetailsProMoviePills(
     compact: Boolean,
 ) {
     val values = buildList {
+        detailsProRating(item.rating)?.let { add("★ $it") }
+        (details?.genre ?: item.genre)
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { add(it.take(27)) }
         technical.quality?.takeIf(String::isNotBlank)?.let(::add)
         detailsProMovieDuration(technical.durationMs ?: detailsProParseDuration(details?.duration))?.let(::add)
-        detailsProRating(item.rating)?.let { add("★ $it") }
-        item.year?.trim()?.takeIf(String::isNotBlank)?.let(::add)
-    }.let { if (compact) it.take(3) else it.take(4) }
+    }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        values.forEach { DetailsProPill(it) }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+        maxItemsInEachRow = 4,
+    ) {
+        values.forEach { DetailsProPill(it, compact = compact) }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailsProSeriesPills(
     series: ContentItem,
+    genre: String?,
     technicalMetadata: SeriesCardTechnicalMetadata,
     seasonCount: Int,
     episodeCount: Int,
-    completedCount: Int,
     compact: Boolean,
 ) {
     val verifiedSeasonCount = technicalMetadata.seasonCount?.takeIf { it > 0 } ?: seasonCount.takeIf { it > 0 }
     val seasonLabel = verifiedSeasonCount?.let { "$it موسم" }
     val episodeLabel = episodeCount.takeIf { it > 0 }?.let { "$it حلقة" }
-    val values = if (compact) {
-        buildList {
-            technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
-            detailsProRating(series.rating)?.let { add("★ $it") }
-            seasonLabel?.let(::add)
-            episodeLabel?.let(::add)
-        }.take(4)
-    } else {
-        buildList {
-            technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
-            detailsProRating(series.rating)?.let { add("★ $it") }
-            series.year?.trim()?.takeIf(String::isNotBlank)?.let(::add)
-            seasonLabel?.let(::add)
-            episodeLabel?.let(::add)
-            if (completedCount > 0) add("✓ $completedCount مكتملة")
-        }.take(5)
+    val values = buildList {
+        detailsProRating(series.rating)?.let { add("★ $it") }
+        genre
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { add(it.take(27)) }
+        technicalMetadata.quality?.takeIf(String::isNotBlank)?.let(::add)
+        seasonLabel?.let(::add)
+        episodeLabel?.let(::add)
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+        maxItemsInEachRow = 5,
+    ) {
         values.forEach { DetailsProPill(it, compact = compact) }
     }
 }
