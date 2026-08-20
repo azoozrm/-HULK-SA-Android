@@ -13,11 +13,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -50,11 +50,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -124,26 +122,21 @@ internal data class NotificationBadgeMetrics(
     val widthDp: Int,
     val heightDp: Int,
     val fontSizeSp: Int,
-    val horizontalOutsetDp: Int,
-    val verticalOutsetDp: Int,
 )
 
 internal fun notificationBadgeMetrics(unreadCount: Int): NotificationBadgeMetrics? {
     if (unreadCount <= 0) return null
     val label = if (unreadCount > 999) "999+" else unreadCount.toString()
-    val widthDp = when (label.length) {
-        1 -> 18
-        2 -> 20
-        3 -> 24
-        else -> 30
-    }
     return NotificationBadgeMetrics(
         label = label,
-        widthDp = widthDp,
+        widthDp = when (label.length) {
+            1 -> 18
+            2 -> 20
+            3 -> 24
+            else -> 30
+        },
         heightDp = 18,
         fontSizeSp = if (label.length >= 4) 7 else 8,
-        horizontalOutsetDp = widthDp - 5,
-        verticalOutsetDp = -5,
     )
 }
 
@@ -155,15 +148,9 @@ fun NotificationBellButton(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val layoutDirection = LocalLayoutDirection.current
     var focused by remember { mutableStateOf(false) }
     val visualSize = notificationBellSizeDp(isTv).dp
     val badgeMetrics = notificationBadgeMetrics(unreadCount)
-    val badgeAlignment = if (layoutDirection == LayoutDirection.Rtl) {
-        Alignment.TopStart
-    } else {
-        Alignment.TopEnd
-    }
     Box(
         modifier = modifier
             .size(homeHeaderActionTouchSizeDp().dp)
@@ -194,24 +181,22 @@ fun NotificationBellButton(
             val badgeShape = RoundedCornerShape((badgeMetrics.heightDp / 2).dp)
             Box(
                 modifier = Modifier
-                    .align(badgeAlignment)
-                    .absoluteOffset(
-                        x = badgeMetrics.horizontalOutsetDp.dp,
-                        y = badgeMetrics.verticalOutsetDp.dp,
-                    )
+                    .align(Alignment.TopEnd)
+                    .offset(x = 2.dp, y = (-2).dp)
                     .width(badgeMetrics.widthDp.dp)
                     .height(badgeMetrics.heightDp.dp)
                     .clip(badgeShape)
-                    .background(colors.background.copy(alpha = .96f))
-                    .border(1.5.dp, colors.goldBright, badgeShape),
+                    .background(colors.goldBright)
+                    .border(1.dp, colors.background, badgeShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = badgeMetrics.label,
-                    color = colors.goldBright,
+                    color = Color.Black,
                     fontSize = badgeMetrics.fontSizeSp.sp,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
+                    modifier = Modifier.offset(y = (-1).dp),
                 )
             }
         }
