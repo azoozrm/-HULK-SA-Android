@@ -265,8 +265,6 @@ private fun MovieDetailsProTvPolished(
                         .padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BrandBadge(Modifier.size(52.dp))
-                    Spacer(Modifier.weight(1f))
                     FocusButton(
                         text = "رجوع",
                         onClick = onBack,
@@ -282,6 +280,8 @@ private fun MovieDetailsProTvPolished(
                                 right = FocusRequester.Cancel
                             },
                     )
+                    Spacer(Modifier.weight(1f))
+                    BrandBadge(Modifier.size(52.dp))
                 }
 
                 Row(
@@ -743,8 +743,6 @@ private fun SeriesDetailsProTvPolished(
                         .padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BrandBadge(Modifier.size(52.dp))
-                    Spacer(Modifier.weight(1f))
                     FocusButton(
                         text = "رجوع",
                         onClick = onBack,
@@ -760,6 +758,8 @@ private fun SeriesDetailsProTvPolished(
                                 right = FocusRequester.Cancel
                             },
                     )
+                    Spacer(Modifier.weight(1f))
+                    BrandBadge(Modifier.size(52.dp))
                 }
 
                 Row(
