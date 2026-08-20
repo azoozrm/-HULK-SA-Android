@@ -651,7 +651,9 @@ private fun SeriesDetailsProTvPolished(
         selectedSeason = targetEpisode?.season
             ?: targetSeason?.takeIf { it in seasons }
             ?: resumePair?.first?.season
-            ?: selectedSeason
+            ?: selectedSeason.takeIf { it in seasons }
+            ?: seasons.firstOrNull()
+            ?: 0
     }
     val visibleEpisodes = remember(ordered, selectedSeason) {
         if (selectedSeason == 0) ordered else ordered.filter { it.season == selectedSeason }
