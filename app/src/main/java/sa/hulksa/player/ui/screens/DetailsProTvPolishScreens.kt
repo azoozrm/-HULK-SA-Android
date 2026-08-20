@@ -661,12 +661,14 @@ private fun SeriesDetailsProTvPolished(
     }
     val currentEpisode = targetEpisode ?: resumePair?.first ?: ordered.firstOrNull()
     val currentIndex = ordered.indexOfFirst { it.id == currentEpisode?.id }
+    val previousEpisode = if (currentEpisode != null) ordered.getOrNull(currentIndex - 1) else null
     val nextEpisode = if (currentEpisode != null) ordered.getOrNull(currentIndex + 1) else null
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
     val seriesResumeHeroExtraDp = (if (resumePair != null) 34 else 0) + 64
 
     val backRequester = remember(series.id) { FocusRequester() }
     val playRequester = remember(series.id) { FocusRequester() }
+    val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
@@ -845,7 +847,38 @@ private fun SeriesDetailsProTvPolished(
                                             up = backRequester
                                             down = favoriteRequester
                                             right = FocusRequester.Cancel
-                                            left = nextRequester
+                                            left = if (previousEpisode != null) {
+                                                previousRequester
+                                            } else if (nextEpisode != null) {
+                                                nextRequester
+                                            } else {
+                                                FocusRequester.Cancel
+                                            }
+                                        },
+                                )
+                                FocusButton(
+                                    text = previousEpisode?.let {
+                                        "السابق · S${it.season} E${it.episodeNumber}"
+                                    } ?: "السابق",
+                                    onClick = { previousEpisode?.let(onPlay) },
+                                    enabled = previousEpisode != null,
+                                    primary = false,
+                                    outlined = true,
+                                    compact = true,
+                                    scaleOnFocus = false,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(seriesDetailsActionHeightDp().dp)
+                                        .focusRequester(previousRequester)
+                                        .focusProperties {
+                                            up = backRequester
+                                            down = notificationRequester
+                                            right = playRequester
+                                            left = if (nextEpisode != null) {
+                                                nextRequester
+                                            } else {
+                                                FocusRequester.Cancel
+                                            }
                                         },
                                 )
                                 FocusButton(
@@ -865,7 +898,11 @@ private fun SeriesDetailsProTvPolished(
                                         .focusProperties {
                                             up = backRequester
                                             down = notificationRequester
-                                            right = playRequester
+                                            right = if (previousEpisode != null) {
+                                                previousRequester
+                                            } else {
+                                                playRequester
+                                            }
                                             left = FocusRequester.Cancel
                                         },
                                 )
@@ -912,12 +949,13 @@ private fun SeriesDetailsProTvPolished(
                                         .height(seriesDetailsActionHeightDp().dp)
                                         .focusRequester(notificationRequester)
                                         .focusProperties {
-                                            up = nextRequester
+                                            up = previousRequester
                                             down = heroDownTarget ?: FocusRequester.Cancel
                                             right = favoriteRequester
                                             left = FocusRequester.Cancel
                                         },
                                 )
+                                Spacer(Modifier.weight(1f))
                             }
                         }
                     }

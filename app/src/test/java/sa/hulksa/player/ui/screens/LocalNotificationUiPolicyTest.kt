@@ -41,12 +41,16 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun seriesDetailsActionsRemainTwoByTwoAtEveryWindowWidth() {
+    fun seriesDetailsActionsPreservePreviousWithAdaptiveBalancedRows() {
         assertEquals(1, detailsProMobileActionColumns(320))
         assertEquals(1, detailsProMobileActionColumns(359))
         assertEquals(2, detailsProMobileActionColumns(360))
         assertEquals(2, detailsProMobileActionColumns(840))
-        assertEquals(2, seriesDetailsActionColumns())
+        assertEquals(5, seriesDetailsActionCount())
+        assertEquals(2, seriesDetailsActionColumns(isTv = false))
+        assertEquals(3, seriesDetailsActionColumns(isTv = true))
+        assertTrue(seriesDetailsPrimarySpansFullWidth(isTv = false))
+        assertTrue(!seriesDetailsPrimarySpansFullWidth(isTv = true))
         assertEquals(50, seriesDetailsActionHeightDp())
         assertTrue(!detailsProActionsUseSingleRow(isTv = false, wide = true, actionCount = 3))
         assertTrue(detailsProActionsUseSingleRow(isTv = true, wide = true, actionCount = 5))

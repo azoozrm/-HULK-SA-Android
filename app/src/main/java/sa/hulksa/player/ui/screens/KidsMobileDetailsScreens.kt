@@ -310,6 +310,7 @@ fun KidsMobileSeriesDetailsScreen(
     }
     val heroEpisode = targetEpisode ?: resumeEpisode ?: orderedEpisodes.firstOrNull()
     val heroEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == heroEpisode?.id }
+    val previousEpisode = if (heroEpisodeIndex >= 0) orderedEpisodes.getOrNull(heroEpisodeIndex - 1) else null
     val nextEpisode = if (heroEpisodeIndex >= 0) orderedEpisodes.getOrNull(heroEpisodeIndex + 1) else null
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
     val listState = rememberLazyListState()
@@ -372,18 +373,33 @@ fun KidsMobileSeriesDetailsScreen(
                         )
                     }
                     Spacer(Modifier.height(16.dp))
+                    FocusButton(
+                        text = when {
+                            targetEpisode != null -> "▶ مشاهدة الحلقة الجديدة"
+                            resumeEpisode != null -> "▶ استكمال المشاهدة"
+                            else -> "▶ ابدأ المشاهدة"
+                        },
+                        onClick = { heroEpisode?.let(onPlay) },
+                        enabled = heroEpisode != null,
+                        compact = true,
+                        scaleOnFocus = false,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(seriesDetailsActionHeightDp().dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         FocusButton(
-                            text = when {
-                                targetEpisode != null -> "▶ مشاهدة الحلقة الجديدة"
-                                resumeEpisode != null -> "▶ استكمال المشاهدة"
-                                else -> "▶ ابدأ المشاهدة"
-                            },
-                            onClick = { heroEpisode?.let(onPlay) },
-                            enabled = heroEpisode != null,
+                            text = previousEpisode?.let {
+                                "السابق · S${it.season} E${it.episodeNumber}"
+                            } ?: "السابق",
+                            onClick = { previousEpisode?.let(onPlay) },
+                            enabled = previousEpisode != null,
+                            primary = false,
+                            outlined = true,
                             compact = true,
                             scaleOnFocus = false,
                             modifier = Modifier

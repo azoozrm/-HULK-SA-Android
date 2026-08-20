@@ -118,7 +118,11 @@ internal fun detailsProMobileActionColumns(screenWidthDp: Int): Int =
 internal fun detailsProActionsUseSingleRow(isTv: Boolean, wide: Boolean, actionCount: Int): Boolean =
     isTv || (wide && actionCount <= 2)
 
-internal fun seriesDetailsActionColumns(): Int = 2
+internal fun seriesDetailsActionColumns(isTv: Boolean): Int = if (isTv) 3 else 2
+
+internal fun seriesDetailsActionCount(): Int = 5
+
+internal fun seriesDetailsPrimarySpansFullWidth(isTv: Boolean): Boolean = !isTv
 
 internal fun seriesDetailsActionHeightDp(): Int = 50
 
@@ -532,6 +536,7 @@ fun SeriesDetailsProScreen(
         if (selectedSeason == 0) orderedEpisodes else orderedEpisodes.filter { it.season == selectedSeason }
     }
     val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
+    val previousEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, -1)
     val nextEpisode = detailsProAdjacentEpisode(orderedEpisodes, heroEpisode?.id, 1)
     val backdrop = details?.backdropUrl ?: series.backdropUrl ?: series.posterUrl
 
@@ -539,6 +544,7 @@ fun SeriesDetailsProScreen(
     val playRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
+    val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val seasonKeys = seasons.toList()
     val seasonRequesters = remember(seasonKeys) {
@@ -609,6 +615,22 @@ fun SeriesDetailsProScreen(
                 requester = playRequester,
                 primary = true,
                 enabled = heroEpisode != null,
+                scaleOnFocus = false,
+                minimumHeightDp = 48,
+            ),
+        )
+        add(
+            DetailsProAction(
+                text = previousEpisode?.let { episode ->
+                    if (isTv || episode.season != heroEpisode?.season) {
+                        "السابق S${episode.season} E${episode.episodeNumber}"
+                    } else {
+                        "السابق · E${episode.episodeNumber}"
+                    }
+                } ?: "السابق",
+                onClick = { previousEpisode?.let(onPlay) },
+                requester = previousRequester,
+                enabled = previousEpisode != null,
                 scaleOnFocus = false,
                 minimumHeightDp = 48,
             ),
@@ -811,7 +833,7 @@ fun SeriesDetailsProScreen(
                                 downTarget = heroDownTarget,
                                 onFocused = { heroReturnRequester = it },
                                 wide = metrics.wideLayout,
-                                forceTwoByTwo = true,
+                                seriesActionLayout = true,
                             )
                         }
 
@@ -1156,10 +1178,10 @@ private fun DetailsProActions(
     downTarget: FocusRequester?,
     onFocused: (FocusRequester) -> Unit,
     wide: Boolean,
-    forceTwoByTwo: Boolean = false,
+    seriesActionLayout: Boolean = false,
 ) {
     val adaptiveUi = LocalAdaptiveUi.current
-    if (!forceTwoByTwo && detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
+    if (!seriesActionLayout && detailsProActionsUseSingleRow(isTv, wide, actions.size)) {
         Row(
             modifier = Modifier.fillMaxWidth().focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1201,22 +1223,59 @@ private fun DetailsProActions(
             }
         }
     } else {
-        val actionColumns = if (forceTwoByTwo) {
-            seriesDetailsActionColumns()
+        val actionColumns = if (seriesActionLayout) {
+            seriesDetailsActionColumns(isTv)
         } else {
             detailsProMobileActionColumns(adaptiveUi.screenWidthDp)
         }
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            actions.chunked(actionColumns).forEachIndexed { rowIndex, row ->
+            if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
+                actions.firstOrNull()?.let { action ->
+                    FocusButton(
+                        text = action.text,
+                        onClick = action.onClick,
+                        primary = action.primary,
+                        enabled = action.enabled,
+                        compact = true,
+                        outlined = !action.primary,
+                        scaleOnFocus = action.scaleOnFocus,
+                        accent = action.accent,
+                        leadingIcon = action.leadingIcon,
+                        textMaxLines = action.textMaxLines,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(seriesDetailsActionHeightDp().dp)
+                            .detailsProTvTarget(
+                                isTv = false,
+                                requester = action.requester,
+                                upTarget = upTarget,
+                                downTarget = actions.getOrNull(1)?.requester ?: downTarget,
+                                leftTarget = null,
+                                rightTarget = null,
+                                onFocused = { onFocused(action.requester) },
+                            ),
+                    )
+                }
+            }
+            val gridActions = if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
+                actions.drop(1)
+            } else {
+                actions
+            }
+            gridActions.chunked(actionColumns).forEachIndexed { rowIndex, row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     row.forEachIndexed { columnIndex, action ->
                         val actionIndex = rowIndex * actionColumns + columnIndex
-                        val previousRowTarget = actions.getOrNull(actionIndex - actionColumns)?.requester
-                            ?: upTarget
-                        val nextRowTarget = actions.getOrNull(actionIndex + actionColumns)?.requester
+                        val previousRowTarget = gridActions.getOrNull(actionIndex - actionColumns)?.requester
+                            ?: if (seriesActionLayout && seriesDetailsPrimarySpansFullWidth(isTv)) {
+                                actions.firstOrNull()?.requester
+                            } else {
+                                upTarget
+                            }
+                        val nextRowTarget = gridActions.getOrNull(actionIndex + actionColumns)?.requester
                             ?: downTarget
                         val leftTarget = row.getOrNull(columnIndex + 1)?.requester
                         val rightTarget = row.getOrNull(columnIndex - 1)?.requester
@@ -1234,7 +1293,7 @@ private fun DetailsProActions(
                             modifier = Modifier
                                 .weight(action.mobileWeight)
                                 .then(
-                                    if (forceTwoByTwo) {
+                                    if (seriesActionLayout) {
                                         Modifier.height(seriesDetailsActionHeightDp().dp)
                                     } else if (action.minimumHeightDp > 0) {
                                         Modifier.heightIn(min = action.minimumHeightDp.dp)

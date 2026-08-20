@@ -179,11 +179,13 @@ fun SeriesDetailsScreenV2(
     val primaryRequester = remember(series.id) { FocusRequester() }
     val favoriteRequester = remember(series.id) { FocusRequester() }
     val notificationRequester = remember(series.id) { FocusRequester() }
+    val previousRequester = remember(series.id) { FocusRequester() }
     val nextRequester = remember(series.id) { FocusRequester() }
     val targetEpisodeRequester = remember(series.id, targetEpisodeId, targetEpisodeNumber) { FocusRequester() }
     var initialFocusRequested by remember(series.id) { mutableStateOf(false) }
     val heroEpisode = targetEpisode ?: resumePair?.first ?: orderedEpisodes.firstOrNull()
     val heroEpisodeIndex = orderedEpisodes.indexOfFirst { it.id == heroEpisode?.id }
+    val previousEpisode = if (heroEpisodeIndex >= 0) orderedEpisodes.getOrNull(heroEpisodeIndex - 1) else null
     val nextEpisode = if (heroEpisodeIndex >= 0) orderedEpisodes.getOrNull(heroEpisodeIndex + 1) else null
     LaunchedEffect(isTv, heroEpisode?.id, series.id, targetEpisode?.id) {
         if (isTv && targetEpisode == null && heroEpisode != null && !initialFocusRequested) {
@@ -222,6 +224,7 @@ fun SeriesDetailsScreenV2(
                     technicalMetadata = technicalMetadata,
                     firstEpisode = orderedEpisodes.firstOrNull(),
                     targetEpisode = targetEpisode,
+                    previousEpisode = previousEpisode,
                     nextEpisode = nextEpisode,
                     resumeEpisode = resumePair?.first,
                     resumeEntry = resumePair?.second,
@@ -232,6 +235,7 @@ fun SeriesDetailsScreenV2(
                     notificationsEnabled = notificationsEnabled,
                     notificationToggleAvailable = notificationToggleAvailable,
                     primaryRequester = primaryRequester,
+                    previousRequester = previousRequester,
                     nextRequester = nextRequester,
                     favoriteRequester = favoriteRequester,
                     notificationRequester = notificationRequester,
@@ -311,6 +315,7 @@ private fun SeriesHeroV2(
     technicalMetadata: SeriesCardTechnicalMetadata,
     firstEpisode: Episode?,
     targetEpisode: Episode?,
+    previousEpisode: Episode?,
     nextEpisode: Episode?,
     resumeEpisode: Episode?,
     resumeEntry: HistoryEntry?,
@@ -321,6 +326,7 @@ private fun SeriesHeroV2(
     notificationsEnabled: Boolean,
     notificationToggleAvailable: Boolean,
     primaryRequester: FocusRequester,
+    previousRequester: FocusRequester,
     nextRequester: FocusRequester,
     favoriteRequester: FocusRequester,
     notificationRequester: FocusRequester,
@@ -339,7 +345,7 @@ private fun SeriesHeroV2(
     Box(
         Modifier
             .fillMaxWidth()
-            .height(if (isTv) 466.dp else 456.dp)
+            .height(if (isTv) 466.dp else 514.dp)
             .background(Color(0xFF090A08)),
     ) {
         if (!backdrop.isNullOrBlank()) {
@@ -485,31 +491,80 @@ private fun SeriesHeroV2(
                             .height(seriesDetailsActionHeightDp().dp)
                             .focusRequester(primaryRequester)
                             .focusProperties {
-                                down = favoriteRequester
-                                left = nextRequester
+                                down = if (isTv) {
+                                    favoriteRequester
+                                } else if (previousEpisode != null) {
+                                    previousRequester
+                                } else if (nextEpisode != null) {
+                                    nextRequester
+                                } else {
+                                    favoriteRequester
+                                }
+                                left = if (isTv && previousEpisode != null) {
+                                    previousRequester
+                                } else if (isTv && nextEpisode != null) {
+                                    nextRequester
+                                } else {
+                                    FocusRequester.Cancel
+                                }
                                 right = FocusRequester.Cancel
                             },
                     )
-                    FocusButton(
-                        text = nextEpisode?.let {
-                            "التالي · S${it.season} E${it.episodeNumber}"
-                        } ?: "التالي",
-                        onClick = { nextEpisode?.let(onPlay) },
-                        enabled = nextEpisode != null,
-                        primary = false,
-                        outlined = true,
-                        compact = true,
-                        scaleOnFocus = false,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(seriesDetailsActionHeightDp().dp)
-                            .focusRequester(nextRequester)
-                            .focusProperties {
-                                down = notificationRequester
-                                right = primaryRequester
-                                left = FocusRequester.Cancel
-                            },
-                    )
+                    if (isTv) {
+                        SeriesAdjacentEpisodeButtonV2(
+                            label = "السابق",
+                            episode = previousEpisode,
+                            requester = previousRequester,
+                            upRequester = null,
+                            downRequester = notificationRequester,
+                            rightRequester = primaryRequester,
+                            leftRequester = nextRequester.takeIf { nextEpisode != null },
+                            onPlay = onPlay,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SeriesAdjacentEpisodeButtonV2(
+                            label = "التالي",
+                            episode = nextEpisode,
+                            requester = nextRequester,
+                            upRequester = null,
+                            downRequester = notificationRequester,
+                            rightRequester = previousRequester.takeIf { previousEpisode != null }
+                                ?: primaryRequester,
+                            leftRequester = null,
+                            onPlay = onPlay,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                if (!isTv) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    ) {
+                        SeriesAdjacentEpisodeButtonV2(
+                            label = "السابق",
+                            episode = previousEpisode,
+                            requester = previousRequester,
+                            upRequester = primaryRequester,
+                            downRequester = favoriteRequester,
+                            rightRequester = null,
+                            leftRequester = nextRequester.takeIf { nextEpisode != null },
+                            onPlay = onPlay,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SeriesAdjacentEpisodeButtonV2(
+                            label = "التالي",
+                            episode = nextEpisode,
+                            requester = nextRequester,
+                            upRequester = primaryRequester,
+                            downRequester = notificationRequester,
+                            rightRequester = previousRequester.takeIf { previousEpisode != null },
+                            leftRequester = null,
+                            onPlay = onPlay,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -553,11 +608,18 @@ private fun SeriesHeroV2(
                             .height(seriesDetailsActionHeightDp().dp)
                             .focusRequester(notificationRequester)
                             .focusProperties {
-                                up = nextRequester
+                                up = if (isTv) {
+                                    previousRequester
+                                } else if (nextEpisode != null) {
+                                    nextRequester
+                                } else {
+                                    previousRequester
+                                }
                                 right = favoriteRequester
                                 left = FocusRequester.Cancel
                             },
                     )
+                    if (isTv) Spacer(Modifier.weight(1f))
                 }
             }
 
@@ -568,6 +630,38 @@ private fun SeriesHeroV2(
             )
         }
     }
+}
+
+@Composable
+private fun SeriesAdjacentEpisodeButtonV2(
+    label: String,
+    episode: Episode?,
+    requester: FocusRequester,
+    upRequester: FocusRequester?,
+    downRequester: FocusRequester,
+    rightRequester: FocusRequester?,
+    leftRequester: FocusRequester?,
+    onPlay: (Episode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusButton(
+        text = episode?.let { "$label · S${it.season} E${it.episodeNumber}" } ?: label,
+        onClick = { episode?.let(onPlay) },
+        enabled = episode != null,
+        primary = false,
+        outlined = true,
+        compact = true,
+        scaleOnFocus = false,
+        modifier = modifier
+            .height(seriesDetailsActionHeightDp().dp)
+            .focusRequester(requester)
+            .focusProperties {
+                if (upRequester != null) up = upRequester
+                down = downRequester
+                right = rightRequester ?: FocusRequester.Cancel
+                left = leftRequester ?: FocusRequester.Cancel
+            },
+    )
 }
 
 @Composable
