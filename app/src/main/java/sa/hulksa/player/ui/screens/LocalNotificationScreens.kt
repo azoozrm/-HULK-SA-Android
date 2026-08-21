@@ -182,7 +182,7 @@ fun NotificationBellButton(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .offset(x = 2.dp, y = (-2).dp)
+                    .offset(x = 2.dp, y = (-5).dp)
                     .width(badgeMetrics.widthDp.dp)
                     .height(badgeMetrics.heightDp.dp)
                     .clip(badgeShape)
