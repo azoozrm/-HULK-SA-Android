@@ -2,6 +2,7 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -136,19 +137,59 @@ class OperationsApkInstaller(
     }
 
     fun openUnknownSourcesSettings(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         val packageUri = Uri.parse("package:${applicationContext.packageName}")
-        val direct = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val securitySettings = Intent(Settings.ACTION_SECURITY_SETTINGS)
+        val applicationDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+        val allApplications = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return openFirstAvailableSettings(
+                listOf(securitySettings, applicationDetails, allApplications),
+            )
         }
-        val fallback = Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        val packageUnknownSources = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri)
+        val candidates = if (isTelevisionDevice()) {
+            // Several Android/Google TV settings apps resolve the package-specific action
+            // but immediately finish it. Open the TV security surface first, where the
+            // Unknown sources / Install unknown apps switch is actually exposed.
+            listOf(
+                securitySettings,
+                packageUnknownSources,
+                applicationDetails,
+                allApplications,
+                Intent(Settings.ACTION_SETTINGS),
+            )
+        } else {
+            listOf(
+                packageUnknownSources,
+                applicationDetails,
+                securitySettings,
+                allApplications,
+                Intent(Settings.ACTION_SETTINGS),
+            )
         }
-        return runCatching {
-            val intent = if (direct.resolveActivity(applicationContext.packageManager) != null) direct else fallback
-            applicationContext.startActivity(intent)
-            true
-        }.getOrDefault(false)
+        return openFirstAvailableSettings(candidates)
+    }
+
+    private fun openFirstAvailableSettings(candidates: List<Intent>): Boolean {
+        val packageManager = applicationContext.packageManager
+        for (candidate in candidates) {
+            candidate.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            if (candidate.resolveActivity(packageManager) == null) continue
+            val opened = runCatching {
+                applicationContext.startActivity(candidate)
+                true
+            }.getOrDefault(false)
+            if (opened) return true
+        }
+        return false
+    }
+
+    private fun isTelevisionDevice(): Boolean {
+        val packageManager = applicationContext.packageManager
+        return packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
     }
 
     private fun canInstallUnknownPackages(): Boolean =
