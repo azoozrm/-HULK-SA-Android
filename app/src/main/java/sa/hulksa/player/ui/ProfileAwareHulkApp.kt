@@ -570,6 +570,7 @@ fun ProfileAwareHulkApp(
             NewEpisodeAlertOverlay(
                 popup = popup,
                 isTv = isTelevisionDevice,
+                onPresented = viewModel::confirmNotificationPopupPresented,
                 onPrimary = {
                     viewModel.activateNotificationPopup { message ->
                         message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }

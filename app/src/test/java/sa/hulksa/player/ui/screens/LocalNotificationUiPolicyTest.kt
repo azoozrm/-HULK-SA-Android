@@ -65,6 +65,22 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
+    fun unreadBadgeSupportsThreeDigitCountsWithoutDistortion() {
+        assertNull(notificationBadgeMetrics(0))
+        assertEquals("1", notificationBadgeMetrics(1)?.label)
+        assertEquals(18, notificationBadgeMetrics(1)?.widthDp)
+        assertEquals("99", notificationBadgeMetrics(99)?.label)
+        assertEquals(20, notificationBadgeMetrics(99)?.widthDp)
+        assertEquals("100", notificationBadgeMetrics(100)?.label)
+        assertEquals(24, notificationBadgeMetrics(100)?.widthDp)
+        assertEquals(18, notificationBadgeMetrics(100)?.heightDp)
+        assertEquals("999", notificationBadgeMetrics(999)?.label)
+        assertEquals(24, notificationBadgeMetrics(999)?.widthDp)
+        assertEquals("999+", notificationBadgeMetrics(1_000)?.label)
+        assertEquals(30, notificationBadgeMetrics(1_000)?.widthDp)
+    }
+
+    @Test
     fun mobileNotificationButtonUsesCompleteCompactLabelsWithoutChangingTvCopy() {
         assertEquals("تنبيهات الحلقات", seriesNotificationButtonLabel(enabled = false, isTv = false))
         assertEquals("التنبيهات مفعلة", seriesNotificationButtonLabel(enabled = true, isTv = false))

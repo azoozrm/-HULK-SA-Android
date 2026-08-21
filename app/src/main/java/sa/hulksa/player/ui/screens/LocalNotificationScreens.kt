@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -116,6 +117,29 @@ internal fun homeHeaderActionTouchSizeDp(): Int = 48
 @Suppress("UNUSED_PARAMETER")
 internal fun notificationBellSizeDp(isTv: Boolean): Int = homeHeaderActionVisualSizeDp()
 
+internal data class NotificationBadgeMetrics(
+    val label: String,
+    val widthDp: Int,
+    val heightDp: Int,
+    val fontSizeSp: Int,
+)
+
+internal fun notificationBadgeMetrics(unreadCount: Int): NotificationBadgeMetrics? {
+    if (unreadCount <= 0) return null
+    val label = if (unreadCount > 999) "999+" else unreadCount.toString()
+    return NotificationBadgeMetrics(
+        label = label,
+        widthDp = when (label.length) {
+            1 -> 18
+            2 -> 20
+            3 -> 24
+            else -> 30
+        },
+        heightDp = 18,
+        fontSizeSp = if (label.length >= 4) 7 else 8,
+    )
+}
+
 @Composable
 fun NotificationBellButton(
     unreadCount: Int,
@@ -126,6 +150,7 @@ fun NotificationBellButton(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val visualSize = notificationBellSizeDp(isTv).dp
+    val badgeMetrics = notificationBadgeMetrics(unreadCount)
     Box(
         modifier = modifier
             .size(homeHeaderActionTouchSizeDp().dp)
@@ -151,24 +176,28 @@ fun NotificationBellButton(
                 tint = if (focused) Color.Black else colors.text,
                 modifier = Modifier.size(21.dp),
             )
-            if (unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(if (unreadCount > 99) 20.dp else 18.dp)
-                        .clip(CircleShape)
-                        .background(colors.goldBright)
-                        .border(1.dp, colors.background, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (unreadCount > 99) "99+" else unreadCount.toString(),
-                        color = Color.Black,
-                        fontSize = if (unreadCount > 99) 6.sp else 8.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                    )
-                }
+        }
+        if (badgeMetrics != null) {
+            val badgeShape = RoundedCornerShape((badgeMetrics.heightDp / 2).dp)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 2.dp, y = (-2).dp)
+                    .width(badgeMetrics.widthDp.dp)
+                    .height(badgeMetrics.heightDp.dp)
+                    .clip(badgeShape)
+                    .background(colors.goldBright)
+                    .border(1.dp, colors.background, badgeShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = badgeMetrics.label,
+                    color = Color.Black,
+                    fontSize = badgeMetrics.fontSizeSp.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    modifier = Modifier.offset(y = (-3).dp),
+                )
             }
         }
     }
@@ -582,6 +611,7 @@ private fun LocalNotificationCard(
 fun NewEpisodeAlertOverlay(
     popup: EpisodeNotificationPopup,
     isTv: Boolean,
+    onPresented: () -> Unit,
     onPrimary: () -> Unit,
     onLater: () -> Unit,
 ) {
@@ -590,6 +620,11 @@ fun NewEpisodeAlertOverlay(
     val primaryRequester = remember(popup.eventIds) { FocusRequester() }
     val laterRequester = remember(popup.eventIds) { FocusRequester() }
     var userInteracted by remember(popup.eventIds) { mutableStateOf(false) }
+
+    LaunchedEffect(popup.eventIds) {
+        delay(120L)
+        onPresented()
+    }
 
     LaunchedEffect(popup.eventIds, isTv) {
         if (isTv) {
