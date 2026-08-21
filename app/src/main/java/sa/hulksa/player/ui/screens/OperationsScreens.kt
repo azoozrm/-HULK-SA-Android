@@ -3,6 +3,7 @@ package sa.hulksa.player.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,14 +34,22 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -114,6 +124,113 @@ fun MaintenanceScreen(
 }
 
 @Composable
+private fun OperationsActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean,
+    enabled: Boolean = true,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(12.dp)
+    val background = when {
+        !enabled -> colors.surfaceRaised.copy(alpha = .62f)
+        primary && focused -> colors.goldBright
+        primary -> colors.gold
+        focused -> colors.gold.copy(alpha = .22f)
+        else -> Color(0xFF151711)
+    }
+    val borderColor = when {
+        focused -> colors.goldBright
+        primary -> colors.goldBright.copy(alpha = .38f)
+        else -> colors.gold.copy(alpha = .42f)
+    }
+    val textColor = when {
+        !enabled -> colors.textMuted
+        primary -> Color.Black
+        focused -> colors.goldBright
+        else -> colors.text
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(shape)
+            .background(background)
+            .border(if (focused) 2.dp else 1.dp, borderColor, shape)
+            .semantics(mergeDescendants = true) { contentDescription = text }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = text,
+            color = textColor,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun OperationsDownloadProgress(
+    operations: OperationsUiState,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val progress = operations.download.progressPercent?.coerceIn(0, 100)
+    val fraction = (progress ?: 0) / 100f
+    val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
+    val trackShape = RoundedCornerShape(50)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = .035f), shape)
+            .border(1.dp, colors.gold.copy(alpha = .24f), shape)
+            .padding(horizontal = if (isTv) 18.dp else 14.dp, vertical = if (isTv) 14.dp else 12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                "جارٍ تنزيل التحديث",
+                color = colors.text,
+                fontSize = if (isTv) 15.sp else 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                progress?.let { "$it%" } ?: "…",
+                color = colors.goldBright,
+                fontSize = if (isTv) 16.sp else 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Spacer(Modifier.height(if (isTv) 10.dp else 8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (isTv) 10.dp else 8.dp)
+                .clip(trackShape)
+                .background(Color.White.copy(alpha = .12f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction)
+                    .background(colors.goldBright, trackShape),
+            )
+        }
+    }
+}
+
+@Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun OperationsBlockingCard(
     icon: ImageVector,
@@ -129,8 +246,9 @@ private fun OperationsBlockingCard(
     val colors = LocalHulkColors.current
     val primaryRequester = remember { FocusRequester() }
     val settingsRequester = remember { FocusRequester() }
+    val downloading = operations?.download?.status == OperationsDownloadStatus.DOWNLOADING
     LaunchedEffect(isTv, operations?.download?.status) {
-        if (isTv) {
+        if (isTv && !downloading) {
             delay(110L)
             runCatching { primaryRequester.requestFocus() }
         }
@@ -182,60 +300,76 @@ private fun OperationsBlockingCard(
                 maxLines = if (isTv) 10 else 12,
                 overflow = TextOverflow.Ellipsis,
             )
-            operations?.download?.message?.let { error ->
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    error,
-                    color = if (operations.download.status == OperationsDownloadStatus.FAILED) {
-                        Color(0xFFFF9A9A)
-                    } else {
-                        colors.goldBright
-                    },
-                    fontSize = if (isTv) 14.sp else 12.sp,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            Spacer(Modifier.height(if (isTv) 22.dp else 16.dp))
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                maxItemsInEachRow = if (compact) 1 else 2,
-            ) {
-                FocusButton(
-                    text = primaryLabel,
-                    onClick = onPrimary,
-                    enabled = operations?.download?.status != OperationsDownloadStatus.DOWNLOADING,
-                    scaleOnFocus = false,
-                    modifier = Modifier
-                        .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = 180.dp))
-                        .heightIn(min = 52.dp)
-                        .focusRequester(primaryRequester)
-                        .focusProperties {
-                            right = FocusRequester.Cancel
-                            left = if (operations?.download?.status == OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED) {
-                                settingsRequester
-                            } else {
-                                FocusRequester.Cancel
-                            }
+            if (downloading && operations != null) {
+                Spacer(Modifier.height(if (isTv) 18.dp else 14.dp))
+                OperationsDownloadProgress(operations = operations, isTv = isTv)
+            } else {
+                operations?.download?.message?.let { statusMessage ->
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        statusMessage,
+                        color = if (operations.download.status == OperationsDownloadStatus.FAILED) {
+                            Color(0xFFFF9A9A)
+                        } else {
+                            colors.goldBright
                         },
-                )
-                if (operations?.download?.status == OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED) {
-                    FocusButton(
-                        text = "فتح إعدادات التثبيت",
-                        onClick = onOpenUnknownSourcesSettings,
-                        primary = false,
-                        outlined = true,
-                        scaleOnFocus = false,
-                        modifier = Modifier
-                            .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = 190.dp))
-                            .heightIn(min = 52.dp)
-                            .focusRequester(settingsRequester)
-                            .focusProperties {
-                                right = primaryRequester
-                                left = FocusRequester.Cancel
-                            },
+                        fontSize = if (isTv) 14.sp else 12.sp,
+                        textAlign = TextAlign.Center,
                     )
+                }
+            }
+            if (!downloading) {
+                Spacer(Modifier.height(if (isTv) 22.dp else 16.dp))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    maxItemsInEachRow = if (compact) 1 else 2,
+                ) {
+                    if (operations != null) {
+                        OperationsActionButton(
+                            text = primaryLabel,
+                            onClick = onPrimary,
+                            primary = true,
+                            modifier = Modifier
+                                .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = 180.dp))
+                                .heightIn(min = 52.dp)
+                                .focusRequester(primaryRequester)
+                                .focusProperties {
+                                    right = FocusRequester.Cancel
+                                    left = if (operations.download.status == OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED) {
+                                        settingsRequester
+                                    } else {
+                                        FocusRequester.Cancel
+                                    }
+                                },
+                        )
+                    } else {
+                        FocusButton(
+                            text = primaryLabel,
+                            onClick = onPrimary,
+                            scaleOnFocus = false,
+                            modifier = Modifier
+                                .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = 180.dp))
+                                .heightIn(min = 52.dp)
+                                .focusRequester(primaryRequester),
+                        )
+                    }
+                    if (operations?.download?.status == OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED) {
+                        OperationsActionButton(
+                            text = "فتح إعدادات التثبيت",
+                            onClick = onOpenUnknownSourcesSettings,
+                            primary = false,
+                            modifier = Modifier
+                                .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = 190.dp))
+                                .heightIn(min = 52.dp)
+                                .focusRequester(settingsRequester)
+                                .focusProperties {
+                                    right = primaryRequester
+                                    left = FocusRequester.Cancel
+                                },
+                        )
+                    }
                 }
             }
         }
@@ -256,12 +390,22 @@ fun OptionalUpdateOverlay(
     val updateRequester = remember { FocusRequester() }
     val laterRequester = remember { FocusRequester() }
     val settingsRequester = remember { FocusRequester() }
+    val downloading = operations.download.status == OperationsDownloadStatus.DOWNLOADING
+    val settingsVisible = operations.download.status == OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED
+
     LaunchedEffect(isTv, operations.download.status) {
         if (isTv) {
             delay(100L)
-            runCatching { updateRequester.requestFocus() }
+            runCatching {
+                if (downloading) {
+                    laterRequester.requestFocus()
+                } else {
+                    updateRequester.requestFocus()
+                }
+            }
         }
     }
+
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -272,60 +416,170 @@ fun OptionalUpdateOverlay(
     ) {
         val compact = !isTv && maxWidth < 430.dp
         val width = when {
-            isTv -> (maxWidth * .46f).coerceIn(500.dp, 740.dp)
-            maxWidth >= 700.dp -> 560.dp
+            isTv -> (maxWidth * .46f).coerceIn(500.dp, 760.dp)
+            maxWidth >= 700.dp -> 580.dp
             else -> maxWidth
         }
+        val shape = RoundedCornerShape(if (isTv) 26.dp else 20.dp)
         Column(
-            Modifier
+            modifier = Modifier
                 .width(width)
                 .heightIn(max = maxHeight)
                 .verticalScroll(rememberScrollState())
-                .background(colors.surfaceRaised, RoundedCornerShape(if (isTv) 24.dp else 18.dp))
-                .border(2.dp, colors.gold.copy(alpha = .62f), RoundedCornerShape(if (isTv) 24.dp else 18.dp))
-                .padding(if (isTv) 26.dp else 18.dp),
+                .background(colors.surfaceRaised, shape)
+                .border(if (isTv) 2.dp else 1.dp, colors.gold.copy(alpha = .72f), shape)
+                .padding(horizontal = if (isTv) 30.dp else 19.dp, vertical = if (isTv) 28.dp else 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Rounded.SystemUpdate, null, tint = colors.goldBright, modifier = Modifier.size(if (isTv) 38.dp else 30.dp))
-                Column {
-                    Text("يتوفر تحديث جديد لـ HULK SA", color = colors.text, fontSize = if (isTv) 24.sp else 19.sp, fontWeight = FontWeight.Black)
-                    Text("الإصدار ${operations.update.latestVersionName}", color = colors.goldBright, fontSize = if (isTv) 14.sp else 12.sp)
+            Box(
+                modifier = Modifier
+                    .size(if (isTv) 58.dp else 48.dp)
+                    .background(colors.gold.copy(alpha = .14f), RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.goldBright.copy(alpha = .42f), RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.SystemUpdate,
+                    contentDescription = null,
+                    tint = colors.goldBright,
+                    modifier = Modifier.size(if (isTv) 32.dp else 26.dp),
+                )
+            }
+            Spacer(Modifier.height(if (isTv) 14.dp else 11.dp))
+            Text(
+                "HULK SA • تحديث التطبيق",
+                color = colors.goldBright,
+                fontSize = if (isTv) 13.sp else 11.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "يتوفر تحديث جديد",
+                color = colors.text,
+                fontSize = if (isTv) 28.sp else 22.sp,
+                lineHeight = if (isTv) 34.sp else 28.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "الإصدار ${operations.update.latestVersionName}",
+                color = colors.textMuted,
+                fontSize = if (isTv) 14.sp else 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            if (operations.update.releaseNotes.isNotBlank()) {
+                Spacer(Modifier.height(if (isTv) 16.dp else 13.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White.copy(alpha = .035f), RoundedCornerShape(14.dp))
+                        .border(1.dp, colors.gold.copy(alpha = .18f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = if (isTv) 16.dp else 13.dp, vertical = if (isTv) 12.dp else 10.dp),
+                ) {
+                    Text(
+                        operations.update.releaseNotes,
+                        color = colors.textMuted,
+                        fontSize = if (isTv) 15.sp else 13.sp,
+                        lineHeight = if (isTv) 22.sp else 19.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        maxLines = 8,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
-            if (operations.update.releaseNotes.isNotBlank()) {
-                Spacer(Modifier.height(13.dp))
-                Text(operations.update.releaseNotes, color = colors.textMuted, fontSize = if (isTv) 15.sp else 13.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
+
+            if (downloading) {
+                Spacer(Modifier.height(if (isTv) 18.dp else 15.dp))
+                OperationsDownloadProgress(operations = operations, isTv = isTv)
+            } else {
+                operations.download.message?.let { statusMessage ->
+                    Spacer(Modifier.height(if (isTv) 13.dp else 10.dp))
+                    Text(
+                        statusMessage,
+                        color = if (operations.download.status == OperationsDownloadStatus.FAILED) {
+                            Color(0xFFFF9A9A)
+                        } else {
+                            colors.goldBright
+                        },
+                        fontSize = if (isTv) 13.sp else 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
-            operations.download.message?.let {
-                Spacer(Modifier.height(10.dp))
-                Text(it, color = if (operations.download.status == OperationsDownloadStatus.FAILED) Color(0xFFFF9A9A) else colors.goldBright, fontSize = if (isTv) 13.sp else 11.sp)
-            }
-            Spacer(Modifier.height(18.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalArrangement = Arrangement.spacedBy(9.dp), maxItemsInEachRow = if (compact) 1 else 3) {
-                FocusButton(
-                    text = operationsUpdateButtonLabel(operations),
-                    onClick = onUpdate,
-                    enabled = operations.download.status != OperationsDownloadStatus.DOWNLOADING,
-                    scaleOnFocus = false,
-                    modifier = Modifier.then(if (compact) Modifier.fillMaxWidth() else Modifier).heightIn(min = 50.dp).focusRequester(updateRequester),
-                )
-                if (operations.download.status == OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED) {
-                    FocusButton(
+
+            Spacer(Modifier.height(if (isTv) 22.dp else 18.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                maxItemsInEachRow = if (compact) 1 else 3,
+            ) {
+                if (!downloading) {
+                    OperationsActionButton(
+                        text = operationsUpdateButtonLabel(operations),
+                        onClick = onUpdate,
+                        primary = true,
+                        modifier = Modifier
+                            .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = if (isTv) 180.dp else 150.dp))
+                            .heightIn(min = if (isTv) 54.dp else 50.dp)
+                            .focusRequester(updateRequester)
+                            .then(
+                                if (isTv) {
+                                    Modifier.focusProperties {
+                                        right = FocusRequester.Cancel
+                                        left = if (settingsVisible) settingsRequester else laterRequester
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                    )
+                }
+                if (settingsVisible) {
+                    OperationsActionButton(
                         text = "إعدادات التثبيت",
                         onClick = onOpenUnknownSourcesSettings,
                         primary = false,
-                        outlined = true,
-                        scaleOnFocus = false,
-                        modifier = Modifier.then(if (compact) Modifier.fillMaxWidth() else Modifier).heightIn(min = 50.dp).focusRequester(settingsRequester),
+                        modifier = Modifier
+                            .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = if (isTv) 190.dp else 155.dp))
+                            .heightIn(min = if (isTv) 54.dp else 50.dp)
+                            .focusRequester(settingsRequester)
+                            .then(
+                                if (isTv) {
+                                    Modifier.focusProperties {
+                                        right = updateRequester
+                                        left = laterRequester
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            ),
                     )
                 }
-                FocusButton(
+                OperationsActionButton(
                     text = "لاحقًا",
                     onClick = onLater,
                     primary = false,
-                    outlined = true,
-                    scaleOnFocus = false,
-                    modifier = Modifier.then(if (compact) Modifier.fillMaxWidth() else Modifier).heightIn(min = 50.dp).focusRequester(laterRequester),
+                    modifier = Modifier
+                        .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = if (isTv) 170.dp else 140.dp))
+                        .heightIn(min = if (isTv) 54.dp else 50.dp)
+                        .focusRequester(laterRequester)
+                        .then(
+                            if (isTv && !downloading) {
+                                Modifier.focusProperties {
+                                    right = if (settingsVisible) settingsRequester else updateRequester
+                                    left = FocusRequester.Cancel
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
                 )
             }
         }
