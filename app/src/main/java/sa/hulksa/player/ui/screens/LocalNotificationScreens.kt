@@ -59,7 +59,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.EpisodeNotificationPopup
-import sa.hulksa.player.data.LocalEpisodeNotification
+import sa.hulksa.player.data.LocalNotificationItem
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -211,14 +211,14 @@ private data class NotificationCardFocus(
 
 @Composable
 fun LocalNotificationCenterScreen(
-    notifications: List<LocalEpisodeNotification>,
+    notifications: List<LocalNotificationItem>,
     unreadCount: Int,
     isTv: Boolean,
     onBack: () -> Unit,
-    onOpen: (LocalEpisodeNotification) -> Unit,
-    onMarkRead: (LocalEpisodeNotification) -> Unit,
+    onOpen: (LocalNotificationItem) -> Unit,
+    onMarkRead: (LocalNotificationItem) -> Unit,
     onReadAll: () -> Unit,
-    onDelete: (LocalEpisodeNotification) -> Unit,
+    onDelete: (LocalNotificationItem) -> Unit,
     onClearAll: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -227,7 +227,7 @@ fun LocalNotificationCenterScreen(
     val readAllRequester = remember { FocusRequester() }
     val clearRequester = remember { FocusRequester() }
     val focusScope = rememberCoroutineScope()
-    val keys = notifications.map(LocalEpisodeNotification::id)
+    val keys = notifications.map(LocalNotificationItem::id)
     val cardFocus = remember(keys) { notifications.associate { it.id to NotificationCardFocus() } }
 
     BoxWithConstraints(
@@ -400,7 +400,7 @@ fun LocalNotificationCenterScreen(
                     contentPadding = PaddingValues(bottom = if (isTv) 34.dp else 24.dp),
                     verticalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
                 ) {
-                    items(notifications, key = LocalEpisodeNotification::id) { notification ->
+                    items(notifications, key = LocalNotificationItem::id) { notification ->
                         val index = notifications.indexOfFirst { it.id == notification.id }
                         val focus = checkNotNull(cardFocus[notification.id])
                         val previous = nextLocalNotificationFocusIndex(index, notifications.size, movingDown = false)
@@ -449,7 +449,7 @@ private fun NotificationCenterTitle(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LocalNotificationCard(
-    notification: LocalEpisodeNotification,
+    notification: LocalNotificationItem,
     metrics: LocalNotificationCenterMetrics,
     isTv: Boolean,
     focus: NotificationCardFocus,
@@ -462,6 +462,14 @@ private fun LocalNotificationCard(
     val colors = LocalHulkColors.current
     val focusScope = rememberCoroutineScope()
     val shape = RoundedCornerShape(if (isTv) 18.dp else 14.dp)
+    val episode = (notification as? LocalNotificationItem.Episode)?.notification
+    val system = (notification as? LocalNotificationItem.System)?.notification
+    val title = episode?.seriesName ?: system?.title.orEmpty()
+    val detail = if (episode != null) {
+        "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}"
+    } else {
+        system?.message.orEmpty()
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -489,10 +497,10 @@ private fun LocalNotificationCard(
                 .background(Color(0xFF11120E)),
             contentAlignment = Alignment.Center,
         ) {
-            if (!notification.posterUrl.isNullOrBlank()) {
+            if (!episode?.posterUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = notification.posterUrl,
-                    contentDescription = notification.seriesName,
+                    model = episode?.posterUrl,
+                    contentDescription = title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
@@ -513,13 +521,13 @@ private fun LocalNotificationCard(
 
         Column(Modifier.weight(1f)) {
             Text(
-                text = "حلقة جديدة",
+                text = if (episode != null) "حلقة جديدة" else "رسالة من HULK SA",
                 color = colors.goldBright,
                 fontSize = if (isTv) 12.sp else 10.sp,
                 fontWeight = FontWeight.Black,
             )
             Text(
-                text = notification.seriesName,
+                text = title,
                 color = colors.text,
                 fontSize = if (isTv) 19.sp else 16.sp,
                 fontWeight = FontWeight.Black,
@@ -528,9 +536,11 @@ private fun LocalNotificationCard(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "الموسم ${notification.seasonNumber} — الحلقة ${notification.episodeNumber}",
+                text = detail,
                 color = colors.textMuted,
                 fontSize = if (isTv) 12.sp else 10.sp,
+                maxLines = if (episode != null) 1 else 6,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = localNotificationRelativeTime(notification.createdAtEpochMs),
@@ -543,7 +553,7 @@ private fun LocalNotificationCard(
                 verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 FocusButton(
-                    text = "فتح",
+                    text = if (episode != null) "فتح" else "حسنًا",
                     onClick = onOpen,
                     compact = true,
                     scaleOnFocus = false,
@@ -554,10 +564,10 @@ private fun LocalNotificationCard(
                             up = previousRequester
                             down = nextRequester
                             right = FocusRequester.Cancel
-                            left = if (notification.read) focus.delete else focus.read
+                            left = if (notification.read || episode == null) focus.delete else focus.read
                         },
                 )
-                if (!notification.read) {
+                if (episode != null && !notification.read) {
                     FocusButton(
                         text = "تعليم كمقروء",
                         onClick = {
@@ -597,7 +607,7 @@ private fun LocalNotificationCard(
                         .focusProperties {
                             up = previousRequester
                             down = nextRequester
-                            right = if (notification.read) focus.open else focus.read
+                            right = if (notification.read || episode == null) focus.open else focus.read
                             left = FocusRequester.Cancel
                         },
                 )

@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
@@ -28,6 +29,8 @@ import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.data.HulkRepository
+import sa.hulksa.player.data.OperationsServiceStatus
+import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.ProfilePinCredentialStore
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
@@ -36,11 +39,16 @@ import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.screens.AdaptiveProfileManagementScreen
 import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
+import sa.hulksa.player.ui.screens.MaintenanceScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.NewEpisodeAlertOverlay
+import sa.hulksa.player.ui.screens.OperationsAnnouncementOverlay
+import sa.hulksa.player.ui.screens.OperationsStatusBanner
+import sa.hulksa.player.ui.screens.OptionalUpdateOverlay
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
+import sa.hulksa.player.ui.screens.RequiredUpdateScreen
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
 
@@ -384,6 +392,10 @@ fun ProfileAwareHulkApp(
 
     val appContentFocusRequester = remember { FocusRequester() }
     val notificationFocusScope = rememberCoroutineScope()
+    val operationsBlocked =
+        state.operations.updateDecision == OperationsUpdateDecision.REQUIRED ||
+            state.operations.service.status == OperationsServiceStatus.MAINTENANCE
+    val operationsAnnouncement = state.operations.announcementPopup
 
     Box(Modifier.fillMaxSize()) {
         Box(
@@ -394,6 +406,23 @@ fun ProfileAwareHulkApp(
                 .focusGroup(),
         ) {
             when {
+            state.operations.updateDecision == OperationsUpdateDecision.REQUIRED -> RequiredUpdateScreen(
+                operations = state.operations,
+                isTv = isTelevisionDevice,
+                onUpdate = viewModel::startOperationsUpdate,
+                onOpenUnknownSourcesSettings = {
+                    viewModel.openOperationsInstallSettings { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+
+            state.operations.service.status == OperationsServiceStatus.MAINTENANCE -> MaintenanceScreen(
+                service = state.operations.service,
+                isTv = isTelevisionDevice,
+                onRetry = viewModel::retryOperations,
+            )
+
             state.screen == HulkScreen.NOTIFICATION_CENTER -> LocalNotificationCenterScreen(
                 notifications = state.localNotifications,
                 unreadCount = state.unreadNotificationCount,
@@ -566,26 +595,74 @@ fun ProfileAwareHulkApp(
             }
         }
 
-        state.notificationPopup?.let { popup ->
-            NewEpisodeAlertOverlay(
-                popup = popup,
+        if (!operationsBlocked) {
+            OperationsStatusBanner(
+                operations = state.operations,
                 isTv = isTelevisionDevice,
-                onPresented = viewModel::confirmNotificationPopupPresented,
-                onPrimary = {
-                    viewModel.activateNotificationPopup { message ->
-                        message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-                    }
-                },
-                onLater = {
-                    viewModel.dismissNotificationPopup()
-                    if (isTelevisionDevice) {
-                        notificationFocusScope.launch {
-                            delay(90L)
-                            runCatching { appContentFocusRequester.requestFocus() }
-                        }
-                    }
-                },
+                modifier = Modifier.align(Alignment.TopCenter),
             )
+
+            when {
+                state.operations.updateDecision == OperationsUpdateDecision.OPTIONAL ->
+                    OptionalUpdateOverlay(
+                        operations = state.operations,
+                        isTv = isTelevisionDevice,
+                        onUpdate = viewModel::startOperationsUpdate,
+                        onLater = {
+                            viewModel.dismissOptionalOperationsUpdate()
+                            if (isTelevisionDevice) {
+                                notificationFocusScope.launch {
+                                    delay(90L)
+                                    runCatching { appContentFocusRequester.requestFocus() }
+                                }
+                            }
+                        },
+                        onOpenUnknownSourcesSettings = {
+                            viewModel.openOperationsInstallSettings { message ->
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                    )
+
+                operationsAnnouncement != null -> {
+                    OperationsAnnouncementOverlay(
+                        announcement = operationsAnnouncement,
+                        isTv = isTelevisionDevice,
+                        onConfirm = {
+                            viewModel.confirmOperationsAnnouncement()
+                            if (isTelevisionDevice) {
+                                notificationFocusScope.launch {
+                                    delay(90L)
+                                    runCatching { appContentFocusRequester.requestFocus() }
+                                }
+                            }
+                        },
+                    )
+                }
+
+                state.notificationPopup != null -> {
+                    val popup = state.notificationPopup
+                    NewEpisodeAlertOverlay(
+                        popup = popup,
+                        isTv = isTelevisionDevice,
+                        onPresented = viewModel::confirmNotificationPopupPresented,
+                        onPrimary = {
+                            viewModel.activateNotificationPopup { message ->
+                                message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                            }
+                        },
+                        onLater = {
+                            viewModel.dismissNotificationPopup()
+                            if (isTelevisionDevice) {
+                                notificationFocusScope.launch {
+                                    delay(90L)
+                                    runCatching { appContentFocusRequester.requestFocus() }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }

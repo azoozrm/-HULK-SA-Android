@@ -307,7 +307,10 @@ fun HulkApp(
                                 isTv = isTv,
                                 isFavorite = viewModel.isFavorite(series),
                                 notificationsEnabled = viewModel.isSeriesNotificationsEnabled(series),
-                                notificationToggleAvailable = !state.isLoading && state.errorMessage == null,
+                                notificationToggleAvailable =
+                                    state.operations.features.episodeNotificationsEnabled &&
+                                        !state.isLoading &&
+                                        state.errorMessage == null,
                                 targetEpisodeId = state.seriesEpisodeTarget
                                     ?.takeIf { it.seriesId == series.id }
                                     ?.episodeId,
@@ -376,6 +379,7 @@ fun HulkApp(
                             )
                             PlayerProScreen(
                                 request = playback,
+                                liveTvProEnabled = state.operations.features.liveTvProEnabled,
                                 liveCatalog = state.catalogs[ContentType.LIVE],
                                 isFavorite = viewModel::isFavorite,
                                 onSelectLiveChannel = viewModel::switchLiveChannel,
@@ -404,6 +408,7 @@ fun HulkApp(
                 ) {
                     StableMobileBottomNavigation(
                         selected = state.destination,
+                        downloadsEnabled = state.operations.features.downloadsEnabled,
                         onSelectDestination = selectDestinationWithProfileContext,
                         onSwitchProfile = requestProfileSwitch,
                         modifier = Modifier.align(Alignment.BottomCenter),

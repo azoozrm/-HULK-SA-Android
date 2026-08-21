@@ -16,11 +16,13 @@ SPEC.loader.exec_module(MODULE)
 
 class RuntimeConfigVerifierTest(unittest.TestCase):
     TEST_API_URL = MODULE.PRODUCTION_RESELLER_API_URL
+    TEST_OPERATIONS_URL = MODULE.PRODUCTION_OPERATIONS_CONFIG_URL
 
     def write_build_config(
         self,
         directory: Path,
         reseller_api_url: str = TEST_API_URL,
+        operations_config_url: str = TEST_OPERATIONS_URL,
     ) -> Path:
         path = directory / "BuildConfig.java"
         path.write_text(
@@ -29,6 +31,7 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
                     "package sa.hulksa.player;",
                     "public final class BuildConfig {",
                     f'  public static final String RESELLER_API_URL = "{reseller_api_url}";',
+                    f'  public static final String OPERATIONS_CONFIG_URL = "{operations_config_url}";',
                     "}",
                 ),
             ),
@@ -48,12 +51,13 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
             build_config = self.write_build_config(directory)
             archive = self.write_archive(
                 directory,
-                b"dex\n" + self.TEST_API_URL.encode("utf-8"),
+                b"dex\n" + self.TEST_API_URL.encode("utf-8") + b"\n" + self.TEST_OPERATIONS_URL.encode("utf-8"),
             )
 
             evidence = MODULE.verify(build_config, archive)
 
             self.assertEqual(self.TEST_API_URL, evidence["reseller_api_url"])
+            self.assertEqual(self.TEST_OPERATIONS_URL, evidence["operations_config_url"])
             self.assertEqual(1, evidence["dex_files"])
 
     def test_rejects_non_https_reseller_api(self) -> None:
@@ -63,7 +67,10 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
                 directory,
                 reseller_api_url="http://reseller-api.hulksa.com",
             )
-            archive = self.write_archive(directory, b"dex\nhttp://reseller-api.hulksa.com")
+            archive = self.write_archive(
+                directory,
+                b"dex\nhttp://reseller-api.hulksa.com\n" + self.TEST_OPERATIONS_URL.encode("utf-8"),
+            )
 
             with self.assertRaises(MODULE.VerificationError):
                 MODULE.verify(build_config, archive)
@@ -75,7 +82,25 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
                 directory,
                 reseller_api_url="https://api.example.com",
             )
-            archive = self.write_archive(directory, b"dex\nhttps://api.example.com")
+            archive = self.write_archive(
+                directory,
+                b"dex\nhttps://api.example.com\n" + self.TEST_OPERATIONS_URL.encode("utf-8"),
+            )
+
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE.verify(build_config, archive)
+
+    def test_rejects_unreviewed_operations_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            build_config = self.write_build_config(
+                directory,
+                operations_config_url="https://example.com/config",
+            )
+            archive = self.write_archive(
+                directory,
+                self.TEST_API_URL.encode("utf-8") + b"\nhttps://example.com/config",
+            )
 
             with self.assertRaises(MODULE.VerificationError):
                 MODULE.verify(build_config, archive)
@@ -88,6 +113,8 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
                 directory,
                 (
                     self.TEST_API_URL.encode("utf-8")
+                    + b"\n"
+                    + self.TEST_OPERATIONS_URL.encode("utf-8")
                     + b"\nhttps://example.invalid"
                 ),
             )
@@ -101,7 +128,10 @@ class RuntimeConfigVerifierTest(unittest.TestCase):
             build_config = self.write_build_config(directory)
             archive = self.write_archive(
                 directory,
-                self.TEST_API_URL.encode("utf-8") + b"\nhttp://3162356.xyz:8080",
+                self.TEST_API_URL.encode("utf-8")
+                + b"\n"
+                + self.TEST_OPERATIONS_URL.encode("utf-8")
+                + b"\nhttp://3162356.xyz:8080",
             )
 
             with self.assertRaises(MODULE.VerificationError):

@@ -359,6 +359,12 @@ fun MainShellScreen(
     val adaptiveUi = LocalAdaptiveUi.current
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
+    val downloadsEnabled = state.operations.features.downloadsEnabled
+    val navigationEntries = remember(downloadsEnabled) {
+        destinations.filterNot { entry ->
+            !downloadsEnabled && entry.destination == MainDestination.DOWNLOADS
+        }
+    }
     val queryMemory = remember { mutableStateMapOf<MainDestination, String>() }
     val categoryMemory = remember { mutableStateMapOf<MainDestination, String?>() }
     var previousDestination by remember { mutableStateOf(state.destination) }
@@ -410,13 +416,14 @@ fun MainShellScreen(
             }
         }
     }
-    val tvRailFocusRequesters = remember {
-        destinations.associate { entry -> entry.destination to FocusRequester() }
+    val tvRailFocusRequesters = remember(navigationEntries) {
+        navigationEntries.associate { entry -> entry.destination to FocusRequester() }
     }
     Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
+                    entries = navigationEntries,
                     selected = state.destination,
                     onSelect = rememberingSelectDestination,
                     onSwitchProfile = requestProfileSwitch,
@@ -491,7 +498,12 @@ fun MainShellScreen(
                         onLogout = onLogout,
                     )
                 }
-                MobileNavigation(state.destination, rememberingSelectDestination, navigationMemory)
+                MobileNavigation(
+                    selected = state.destination,
+                    onSelect = rememberingSelectDestination,
+                    navigationMemory = navigationMemory,
+                    entries = navigationEntries,
+                )
             }
         }
     }
@@ -499,6 +511,7 @@ fun MainShellScreen(
 
 @Composable
 private fun CinematicNavigationRail(
+    entries: List<DestinationEntry>,
     selected: MainDestination,
     onSelect: (MainDestination) -> Unit,
     onSwitchProfile: () -> Unit,
@@ -511,7 +524,7 @@ private fun CinematicNavigationRail(
         screenWidthDp = adaptiveUi.screenWidthDp,
         screenHeightDp = adaptiveUi.screenHeightDp,
     )
-    val primaryEntries = destinations.filterNot { it.destination == MainDestination.SETTINGS }
+    val primaryEntries = entries.filterNot { it.destination == MainDestination.SETTINGS }
     val profileRequester = remember { FocusRequester() }
     val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
     val selectedRequester = destinationFocusRequesters.getValue(selected)
@@ -589,7 +602,7 @@ private fun CinematicNavigationRail(
         )
         Spacer(Modifier.height(metrics.itemGapDp.dp))
         Spacer(Modifier.weight(1f))
-        destinations.first { it.destination == MainDestination.SETTINGS }.let { entry ->
+        entries.first { it.destination == MainDestination.SETTINGS }.let { entry ->
             NavigationItem(
                 entry = entry,
                 selected = selected == entry.destination,
@@ -673,6 +686,7 @@ private fun MobileNavigation(
     selected: MainDestination,
     onSelect: (MainDestination) -> Unit,
     navigationMemory: NavigationMemoryStore,
+    entries: List<DestinationEntry>,
 ) {
     val colors = LocalHulkColors.current
     val rememberedPosition = remember(navigationMemory) { navigationMemory.mobileNavigationPosition() }
@@ -685,9 +699,9 @@ private fun MobileNavigation(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
     val isWide = configuration.screenWidthDp >= 600
-    val mobileEntries = remember {
+    val mobileEntries = remember(entries) {
         buildList {
-            destinations.forEach { entry ->
+            entries.forEach { entry ->
                 add(entry to false)
                 if (entry.destination == MainDestination.SEARCH) {
                     add(
@@ -988,10 +1002,12 @@ private fun DestinationContent(
             },
             onClearHistory = onClearHistory,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
+            downloadsEnabled = state.operations.features.downloadsEnabled,
             onToggleWifiOnly = onToggleWifiOnly,
             onToggleDownloadSchedule = onToggleDownloadSchedule,
             onCycleConcurrentDownloads = onCycleConcurrentDownloads,
             notificationMasterEnabled = state.episodeNotificationsEnabled,
+            episodeNotificationsAvailable = state.operations.features.episodeNotificationsEnabled,
             onToggleEpisodeNotificationMaster = onToggleEpisodeNotificationMaster,
             onLogout = onLogout,
         )
@@ -1017,10 +1033,12 @@ private fun CinemaHomeScreen(
     val live = homeContent.live
     val continueWatching = homeContent.continueWatching
     val lastLive = homeContent.lastLive
-    val becauseYouWatched = homeContent.becauseYouWatched
-    val suggested = homeContent.suggested
+    val smartRecommendationsEnabled = state.operations.features.smartRecommendationsEnabled
+    val becauseYouWatched = if (smartRecommendationsEnabled) homeContent.becauseYouWatched else emptyList()
+    val suggested = if (smartRecommendationsEnabled) homeContent.suggested else emptyList()
     val personalizedLive = homeContent.personalizedLive
-    val suggestedLive = remember(personalizedLive, lastLive) {
+    val suggestedLive = remember(personalizedLive, lastLive, smartRecommendationsEnabled) {
+        if (!smartRecommendationsEnabled) return@remember emptyList()
         val lastLiveId = lastLive?.streamId
         personalizedLive
             .filterNot { lastLiveId != null && it.id == lastLiveId }
@@ -1029,7 +1047,8 @@ private fun CinemaHomeScreen(
     val popularMovies = homeContent.popularMovies
     val popularSeries = homeContent.popularSeries
     val featuredCandidates = homeContent.featuredCandidates
-    val activeDownloads = remember(state.downloads) {
+    val activeDownloads = remember(state.downloads, state.operations.features.downloadsEnabled) {
+        if (!state.operations.features.downloadsEnabled) return@remember emptyList()
         state.downloads.filter {
             it.status == OfflineStatus.DOWNLOADING || it.status == OfflineStatus.QUEUED ||
                 it.status == OfflineStatus.CHECKING || it.status == OfflineStatus.PAUSED ||

@@ -12,10 +12,11 @@ fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 val resellerApiUrl = "https://hulksa.com"
+val operationsConfigUrl = "https://hulksa.com/hulk-operations/api/app/v1/config/"
 
 val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
     group = "verification"
-    description = "Fails release builds unless the public HTTPS HULK reseller API is configured."
+    description = "Fails release builds unless the reviewed HTTPS HULK endpoints are configured."
 
     doLast {
         val value = resellerApiUrl.trim()
@@ -36,6 +37,22 @@ val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfi
         if (value.contains("3162356.xyz", ignoreCase = true)) {
             throw GradleException(
                 "The legacy IPTV host must never be compiled as the HULK reseller API.",
+            )
+        }
+
+        val operationsValue = operationsConfigUrl.trim()
+        val operationsParsed = runCatching { URI(operationsValue) }.getOrNull()
+        if (
+            operationsParsed == null ||
+            !operationsParsed.scheme.equals("https", ignoreCase = true) ||
+            !operationsParsed.host.equals("hulksa.com", ignoreCase = true) ||
+            operationsParsed.userInfo != null ||
+            operationsParsed.query != null ||
+            operationsParsed.fragment != null ||
+            operationsParsed.path != "/hulk-operations/api/app/v1/config/"
+        ) {
+            throw GradleException(
+                "The HULK Operations config endpoint must be the reviewed public HTTPS URL.",
             )
         }
     }
@@ -88,6 +105,7 @@ android {
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
 
         buildConfigField("String", "RESELLER_API_URL", resellerApiUrl.asBuildConfigString())
+        buildConfigField("String", "OPERATIONS_CONFIG_URL", operationsConfigUrl.asBuildConfigString())
         vectorDrawables.useSupportLibrary = true
 
         // Phase 3.1: preserve qualified ABIs while polishing responsive mobile UI.
@@ -168,6 +186,7 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
