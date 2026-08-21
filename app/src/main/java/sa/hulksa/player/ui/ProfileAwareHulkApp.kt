@@ -641,7 +641,7 @@ fun ProfileAwareHulkApp(
                 }
 
                 state.notificationPopup != null -> {
-                    val popup = state.notificationPopup
+                    val popup = checkNotNull(state.notificationPopup)
                     NewEpisodeAlertOverlay(
                         popup = popup,
                         isTv = isTelevisionDevice,
