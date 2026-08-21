@@ -354,35 +354,108 @@ fun OperationsAnnouncementOverlay(
         OperationsAnnouncementSeverity.IMPORTANT,
         -> Icons.Rounded.Warning
     }
+    val severityLabel = when (announcement.severity) {
+        OperationsAnnouncementSeverity.INFO -> "رسالة من HULK SA"
+        OperationsAnnouncementSeverity.WARNING -> "تنبيه من HULK SA"
+        OperationsAnnouncementSeverity.IMPORTANT -> "إشعار مهم من HULK SA"
+    }
+    val accent = when (announcement.severity) {
+        OperationsAnnouncementSeverity.INFO -> colors.goldBright
+        OperationsAnnouncementSeverity.WARNING -> Color(0xFFFFC857)
+        OperationsAnnouncementSeverity.IMPORTANT -> Color(0xFFFFB347)
+    }
     BoxWithConstraints(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = .66f)).safeDrawingPadding().padding(if (isTv) 34.dp else 12.dp),
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = .72f))
+            .safeDrawingPadding()
+            .padding(if (isTv) 34.dp else 12.dp),
         contentAlignment = Alignment.Center,
     ) {
+        val compact = !isTv && maxWidth < 430.dp
         val width = when {
-            isTv -> (maxWidth * .44f).coerceIn(480.dp, 720.dp)
+            isTv -> (maxWidth * .42f).coerceIn(500.dp, 690.dp)
             maxWidth >= 700.dp -> 560.dp
             else -> maxWidth
         }
+        val shape = RoundedCornerShape(if (isTv) 26.dp else 20.dp)
         Column(
-            Modifier.width(width).heightIn(max = maxHeight).verticalScroll(rememberScrollState())
-                .background(colors.surfaceRaised, RoundedCornerShape(if (isTv) 24.dp else 18.dp))
-                .border(2.dp, colors.gold.copy(alpha = .62f), RoundedCornerShape(if (isTv) 24.dp else 18.dp))
-                .padding(if (isTv) 26.dp else 18.dp),
+            Modifier
+                .width(width)
+                .heightIn(max = maxHeight)
+                .verticalScroll(rememberScrollState())
+                .background(colors.surfaceRaised, shape)
+                .border(if (isTv) 2.dp else 1.dp, accent.copy(alpha = .68f), shape)
+                .padding(horizontal = if (isTv) 34.dp else 20.dp, vertical = if (isTv) 30.dp else 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            BrandLogo(Modifier.size(if (isTv) 68.dp else 52.dp))
-            Spacer(Modifier.height(10.dp))
-            Icon(icon, null, tint = colors.goldBright, modifier = Modifier.size(if (isTv) 34.dp else 28.dp))
-            Text("HULK SA", color = colors.goldBright, fontSize = if (isTv) 13.sp else 11.sp, fontWeight = FontWeight.Bold)
-            Text(announcement.title, color = colors.text, fontSize = if (isTv) 25.sp else 20.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(10.dp))
-            Text(announcement.message, color = colors.textMuted, fontSize = if (isTv) 16.sp else 14.sp, textAlign = TextAlign.Center, maxLines = 12, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(18.dp))
+            BrandLogo(Modifier.size(if (isTv) 86.dp else 62.dp))
+            Spacer(Modifier.height(if (isTv) 10.dp else 8.dp))
+            Text(
+                "HULK SA",
+                color = colors.text,
+                fontSize = if (isTv) 18.sp else 15.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+            )
+            Text(
+                "رسالة رسمية من التطبيق",
+                color = colors.textMuted,
+                fontSize = if (isTv) 12.sp else 10.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(if (isTv) 18.dp else 14.dp))
+            Box(
+                modifier = Modifier
+                    .size(if (isTv) 56.dp else 46.dp)
+                    .background(accent.copy(alpha = .13f), RoundedCornerShape(50))
+                    .border(1.dp, accent.copy(alpha = .48f), RoundedCornerShape(50)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(if (isTv) 30.dp else 24.dp),
+                )
+            }
+            Spacer(Modifier.height(if (isTv) 11.dp else 9.dp))
+            Text(
+                severityLabel,
+                color = accent,
+                fontSize = if (isTv) 14.sp else 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(if (isTv) 6.dp else 5.dp))
+            Text(
+                announcement.title,
+                color = colors.text,
+                fontSize = if (isTv) 29.sp else 22.sp,
+                lineHeight = if (isTv) 36.sp else 29.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(if (isTv) 13.dp else 11.dp))
+            Text(
+                announcement.message,
+                color = colors.textMuted,
+                fontSize = if (isTv) 17.sp else 14.sp,
+                lineHeight = if (isTv) 26.sp else 21.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 12,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(if (isTv) 24.dp else 19.dp))
             FocusButton(
                 text = "حسنًا",
                 onClick = onConfirm,
                 scaleOnFocus = false,
-                modifier = Modifier.widthIn(min = 150.dp).heightIn(min = 50.dp).focusRequester(confirmRequester),
+                modifier = Modifier
+                    .then(if (compact) Modifier.fillMaxWidth() else Modifier.widthIn(min = 190.dp))
+                    .heightIn(min = if (isTv) 54.dp else 50.dp)
+                    .focusRequester(confirmRequester),
             )
         }
     }
