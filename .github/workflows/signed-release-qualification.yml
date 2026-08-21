@@ -6,11 +6,11 @@ on:
       expected_version_code:
         required: false
         type: string
-        default: '62'
+        default: '65'
       expected_version_name:
         required: false
         type: string
-        default: '0.9.3.18'
+        default: '0.9.3.21'
     secrets:
       HULK_RELEASE_KEYSTORE_BASE64:
         required: true
@@ -27,12 +27,12 @@ on:
       expected_version_code:
         description: Expected Android versionCode
         required: true
-        default: '62'
+        default: '65'
         type: string
       expected_version_name:
         description: Expected Android versionName
         required: true
-        default: '0.9.3.18'
+        default: '0.9.3.21'
         type: string
 
 permissions:
@@ -136,6 +136,8 @@ jobs:
       ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD: ${{ secrets.HULK_RELEASE_STORE_PASSWORD }}
       ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD: ${{ secrets.HULK_RELEASE_KEY_PASSWORD }}
       EXPECTED_CERT_SHA256: ${{ secrets.HULK_RELEASE_CERT_SHA256 }}
+      QUALIFICATION_VERSION_CODE: ${{ inputs.expected_version_code || '65' }}
+      QUALIFICATION_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.21' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -169,10 +171,13 @@ jobs:
           [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_STORE_PASSWORD" ]] || missing+=(HULK_RELEASE_STORE_PASSWORD)
           [[ -n "$ORG_GRADLE_PROJECT_HULK_RELEASE_KEY_PASSWORD" ]] || missing+=(HULK_RELEASE_KEY_PASSWORD)
           [[ -n "$EXPECTED_CERT_SHA256" ]] || missing+=(HULK_RELEASE_CERT_SHA256)
+          [[ -n "$QUALIFICATION_VERSION_CODE" ]] || missing+=(expected_version_code)
+          [[ -n "$QUALIFICATION_VERSION_NAME" ]] || missing+=(expected_version_name)
           if [[ "${#missing[@]}" -ne 0 ]]; then
             printf 'Missing required release signing inputs: %s\n' "${missing[*]}" >&2
             exit 2
           fi
+          [[ "$QUALIFICATION_VERSION_CODE" =~ ^[1-9][0-9]*$ ]]
           echo 'PASS: all required release signing inputs are present'
           echo 'PASS: the public HULK reseller API is compiled from reviewed source'
 
@@ -190,6 +195,8 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
+            -PHULK_QUALIFICATION_VERSION_CODE="$QUALIFICATION_VERSION_CODE" \
+            -PHULK_QUALIFICATION_VERSION_NAME="$QUALIFICATION_VERSION_NAME" \
             clean :app:assembleRelease :app:bundleRelease
 
           test -f app/build/outputs/apk/release/app-release.apk
@@ -198,8 +205,8 @@ jobs:
 
       - name: Verify package identity and version
         env:
-          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '62' }}
-          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.18' }}
+          EXPECTED_VERSION_CODE: ${{ inputs.expected_version_code || '65' }}
+          EXPECTED_VERSION_NAME: ${{ inputs.expected_version_name || '0.9.3.21' }}
         run: |
           set -euo pipefail
           apk='app/build/outputs/apk/release/app-release.apk'

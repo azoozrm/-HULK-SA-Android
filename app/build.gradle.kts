@@ -14,6 +14,25 @@ fun String.asBuildConfigString(): String =
 val resellerApiUrl = "https://hulksa.com"
 val operationsConfigUrl = "https://hulksa.com/hulk-operations/api/app/v1/config/"
 
+val qualificationVersionCode = providers.gradleProperty("HULK_QUALIFICATION_VERSION_CODE")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+    ?.toIntOrNull()
+val qualificationVersionName = providers.gradleProperty("HULK_QUALIFICATION_VERSION_NAME")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+
+if ((qualificationVersionCode == null) != (qualificationVersionName == null)) {
+    throw GradleException(
+        "Qualification version overrides must provide both HULK_QUALIFICATION_VERSION_CODE and HULK_QUALIFICATION_VERSION_NAME.",
+    )
+}
+if (qualificationVersionCode != null && qualificationVersionCode <= 0) {
+    throw GradleException("HULK_QUALIFICATION_VERSION_CODE must be a positive integer.")
+}
+
 val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
     group = "verification"
     description = "Fails release builds unless the reviewed HTTPS HULK endpoints are configured."
@@ -101,6 +120,10 @@ android {
         targetSdk = 36
         versionCode = 64
         versionName = "0.9.3.20"
+        if (qualificationVersionCode != null && qualificationVersionName != null) {
+            versionCode = qualificationVersionCode
+            versionName = qualificationVersionName
+        }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
 
