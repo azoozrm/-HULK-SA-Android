@@ -50,7 +50,7 @@ function ops_admin_page_end(): void
     ?>
         </main>
     </div>
-    <script src="../assets/app.js?v=2.2.2" defer></script>
+    <script src="../assets/app.js?v=2.2.3" defer></script>
     </body>
     </html>
     <?php
