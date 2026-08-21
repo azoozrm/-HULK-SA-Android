@@ -1618,7 +1618,7 @@ private fun LiveCatalogScreen(
             CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
             if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(10.dp))
-            ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory)
+            ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory, isTv)
             LiveInteractionHints(isTv)
             Spacer(Modifier.height(8.dp))
         }
@@ -3167,6 +3167,15 @@ private fun ReorderableCatalogCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val allFocusRequester = remember(type) { FocusRequester() }
+    val favoritesFocusRequester = remember(type) { FocusRequester() }
+    val continueFocusRequester = remember(type) { FocusRequester() }
+    val stableCategoryIds = remember(categories, type) { categories.map(Category::id) }
+    val categoryFocusRequesters = remember(type, stableCategoryIds) {
+        stableCategoryIds.associateWith { FocusRequester() }
+    }
+    var categoryBarHasFocus by remember(type) { mutableStateOf(false) }
+    var restoringSelectedFocus by remember(type) { mutableStateOf(false) }
     val ordered = remember(categories, ids) {
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
@@ -3176,15 +3185,41 @@ private fun ReorderableCatalogCategoryBar(
             .groupBy(ContentItem::categoryId)
             .mapValues { (_, content) -> content.first() }
     }
-    LaunchedEffect(selectedId) {
-        val targetIndex = when (selectedId) {
-            null -> 0
-            FAVORITES_CATEGORY_ID -> 1
-            CONTINUE_CATEGORY_ID -> 2
-            else -> ordered.indexOfFirst { it.id == selectedId }
-                .takeIf { it >= 0 }
-                ?.plus(3)
+    val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
+
+    fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedId,
+            leadingIds = leadingIds,
+            orderedIds = ordered.map(Category::id),
+        ) ?: return null
+        val requester = when (selectedId) {
+            null -> allFocusRequester
+            FAVORITES_CATEGORY_ID -> favoritesFocusRequester
+            CONTINUE_CATEGORY_ID -> continueFocusRequester
+            else -> selectedId?.let(categoryFocusRequesters::get)
+        } ?: return null
+        return targetIndex to requester
+    }
+
+    fun restoreSelectedCategoryFocus() {
+        if (!isTv || restoringSelectedFocus) return
+        val (targetIndex, requester) = selectedFocusTarget() ?: return
+        restoringSelectedFocus = true
+        scope.launch {
+            listState.scrollToItem(targetIndex)
+            delay(40L)
+            runCatching { requester.requestFocus() }
+            restoringSelectedFocus = false
         }
+    }
+
+    LaunchedEffect(selectedId, ordered) {
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedId,
+            leadingIds = leadingIds,
+            orderedIds = ordered.map(Category::id),
+        )
         if (targetIndex != null) {
             val anchorIndex = (targetIndex - 1).coerceAtLeast(0)
             listState.scrollToItem(anchorIndex)
@@ -3209,12 +3244,44 @@ private fun ReorderableCatalogCategoryBar(
     }
     LazyRow(
         state = listState,
+        modifier = Modifier
+            .focusRestorer()
+            .focusGroup()
+            .onFocusChanged { focusState ->
+                val entering = focusState.hasFocus && !categoryBarHasFocus
+                categoryBarHasFocus = focusState.hasFocus
+                if (entering) restoreSelectedCategoryFocus()
+            },
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 24.dp, vertical = 8.dp),
     ) {
-        item { FocusButton("الكل", { onSelect(null) }, primary = selectedId == null, compact = true) }
-        item { FocusButton("★ المفضلة", { onSelect(FAVORITES_CATEGORY_ID) }, primary = selectedId == FAVORITES_CATEGORY_ID, compact = true) }
-        item { FocusButton("▶ استكمال اخر مشاهدة", { onSelect(CONTINUE_CATEGORY_ID) }, primary = selectedId == CONTINUE_CATEGORY_ID, compact = true) }
+        item {
+            FocusButton(
+                "الكل",
+                { onSelect(null) },
+                primary = selectedId == null,
+                compact = true,
+                modifier = Modifier.focusRequester(allFocusRequester),
+            )
+        }
+        item {
+            FocusButton(
+                "★ المفضلة",
+                { onSelect(FAVORITES_CATEGORY_ID) },
+                primary = selectedId == FAVORITES_CATEGORY_ID,
+                compact = true,
+                modifier = Modifier.focusRequester(favoritesFocusRequester),
+            )
+        }
+        item {
+            FocusButton(
+                "▶ استكمال اخر مشاهدة",
+                { onSelect(CONTINUE_CATEGORY_ID) },
+                primary = selectedId == CONTINUE_CATEGORY_ID,
+                compact = true,
+                modifier = Modifier.focusRequester(continueFocusRequester),
+            )
+        }
         items(ordered, key = Category::id) { category ->
             LiveCategoryChip(
                 category = category,
@@ -3225,6 +3292,7 @@ private fun ReorderableCatalogCategoryBar(
                 onLongClick = { moving = category.id },
                 onMoveLeft = { move(category.id, 1) },
                 onMoveRight = { move(category.id, -1) },
+                modifier = Modifier.focusRequester(categoryFocusRequesters.getValue(category.id)),
             )
         }
     }
@@ -3253,6 +3321,7 @@ private fun ReorderableLiveCategoryBar(
     items: List<ContentItem>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
+    isTv: Boolean,
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("live_category_order", android.content.Context.MODE_PRIVATE) }
@@ -3262,6 +3331,14 @@ private fun ReorderableLiveCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val allFocusRequester = remember { FocusRequester() }
+    val favoritesFocusRequester = remember { FocusRequester() }
+    val stableCategoryIds = remember(categories) { categories.map(Category::id) }
+    val categoryFocusRequesters = remember(stableCategoryIds) {
+        stableCategoryIds.associateWith { FocusRequester() }
+    }
+    var categoryBarHasFocus by remember { mutableStateOf(false) }
+    var restoringSelectedFocus by remember { mutableStateOf(false) }
     val ordered = remember(categories, ids) {
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
@@ -3271,14 +3348,40 @@ private fun ReorderableLiveCategoryBar(
             .groupBy(ContentItem::categoryId)
             .mapValues { (_, channels) -> channels.first() }
     }
-    LaunchedEffect(selectedId) {
-        val targetIndex = when (selectedId) {
-            null -> 0
-            FAVORITES_CATEGORY_ID -> 1
-            else -> ordered.indexOfFirst { it.id == selectedId }
-                .takeIf { it >= 0 }
-                ?.plus(2)
+    val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID) }
+
+    fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedId,
+            leadingIds = leadingIds,
+            orderedIds = ordered.map(Category::id),
+        ) ?: return null
+        val requester = when (selectedId) {
+            null -> allFocusRequester
+            FAVORITES_CATEGORY_ID -> favoritesFocusRequester
+            else -> selectedId?.let(categoryFocusRequesters::get)
+        } ?: return null
+        return targetIndex to requester
+    }
+
+    fun restoreSelectedCategoryFocus() {
+        if (!isTv || restoringSelectedFocus) return
+        val (targetIndex, requester) = selectedFocusTarget() ?: return
+        restoringSelectedFocus = true
+        scope.launch {
+            listState.scrollToItem(targetIndex)
+            delay(40L)
+            runCatching { requester.requestFocus() }
+            restoringSelectedFocus = false
         }
+    }
+
+    LaunchedEffect(selectedId, ordered) {
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedId,
+            leadingIds = leadingIds,
+            orderedIds = ordered.map(Category::id),
+        )
         if (targetIndex != null) {
             val anchorIndex = (targetIndex - 1).coerceAtLeast(0)
             listState.scrollToItem(anchorIndex)
@@ -3303,7 +3406,14 @@ private fun ReorderableLiveCategoryBar(
     }
     LazyRow(
         state = listState,
-        modifier = Modifier.focusRestorer().focusGroup(),
+        modifier = Modifier
+            .focusRestorer()
+            .focusGroup()
+            .onFocusChanged { focusState ->
+                val entering = focusState.hasFocus && !categoryBarHasFocus
+                categoryBarHasFocus = focusState.hasFocus
+                if (entering) restoreSelectedCategoryFocus()
+            },
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
     ) {
@@ -3313,6 +3423,7 @@ private fun ReorderableLiveCategoryBar(
                 { onSelect(null) },
                 primary = selectedId == null,
                 compact = true,
+                modifier = Modifier.focusRequester(allFocusRequester),
             )
         }
         item {
@@ -3321,6 +3432,7 @@ private fun ReorderableLiveCategoryBar(
                 { onSelect(FAVORITES_CATEGORY_ID) },
                 primary = selectedId == FAVORITES_CATEGORY_ID,
                 compact = true,
+                modifier = Modifier.focusRequester(favoritesFocusRequester),
             )
         }
         items(ordered, key = Category::id) { category ->
@@ -3330,6 +3442,7 @@ private fun ReorderableLiveCategoryBar(
                     { onSelect(category.id) },
                     primary = selectedId == category.id,
                     compact = true,
+                    modifier = Modifier.focusRequester(categoryFocusRequesters.getValue(category.id)),
                 )
             } else {
                 LiveCategoryChip(
@@ -3343,6 +3456,7 @@ private fun ReorderableLiveCategoryBar(
                     onLongClick = { moving = category.id },
                     onMoveLeft = { move(category.id, 1) },
                     onMoveRight = { move(category.id, -1) },
+                    modifier = Modifier.focusRequester(categoryFocusRequesters.getValue(category.id)),
                 )
             }
         }
@@ -3359,6 +3473,7 @@ private fun LiveCategoryChip(
     onLongClick: () -> Unit,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -3376,7 +3491,7 @@ private fun LiveCategoryChip(
     }
     val shape = RoundedCornerShape(13.dp)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .clip(shape)
             .background(
                 when {

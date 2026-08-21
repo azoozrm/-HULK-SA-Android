@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.HulkInputMode
@@ -205,6 +207,7 @@ fun LiveTvProChannelBrowser(
 
     val listState = rememberLazyListState()
     val categoryListState = rememberLazyListState()
+    val categoryFocusScope = rememberCoroutineScope()
     val channelFocus = remember { FocusRequester() }
     val searchFocus = remember { FocusRequester() }
     val allCategoryFocus = remember { FocusRequester() }
@@ -223,6 +226,25 @@ fun LiveTvProChannelBrowser(
         else -> selectedCategory?.let(categoryFocusRequesters::get)
     }
     val focusIndex = visible.indexOfFirst { it.id == currentStreamId }.takeIf { it >= 0 } ?: 0
+
+    fun returnFocusToSelectedCategory() {
+        if (!tvLayout || normalizedQuery.isNotBlank()) return
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedCategory,
+            leadingIds = listOf(
+                null,
+                LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY,
+                LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY,
+            ),
+            orderedIds = orderedCategories.map { it.id },
+        ) ?: return
+        val requester = selectedCategoryFocusRequester ?: return
+        categoryFocusScope.launch {
+            categoryListState.scrollToItem(targetIndex)
+            withFrameNanos { }
+            runCatching { requester.requestFocus() }
+        }
+    }
 
     LaunchedEffect(visible, selectedCategory, normalizedQuery) {
         if (visible.isNotEmpty() && normalizedQuery.isBlank()) {
@@ -296,6 +318,7 @@ fun LiveTvProChannelBrowser(
         selected: Boolean,
         favorite: Boolean,
         rowModifier: Modifier = Modifier,
+        onReturnToCategory: () -> Unit,
         onClick: () -> Unit,
         onLongClick: () -> Unit,
     ) {
@@ -314,27 +337,33 @@ fun LiveTvProChannelBrowser(
                 .onFocusChanged { focused = it.isFocused }
                 .onPreviewKeyEvent { event ->
                     val code = event.nativeKeyEvent.keyCode
+                    val returnToCategory = tvLayout && code == AndroidKeyEvent.KEYCODE_DPAD_LEFT
                     val remoteSelect = code == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
                         code == AndroidKeyEvent.KEYCODE_ENTER ||
                         code == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ||
                         code == AndroidKeyEvent.KEYCODE_SPACE
-                    if (!remoteSelect) {
-                        false
-                    } else if (event.type == KeyEventType.KeyDown) {
-                        if (
-                            (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
-                            !remoteLongPressHandled
-                        ) {
-                            remoteLongPressHandled = true
-                            onLongClick()
+                    when {
+                        returnToCategory -> {
+                            if (event.type == KeyEventType.KeyDown) onReturnToCategory()
+                            true
                         }
-                        true
-                    } else if (event.type == KeyEventType.KeyUp) {
-                        if (!remoteLongPressHandled) onClick()
-                        remoteLongPressHandled = false
-                        true
-                    } else {
-                        false
+                        !remoteSelect -> false
+                        event.type == KeyEventType.KeyDown -> {
+                            if (
+                                (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
+                                !remoteLongPressHandled
+                            ) {
+                                remoteLongPressHandled = true
+                                onLongClick()
+                            }
+                            true
+                        }
+                        event.type == KeyEventType.KeyUp -> {
+                            if (!remoteLongPressHandled) onClick()
+                            remoteLongPressHandled = false
+                            true
+                        }
+                        else -> false
                     }
                 }
                 .combinedClickable(
@@ -666,6 +695,7 @@ fun LiveTvProChannelBrowser(
                             channel = channel,
                             selected = channel.id == currentStreamId,
                             favorite = favorite,
+                            onReturnToCategory = ::returnFocusToSelectedCategory,
                             onClick = { onSelectChannel(channel) },
                             onLongClick = {
                                 favoriteIds = if (favorite) favoriteIds - channel.id else favoriteIds + channel.id
@@ -676,9 +706,7 @@ fun LiveTvProChannelBrowser(
                                     Toast.LENGTH_SHORT,
                                 ).show()
                             },
-                            rowModifier = baseModifier.focusProperties {
-                                selectedCategoryFocusRequester?.let { left = it }
-                            },
+                            rowModifier = baseModifier,
                         )
                     }
                 }
