@@ -66,14 +66,16 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         self.assertIn("cancelPendingLiveZap()", pro_text)
         self.assertIn("dismissLiveZapIndicator()", pro_text)
 
-    def test_live_category_strip_restores_focus_context(self) -> None:
+    def test_live_category_strip_restores_selected_focus_context(self) -> None:
         text = self.read(MAIN_SHELL)
         start = text.index("private fun ReorderableLiveCategoryBar(")
         end = text.index("private fun LiveCategoryChip(", start)
         block = text[start:end]
-        self.assertIn("LaunchedEffect(selectedId)", block)
-        self.assertIn("Modifier.focusRestorer().focusGroup()", block)
-        self.assertIn("listState.scrollToItem(anchorIndex)", block)
+        self.assertIn("selectedCategoryFocusIndex(", block)
+        self.assertIn("restoreSelectedCategoryFocus()", block)
+        self.assertIn("listState.scrollToItem(targetIndex)", block)
+        self.assertIn("requester.requestFocus()", block)
+        self.assertIn(".onFocusChanged { focusState ->", block)
 
 
 if __name__ == "__main__":
