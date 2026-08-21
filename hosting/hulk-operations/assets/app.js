@@ -1,3 +1,11 @@
+const apkUploadInput = document.querySelector('input[type="file"][name="apk"]');
+if (apkUploadInput) {
+    // iOS Safari greys out APK files when an Android-specific accept filter is present.
+    // Keep selection unrestricted in the browser; the backend still validates extension,
+    // MIME, ZIP signature, AndroidManifest.xml, classes.dex, size and SHA-256.
+    apkUploadInput.removeAttribute('accept');
+}
+
 document.addEventListener('click', function (event) {
     const copyButton = event.target.closest('[data-copy]');
     if (copyButton) {
