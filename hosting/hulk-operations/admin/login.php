@@ -92,15 +92,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex,nofollow">
-    <title>تسجيل الدخول — HULK Operations</title>
-    <link rel="stylesheet" href="../assets/app.css">
+    <title>تسجيل الدخول — مركز عمليات HULK</title>
+    <link rel="stylesheet" href="../assets/app.css?v=2.2.1">
 </head>
 <body>
 <main class="login-shell">
     <section class="card login-card">
         <div class="brand">
             <div class="brand-mark">H</div>
-            <div><strong>HULK SA</strong><small>Operations Center</small></div>
+            <div><strong>HULK SA</strong><small>مركز العمليات</small></div>
         </div>
         <h1>تسجيل دخول المسؤول</h1>
         <?php if ($error !== null): ?><div class="flash error"><?= ops_e($error) ?></div><?php endif; ?>

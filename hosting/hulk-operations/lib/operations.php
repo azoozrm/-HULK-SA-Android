@@ -16,12 +16,16 @@ function ops_active_announcements(PDO $db, DateTimeImmutable $now): array
 {
     $statement = $db->prepare(
         'SELECT * FROM app_announcements '
-        . 'WHERE enabled = 1 AND starts_at <= :now '
-        . 'AND (ends_at IS NULL OR ends_at > :now) '
+        . 'WHERE enabled = 1 AND starts_at <= :starts_now '
+        . 'AND (ends_at IS NULL OR ends_at > :ends_now) '
         . "ORDER BY FIELD(severity, 'IMPORTANT', 'WARNING', 'INFO'), starts_at DESC, id DESC "
         . 'LIMIT 20'
     );
-    $statement->execute(['now' => $now->format('Y-m-d H:i:s')]);
+    $formattedNow = $now->format('Y-m-d H:i:s');
+    $statement->execute([
+        'starts_now' => $formattedNow,
+        'ends_now' => $formattedNow,
+    ]);
     return array_values(array_filter($statement->fetchAll(), static function (array $row) use ($now): bool {
         return ops_announcement_is_active($row, $now);
     }));

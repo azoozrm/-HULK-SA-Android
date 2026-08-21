@@ -79,6 +79,36 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("ops_normalize_feature_flags", operations)
         self.assertIn("LIMIT 20", operations)
 
+    def test_native_pdo_queries_use_unique_named_placeholders(self) -> None:
+        operations = self.read("lib/operations.php")
+        self.assertNotIn("starts_at <= :now", operations)
+        self.assertNotIn("ends_at > :now", operations)
+        self.assertIn("starts_at <= :starts_now", operations)
+        self.assertIn("ends_at > :ends_now", operations)
+        self.assertIn("'starts_now' => $formattedNow", operations)
+        self.assertIn("'ends_now' => $formattedNow", operations)
+
+    def test_admin_dashboard_is_arabic_and_mobile_adaptive(self) -> None:
+        dashboard = self.read("admin/index.php")
+        layout = self.read("admin/_layout.php")
+        login = self.read("admin/login.php")
+        styles = self.read("assets/app.css")
+        for label in (
+            "مركز عمليات HULK SA",
+            "الإصدار المنشور حاليًا",
+            "الحد الأدنى للإصدار المدعوم",
+            "حالة التحديث",
+            "حالة الخدمة",
+            "وضع الصيانة",
+            "الرسالة النشطة",
+            "المميزات المفعّلة",
+        ):
+            self.assertIn(label, dashboard)
+        self.assertNotIn("Operations Center", dashboard + layout + login)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", styles)
+        self.assertIn(".stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }", styles)
+        self.assertIn(".logout-user { display: none; }", styles)
+
     def test_service_and_feature_mutations_use_closed_allowlists(self) -> None:
         actions = self.read("admin/actions.php")
         policies = self.read("lib/policies.php")

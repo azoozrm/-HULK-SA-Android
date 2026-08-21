@@ -19,15 +19,15 @@ function ops_admin_page_start(string $title, string $section, array $admin): voi
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="robots" content="noindex,nofollow">
-        <title><?= ops_e($title) ?> — HULK Operations</title>
-        <link rel="stylesheet" href="../assets/app.css">
+        <title><?= ops_e($title) ?> — مركز عمليات HULK</title>
+        <link rel="stylesheet" href="../assets/app.css?v=2.2.1">
     </head>
     <body>
     <div class="shell">
         <aside class="sidebar">
             <div class="brand">
                 <div class="brand-mark">H</div>
-                <div><strong>HULK SA</strong><small>Operations Center</small></div>
+                <div><strong>HULK SA</strong><small>مركز العمليات</small></div>
             </div>
             <nav class="nav" aria-label="التنقل الرئيسي">
                 <?php foreach ($sections as $key => $label): ?>
@@ -38,7 +38,7 @@ function ops_admin_page_start(string $title, string $section, array $admin): voi
             </nav>
             <form class="logout" action="logout.php" method="post">
                 <input type="hidden" name="csrf_token" value="<?= ops_e(ops_csrf_token()) ?>">
-                <button class="button secondary" type="submit">تسجيل الخروج · <?= ops_e($admin['username']) ?></button>
+                <button class="button secondary" type="submit">تسجيل الخروج<span class="logout-user"> · <?= ops_e($admin['username']) ?></span></button>
             </form>
         </aside>
         <main class="content">
@@ -50,7 +50,7 @@ function ops_admin_page_end(): void
     ?>
         </main>
     </div>
-    <script src="../assets/app.js" defer></script>
+    <script src="../assets/app.js?v=2.2.1" defer></script>
     </body>
     </html>
     <?php

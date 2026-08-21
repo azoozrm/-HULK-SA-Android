@@ -93,20 +93,25 @@ ops_admin_flash($flash);
         ? ((bool) $activeRelease['required'] ? 'إجباري' : 'اختياري')
         : 'لا يوجد تحديث منشور';
     $serviceStatus = (string) $service['status'];
+    $serviceStatusLabel = [
+        'OPERATIONAL' => 'تعمل بشكل طبيعي',
+        'DEGRADED' => 'أداء الخدمة متأثر',
+        'MAINTENANCE' => 'الخدمة تحت الصيانة',
+    ][$serviceStatus] ?? 'حالة غير معروفة';
     $releaseUrl = $activeRelease ? ops_public_url((string) $activeRelease['apk_path']) : null;
     ?>
     <header class="page-head">
-        <div><h1>HULK Operations Center</h1><p>ملخص تشغيلي آمن وخفيف لتطبيق HULK SA.</p></div>
-        <a class="button secondary" href="<?= ops_e(ops_public_url('api/app/v1/config/')) ?>" target="_blank" rel="noreferrer">فتح Operations API</a>
+        <div><h1>مركز عمليات HULK SA</h1><p>ملخص واضح وآمن لحالة التطبيق وإعداداته التشغيلية.</p></div>
+        <a class="button secondary" href="<?= ops_e(ops_public_url('api/app/v1/config/')) ?>" target="_blank" rel="noreferrer">عرض بيانات الربط (JSON)</a>
     </header>
     <section class="grid stats">
-        <article class="card"><span class="stat-label">Current Published Version</span><strong class="stat-value"><?= ops_e($activeVersionName) ?> / <?= $activeVersionCode ?></strong></article>
-        <article class="card"><span class="stat-label">Minimum Supported Version</span><strong class="stat-value"><?= $minimumCode ?></strong></article>
-        <article class="card"><span class="stat-label">Update Status</span><strong class="stat-value"><?= ops_e($updateLabel) ?></strong></article>
-        <article class="card"><span class="stat-label">Service Status</span><strong class="stat-value"><?= ops_e($serviceStatus) ?></strong></article>
-        <article class="card"><span class="stat-label">Maintenance Mode</span><strong class="stat-value"><?= $serviceStatus === 'MAINTENANCE' ? 'مفعّل' : 'متوقف' ?></strong></article>
-        <article class="card"><span class="stat-label">Active Announcement</span><strong class="stat-value"><?= ops_e((string) ($activeAnnouncements[0]['message_key'] ?? 'لا توجد')) ?></strong></article>
-        <article class="card"><span class="stat-label">Active Feature Flags</span><strong class="stat-value"><?= count(array_filter($features)) ?> / <?= count($features) ?></strong></article>
+        <article class="card"><span class="stat-label">الإصدار المنشور حاليًا</span><strong class="stat-value"><?= ops_e($activeVersionName) ?> / <?= $activeVersionCode ?></strong></article>
+        <article class="card"><span class="stat-label">الحد الأدنى للإصدار المدعوم</span><strong class="stat-value"><?= $minimumCode ?></strong></article>
+        <article class="card"><span class="stat-label">حالة التحديث</span><strong class="stat-value"><?= ops_e($updateLabel) ?></strong></article>
+        <article class="card"><span class="stat-label">حالة الخدمة</span><strong class="stat-value"><?= ops_e($serviceStatusLabel) ?></strong></article>
+        <article class="card"><span class="stat-label">وضع الصيانة</span><strong class="stat-value"><?= $serviceStatus === 'MAINTENANCE' ? 'مفعّل' : 'متوقف' ?></strong></article>
+        <article class="card"><span class="stat-label">الرسالة النشطة</span><strong class="stat-value"><?= ops_e((string) ($activeAnnouncements[0]['message_key'] ?? 'لا توجد')) ?></strong></article>
+        <article class="card"><span class="stat-label">المميزات المفعّلة</span><strong class="stat-value"><?= count(array_filter($features)) ?> من <?= count($features) ?></strong></article>
         <article class="card"><span class="stat-label">آخر تعديل</span><strong class="stat-value"><?= ops_e((string) ($lastModified ?: '—')) ?></strong></article>
     </section>
     <section class="grid two" style="margin-top:14px">
@@ -128,7 +133,7 @@ ops_admin_flash($flash);
             <?php if ($releaseUrl !== null): ?>
                 <p class="mono"><?= ops_e($releaseUrl) ?></p>
                 <button class="button" type="button" data-copy="<?= ops_e($releaseUrl) ?>">نسخ رابط التحميل</button>
-            <?php else: ?><p class="empty">Safe default: 0.9.3.20 / 64 بدون تحديث مفروض.</p><?php endif; ?>
+            <?php else: ?><p class="empty">الإعداد الآمن الحالي: 0.9.3.20 / 64 بدون تحديث مفروض.</p><?php endif; ?>
         </article>
     </section>
 
@@ -140,16 +145,16 @@ ops_admin_flash($flash);
             <input type="hidden" name="csrf_token" value="<?= ops_e($csrf) ?>">
             <input type="hidden" name="action" value="upload_release">
             <div class="field"><label>ملف APK</label><input name="apk" type="file" accept=".apk,application/vnd.android.package-archive" required></div>
-            <div class="field"><label>Version Name</label><input name="version_name" maxlength="32" placeholder="0.9.3.21" required></div>
-            <div class="field"><label>Version Code</label><input name="version_code" type="number" min="1" required></div>
-            <div class="field"><label>Minimum Supported Version Code</label><input name="minimum_supported_version_code" type="number" min="1" value="64" required></div>
-            <div class="field full"><label>Release Notes</label><textarea name="release_notes" maxlength="10000"></textarea></div>
-            <label class="check full"><input type="checkbox" name="required" value="1"> Required Update — سيصبح هذا Version Code هو الحد الأدنى</label>
+            <div class="field"><label>اسم الإصدار</label><input name="version_name" maxlength="32" placeholder="0.9.3.21" required></div>
+            <div class="field"><label>رمز الإصدار</label><input name="version_code" type="number" min="1" required></div>
+            <div class="field"><label>الحد الأدنى لرمز الإصدار المدعوم</label><input name="minimum_supported_version_code" type="number" min="1" value="64" required></div>
+            <div class="field full"><label>ملاحظات الإصدار</label><textarea name="release_notes" maxlength="10000"></textarea></div>
+            <label class="check full"><input type="checkbox" name="required" value="1"> تحديث إجباري — سيصبح رمز هذا الإصدار هو الحد الأدنى المدعوم</label>
             <div class="actions full"><button class="button" type="submit">رفع APK وحساب SHA-256</button></div>
         </form>
     </section>
     <section class="card" style="margin-top:14px">
-        <h2>App Releases</h2>
+        <h2>إصدارات التطبيق</h2>
         <?php if ($releases === []): ?><p class="empty">لا توجد إصدارات.</p><?php else: ?>
         <div class="table-wrap"><table>
             <thead><tr><th>الإصدار</th><th>الحالة</th><th>السياسة</th><th>SHA-256</th><th>الحجم</th><th>الإجراءات</th></tr></thead>
@@ -157,7 +162,7 @@ ops_admin_flash($flash);
             <?php foreach ($releases as $release): ?>
                 <?php $apkUrl = ops_public_url((string) $release['apk_path']); ?>
                 <tr>
-                    <td><strong><?= ops_e((string) $release['version_name']) ?></strong><br><span class="muted">Code <?= (int) $release['version_code'] ?></span></td>
+                    <td><strong><?= ops_e((string) $release['version_name']) ?></strong><br><span class="muted">الرمز <?= (int) $release['version_code'] ?></span></td>
                     <td>
                         <?php if ((bool) $release['is_active']): ?><span class="status ok">منشور</span>
                         <?php elseif ((bool) $release['enabled']): ?><span class="status warn">مفعّل</span>
@@ -174,7 +179,7 @@ ops_admin_flash($flash);
                         </form>
                     </td>
                     <td class="mono"><?= ops_e((string) $release['apk_sha256']) ?></td>
-                    <td><?= number_format(((int) $release['apk_size_bytes']) / 1048576, 1) ?> MB</td>
+                    <td><?= number_format(((int) $release['apk_size_bytes']) / 1048576, 1) ?> ميجابايت</td>
                     <td><div class="actions">
                         <button class="button secondary" type="button" data-copy="<?= ops_e($apkUrl) ?>">نسخ الرابط</button>
                         <?php if (!(bool) $release['is_active']): ?>
@@ -198,35 +203,39 @@ ops_admin_flash($flash);
     </section>
 
 <?php elseif ($section === 'announcements'): ?>
-    <header class="page-head"><div><h1>الرسائل</h1><p>تظهر عند فتح التطبيق أو أول تحديث طبيعي، بدون Push.</p></div></header>
+    <header class="page-head"><div><h1>الرسائل</h1><p>تظهر عند فتح التطبيق أو أول تحديث طبيعي، بدون إشعارات فورية.</p></div></header>
     <section class="card">
         <h2>إنشاء رسالة عامة</h2>
         <form method="post" class="form-grid">
             <input type="hidden" name="csrf_token" value="<?= ops_e($csrf) ?>"><input type="hidden" name="action" value="create_announcement">
-            <div class="field"><label>Message ID (اختياري)</label><input name="message_key" maxlength="80" placeholder="MSG-001"></div>
-            <div class="field"><label>Title</label><input name="title" maxlength="160" required></div>
-            <div class="field full"><label>Message</label><textarea name="message" maxlength="10000" required></textarea></div>
-            <div class="field"><label>Severity</label><select name="severity"><option>INFO</option><option>WARNING</option><option>IMPORTANT</option></select></div>
-            <div class="field"><label>Target</label><select name="target"><option>ALL</option><option>MOBILE</option><option>TV</option></select></div>
-            <div class="field"><label>Start Date</label><input name="starts_at" type="datetime-local" value="<?= ops_e(date('Y-m-d\TH:i')) ?>" required></div>
-            <div class="field"><label>End Date (اختياري)</label><input name="ends_at" type="datetime-local"></div>
-            <div class="field"><label>Minimum Version (اختياري)</label><input name="minimum_version_code" type="number" min="1"></div>
-            <div class="field"><label>Maximum Version (اختياري)</label><input name="maximum_version_code" type="number" min="1"></div>
-            <label class="check"><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
-            <label class="check"><input type="checkbox" name="show_once" value="1" checked> Show Once</label>
-            <label class="check"><input type="checkbox" name="persistent" value="1"> Persistent Banner</label>
+            <div class="field"><label>معرّف الرسالة (اختياري)</label><input name="message_key" maxlength="80" placeholder="MSG-001"></div>
+            <div class="field"><label>عنوان الرسالة</label><input name="title" maxlength="160" required></div>
+            <div class="field full"><label>نص الرسالة</label><textarea name="message" maxlength="10000" required></textarea></div>
+            <div class="field"><label>درجة الأهمية</label><select name="severity"><option value="INFO">معلومات</option><option value="WARNING">تحذير</option><option value="IMPORTANT">مهم</option></select></div>
+            <div class="field"><label>الأجهزة المستهدفة</label><select name="target"><option value="ALL">جميع الأجهزة</option><option value="MOBILE">الجوال والتابلت</option><option value="TV">التلفزيون</option></select></div>
+            <div class="field"><label>تاريخ البداية</label><input name="starts_at" type="datetime-local" value="<?= ops_e(date('Y-m-d\TH:i')) ?>" required></div>
+            <div class="field"><label>تاريخ النهاية (اختياري)</label><input name="ends_at" type="datetime-local"></div>
+            <div class="field"><label>الحد الأدنى للإصدار (اختياري)</label><input name="minimum_version_code" type="number" min="1"></div>
+            <div class="field"><label>الحد الأعلى للإصدار (اختياري)</label><input name="maximum_version_code" type="number" min="1"></div>
+            <label class="check"><input type="checkbox" name="enabled" value="1" checked> الرسالة مفعّلة</label>
+            <label class="check"><input type="checkbox" name="show_once" value="1" checked> العرض مرة واحدة</label>
+            <label class="check"><input type="checkbox" name="persistent" value="1"> إظهار شريط ثابت</label>
             <div class="actions full"><button class="button" type="submit">حفظ الرسالة</button></div>
         </form>
     </section>
     <section class="card" style="margin-top:14px">
         <h2>الرسائل المحفوظة</h2>
         <?php if ($announcements === []): ?><p class="empty">لا توجد رسائل.</p><?php else: ?>
-        <div class="table-wrap"><table><thead><tr><th>ID</th><th>العنوان</th><th>النوع والهدف</th><th>المدة</th><th>الحالة</th><th></th></tr></thead><tbody>
+        <div class="table-wrap"><table><thead><tr><th>المعرّف</th><th>العنوان</th><th>النوع والهدف</th><th>المدة</th><th>الحالة</th><th></th></tr></thead><tbody>
         <?php foreach ($announcements as $announcement): ?>
             <tr>
                 <td class="mono"><?= ops_e((string) $announcement['message_key']) ?></td>
                 <td><strong><?= ops_e((string) $announcement['title']) ?></strong><br><span class="muted"><?= ops_e(ops_text_excerpt((string) $announcement['message'], 120)) ?></span></td>
-                <td><?= ops_e((string) $announcement['severity']) ?> / <?= ops_e((string) $announcement['target']) ?><br><span class="muted"><?= (bool) $announcement['show_once'] ? 'مرة واحدة' : 'متكرر' ?><?= (bool) $announcement['persistent'] ? ' · ثابت' : '' ?></span></td>
+                <?php
+                $severityLabel = ['INFO' => 'معلومات', 'WARNING' => 'تحذير', 'IMPORTANT' => 'مهم'][(string) $announcement['severity']] ?? 'غير معروف';
+                $targetLabel = ['ALL' => 'جميع الأجهزة', 'MOBILE' => 'الجوال والتابلت', 'TV' => 'التلفزيون'][(string) $announcement['target']] ?? 'غير معروف';
+                ?>
+                <td><?= ops_e($severityLabel) ?> / <?= ops_e($targetLabel) ?><br><span class="muted"><?= (bool) $announcement['show_once'] ? 'مرة واحدة' : 'متكرر' ?><?= (bool) $announcement['persistent'] ? ' · ثابت' : '' ?></span></td>
                 <td><?= ops_e((string) $announcement['starts_at']) ?><br><span class="muted"><?= ops_e((string) ($announcement['ends_at'] ?: 'بدون انتهاء')) ?></span></td>
                 <td><?= (bool) $announcement['enabled'] ? '<span class="status ok">مفعلة</span>' : '<span class="status">معطلة</span>' ?></td>
                 <td><?php if ((bool) $announcement['enabled']): ?><form method="post" data-confirm="هل تريد تعطيل هذه الرسالة؟"><input type="hidden" name="csrf_token" value="<?= ops_e($csrf) ?>"><input type="hidden" name="action" value="disable_announcement"><input type="hidden" name="announcement_id" value="<?= (int) $announcement['id'] ?>"><button class="button danger" type="submit">تعطيل</button></form><?php endif; ?></td>
@@ -236,23 +245,23 @@ ops_admin_flash($flash);
     </section>
 
 <?php elseif ($section === 'service'): ?>
-    <header class="page-head"><div><h1>حالة الخدمة</h1><p>تعطل Operations API لا يشغّل الصيانة تلقائيًا داخل التطبيق.</p></div></header>
+    <header class="page-head"><div><h1>حالة الخدمة</h1><p>تعطل واجهة العمليات لا يشغّل وضع الصيانة تلقائيًا داخل التطبيق.</p></div></header>
     <section class="card">
         <form method="post" class="form-grid" data-confirm="هل تريد تغيير حالة الخدمة الآن؟">
             <input type="hidden" name="csrf_token" value="<?= ops_e($csrf) ?>"><input type="hidden" name="action" value="update_service_status">
-            <div class="field"><label>Status</label><select name="status">
-                <?php foreach (['OPERATIONAL', 'DEGRADED', 'MAINTENANCE'] as $status): ?><option <?= $serviceRow['status'] === $status ? 'selected' : '' ?>><?= $status ?></option><?php endforeach; ?>
+            <div class="field"><label>حالة الخدمة</label><select name="status">
+                <?php foreach (['OPERATIONAL' => 'تعمل بشكل طبيعي', 'DEGRADED' => 'أداء الخدمة متأثر', 'MAINTENANCE' => 'الخدمة تحت الصيانة'] as $status => $statusLabel): ?><option value="<?= ops_e($status) ?>" <?= $serviceRow['status'] === $status ? 'selected' : '' ?>><?= ops_e($statusLabel) ?></option><?php endforeach; ?>
             </select></div>
-            <div class="field"><label>Start Time</label><input name="starts_at" type="datetime-local" value="<?= ops_e(ops_datetime_local_value($serviceRow['starts_at'] ?? null)) ?>"></div>
-            <div class="field full"><label>Maintenance / Degraded Message</label><textarea name="message" maxlength="2000"><?= ops_e((string) ($serviceRow['message'] ?? '')) ?></textarea></div>
-            <div class="field"><label>Estimated End Time (اختياري)</label><input name="estimated_end_at" type="datetime-local" value="<?= ops_e(ops_datetime_local_value($serviceRow['estimated_end_at'] ?? null)) ?>"></div>
+            <div class="field"><label>وقت البداية</label><input name="starts_at" type="datetime-local" value="<?= ops_e(ops_datetime_local_value($serviceRow['starts_at'] ?? null)) ?>"></div>
+            <div class="field full"><label>رسالة الصيانة أو تأثر الخدمة</label><textarea name="message" maxlength="2000"><?= ops_e((string) ($serviceRow['message'] ?? '')) ?></textarea></div>
+            <div class="field"><label>وقت الانتهاء المتوقع (اختياري)</label><input name="estimated_end_at" type="datetime-local" value="<?= ops_e(ops_datetime_local_value($serviceRow['estimated_end_at'] ?? null)) ?>"></div>
             <div class="actions full"><button class="button" type="submit">تحديث الحالة</button></div>
         </form>
     </section>
 
 <?php elseif ($section === 'features'): ?>
-    <?php $featureLabels = ['downloads_enabled' => 'التنزيلات', 'episode_notifications_enabled' => 'تنبيهات الحلقات', 'smart_recommendations_enabled' => 'التوصيات الذكية', 'live_tv_pro_enabled' => 'Live TV Pro']; ?>
-    <header class="page-head"><div><h1>المميزات</h1><p>أسماء ثابتة معرّفة مسبقًا داخل Android؛ أي Flag غير معروف يتم تجاهله.</p></div></header>
+    <?php $featureLabels = ['downloads_enabled' => 'التنزيلات', 'episode_notifications_enabled' => 'تنبيهات الحلقات', 'smart_recommendations_enabled' => 'التوصيات الذكية', 'live_tv_pro_enabled' => 'البث المباشر الاحترافي']; ?>
+    <header class="page-head"><div><h1>المميزات</h1><p>مميزات آمنة ومعرّفة مسبقًا داخل التطبيق؛ أي ميزة غير معروفة يتم تجاهلها.</p></div></header>
     <section class="grid two">
         <?php foreach (ops_known_feature_flags() as $flagKey): ?>
             <?php $enabled = (bool) ($features[$flagKey] ?? true); ?>

@@ -52,7 +52,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 <head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex,nofollow"><title>إعداد المسؤول الأول</title>
-    <link rel="stylesheet" href="../assets/app.css">
+    <link rel="stylesheet" href="../assets/app.css?v=2.2.1">
 </head>
 <body><main class="login-shell"><section class="card login-card">
     <div class="brand"><div class="brand-mark">H</div><div><strong>HULK SA</strong><small>إعداد آمن لمرة واحدة</small></div></div>
