@@ -43,14 +43,22 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun notificationHeaderFocusGraphStopsAtEdgesAndNeverJumps() {
+    fun notificationHeaderFocusGraphFollowsRtlGeometryAndStopsAtEdges() {
         assertEquals(
             NotificationHeaderFocusNode.READ_ALL,
             notificationHeaderMove(
                 NotificationHeaderFocusNode.BACK,
                 unreadCount = 2,
                 hasNotifications = true,
-                direction = NotificationFocusDirection.LEFT,
+                direction = NotificationFocusDirection.DOWN,
+            ),
+        )
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.BACK,
+                2,
+                true,
+                NotificationFocusDirection.LEFT,
             ),
         )
         assertNull(
@@ -70,6 +78,15 @@ class LocalNotificationUiPolicyTest {
             ),
         )
 
+        assertEquals(
+            NotificationHeaderFocusNode.BACK,
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.READ_ALL,
+                2,
+                true,
+                NotificationFocusDirection.UP,
+            ),
+        )
         assertEquals(
             NotificationHeaderFocusNode.CLEAR_ALL,
             notificationHeaderMove(
@@ -79,8 +96,7 @@ class LocalNotificationUiPolicyTest {
                 NotificationFocusDirection.LEFT,
             ),
         )
-        assertEquals(
-            NotificationHeaderFocusNode.BACK,
+        assertNull(
             notificationHeaderMove(
                 NotificationHeaderFocusNode.READ_ALL,
                 2,
@@ -93,10 +109,19 @@ class LocalNotificationUiPolicyTest {
                 NotificationHeaderFocusNode.READ_ALL,
                 2,
                 true,
-                NotificationFocusDirection.UP,
+                NotificationFocusDirection.DOWN,
             ),
         )
 
+        assertEquals(
+            NotificationHeaderFocusNode.BACK,
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                2,
+                true,
+                NotificationFocusDirection.UP,
+            ),
+        )
         assertEquals(
             NotificationHeaderFocusNode.READ_ALL,
             notificationHeaderMove(
@@ -119,7 +144,7 @@ class LocalNotificationUiPolicyTest {
                 NotificationHeaderFocusNode.CLEAR_ALL,
                 2,
                 true,
-                NotificationFocusDirection.UP,
+                NotificationFocusDirection.DOWN,
             ),
         )
 
@@ -134,6 +159,14 @@ class LocalNotificationUiPolicyTest {
         )
         assertEquals(
             NotificationHeaderFocusNode.BACK,
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                0,
+                true,
+                NotificationFocusDirection.UP,
+            ),
+        )
+        assertNull(
             notificationHeaderMove(
                 NotificationHeaderFocusNode.CLEAR_ALL,
                 0,
