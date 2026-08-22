@@ -97,67 +97,69 @@ internal fun shouldSyncTvProgress(
 private fun HistoryEntry.toCandidate(
     scope: TvProfileScope,
     verifiedKidsContentKeys: Set<String>,
-): TvContinueWatchingItem? = when (streamKind.trim().lowercase()) {
-    "movie" -> {
-        if (streamId <= 0 || key != "MOVIE:$streamId" || title.isBlank()) return null
-        if (
-            scope.profileKind == ProfileKind.KIDS &&
-            "MOVIE:$streamId" !in verifiedKidsContentKeys
-        ) return null
-        val providerId = "${TV_PROGRAM_PROVIDER_PREFIX}movie:$streamId"
-        TvContinueWatchingItem(
-            scope = scope,
-            providerId = providerId,
-            type = TvContinueWatchingType.MOVIE,
-            title = title,
-            episodeTitle = null,
-            posterUrl = posterUrl,
-            contentId = streamId,
-            seriesId = null,
-            seasonNumber = null,
-            episodeNumber = null,
-            positionMs = positionMs,
-            durationMs = durationMs,
-            updatedAtEpochMs = updatedAtEpochMs,
-            deepLinkUri = TvDeepLinkRouter.uri(
-                TvDeepLinkTarget.Movie(streamId, resumePlayback = true),
-            ),
-            weight = 0,
-        )
-    }
-    "series" -> {
-        val parentSeriesId = parentContentId?.takeIf { it > 0 } ?: return null
-        if (streamId <= 0 || key != "SERIES:$streamId" || title.isBlank()) return null
-        if (
-            scope.profileKind == ProfileKind.KIDS &&
-            "SERIES:$parentSeriesId" !in verifiedKidsContentKeys
-        ) return null
-        val providerId = "${TV_PROGRAM_PROVIDER_PREFIX}episode:$parentSeriesId:$streamId"
-        TvContinueWatchingItem(
-            scope = scope,
-            providerId = providerId,
-            type = TvContinueWatchingType.EPISODE,
-            title = seriesTitle?.takeIf { it.isNotBlank() } ?: title,
-            episodeTitle = episodeTitle?.takeIf { it.isNotBlank() } ?: title,
-            posterUrl = posterUrl,
-            contentId = streamId,
-            seriesId = parentSeriesId,
-            seasonNumber = season,
-            episodeNumber = episodeNumber,
-            positionMs = positionMs,
-            durationMs = durationMs,
-            updatedAtEpochMs = updatedAtEpochMs,
-            deepLinkUri = TvDeepLinkRouter.uri(
-                TvDeepLinkTarget.Episode(
-                    seriesId = parentSeriesId,
-                    episodeId = streamId,
-                    resumePlayback = true,
+): TvContinueWatchingItem? {
+    return when (streamKind.trim().lowercase()) {
+        "movie" -> {
+            if (streamId <= 0 || key != "MOVIE:$streamId" || title.isBlank()) return null
+            if (
+                scope.profileKind == ProfileKind.KIDS &&
+                "MOVIE:$streamId" !in verifiedKidsContentKeys
+            ) return null
+            val providerId = "${TV_PROGRAM_PROVIDER_PREFIX}movie:$streamId"
+            TvContinueWatchingItem(
+                scope = scope,
+                providerId = providerId,
+                type = TvContinueWatchingType.MOVIE,
+                title = title,
+                episodeTitle = null,
+                posterUrl = posterUrl,
+                contentId = streamId,
+                seriesId = null,
+                seasonNumber = null,
+                episodeNumber = null,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                updatedAtEpochMs = updatedAtEpochMs,
+                deepLinkUri = TvDeepLinkRouter.uri(
+                    TvDeepLinkTarget.Movie(streamId, resumePlayback = true),
                 ),
-            ),
-            weight = 0,
-        )
+                weight = 0,
+            )
+        }
+        "series" -> {
+            val parentSeriesId = parentContentId?.takeIf { it > 0 } ?: return null
+            if (streamId <= 0 || key != "SERIES:$streamId" || title.isBlank()) return null
+            if (
+                scope.profileKind == ProfileKind.KIDS &&
+                "SERIES:$parentSeriesId" !in verifiedKidsContentKeys
+            ) return null
+            val providerId = "${TV_PROGRAM_PROVIDER_PREFIX}episode:$parentSeriesId:$streamId"
+            TvContinueWatchingItem(
+                scope = scope,
+                providerId = providerId,
+                type = TvContinueWatchingType.EPISODE,
+                title = seriesTitle?.takeIf { it.isNotBlank() } ?: title,
+                episodeTitle = episodeTitle?.takeIf { it.isNotBlank() } ?: title,
+                posterUrl = posterUrl,
+                contentId = streamId,
+                seriesId = parentSeriesId,
+                seasonNumber = season,
+                episodeNumber = episodeNumber,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                updatedAtEpochMs = updatedAtEpochMs,
+                deepLinkUri = TvDeepLinkRouter.uri(
+                    TvDeepLinkTarget.Episode(
+                        seriesId = parentSeriesId,
+                        episodeId = streamId,
+                        resumePlayback = true,
+                    ),
+                ),
+                weight = 0,
+            )
+        }
+        else -> null
     }
-    else -> null
 }
 
 data class ExistingTvProgram(
