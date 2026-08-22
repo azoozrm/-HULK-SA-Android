@@ -71,6 +71,24 @@ data class TvContinueWatchingItem(
     val weight: Int,
 )
 
+internal data class TvEpisodeProgramMetadata(
+    val seriesId: String,
+    val seasonNumber: Int?,
+    val episodeNumber: Int?,
+    val episodeTitle: String?,
+)
+
+internal fun TvContinueWatchingItem.officialEpisodeMetadata(): TvEpisodeProgramMetadata? {
+    if (type != TvContinueWatchingType.EPISODE) return null
+    val stableSeriesId = seriesId?.takeIf { it > 0 } ?: return null
+    return TvEpisodeProgramMetadata(
+        seriesId = stableSeriesId.toString(),
+        seasonNumber = seasonNumber?.takeIf { it > 0 },
+        episodeNumber = episodeNumber?.takeIf { it > 0 },
+        episodeTitle = episodeTitle?.takeIf(String::isNotBlank),
+    )
+}
+
 object TvContinueWatchingMapper {
     fun map(
         scope: TvProfileScope,
@@ -181,18 +199,22 @@ private fun HistoryEntry.toCandidate(
             ) return null
             val providerId =
                 "${TV_PROGRAM_PROVIDER_PREFIX}${scope.providerScopeId}:episode:$parentSeriesId:$streamId"
+            val programTitle = tvSeriesProgramTitle()
+            val validSeasonNumber = season?.takeIf { it > 0 }
+            val validEpisodeNumber = episodeNumber?.takeIf { it > 0 }
             TvContinueWatchingItem(
                 scope = scope,
                 providerId = providerId,
                 type = TvContinueWatchingType.EPISODE,
-                title = seriesTitle?.takeIf { it.isNotBlank() } ?: title,
-                episodeTitle = episodeTitle?.takeIf { it.isNotBlank() } ?: title,
+                title = programTitle,
+                episodeTitle = sanitizeTvEpisodeTitle(
+                    seriesTitle = programTitle,
+                    rawEpisodeTitle = episodeTitle,
+                ),
                 description = formatTvContinueWatchingDescription(
                     type = TvContinueWatchingType.EPISODE,
                     positionMs = positionMs,
                     durationMs = durationMs,
-                    seasonNumber = season,
-                    episodeNumber = episodeNumber,
                 ),
                 landscapeImageUrl = selectTvProgramArtwork(
                     landscapeUrl = landscapeArtworkByContentKey["SERIES:$parentSeriesId"],
@@ -201,8 +223,8 @@ private fun HistoryEntry.toCandidate(
                 artworkAspectRatio = TvProgramArtworkAspectRatio.LANDSCAPE_16_9,
                 contentId = streamId,
                 seriesId = parentSeriesId,
-                seasonNumber = season,
-                episodeNumber = episodeNumber,
+                seasonNumber = validSeasonNumber,
+                episodeNumber = validEpisodeNumber,
                 positionMs = positionMs,
                 durationMs = durationMs,
                 updatedAtEpochMs = updatedAtEpochMs,
@@ -225,14 +247,9 @@ internal fun formatTvContinueWatchingDescription(
     type: TvContinueWatchingType,
     positionMs: Long,
     durationMs: Long,
-    seasonNumber: Int? = null,
-    episodeNumber: Int? = null,
 ): String {
-    val parts = mutableListOf(if (type == TvContinueWatchingType.MOVIE) "فيلم" else "مسلسل")
-    if (type == TvContinueWatchingType.EPISODE) {
-        seasonNumber?.takeIf { it > 0 }?.let { parts += "الموسم $it" }
-        episodeNumber?.takeIf { it > 0 }?.let { parts += "الحلقة $it" }
-    }
+    val parts = mutableListOf(TV_CONTINUE_WATCHING_LABEL)
+    if (type == TvContinueWatchingType.MOVIE) parts += "فيلم"
     parts += "تم الوصول إلى ${formatTvPlaybackTime(positionMs, roundUp = false)}"
     val remaining = formatTvPlaybackTime(
         valueMs = (durationMs - positionMs).coerceAtLeast(0L),
@@ -241,6 +258,54 @@ internal fun formatTvContinueWatchingDescription(
     parts += "المتبقي $remaining"
     return parts.joinToString(" • ")
 }
+
+private fun HistoryEntry.tvSeriesProgramTitle(): String {
+    seriesTitle?.trim()?.takeIf(String::isNotEmpty)?.let { return it }
+    return title.substringBefore(" · ").trim().takeIf(String::isNotEmpty) ?: title.trim()
+}
+
+internal fun sanitizeTvEpisodeTitle(
+    seriesTitle: String,
+    rawEpisodeTitle: String?,
+): String? {
+    var candidate = rawEpisodeTitle?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val cleanSeriesTitle = seriesTitle.trim()
+    if (candidate.equals(cleanSeriesTitle, ignoreCase = true)) return null
+    if (
+        cleanSeriesTitle.isNotEmpty() &&
+        candidate.startsWith(cleanSeriesTitle, ignoreCase = true)
+    ) {
+        val suffix = candidate.substring(cleanSeriesTitle.length)
+        if (suffix.isEmpty() || suffix.first().isTvMetadataSeparator()) {
+            candidate = suffix.trimTvMetadataSeparators()
+        }
+    }
+    candidate = LATIN_EPISODE_PREFIX.replaceFirst(candidate, "").trimTvMetadataSeparators()
+    candidate = ARABIC_EPISODE_PREFIX.replaceFirst(candidate, "").trimTvMetadataSeparators()
+    if (candidate.isEmpty() || candidate.equals(cleanSeriesTitle, ignoreCase = true)) return null
+    val compact = candidate.lowercase(Locale.ROOT).filterNot { it.isTvMetadataSeparator() }
+    return candidate.takeUnless {
+        compact.matches(NUMBERING_ONLY_PATTERN) || compact.matches(ARABIC_NUMBERING_ONLY_PATTERN)
+    }
+}
+
+private fun Char.isTvMetadataSeparator(): Boolean =
+    isWhitespace() || this in "-–—·•|:._/\\"
+
+private fun String.trimTvMetadataSeparators(): String = trim { it.isTvMetadataSeparator() }
+
+private val LATIN_EPISODE_PREFIX = Regex(
+    """(?i)^(?:s(?:eason)?\s*\d+\s*[.\-_:]?\s*e(?:pisode)?\s*\d+|(?:episode|ep|e)\s*\d+|s(?:eason)?\s*\d+)""",
+)
+private val ARABIC_EPISODE_PREFIX = Regex(
+    """^(?:(?:الموسم\s*\d+\s*[-–—·•|:]?\s*)?الحلقة\s*\d+|الموسم\s*\d+)""",
+)
+private val NUMBERING_ONLY_PATTERN = Regex(
+    """(?:s(?:eason)?\d+e(?:pisode)?\d+|(?:episode|ep|e)\d+|(?:season|s)\d+|\d+)""",
+)
+private val ARABIC_NUMBERING_ONLY_PATTERN = Regex(
+    """(?:الموسم\d+(?:الحلقة\d+)?|الحلقة\d+)""",
+)
 
 private fun formatTvPlaybackTime(valueMs: Long, roundUp: Boolean): String {
     if (valueMs <= 0L) return "0د"

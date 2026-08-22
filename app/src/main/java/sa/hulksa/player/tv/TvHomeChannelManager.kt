@@ -343,19 +343,19 @@ class TvHomeChannelManager(context: Context) {
     }
 
     private fun PreviewProgram.Builder.applyEpisodeMetadata(item: TvContinueWatchingItem) {
-        if (item.type != TvContinueWatchingType.EPISODE) return
-        setSeriesId(item.seriesId?.toString())
-        item.seasonNumber?.takeIf { it >= 0 }?.let { setSeasonNumber(it) }
-        item.episodeNumber?.takeIf { it >= 0 }?.let { setEpisodeNumber(it) }
-        item.episodeTitle?.let { setEpisodeTitle(it) }
+        val metadata = item.officialEpisodeMetadata() ?: return
+        setSeriesId(metadata.seriesId)
+        metadata.seasonNumber?.let { setSeasonNumber(it) }
+        metadata.episodeNumber?.let { setEpisodeNumber(it) }
+        metadata.episodeTitle?.let { setEpisodeTitle(it) }
     }
 
     private fun WatchNextProgram.Builder.applyEpisodeMetadata(item: TvContinueWatchingItem) {
-        if (item.type != TvContinueWatchingType.EPISODE) return
-        setSeriesId(item.seriesId?.toString())
-        item.seasonNumber?.takeIf { it >= 0 }?.let { setSeasonNumber(it) }
-        item.episodeNumber?.takeIf { it >= 0 }?.let { setEpisodeNumber(it) }
-        item.episodeTitle?.let { setEpisodeTitle(it) }
+        val metadata = item.officialEpisodeMetadata() ?: return
+        setSeriesId(metadata.seriesId)
+        metadata.seasonNumber?.let { setSeasonNumber(it) }
+        metadata.episodeNumber?.let { setEpisodeNumber(it) }
+        metadata.episodeTitle?.let { setEpisodeTitle(it) }
     }
 
     private fun TvContinueWatchingItem.programType(): Int = when (type) {

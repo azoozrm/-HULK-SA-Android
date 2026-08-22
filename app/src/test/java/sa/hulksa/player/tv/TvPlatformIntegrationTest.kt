@@ -116,17 +116,20 @@ class TvPlatformIntegrationTest {
             history = listOf(
                 movieHistory(
                     id = 41,
-                    position = 6_120_000L,
-                    duration = 7_200_000L,
-                ),
+                    position = 240_000L,
+                    duration = 2_820_000L,
+                ).copy(title = "Ghost War 2026"),
             ),
             verifiedKidsContentKeys = emptySet(),
         ).single()
 
-        assertEquals(
-            "فيلم • تم الوصول إلى 1س 42د • المتبقي 18د",
-            item.description,
-        )
+        assertEquals("Ghost War 2026", item.title)
+        assertEquals("اكمل المشاهدة • فيلم • تم الوصول إلى 4د • المتبقي 43د", item.description)
+        assertNull(item.seriesId)
+        assertNull(item.seasonNumber)
+        assertNull(item.episodeNumber)
+        assertNull(item.episodeTitle)
+        assertNull(item.officialEpisodeMetadata())
     }
 
     @Test
@@ -135,16 +138,113 @@ class TvPlatformIntegrationTest {
             scope = standardScope("A"),
             history = listOf(
                 episodeHistory().copy(
-                    positionMs = 1_380_000L,
-                    durationMs = 2_400_000L,
+                    title = "صمود مترجم · صمود مترجم-S1.E4",
+                    seriesTitle = "صمود مترجم",
+                    episodeTitle = "صمود مترجم-S1.E4",
+                    positionMs = 240_000L,
+                    durationMs = 2_580_000L,
                     episodeNumber = 4,
+                ),
+            ),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+        val official = item.officialEpisodeMetadata()
+
+        assertEquals("صمود مترجم", item.title)
+        assertEquals("اكمل المشاهدة • تم الوصول إلى 4د • المتبقي 39د", item.description)
+        assertFalse(item.description.contains("صمود مترجم"))
+        assertFalse(Regex("(?i)S\\d+\\.E\\d+").containsMatchIn(item.description))
+        assertFalse(item.description.contains("الموسم 1"))
+        assertFalse(item.description.contains("الحلقة 4"))
+        assertEquals("82", official?.seriesId)
+        assertEquals(1, official?.seasonNumber)
+        assertEquals(4, official?.episodeNumber)
+        assertNull(official?.episodeTitle)
+    }
+
+    @Test
+    fun usefulEpisodeTitleKeepsOnlyTheRealTitle() {
+        val item = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(
+                episodeHistory().copy(
+                    seriesTitle = "صمود مترجم",
+                    season = 1,
+                    episodeNumber = 4,
+                    episodeTitle = "صمود مترجم - S1.E4 - الحلقة الأخيرة",
+                ),
+            ),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+
+        assertEquals("الحلقة الأخيرة", item.episodeTitle)
+        assertEquals("الحلقة الأخيرة", item.officialEpisodeMetadata()?.episodeTitle)
+        assertFalse(item.episodeTitle.orEmpty().contains("صمود مترجم"))
+        assertFalse(item.episodeTitle.orEmpty().contains("S1.E4", ignoreCase = true))
+    }
+
+    @Test
+    fun redundantEpisodeTitlesAreIgnored() {
+        listOf(
+            "صمود مترجم",
+            "صمود مترجم-S1.E1",
+            "S1.E1",
+            "Season 1 Episode 1",
+            "Season 1",
+            "الموسم 1 • الحلقة 1",
+            "الموسم 1",
+            "الحلقة 1",
+        ).forEach { rawTitle ->
+            assertNull(sanitizeTvEpisodeTitle("صمود مترجم", rawTitle))
+        }
+    }
+
+    @Test
+    fun missingEpisodeMetadataFailsSafelyWithoutPlaceholderText() {
+        val item = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(
+                episodeHistory().copy(
+                    seriesTitle = "صمود مترجم",
+                    season = 0,
+                    episodeNumber = 0,
+                    episodeTitle = "S0.E0",
+                    positionMs = 1_080_000L,
+                    durationMs = 2_400_000L,
+                ),
+            ),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+        val official = item.officialEpisodeMetadata()
+
+        assertNull(item.seasonNumber)
+        assertNull(item.episodeNumber)
+        assertNull(item.episodeTitle)
+        assertNull(official?.seasonNumber)
+        assertNull(official?.episodeNumber)
+        assertNull(official?.episodeTitle)
+        assertEquals("اكمل المشاهدة • تم الوصول إلى 18د • المتبقي 22د", item.description)
+        listOf("null", "S0.E0", "الموسم 0", "الحلقة 0").forEach { placeholder ->
+            assertFalse(item.description.contains(placeholder, ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun progressAndRemainingUseCompactHourFormatting() {
+        val item = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(
+                movieHistory(
+                    id = 41,
+                    position = 3_840_000L,
+                    duration = 6_420_000L,
                 ),
             ),
             verifiedKidsContentKeys = emptySet(),
         ).single()
 
         assertEquals(
-            "مسلسل • الموسم 1 • الحلقة 4 • تم الوصول إلى 23د • المتبقي 17د",
+            "اكمل المشاهدة • فيلم • تم الوصول إلى 1س 4د • المتبقي 43د",
             item.description,
         )
     }
