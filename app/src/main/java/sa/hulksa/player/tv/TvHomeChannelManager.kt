@@ -1,5 +1,6 @@
 package sa.hulksa.player.tv
 
+import android.annotation.SuppressLint
 import android.app.UiModeManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -42,6 +43,8 @@ sealed interface TvPlatformSyncResult {
  * Small Android TV provider adapter. All provider I/O is serialized and performed off the main
  * thread; no worker, service, polling loop or program-specific network request is involved.
  */
+// tvprovider exposes its public PreviewProgram/WatchNextProgram API through restricted base types.
+@SuppressLint("RestrictedApi")
 class TvHomeChannelManager(context: Context) {
     private val appContext = context.applicationContext
     private val helper = PreviewChannelHelper(appContext)
