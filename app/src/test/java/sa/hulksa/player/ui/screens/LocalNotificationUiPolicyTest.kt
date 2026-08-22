@@ -16,10 +16,10 @@ class LocalNotificationUiPolicyTest {
         )
 
         profiles.forEach { metrics ->
-            assertTrue(metrics.horizontalPaddingDp in 18..64)
-            assertTrue(metrics.topPaddingDp in 16..42)
-            assertTrue(metrics.maxContentWidthDp in 760..1320)
-            assertTrue(metrics.posterWidthDp in 70..112)
+            assertTrue(metrics.horizontalPaddingDp in 18..48)
+            assertTrue(metrics.topPaddingDp in 14..32)
+            assertTrue(metrics.maxContentWidthDp in 720..1120)
+            assertTrue(metrics.posterWidthDp in 64..88)
             assertTrue(abs(metrics.posterHeightDp - metrics.posterWidthDp * 1.5f) <= 2f)
         }
         assertTrue(profiles.zipWithNext().all { (first, second) -> first.maxContentWidthDp <= second.maxContentWidthDp })
