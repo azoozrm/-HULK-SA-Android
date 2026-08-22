@@ -724,7 +724,9 @@ private fun TvLocalNotificationCenter(
                 .heightIn(min = 52.dp),
         ) {
             Row(
-                modifier = Modifier.align(Alignment.CenterStart),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 100.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -752,7 +754,7 @@ private fun TvLocalNotificationCenter(
                 onTvDirection = { direction -> handleDirection(backTarget, direction) },
                 onFocused = { focusedTarget = backTarget },
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
+                    .align(Alignment.CenterStart)
                     .width(82.dp)
                     .height(38.dp)
                     .focusRequester(backRequester),
@@ -770,7 +772,7 @@ private fun TvLocalNotificationCenter(
         if (notifications.isNotEmpty()) {
             Spacer(Modifier.height(11.dp))
             Row(
-                modifier = Modifier.align(Alignment.End),
+                modifier = Modifier.align(Alignment.Start),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
