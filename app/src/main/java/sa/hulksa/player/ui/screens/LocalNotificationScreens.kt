@@ -152,17 +152,17 @@ internal fun notificationHeaderMove(
     if (!hasNotifications) return null
     return when (current) {
         NotificationHeaderFocusNode.BACK -> when (direction) {
-            NotificationFocusDirection.LEFT -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.CLEAR_ALL
             NotificationFocusDirection.DOWN -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.CLEAR_ALL
             else -> null
         }
         NotificationHeaderFocusNode.READ_ALL -> when (direction) {
-            NotificationFocusDirection.RIGHT -> NotificationHeaderFocusNode.BACK
+            NotificationFocusDirection.UP -> NotificationHeaderFocusNode.BACK
             NotificationFocusDirection.LEFT -> NotificationHeaderFocusNode.CLEAR_ALL
             else -> null
         }
         NotificationHeaderFocusNode.CLEAR_ALL -> when (direction) {
-            NotificationFocusDirection.RIGHT -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.BACK
+            NotificationFocusDirection.UP -> NotificationHeaderFocusNode.BACK
+            NotificationFocusDirection.RIGHT -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else null
             else -> null
         }
     }
@@ -265,9 +265,9 @@ private data class NotificationCardFocus(
     val delete: FocusRequester = FocusRequester(),
 )
 
-private fun FocusRequester.moveIfPossible(target: FocusRequester?): Boolean {
-    if (target == null) return false
-    return runCatching { target.requestFocus() }.getOrDefault(false)
+private fun requestFocusAndConsume(target: FocusRequester?): Boolean {
+    if (target != null) runCatching { target.requestFocus() }
+    return true
 }
 
 private fun keyToDirection(key: Key): NotificationFocusDirection? = when (key) {
@@ -322,9 +322,8 @@ private fun NotificationActionButton(
             .then(
                 if (isTv && onTvDirection != null) {
                     Modifier.onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         val direction = keyToDirection(event.key) ?: return@onPreviewKeyEvent false
-                        onTvDirection(direction)
+                        if (event.type == KeyEventType.KeyDown) onTvDirection(direction) else true
                     }
                 } else {
                     Modifier
@@ -396,7 +395,7 @@ fun LocalNotificationCenterScreen(
             direction: NotificationFocusDirection,
         ): Boolean {
             if (direction == NotificationFocusDirection.DOWN && node != NotificationHeaderFocusNode.BACK) {
-                return firstRequester?.requestFocus() ?: false
+                return requestFocusAndConsume(firstRequester)
             }
             val target = notificationHeaderMove(
                 current = node,
@@ -404,11 +403,7 @@ fun LocalNotificationCenterScreen(
                 hasNotifications = notifications.isNotEmpty(),
                 direction = direction,
             )
-            return if (target == null) {
-                true
-            } else {
-                headerRequester(target).requestFocus()
-            }
+            return requestFocusAndConsume(target?.let(::headerRequester))
         }
 
         LaunchedEffect(keys, isTv) {
@@ -430,79 +425,81 @@ fun LocalNotificationCenterScreen(
                 ),
         ) {
             if (isTv) {
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    horizontalAlignment = Alignment.Start,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        NotificationCenterTitle(unreadCount = unreadCount, isTv = true)
-                    }
-                    NotificationActionButton(
-                        text = "رجوع",
-                        onClick = onBack,
-                        isTv = true,
-                        primary = false,
-                        headerCompact = true,
-                        onTvDirection = { direction ->
-                            handleHeaderDirection(NotificationHeaderFocusNode.BACK, direction)
-                        },
-                        modifier = Modifier
-                            .widthIn(min = 72.dp, max = 82.dp)
-                            .heightIn(min = 40.dp)
-                            .focusRequester(backRequester),
-                    )
-                }
-
-                if (notifications.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
+                        Column {
+                            NotificationCenterTitle(unreadCount = unreadCount, isTv = true)
+                        }
                         NotificationActionButton(
-                            text = "تعليم الكل كمقروء",
-                            onClick = {
-                                onReadAll()
-                                focusScope.launch {
-                                    delay(80L)
-                                    runCatching { (firstRequester ?: clearRequester).requestFocus() }
-                                }
-                            },
-                            isTv = true,
-                            enabled = unreadCount > 0,
-                            primary = false,
-                            headerCompact = true,
-                            onTvDirection = { direction ->
-                                if (!readAllRequester.moveIfPossible(readAllRequester)) return@NotificationActionButton true
-                                handleHeaderDirection(NotificationHeaderFocusNode.READ_ALL, direction)
-                            },
-                            modifier = Modifier
-                                .widthIn(min = 138.dp, max = 156.dp)
-                                .heightIn(min = 40.dp)
-                                .focusRequester(readAllRequester),
-                        )
-                        NotificationActionButton(
-                            text = "مسح الكل",
-                            onClick = {
-                                onClearAll()
-                                focusScope.launch {
-                                    delay(80L)
-                                    runCatching { backRequester.requestFocus() }
-                                }
-                            },
+                            text = "رجوع",
+                            onClick = onBack,
                             isTv = true,
                             primary = false,
                             headerCompact = true,
                             onTvDirection = { direction ->
-                                handleHeaderDirection(NotificationHeaderFocusNode.CLEAR_ALL, direction)
+                                handleHeaderDirection(NotificationHeaderFocusNode.BACK, direction)
                             },
                             modifier = Modifier
-                                .widthIn(min = 88.dp, max = 104.dp)
+                                .widthIn(min = 72.dp, max = 82.dp)
                                 .heightIn(min = 40.dp)
-                                .focusRequester(clearRequester),
+                                .focusRequester(backRequester),
                         )
+                    }
+
+                    if (notifications.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            NotificationActionButton(
+                                text = "تعليم الكل كمقروء",
+                                onClick = {
+                                    onReadAll()
+                                    focusScope.launch {
+                                        delay(80L)
+                                        runCatching { (firstRequester ?: clearRequester).requestFocus() }
+                                    }
+                                },
+                                isTv = true,
+                                enabled = unreadCount > 0,
+                                primary = false,
+                                headerCompact = true,
+                                onTvDirection = { direction ->
+                                    handleHeaderDirection(NotificationHeaderFocusNode.READ_ALL, direction)
+                                },
+                                modifier = Modifier
+                                    .widthIn(min = 138.dp, max = 156.dp)
+                                    .heightIn(min = 40.dp)
+                                    .focusRequester(readAllRequester),
+                            )
+                            NotificationActionButton(
+                                text = "مسح الكل",
+                                onClick = {
+                                    onClearAll()
+                                    focusScope.launch {
+                                        delay(80L)
+                                        runCatching { backRequester.requestFocus() }
+                                    }
+                                },
+                                isTv = true,
+                                primary = false,
+                                headerCompact = true,
+                                onTvDirection = { direction ->
+                                    handleHeaderDirection(NotificationHeaderFocusNode.CLEAR_ALL, direction)
+                                },
+                                modifier = Modifier
+                                    .widthIn(min = 88.dp, max = 104.dp)
+                                    .heightIn(min = 40.dp)
+                                    .focusRequester(clearRequester),
+                            )
+                        }
                     }
                 }
             } else {
@@ -710,8 +707,8 @@ private fun NotificationCardActions(
         direction: NotificationFocusDirection,
     ): Boolean {
         return when (direction) {
-            NotificationFocusDirection.UP -> if (up == null) true else up.requestFocus()
-            NotificationFocusDirection.DOWN -> if (down == null) true else down.requestFocus()
+            NotificationFocusDirection.UP -> requestFocusAndConsume(up)
+            NotificationFocusDirection.DOWN -> requestFocusAndConsume(down)
             NotificationFocusDirection.LEFT, NotificationFocusDirection.RIGHT -> true
         }
     }
@@ -905,7 +902,7 @@ fun NewEpisodeAlertOverlay(
                         isTv = isTv,
                         onTvDirection = if (isTv) { direction ->
                             when (direction) {
-                                NotificationFocusDirection.LEFT -> laterRequester.requestFocus()
+                                NotificationFocusDirection.LEFT -> requestFocusAndConsume(laterRequester)
                                 NotificationFocusDirection.RIGHT, NotificationFocusDirection.UP, NotificationFocusDirection.DOWN -> true
                             }
                         } else null,
@@ -924,7 +921,7 @@ fun NewEpisodeAlertOverlay(
                         primary = false,
                         onTvDirection = if (isTv) { direction ->
                             when (direction) {
-                                NotificationFocusDirection.RIGHT -> primaryRequester.requestFocus()
+                                NotificationFocusDirection.RIGHT -> requestFocusAndConsume(primaryRequester)
                                 NotificationFocusDirection.LEFT, NotificationFocusDirection.UP, NotificationFocusDirection.DOWN -> true
                             }
                         } else null,
