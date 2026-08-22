@@ -46,38 +46,117 @@ class LocalNotificationUiPolicyTest {
     fun notificationHeaderFocusGraphStopsAtEdgesAndNeverJumps() {
         assertEquals(
             NotificationHeaderFocusNode.READ_ALL,
-            notificationHeaderMove(NotificationHeaderFocusNode.BACK, unreadCount = 2, hasNotifications = true, direction = "left"),
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.BACK,
+                unreadCount = 2,
+                hasNotifications = true,
+                direction = NotificationFocusDirection.LEFT,
+            ),
         )
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.BACK, 2, true, "right"))
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.BACK, 2, true, "up"))
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.BACK,
+                2,
+                true,
+                NotificationFocusDirection.RIGHT,
+            ),
+        )
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.BACK,
+                2,
+                true,
+                NotificationFocusDirection.UP,
+            ),
+        )
 
         assertEquals(
             NotificationHeaderFocusNode.CLEAR_ALL,
-            notificationHeaderMove(NotificationHeaderFocusNode.READ_ALL, 2, true, "left"),
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.READ_ALL,
+                2,
+                true,
+                NotificationFocusDirection.LEFT,
+            ),
         )
         assertEquals(
             NotificationHeaderFocusNode.BACK,
-            notificationHeaderMove(NotificationHeaderFocusNode.READ_ALL, 2, true, "right"),
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.READ_ALL,
+                2,
+                true,
+                NotificationFocusDirection.RIGHT,
+            ),
         )
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.READ_ALL, 2, true, "up"))
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.READ_ALL,
+                2,
+                true,
+                NotificationFocusDirection.UP,
+            ),
+        )
 
         assertEquals(
             NotificationHeaderFocusNode.READ_ALL,
-            notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 2, true, "right"),
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                2,
+                true,
+                NotificationFocusDirection.RIGHT,
+            ),
         )
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 2, true, "left"))
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 2, true, "up"))
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                2,
+                true,
+                NotificationFocusDirection.LEFT,
+            ),
+        )
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                2,
+                true,
+                NotificationFocusDirection.UP,
+            ),
+        )
 
         assertEquals(
             NotificationHeaderFocusNode.CLEAR_ALL,
-            notificationHeaderMove(NotificationHeaderFocusNode.BACK, 0, true, "down"),
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.BACK,
+                0,
+                true,
+                NotificationFocusDirection.DOWN,
+            ),
         )
         assertEquals(
             NotificationHeaderFocusNode.BACK,
-            notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 0, true, "right"),
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                0,
+                true,
+                NotificationFocusDirection.RIGHT,
+            ),
         )
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 0, true, "left"))
-        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.BACK, 0, false, "down"))
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.CLEAR_ALL,
+                0,
+                true,
+                NotificationFocusDirection.LEFT,
+            ),
+        )
+        assertNull(
+            notificationHeaderMove(
+                NotificationHeaderFocusNode.BACK,
+                0,
+                false,
+                NotificationFocusDirection.DOWN,
+            ),
+        )
     }
 
     @Test
