@@ -47,7 +47,9 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -134,25 +136,33 @@ internal enum class NotificationHeaderFocusNode {
     CLEAR_ALL,
 }
 
+internal enum class NotificationFocusDirection {
+    UP,
+    DOWN,
+    LEFT,
+    RIGHT,
+}
+
 internal fun notificationHeaderMove(
     current: NotificationHeaderFocusNode,
     unreadCount: Int,
     hasNotifications: Boolean,
-    direction: String,
+    direction: NotificationFocusDirection,
 ): NotificationHeaderFocusNode? {
     if (!hasNotifications) return null
     return when (current) {
         NotificationHeaderFocusNode.BACK -> when (direction) {
-            "down", "left" -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.CLEAR_ALL
+            NotificationFocusDirection.LEFT -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.CLEAR_ALL
+            NotificationFocusDirection.DOWN -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.CLEAR_ALL
             else -> null
         }
         NotificationHeaderFocusNode.READ_ALL -> when (direction) {
-            "right" -> NotificationHeaderFocusNode.BACK
-            "left" -> NotificationHeaderFocusNode.CLEAR_ALL
+            NotificationFocusDirection.RIGHT -> NotificationHeaderFocusNode.BACK
+            NotificationFocusDirection.LEFT -> NotificationHeaderFocusNode.CLEAR_ALL
             else -> null
         }
         NotificationHeaderFocusNode.CLEAR_ALL -> when (direction) {
-            "right" -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.BACK
+            NotificationFocusDirection.RIGHT -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.BACK
             else -> null
         }
     }
@@ -255,6 +265,19 @@ private data class NotificationCardFocus(
     val delete: FocusRequester = FocusRequester(),
 )
 
+private fun FocusRequester.moveIfPossible(target: FocusRequester?): Boolean {
+    if (target == null) return false
+    return runCatching { target.requestFocus() }.getOrDefault(false)
+}
+
+private fun keyToDirection(key: Key): NotificationFocusDirection? = when (key) {
+    Key.DirectionUp -> NotificationFocusDirection.UP
+    Key.DirectionDown -> NotificationFocusDirection.DOWN
+    Key.DirectionLeft -> NotificationFocusDirection.LEFT
+    Key.DirectionRight -> NotificationFocusDirection.RIGHT
+    else -> null
+}
+
 @Composable
 private fun NotificationActionButton(
     text: String,
@@ -264,6 +287,7 @@ private fun NotificationActionButton(
     primary: Boolean = true,
     enabled: Boolean = true,
     headerCompact: Boolean = false,
+    onTvDirection: ((NotificationFocusDirection) -> Boolean)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -295,6 +319,17 @@ private fun NotificationActionButton(
             .border(if (focused) 3.dp else 1.dp, borderColor, shape)
             .semantics(mergeDescendants = true) { contentDescription = text }
             .onFocusChanged { focused = it.isFocused }
+            .then(
+                if (isTv && onTvDirection != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val direction = keyToDirection(event.key) ?: return@onPreviewKeyEvent false
+                        onTvDirection(direction)
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(
                 horizontal = if (headerCompact) 11.dp else if (isTv) 15.dp else 14.dp,
@@ -351,6 +386,30 @@ fun LocalNotificationCenterScreen(
             NotificationHeaderEntry.READ_ALL -> readAllRequester
             NotificationHeaderEntry.CLEAR_ALL -> clearRequester
         }
+        fun headerRequester(node: NotificationHeaderFocusNode): FocusRequester = when (node) {
+            NotificationHeaderFocusNode.BACK -> backRequester
+            NotificationHeaderFocusNode.READ_ALL -> readAllRequester
+            NotificationHeaderFocusNode.CLEAR_ALL -> clearRequester
+        }
+        fun handleHeaderDirection(
+            node: NotificationHeaderFocusNode,
+            direction: NotificationFocusDirection,
+        ): Boolean {
+            if (direction == NotificationFocusDirection.DOWN && node != NotificationHeaderFocusNode.BACK) {
+                return firstRequester?.requestFocus() ?: false
+            }
+            val target = notificationHeaderMove(
+                current = node,
+                unreadCount = unreadCount,
+                hasNotifications = notifications.isNotEmpty(),
+                direction = direction,
+            )
+            return if (target == null) {
+                true
+            } else {
+                headerRequester(target).requestFocus()
+            }
+        }
 
         LaunchedEffect(keys, isTv) {
             if (isTv) {
@@ -376,26 +435,23 @@ fun LocalNotificationCenterScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
+                    Column(Modifier.weight(1f)) {
+                        NotificationCenterTitle(unreadCount = unreadCount, isTv = true)
+                    }
                     NotificationActionButton(
                         text = "رجوع",
                         onClick = onBack,
                         isTv = true,
                         primary = false,
                         headerCompact = true,
+                        onTvDirection = { direction ->
+                            handleHeaderDirection(NotificationHeaderFocusNode.BACK, direction)
+                        },
                         modifier = Modifier
                             .widthIn(min = 72.dp, max = 82.dp)
                             .heightIn(min = 40.dp)
-                            .focusRequester(backRequester)
-                            .focusProperties {
-                                up = FocusRequester.Cancel
-                                right = FocusRequester.Cancel
-                                left = if (notifications.isNotEmpty()) firstHeaderRequester else FocusRequester.Cancel
-                                down = if (notifications.isNotEmpty()) firstHeaderRequester else FocusRequester.Cancel
-                            },
+                            .focusRequester(backRequester),
                     )
-                    Column(Modifier.weight(1f)) {
-                        NotificationCenterTitle(unreadCount = unreadCount, isTv = true)
-                    }
                 }
 
                 if (notifications.isNotEmpty()) {
@@ -418,16 +474,14 @@ fun LocalNotificationCenterScreen(
                             enabled = unreadCount > 0,
                             primary = false,
                             headerCompact = true,
+                            onTvDirection = { direction ->
+                                if (!readAllRequester.moveIfPossible(readAllRequester)) return@NotificationActionButton true
+                                handleHeaderDirection(NotificationHeaderFocusNode.READ_ALL, direction)
+                            },
                             modifier = Modifier
                                 .widthIn(min = 138.dp, max = 156.dp)
                                 .heightIn(min = 40.dp)
-                                .focusRequester(readAllRequester)
-                                .focusProperties {
-                                    up = backRequester
-                                    right = backRequester
-                                    left = clearRequester
-                                    down = firstRequester ?: FocusRequester.Cancel
-                                },
+                                .focusRequester(readAllRequester),
                         )
                         NotificationActionButton(
                             text = "مسح الكل",
@@ -441,16 +495,13 @@ fun LocalNotificationCenterScreen(
                             isTv = true,
                             primary = false,
                             headerCompact = true,
+                            onTvDirection = { direction ->
+                                handleHeaderDirection(NotificationHeaderFocusNode.CLEAR_ALL, direction)
+                            },
                             modifier = Modifier
                                 .widthIn(min = 88.dp, max = 104.dp)
                                 .heightIn(min = 40.dp)
-                                .focusRequester(clearRequester)
-                                .focusProperties {
-                                    up = backRequester
-                                    right = if (unreadCount > 0) readAllRequester else backRequester
-                                    left = FocusRequester.Cancel
-                                    down = firstRequester ?: FocusRequester.Cancel
-                                },
+                                .focusRequester(clearRequester),
                         )
                     }
                 }
@@ -531,7 +582,7 @@ fun LocalNotificationCenterScreen(
                         val nextCardRequester = nextLocalNotificationFocusIndex(index, notifications.size, true)
                             ?.let { nextIndex -> cardFocus[notifications[nextIndex].id]?.open }
                         val previousRequester = previousCardRequester ?: firstHeaderRequester
-                        val nextRequester = nextCardRequester ?: FocusRequester.Cancel
+                        val nextRequester = nextCardRequester
                         val afterDeleteRequester = nextCardRequester ?: previousCardRequester ?: firstHeaderRequester
                         LocalNotificationCard(
                             notification = notification,
@@ -575,7 +626,7 @@ private fun LocalNotificationCard(
     isTv: Boolean,
     focus: NotificationCardFocus,
     previousRequester: FocusRequester,
-    nextRequester: FocusRequester,
+    nextRequester: FocusRequester?,
     afterDeleteRequester: FocusRequester,
     onOpen: () -> Unit,
     onMarkRead: () -> Unit,
@@ -643,7 +694,7 @@ private fun NotificationCardActions(
     isTv: Boolean,
     focus: NotificationCardFocus,
     previousRequester: FocusRequester,
-    nextRequester: FocusRequester,
+    nextRequester: FocusRequester?,
     afterDeleteRequester: FocusRequester,
     onOpen: () -> Unit,
     onMarkRead: () -> Unit,
@@ -652,6 +703,18 @@ private fun NotificationCardActions(
 ) {
     val focusScope = rememberCoroutineScope()
     val readVisible = episode && !read
+    fun handleTvDirection(
+        current: FocusRequester,
+        up: FocusRequester?,
+        down: FocusRequester?,
+        direction: NotificationFocusDirection,
+    ): Boolean {
+        return when (direction) {
+            NotificationFocusDirection.UP -> if (up == null) true else up.requestFocus()
+            NotificationFocusDirection.DOWN -> if (down == null) true else down.requestFocus()
+            NotificationFocusDirection.LEFT, NotificationFocusDirection.RIGHT -> true
+        }
+    }
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -662,23 +725,18 @@ private fun NotificationCardActions(
             text = if (episode) "مشاهدة الان" else "حسنا",
             onClick = onOpen,
             isTv = isTv,
+            onTvDirection = if (isTv) { direction ->
+                handleTvDirection(
+                    current = focus.open,
+                    up = previousRequester,
+                    down = if (readVisible) focus.read else focus.delete,
+                    direction = direction,
+                )
+            } else null,
             modifier = Modifier
                 .then(if (isTv) Modifier.fillMaxWidth() else Modifier)
                 .heightIn(min = if (isTv) 42.dp else 48.dp)
-                .focusRequester(focus.open)
-                .focusProperties {
-                    if (isTv) {
-                        up = previousRequester
-                        down = if (readVisible) focus.read else focus.delete
-                        right = FocusRequester.Cancel
-                        left = FocusRequester.Cancel
-                    } else {
-                        up = previousRequester
-                        down = nextRequester
-                        right = FocusRequester.Cancel
-                        left = if (readVisible) focus.read else focus.delete
-                    }
-                },
+                .focusRequester(focus.open),
         )
         if (readVisible) {
             NotificationActionButton(
@@ -689,23 +747,18 @@ private fun NotificationCardActions(
                 },
                 isTv = isTv,
                 primary = false,
+                onTvDirection = if (isTv) { direction ->
+                    handleTvDirection(
+                        current = focus.read,
+                        up = focus.open,
+                        down = focus.delete,
+                        direction = direction,
+                    )
+                } else null,
                 modifier = Modifier
                     .then(if (isTv) Modifier.fillMaxWidth() else Modifier)
                     .heightIn(min = if (isTv) 42.dp else 48.dp)
-                    .focusRequester(focus.read)
-                    .focusProperties {
-                        if (isTv) {
-                            up = focus.open
-                            down = focus.delete
-                            right = FocusRequester.Cancel
-                            left = FocusRequester.Cancel
-                        } else {
-                            up = previousRequester
-                            down = nextRequester
-                            right = focus.open
-                            left = focus.delete
-                        }
-                    },
+                    .focusRequester(focus.read),
             )
         }
         NotificationActionButton(
@@ -716,23 +769,18 @@ private fun NotificationCardActions(
             },
             isTv = isTv,
             primary = false,
+            onTvDirection = if (isTv) { direction ->
+                handleTvDirection(
+                    current = focus.delete,
+                    up = if (readVisible) focus.read else focus.open,
+                    down = nextRequester,
+                    direction = direction,
+                )
+            } else null,
             modifier = Modifier
                 .then(if (isTv) Modifier.fillMaxWidth() else Modifier)
                 .heightIn(min = if (isTv) 42.dp else 48.dp)
-                .focusRequester(focus.delete)
-                .focusProperties {
-                    if (isTv) {
-                        up = if (readVisible) focus.read else focus.open
-                        down = nextRequester
-                        right = FocusRequester.Cancel
-                        left = FocusRequester.Cancel
-                    } else {
-                        up = previousRequester
-                        down = nextRequester
-                        right = if (readVisible) focus.read else focus.open
-                        left = FocusRequester.Cancel
-                    }
-                },
+                .focusRequester(focus.delete),
         )
     }
 }
@@ -751,7 +799,12 @@ fun NewEpisodeAlertOverlay(
     val primaryRequester = remember(popup.eventIds) { FocusRequester() }
     val laterRequester = remember(popup.eventIds) { FocusRequester() }
     var userInteracted by remember(popup.eventIds) { mutableStateOf(false) }
-    LaunchedEffect(popup.eventIds) { delay(120L); onPresented() }
+
+    LaunchedEffect(popup.eventIds) {
+        delay(120L)
+        onPresented()
+    }
+
     LaunchedEffect(popup.eventIds, isTv) {
         if (isTv) {
             delay(100L)
@@ -760,8 +813,15 @@ fun NewEpisodeAlertOverlay(
             if (!userInteracted) onLater()
         }
     }
+
     BoxWithConstraints(
-        Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = if (isTv) 34.dp else 12.dp, vertical = if (isTv) 28.dp else 12.dp),
+        Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(
+                horizontal = if (isTv) 34.dp else 12.dp,
+                vertical = if (isTv) 28.dp else 12.dp,
+            ),
     ) {
         val compactPhone = !isTv && maxWidth < 420.dp
         val cardWidth = when {
@@ -777,13 +837,20 @@ fun NewEpisodeAlertOverlay(
                 .clip(shape)
                 .background(colors.surfaceRaised.copy(alpha = .985f))
                 .border(2.dp, colors.gold.copy(alpha = .68f), shape)
-                .onPreviewKeyEvent { event -> if (event.type == KeyEventType.KeyDown) userInteracted = true; false }
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) userInteracted = true
+                    false
+                }
                 .padding(if (isTv) 18.dp else 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 11.dp),
         ) {
             Box(
-                Modifier.width(if (isTv) 82.dp else 66.dp).height(if (isTv) 123.dp else 99.dp).clip(RoundedCornerShape(if (isTv) 13.dp else 10.dp)).background(Color(0xFF11120E)),
+                Modifier
+                    .width(if (isTv) 82.dp else 66.dp)
+                    .height(if (isTv) 123.dp else 99.dp)
+                    .clip(RoundedCornerShape(if (isTv) 13.dp else 10.dp))
+                    .background(Color(0xFF11120E)),
                 contentAlignment = Alignment.Center,
             ) {
                 if (!popup.posterUrl.isNullOrBlank() && !popup.summary) {
@@ -805,10 +872,21 @@ fun NewEpisodeAlertOverlay(
                     maxLines = 2,
                 )
                 if (!popup.summary) {
-                    Text(text = popup.seriesName.orEmpty(), color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = popup.seriesName.orEmpty(),
+                        color = colors.text,
+                        fontSize = if (isTv) 20.sp else 17.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     val episode = popup.notifications.lastOrNull()
                     if (popup.episodeCount == 1 && episode != null) {
-                        Text(text = "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}", color = colors.textMuted, fontSize = if (isTv) 12.sp else 10.sp)
+                        Text(
+                            text = "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}",
+                            color = colors.textMuted,
+                            fontSize = if (isTv) 12.sp else 10.sp,
+                        )
                     }
                 }
                 Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
@@ -820,26 +898,40 @@ fun NewEpisodeAlertOverlay(
                 ) {
                     NotificationActionButton(
                         text = if (popup.summary) "عرض الاشعارات" else "مشاهدة الان",
-                        onClick = { userInteracted = true; onPrimary() },
-                        isTv = isTv,
-                        modifier = Modifier.then(if (compactPhone) Modifier.fillMaxWidth() else Modifier).heightIn(min = 48.dp).focusRequester(primaryRequester).focusProperties {
-                            up = FocusRequester.Cancel
-                            down = FocusRequester.Cancel
-                            right = FocusRequester.Cancel
-                            left = laterRequester
+                        onClick = {
+                            userInteracted = true
+                            onPrimary()
                         },
+                        isTv = isTv,
+                        onTvDirection = if (isTv) { direction ->
+                            when (direction) {
+                                NotificationFocusDirection.LEFT -> laterRequester.requestFocus()
+                                NotificationFocusDirection.RIGHT, NotificationFocusDirection.UP, NotificationFocusDirection.DOWN -> true
+                            }
+                        } else null,
+                        modifier = Modifier
+                            .then(if (compactPhone) Modifier.fillMaxWidth() else Modifier)
+                            .heightIn(min = 48.dp)
+                            .focusRequester(primaryRequester),
                     )
                     NotificationActionButton(
                         text = "لاحقا",
-                        onClick = { userInteracted = true; onLater() },
+                        onClick = {
+                            userInteracted = true
+                            onLater()
+                        },
                         isTv = isTv,
                         primary = false,
-                        modifier = Modifier.then(if (compactPhone) Modifier.fillMaxWidth() else Modifier).heightIn(min = 48.dp).focusRequester(laterRequester).focusProperties {
-                            up = FocusRequester.Cancel
-                            down = FocusRequester.Cancel
-                            right = primaryRequester
-                            left = FocusRequester.Cancel
-                        },
+                        onTvDirection = if (isTv) { direction ->
+                            when (direction) {
+                                NotificationFocusDirection.RIGHT -> primaryRequester.requestFocus()
+                                NotificationFocusDirection.LEFT, NotificationFocusDirection.UP, NotificationFocusDirection.DOWN -> true
+                            }
+                        } else null,
+                        modifier = Modifier
+                            .then(if (compactPhone) Modifier.fillMaxWidth() else Modifier)
+                            .heightIn(min = 48.dp)
+                            .focusRequester(laterRequester),
                     )
                 }
             }
@@ -847,7 +939,10 @@ fun NewEpisodeAlertOverlay(
     }
 }
 
-internal fun localNotificationRelativeTime(createdAtEpochMs: Long, nowEpochMs: Long = System.currentTimeMillis()): String {
+internal fun localNotificationRelativeTime(
+    createdAtEpochMs: Long,
+    nowEpochMs: Long = System.currentTimeMillis(),
+): String {
     val elapsed = (nowEpochMs - createdAtEpochMs).coerceAtLeast(0L)
     val minutes = elapsed / 60_000L
     return when {
