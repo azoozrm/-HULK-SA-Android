@@ -128,10 +128,38 @@ internal fun notificationHeaderEntry(
     else -> NotificationHeaderEntry.CLEAR_ALL
 }
 
+internal enum class NotificationHeaderFocusNode {
+    BACK,
+    READ_ALL,
+    CLEAR_ALL,
+}
+
+internal fun notificationHeaderMove(
+    current: NotificationHeaderFocusNode,
+    unreadCount: Int,
+    hasNotifications: Boolean,
+    direction: String,
+): NotificationHeaderFocusNode? {
+    if (!hasNotifications) return null
+    return when (current) {
+        NotificationHeaderFocusNode.BACK -> when (direction) {
+            "down", "left" -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.CLEAR_ALL
+            else -> null
+        }
+        NotificationHeaderFocusNode.READ_ALL -> when (direction) {
+            "right" -> NotificationHeaderFocusNode.BACK
+            "left" -> NotificationHeaderFocusNode.CLEAR_ALL
+            else -> null
+        }
+        NotificationHeaderFocusNode.CLEAR_ALL -> when (direction) {
+            "right" -> if (unreadCount > 0) NotificationHeaderFocusNode.READ_ALL else NotificationHeaderFocusNode.BACK
+            else -> null
+        }
+    }
+}
+
 internal fun homeHeaderActionVisualSizeDp(): Int = 44
-
 internal fun homeHeaderActionTouchSizeDp(): Int = 48
-
 @Suppress("UNUSED_PARAMETER")
 internal fun notificationBellSizeDp(isTv: Boolean): Int = homeHeaderActionVisualSizeDp()
 
@@ -169,7 +197,6 @@ fun NotificationBellButton(
     var focused by remember { mutableStateOf(false) }
     val visualSize = notificationBellSizeDp(isTv).dp
     val badgeMetrics = notificationBadgeMetrics(unreadCount)
-
     Box(
         modifier = modifier
             .size(homeHeaderActionTouchSizeDp().dp)
@@ -196,7 +223,6 @@ fun NotificationBellButton(
                 modifier = Modifier.size(21.dp),
             )
         }
-
         if (badgeMetrics != null) {
             val badgeShape = RoundedCornerShape((badgeMetrics.heightDp / 2).dp)
             Box(
@@ -241,14 +267,7 @@ private fun NotificationActionButton(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(
-        when {
-            headerCompact -> 10.dp
-            isTv -> 13.dp
-            else -> 12.dp
-        },
-    )
-
+    val shape = RoundedCornerShape(if (headerCompact) 10.dp else if (isTv) 13.dp else 12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .50f)
         focused -> colors.goldBright
@@ -269,7 +288,6 @@ private fun NotificationActionButton(
         primary -> Color.Black
         else -> colors.text
     }
-
     Box(
         modifier = modifier
             .clip(shape)
@@ -279,27 +297,15 @@ private fun NotificationActionButton(
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(
-                horizontal = when {
-                    headerCompact -> 11.dp
-                    isTv -> 15.dp
-                    else -> 14.dp
-                },
-                vertical = when {
-                    headerCompact -> 7.dp
-                    isTv -> 10.dp
-                    else -> 10.dp
-                },
+                horizontal = if (headerCompact) 11.dp else if (isTv) 15.dp else 14.dp,
+                vertical = if (headerCompact) 7.dp else 10.dp,
             ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             color = textColor,
-            fontSize = when {
-                headerCompact -> 12.sp
-                isTv -> 14.sp
-                else -> 13.sp
-            },
+            fontSize = if (headerCompact) 12.sp else if (isTv) 14.sp else 13.sp,
             fontWeight = FontWeight.Black,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -340,11 +346,7 @@ fun LocalNotificationCenterScreen(
             isTv = isTv,
         )
         val firstRequester = notifications.firstOrNull()?.let { cardFocus[it.id]?.open }
-        val headerEntry = notificationHeaderEntry(
-            unreadCount = unreadCount,
-            hasNotifications = notifications.isNotEmpty(),
-        )
-        val firstHeaderRequester = when (headerEntry) {
+        val firstHeaderRequester = when (notificationHeaderEntry(unreadCount, notifications.isNotEmpty())) {
             NotificationHeaderEntry.BACK -> backRequester
             NotificationHeaderEntry.READ_ALL -> readAllRequester
             NotificationHeaderEntry.CLEAR_ALL -> clearRequester
@@ -372,11 +374,8 @@ fun LocalNotificationCenterScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        NotificationCenterTitle(unreadCount = unreadCount, isTv = true)
-                    }
                     NotificationActionButton(
                         text = "رجوع",
                         onClick = onBack,
@@ -388,15 +387,19 @@ fun LocalNotificationCenterScreen(
                             .heightIn(min = 40.dp)
                             .focusRequester(backRequester)
                             .focusProperties {
-                                down = if (notifications.isNotEmpty()) firstHeaderRequester else FocusRequester.Cancel
-                                left = if (notifications.isNotEmpty()) firstHeaderRequester else FocusRequester.Cancel
+                                up = FocusRequester.Cancel
                                 right = FocusRequester.Cancel
+                                left = if (notifications.isNotEmpty()) firstHeaderRequester else FocusRequester.Cancel
+                                down = if (notifications.isNotEmpty()) firstHeaderRequester else FocusRequester.Cancel
                             },
                     )
+                    Column(Modifier.weight(1f)) {
+                        NotificationCenterTitle(unreadCount = unreadCount, isTv = true)
+                    }
                 }
 
                 if (notifications.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
@@ -421,9 +424,9 @@ fun LocalNotificationCenterScreen(
                                 .focusRequester(readAllRequester)
                                 .focusProperties {
                                     up = backRequester
-                                    down = firstRequester ?: FocusRequester.Cancel
                                     right = backRequester
                                     left = clearRequester
+                                    down = firstRequester ?: FocusRequester.Cancel
                                 },
                         )
                         NotificationActionButton(
@@ -444,9 +447,9 @@ fun LocalNotificationCenterScreen(
                                 .focusRequester(clearRequester)
                                 .focusProperties {
                                     up = backRequester
-                                    down = firstRequester ?: FocusRequester.Cancel
                                     right = if (unreadCount > 0) readAllRequester else backRequester
                                     left = FocusRequester.Cancel
+                                    down = firstRequester ?: FocusRequester.Cancel
                                 },
                         )
                     }
@@ -502,11 +505,7 @@ fun LocalNotificationCenterScreen(
                         .heightIn(min = if (isTv) 150.dp else 170.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(colors.surface.copy(alpha = .72f))
-                        .border(
-                            1.dp,
-                            colors.line.copy(alpha = .34f),
-                            RoundedCornerShape(16.dp),
-                        ),
+                        .border(1.dp, colors.line.copy(alpha = .34f), RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -527,25 +526,13 @@ fun LocalNotificationCenterScreen(
                     items(notifications, key = LocalNotificationItem::id) { notification ->
                         val index = notifications.indexOfFirst { it.id == notification.id }
                         val focus = checkNotNull(cardFocus[notification.id])
-                        val previousCardRequester = nextLocalNotificationFocusIndex(
-                            index,
-                            notifications.size,
-                            movingDown = false,
-                        )?.let { previousIndex ->
-                            cardFocus[notifications[previousIndex].id]?.open
-                        }
-                        val nextCardRequester = nextLocalNotificationFocusIndex(
-                            index,
-                            notifications.size,
-                            movingDown = true,
-                        )?.let { nextIndex ->
-                            cardFocus[notifications[nextIndex].id]?.open
-                        }
+                        val previousCardRequester = nextLocalNotificationFocusIndex(index, notifications.size, false)
+                            ?.let { previousIndex -> cardFocus[notifications[previousIndex].id]?.open }
+                        val nextCardRequester = nextLocalNotificationFocusIndex(index, notifications.size, true)
+                            ?.let { nextIndex -> cardFocus[notifications[nextIndex].id]?.open }
                         val previousRequester = previousCardRequester ?: firstHeaderRequester
                         val nextRequester = nextCardRequester ?: FocusRequester.Cancel
-                        val afterDeleteRequester =
-                            nextCardRequester ?: previousCardRequester ?: firstHeaderRequester
-
+                        val afterDeleteRequester = nextCardRequester ?: previousCardRequester ?: firstHeaderRequester
                         LocalNotificationCard(
                             notification = notification,
                             metrics = metrics,
@@ -566,10 +553,7 @@ fun LocalNotificationCenterScreen(
 }
 
 @Composable
-private fun NotificationCenterTitle(
-    unreadCount: Int,
-    isTv: Boolean,
-) {
+private fun NotificationCenterTitle(unreadCount: Int, isTv: Boolean) {
     val colors = LocalHulkColors.current
     Text(
         text = "الاشعارات",
@@ -602,26 +586,13 @@ private fun LocalNotificationCard(
     val episode = (notification as? LocalNotificationItem.Episode)?.notification
     val system = (notification as? LocalNotificationItem.System)?.notification
     val title = episode?.seriesName ?: system?.title.orEmpty()
-    val detail = if (episode != null) {
-        "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}"
-    } else {
-        system?.message.orEmpty()
-    }
-
+    val detail = if (episode != null) "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}" else system?.message.orEmpty()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(
-                if (notification.read) colors.surface.copy(alpha = .72f)
-                else colors.surfaceRaised.copy(alpha = .94f),
-            )
-            .border(
-                1.dp,
-                if (notification.read) colors.line.copy(alpha = .32f)
-                else colors.gold.copy(alpha = .38f),
-                shape,
-            )
+            .background(if (notification.read) colors.surface.copy(alpha = .72f) else colors.surfaceRaised.copy(alpha = .94f))
+            .border(1.dp, if (notification.read) colors.line.copy(alpha = .32f) else colors.gold.copy(alpha = .38f), shape)
             .focusProperties { canFocus = false }
             .clickable(role = Role.Button, onClick = onOpen)
             .padding(if (isTv) 10.dp else 11.dp),
@@ -637,87 +608,29 @@ private fun LocalNotificationCard(
             contentAlignment = Alignment.Center,
         ) {
             if (!episode?.posterUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = episode?.posterUrl,
-                    contentDescription = title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
+                AsyncImage(model = episode?.posterUrl, contentDescription = title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
                 BrandLogo(Modifier.size((metrics.posterWidthDp * .72f).dp))
             }
             if (!notification.read) {
                 Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(colors.goldBright),
+                    Modifier.align(Alignment.TopEnd).padding(4.dp).size(8.dp).clip(CircleShape).background(colors.goldBright),
                 )
             }
         }
-
         Column(Modifier.weight(1f)) {
-            Text(
-                text = if (episode != null) "حلقة جديدة" else "رسالة من HULK SA",
-                color = colors.goldBright,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Text(
-                text = title,
-                color = colors.text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Text(text = if (episode != null) "حلقة جديدة" else "رسالة من HULK SA", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(text = title, color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = detail,
-                color = colors.textMuted,
-                fontSize = 10.sp,
-                maxLines = if (episode != null) 1 else 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = localNotificationRelativeTime(notification.createdAtEpochMs),
-                color = colors.textMuted.copy(alpha = .76f),
-                fontSize = 9.sp,
-            )
+            Text(text = detail, color = colors.textMuted, fontSize = 10.sp, maxLines = if (episode != null) 1 else 3, overflow = TextOverflow.Ellipsis)
+            Text(text = localNotificationRelativeTime(notification.createdAtEpochMs), color = colors.textMuted.copy(alpha = .76f), fontSize = 9.sp)
             if (!isTv) {
                 Spacer(Modifier.height(8.dp))
-                NotificationCardActions(
-                    episode = episode != null,
-                    read = notification.read,
-                    isTv = false,
-                    focus = focus,
-                    previousRequester = previousRequester,
-                    nextRequester = nextRequester,
-                    afterDeleteRequester = afterDeleteRequester,
-                    onOpen = onOpen,
-                    onMarkRead = onMarkRead,
-                    onDelete = onDelete,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                NotificationCardActions(episode != null, notification.read, false, focus, previousRequester, nextRequester, afterDeleteRequester, onOpen, onMarkRead, onDelete, Modifier.fillMaxWidth())
             }
         }
-
         if (isTv) {
-            NotificationCardActions(
-                episode = episode != null,
-                read = notification.read,
-                isTv = true,
-                focus = focus,
-                previousRequester = previousRequester,
-                nextRequester = nextRequester,
-                afterDeleteRequester = afterDeleteRequester,
-                onOpen = onOpen,
-                onMarkRead = onMarkRead,
-                onDelete = onDelete,
-                modifier = Modifier.widthIn(min = 136.dp, max = 156.dp),
-            )
+            NotificationCardActions(episode != null, notification.read, true, focus, previousRequester, nextRequester, afterDeleteRequester, onOpen, onMarkRead, onDelete, Modifier.widthIn(min = 136.dp, max = 156.dp))
         }
     }
 }
@@ -739,7 +652,6 @@ private fun NotificationCardActions(
 ) {
     val focusScope = rememberCoroutineScope()
     val readVisible = episode && !read
-
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -768,18 +680,12 @@ private fun NotificationCardActions(
                     }
                 },
         )
-
         if (readVisible) {
             NotificationActionButton(
                 text = "تعليم كمقروء",
                 onClick = {
                     onMarkRead()
-                    if (isTv) {
-                        focusScope.launch {
-                            delay(80L)
-                            runCatching { focus.open.requestFocus() }
-                        }
-                    }
+                    if (isTv) focusScope.launch { delay(80L); runCatching { focus.open.requestFocus() } }
                 },
                 isTv = isTv,
                 primary = false,
@@ -802,17 +708,11 @@ private fun NotificationCardActions(
                     },
             )
         }
-
         NotificationActionButton(
             text = "حذف",
             onClick = {
                 onDelete()
-                if (isTv) {
-                    focusScope.launch {
-                        delay(80L)
-                        runCatching { afterDeleteRequester.requestFocus() }
-                    }
-                }
+                if (isTv) focusScope.launch { delay(80L); runCatching { afterDeleteRequester.requestFocus() } }
             },
             isTv = isTv,
             primary = false,
@@ -851,12 +751,7 @@ fun NewEpisodeAlertOverlay(
     val primaryRequester = remember(popup.eventIds) { FocusRequester() }
     val laterRequester = remember(popup.eventIds) { FocusRequester() }
     var userInteracted by remember(popup.eventIds) { mutableStateOf(false) }
-
-    LaunchedEffect(popup.eventIds) {
-        delay(120L)
-        onPresented()
-    }
-
+    LaunchedEffect(popup.eventIds) { delay(120L); onPresented() }
     LaunchedEffect(popup.eventIds, isTv) {
         if (isTv) {
             delay(100L)
@@ -865,15 +760,8 @@ fun NewEpisodeAlertOverlay(
             if (!userInteracted) onLater()
         }
     }
-
     BoxWithConstraints(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .padding(
-                horizontal = if (isTv) 34.dp else 12.dp,
-                vertical = if (isTv) 28.dp else 12.dp,
-            ),
+        Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = if (isTv) 34.dp else 12.dp, vertical = if (isTv) 28.dp else 12.dp),
     ) {
         val compactPhone = !isTv && maxWidth < 420.dp
         val cardWidth = when {
@@ -882,7 +770,6 @@ fun NewEpisodeAlertOverlay(
             else -> maxWidth
         }
         val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
-
         Row(
             modifier = Modifier
                 .align(if (isTv) Alignment.BottomEnd else Alignment.BottomCenter)
@@ -890,34 +777,21 @@ fun NewEpisodeAlertOverlay(
                 .clip(shape)
                 .background(colors.surfaceRaised.copy(alpha = .985f))
                 .border(2.dp, colors.gold.copy(alpha = .68f), shape)
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown) userInteracted = true
-                    false
-                }
+                .onPreviewKeyEvent { event -> if (event.type == KeyEventType.KeyDown) userInteracted = true; false }
                 .padding(if (isTv) 18.dp else 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 11.dp),
         ) {
             Box(
-                Modifier
-                    .width(if (isTv) 82.dp else 66.dp)
-                    .height(if (isTv) 123.dp else 99.dp)
-                    .clip(RoundedCornerShape(if (isTv) 13.dp else 10.dp))
-                    .background(Color(0xFF11120E)),
+                Modifier.width(if (isTv) 82.dp else 66.dp).height(if (isTv) 123.dp else 99.dp).clip(RoundedCornerShape(if (isTv) 13.dp else 10.dp)).background(Color(0xFF11120E)),
                 contentAlignment = Alignment.Center,
             ) {
                 if (!popup.posterUrl.isNullOrBlank() && !popup.summary) {
-                    AsyncImage(
-                        model = popup.posterUrl,
-                        contentDescription = popup.seriesName,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
+                    AsyncImage(model = popup.posterUrl, contentDescription = popup.seriesName, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
                     BrandLogo(Modifier.size(if (isTv) 58.dp else 46.dp))
                 }
             }
-
             Column(Modifier.weight(1f)) {
                 Text(
                     text = when {
@@ -931,26 +805,13 @@ fun NewEpisodeAlertOverlay(
                     maxLines = 2,
                 )
                 if (!popup.summary) {
-                    Text(
-                        text = popup.seriesName.orEmpty(),
-                        color = colors.text,
-                        fontSize = if (isTv) 20.sp else 17.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Text(text = popup.seriesName.orEmpty(), color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     val episode = popup.notifications.lastOrNull()
                     if (popup.episodeCount == 1 && episode != null) {
-                        Text(
-                            text = "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}",
-                            color = colors.textMuted,
-                            fontSize = if (isTv) 12.sp else 10.sp,
-                        )
+                        Text(text = "الموسم ${episode.seasonNumber} — الحلقة ${episode.episodeNumber}", color = colors.textMuted, fontSize = if (isTv) 12.sp else 10.sp)
                     }
                 }
-
                 Spacer(Modifier.height(if (isTv) 12.dp else 9.dp))
-
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -959,36 +820,26 @@ fun NewEpisodeAlertOverlay(
                 ) {
                     NotificationActionButton(
                         text = if (popup.summary) "عرض الاشعارات" else "مشاهدة الان",
-                        onClick = {
-                            userInteracted = true
-                            onPrimary()
-                        },
+                        onClick = { userInteracted = true; onPrimary() },
                         isTv = isTv,
-                        modifier = Modifier
-                            .then(if (compactPhone) Modifier.fillMaxWidth() else Modifier)
-                            .heightIn(min = 48.dp)
-                            .focusRequester(primaryRequester)
-                            .focusProperties {
-                                right = FocusRequester.Cancel
-                                left = laterRequester
-                            },
+                        modifier = Modifier.then(if (compactPhone) Modifier.fillMaxWidth() else Modifier).heightIn(min = 48.dp).focusRequester(primaryRequester).focusProperties {
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            left = laterRequester
+                        },
                     )
                     NotificationActionButton(
                         text = "لاحقا",
-                        onClick = {
-                            userInteracted = true
-                            onLater()
-                        },
+                        onClick = { userInteracted = true; onLater() },
                         isTv = isTv,
                         primary = false,
-                        modifier = Modifier
-                            .then(if (compactPhone) Modifier.fillMaxWidth() else Modifier)
-                            .heightIn(min = 48.dp)
-                            .focusRequester(laterRequester)
-                            .focusProperties {
-                                right = primaryRequester
-                                left = FocusRequester.Cancel
-                            },
+                        modifier = Modifier.then(if (compactPhone) Modifier.fillMaxWidth() else Modifier).heightIn(min = 48.dp).focusRequester(laterRequester).focusProperties {
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                            right = primaryRequester
+                            left = FocusRequester.Cancel
+                        },
                     )
                 }
             }
@@ -996,10 +847,7 @@ fun NewEpisodeAlertOverlay(
     }
 }
 
-internal fun localNotificationRelativeTime(
-    createdAtEpochMs: Long,
-    nowEpochMs: Long = System.currentTimeMillis(),
-): String {
+internal fun localNotificationRelativeTime(createdAtEpochMs: Long, nowEpochMs: Long = System.currentTimeMillis()): String {
     val elapsed = (nowEpochMs - createdAtEpochMs).coerceAtLeast(0L)
     val minutes = elapsed / 60_000L
     return when {
