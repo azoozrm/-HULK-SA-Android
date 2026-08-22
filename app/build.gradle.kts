@@ -12,10 +12,30 @@ fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 val resellerApiUrl = "https://hulksa.com"
+val operationsConfigUrl = "https://hulksa.com/hulk-operations/api/app/v1/config/"
+
+val qualificationVersionCode = providers.gradleProperty("HULK_QUALIFICATION_VERSION_CODE")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+    ?.toIntOrNull()
+val qualificationVersionName = providers.gradleProperty("HULK_QUALIFICATION_VERSION_NAME")
+    .orNull
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+
+if ((qualificationVersionCode == null) != (qualificationVersionName == null)) {
+    throw GradleException(
+        "Qualification version overrides must provide both HULK_QUALIFICATION_VERSION_CODE and HULK_QUALIFICATION_VERSION_NAME.",
+    )
+}
+if (qualificationVersionCode != null && qualificationVersionCode <= 0) {
+    throw GradleException("HULK_QUALIFICATION_VERSION_CODE must be a positive integer.")
+}
 
 val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig") {
     group = "verification"
-    description = "Fails release builds unless the public HTTPS HULK reseller API is configured."
+    description = "Fails release builds unless the reviewed HTTPS HULK endpoints are configured."
 
     doLast {
         val value = resellerApiUrl.trim()
@@ -36,6 +56,22 @@ val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfi
         if (value.contains("3162356.xyz", ignoreCase = true)) {
             throw GradleException(
                 "The legacy IPTV host must never be compiled as the HULK reseller API.",
+            )
+        }
+
+        val operationsValue = operationsConfigUrl.trim()
+        val operationsParsed = runCatching { URI(operationsValue) }.getOrNull()
+        if (
+            operationsParsed == null ||
+            !operationsParsed.scheme.equals("https", ignoreCase = true) ||
+            !operationsParsed.host.equals("hulksa.com", ignoreCase = true) ||
+            operationsParsed.userInfo != null ||
+            operationsParsed.query != null ||
+            operationsParsed.fragment != null ||
+            operationsParsed.path != "/hulk-operations/api/app/v1/config/"
+        ) {
+            throw GradleException(
+                "The HULK Operations config endpoint must be the reviewed public HTTPS URL.",
             )
         }
     }
@@ -84,10 +120,15 @@ android {
         targetSdk = 36
         versionCode = 64
         versionName = "0.9.3.20"
+        if (qualificationVersionCode != null && qualificationVersionName != null) {
+            versionCode = qualificationVersionCode
+            versionName = qualificationVersionName
+        }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
 
         buildConfigField("String", "RESELLER_API_URL", resellerApiUrl.asBuildConfigString())
+        buildConfigField("String", "OPERATIONS_CONFIG_URL", operationsConfigUrl.asBuildConfigString())
         vectorDrawables.useSupportLibrary = true
 
         // Phase 3.1: preserve qualified ABIs while polishing responsive mobile UI.
@@ -168,6 +209,7 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")

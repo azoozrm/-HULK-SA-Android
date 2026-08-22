@@ -119,10 +119,12 @@ internal fun SettingsProScreen(
     onRefreshLibrary: () -> Unit,
     onClearHistory: () -> Unit,
     onOpenDownloads: () -> Unit,
+    downloadsEnabled: Boolean,
     onToggleWifiOnly: () -> Unit,
     onToggleDownloadSchedule: () -> Unit,
     onCycleConcurrentDownloads: () -> Unit,
     notificationMasterEnabled: Boolean,
+    episodeNotificationsAvailable: Boolean,
     onToggleEpisodeNotificationMaster: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -332,7 +334,11 @@ internal fun SettingsProScreen(
                     expanded = expandedLayout,
                     focusRequester = focus.resetPlayback,
                     upRequester = focus.autoHideControls,
-                    downRequester = focus.episodeNotifications,
+                    downRequester = if (episodeNotificationsAvailable) {
+                        focus.episodeNotifications
+                    } else {
+                        focus.wifiOnly
+                    },
                     onClick = { pendingConfirmation = SettingsConfirmation.RESET_PLAYBACK },
                 )
             }
@@ -340,8 +346,13 @@ internal fun SettingsProScreen(
             SettingsPanel(title = "الإشعارات", expanded = expandedLayout) {
                 SettingsMenuRow(
                     label = "تنبيهات الحلقات الجديدة",
-                    value = settingsToggleLabel(notificationMasterEnabled),
+                    value = if (episodeNotificationsAvailable) {
+                        settingsToggleLabel(notificationMasterEnabled)
+                    } else {
+                        "متوقفة مؤقتًا"
+                    },
                     accentValue = notificationMasterEnabled,
+                    enabled = episodeNotificationsAvailable,
                     expanded = expandedLayout,
                     focusRequester = focus.episodeNotifications,
                     upRequester = focus.resetPlayback,
@@ -365,7 +376,11 @@ internal fun SettingsProScreen(
                     accentValue = state.downloadSettings.wifiOnly,
                     expanded = expandedLayout,
                     focusRequester = focus.wifiOnly,
-                    upRequester = focus.episodeNotifications,
+                    upRequester = if (episodeNotificationsAvailable) {
+                        focus.episodeNotifications
+                    } else {
+                        focus.resetPlayback
+                    },
                     downRequester = focus.downloadSchedule,
                     onClick = onToggleWifiOnly,
                 )
@@ -386,14 +401,15 @@ internal fun SettingsProScreen(
                     expanded = expandedLayout,
                     focusRequester = focus.concurrentDownloads,
                     upRequester = focus.downloadSchedule,
-                    downRequester = focus.manageDownloads,
+                    downRequester = if (downloadsEnabled) focus.manageDownloads else focus.clearCache,
                     onClick = onCycleConcurrentDownloads,
                 )
                 SettingsDivider()
                 SettingsMenuRow(
                     label = "إدارة التنزيلات",
-                    value = "",
-                    accentValue = true,
+                    value = if (downloadsEnabled) "" else "متوقفة مؤقتًا",
+                    accentValue = downloadsEnabled,
+                    enabled = downloadsEnabled,
                     expanded = expandedLayout,
                     focusRequester = focus.manageDownloads,
                     upRequester = focus.concurrentDownloads,
@@ -406,7 +422,7 @@ internal fun SettingsProScreen(
                     value = settingsFormatBytes(cacheBytes),
                     expanded = expandedLayout,
                     focusRequester = focus.clearCache,
-                    upRequester = focus.manageDownloads,
+                    upRequester = if (downloadsEnabled) focus.manageDownloads else focus.concurrentDownloads,
                     downRequester = focus.switchProfile,
                     onClick = {
                         scope.launch {

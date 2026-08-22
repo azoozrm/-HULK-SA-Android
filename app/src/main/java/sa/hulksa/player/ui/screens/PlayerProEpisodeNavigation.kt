@@ -171,6 +171,7 @@ internal fun playerProQueuedRelativeChannel(
 @Composable
 fun PlayerProScreen(
     request: PlaybackRequest,
+    liveTvProEnabled: Boolean,
     liveCatalog: Catalog?,
     isFavorite: (ContentItem) -> Boolean,
     onSelectLiveChannel: (ContentItem) -> Unit,
@@ -333,7 +334,7 @@ fun PlayerProScreen(
     }
 
     fun queuePlayerRequestedLiveChannel(channel: ContentItem) {
-        if (!request.isLive) {
+        if (!request.isLive || !liveTvProEnabled) {
             onSelectLiveChannel(channel)
             return
         }
@@ -376,7 +377,7 @@ fun PlayerProScreen(
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
                 val keyCode = event.nativeKeyEvent.keyCode
-                if (request.isLive) {
+                if (request.isLive && liveTvProEnabled) {
                     if (liveBrowserVisible) return@onPreviewKeyEvent false
 
                     when (keyCode) {
@@ -501,7 +502,7 @@ fun PlayerProScreen(
             onPlayNextEpisode = onPlayNextEpisode,
         )
 
-        if (request.isLive && liveZapIndicatorChannel != null && !liveBrowserVisible) {
+        if (liveTvProEnabled && request.isLive && liveZapIndicatorChannel != null && !liveBrowserVisible) {
             LiveZapIndicator(
                 channel = liveZapIndicatorChannel,
                 modifier = Modifier
@@ -520,7 +521,7 @@ fun PlayerProScreen(
             )
         }
 
-        if (request.isLive && liveBrowserVisible) {
+        if (liveTvProEnabled && request.isLive && liveBrowserVisible) {
             LiveTvProChannelBrowser(
                 catalog = liveCatalog,
                 currentStreamId = request.streamId,

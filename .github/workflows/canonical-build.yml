@@ -7,6 +7,7 @@ on:
       - rebuild/adaptive-ui-compatibility-lab-v2
     paths:
       - 'app/**'
+      - 'hosting/hulk-operations/**'
       - 'quality/compatibility-v2/**'
       - 'gradle/**'
       - 'gradlew'
@@ -15,12 +16,15 @@ on:
       - 'settings.gradle*'
       - 'gradle.properties'
       - 'tools/verify-android-architectures.py'
+      - 'tools/verify-runtime-config.py'
+      - 'tools/tests/test_verify_runtime_config.py'
       - '.github/workflows/canonical-build.yml'
   pull_request:
     branches:
       - phase-3-v0.9.3.0-adaptive-foundation
     paths:
       - 'app/**'
+      - 'hosting/hulk-operations/**'
       - 'quality/compatibility-v2/**'
       - 'gradle/**'
       - 'gradlew'
@@ -29,6 +33,8 @@ on:
       - 'settings.gradle*'
       - 'gradle.properties'
       - 'tools/verify-android-architectures.py'
+      - 'tools/verify-runtime-config.py'
+      - 'tools/tests/test_verify_runtime_config.py'
       - '.github/workflows/canonical-build.yml'
   workflow_dispatch:
 
@@ -81,6 +87,18 @@ jobs:
           python3 quality/compatibility-v2/static_validate.py \
             --repo-root . --out build/compatibility-v2/canonical-static
           ./gradlew --version
+
+      - name: Verify HULK Operations backend package
+        run: |
+          set -euo pipefail
+          php --version
+          find hosting/hulk-operations -type f -name '*.php' -print0 \
+            | xargs -0 -n1 php -l
+          php hosting/hulk-operations/tests/run.php
+          PYTHONDONTWRITEBYTECODE=1 \
+            python3 -m unittest hosting/hulk-operations/tests/test_backend_contract.py -v
+          PYTHONDONTWRITEBYTECODE=1 \
+            python3 -m unittest tools/tests/test_verify_runtime_config.py -v
 
       - name: Build debug, unit tests and lint
         run: |

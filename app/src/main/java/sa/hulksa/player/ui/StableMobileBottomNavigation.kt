@@ -78,6 +78,7 @@ private val stableMobileEntries = listOf(
 @Composable
 internal fun StableMobileBottomNavigation(
     selected: MainDestination,
+    downloadsEnabled: Boolean,
     onSelectDestination: (MainDestination) -> Unit,
     onSwitchProfile: () -> Unit,
     modifier: Modifier = Modifier,
@@ -85,6 +86,11 @@ internal fun StableMobileBottomNavigation(
     if (WindowInsets.isImeVisible) return
 
     val listState = rememberLazyListState()
+    val visibleEntries = if (downloadsEnabled) {
+        stableMobileEntries
+    } else {
+        stableMobileEntries.filterNot { it.destination == MainDestination.DOWNLOADS }
+    }
 
     LazyRow(
         modifier = modifier
@@ -98,7 +104,7 @@ internal fun StableMobileBottomNavigation(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items(
-            items = stableMobileEntries,
+            items = visibleEntries,
             key = { entry -> entry.destination?.name ?: "profile-switch" },
         ) { entry ->
             val active = entry.destination != null && selected == entry.destination

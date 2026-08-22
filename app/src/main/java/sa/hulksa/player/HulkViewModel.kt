@@ -1,7 +1,9 @@
 package sa.hulksa.player
 
 import android.app.Application
+import android.app.UiModeManager
 import android.content.Context
+import android.content.res.Configuration
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -30,12 +32,31 @@ import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.LocalEpisodeNotification
 import sa.hulksa.player.data.LocalEpisodeNotificationStore
+import sa.hulksa.player.data.LocalNotificationItem
+import sa.hulksa.player.data.OPERATIONS_CACHE_TTL_MS
+import sa.hulksa.player.data.OperationsApkInstaller
+import sa.hulksa.player.data.OperationsClient
+import sa.hulksa.player.data.OperationsConfig
+import sa.hulksa.player.data.OperationsConfigSource
+import sa.hulksa.player.data.OperationsDownloadStatus
+import sa.hulksa.player.data.OperationsDownloadUiState
+import sa.hulksa.player.data.OperationsFetchResult
+import sa.hulksa.player.data.OperationsInstallResult
+import sa.hulksa.player.data.OperationsServiceStatus
+import sa.hulksa.player.data.OperationsStore
+import sa.hulksa.player.data.OperationsUiState
+import sa.hulksa.player.data.OperationsUpdateDecision
+import sa.hulksa.player.data.activePersistentOperationsAnnouncement
 import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
 import sa.hulksa.player.data.buildEpisodeNotificationPopups
 import sa.hulksa.player.data.canUseSeriesEpisodeNotifications
+import sa.hulksa.player.data.effectiveOperationsServiceStatus
+import sa.hulksa.player.data.eligibleOperationsAnnouncements
+import sa.hulksa.player.data.evaluateOperationsUpdatePolicy
+import sa.hulksa.player.data.mergeNotificationCenterItems
 import sa.hulksa.player.data.normalizeResellerAccessCode
 import sa.hulksa.player.data.reliableEpisodeKeys
 import sa.hulksa.player.data.resolveLocalNotificationSeriesTarget
@@ -99,10 +120,11 @@ data class HulkUiState(
     val episodes: List<Episode> = emptyList(),
     val seriesEpisodeTarget: SeriesEpisodeTarget? = null,
     val notificationSubscribedSeriesIds: Set<Int> = emptySet(),
-    val localNotifications: List<LocalEpisodeNotification> = emptyList(),
+    val localNotifications: List<LocalNotificationItem> = emptyList(),
     val unreadNotificationCount: Int = 0,
     val episodeNotificationsEnabled: Boolean = true,
     val notificationPopup: EpisodeNotificationPopup? = null,
+    val operations: OperationsUiState = OperationsUiState(),
     val playback: PlaybackRequest? = null,
     val diagnostics: DiagnosticsState = DiagnosticsState(),
 ) {
@@ -132,6 +154,43 @@ private data class MovieCardProbeMetadata(
     val durationMs: Long? = null,
 )
 
+private fun initialOperationsUiState(
+    config: OperationsConfig,
+    fetchedAtEpochMs: Long,
+    isTv: Boolean,
+): OperationsUiState {
+    val nowEpochMs = System.currentTimeMillis()
+    val source = OperationsConfigSource.CACHE
+    val effectiveService = config.service.copy(
+        status = effectiveOperationsServiceStatus(config.service, source),
+    )
+    return OperationsUiState(
+        source = source,
+        updateDecision = evaluateOperationsUpdatePolicy(
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            update = config.update,
+            source = source,
+            cacheAgeMs = nowEpochMs - fetchedAtEpochMs,
+        ),
+        update = config.update,
+        service = effectiveService,
+        features = config.features,
+        persistentAnnouncement = activePersistentOperationsAnnouncement(
+            announcements = config.announcements,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            isTv = isTv,
+            nowEpochSeconds = nowEpochMs / 1_000L,
+        ),
+    )
+}
+
+private fun Application.isTelevisionDevice(): Boolean {
+    val uiMode = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+    return uiMode?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+        packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
+        packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TELEVISION)
+}
+
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
     private val repository = HulkRepository(application)
@@ -140,6 +199,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val profileStore = ProfileStore(application)
     private val kidsContentFilterStore = KidsContentFilterStore(application)
     private val localEpisodeNotificationStore = LocalEpisodeNotificationStore(application)
+    private val operationsStore = OperationsStore(application)
+    private val operationsClient = OperationsClient()
+    private val operationsInstaller = OperationsApkInstaller(application)
+    private val operationsDeviceIsTv = application.isTelevisionDevice()
+    private val initialCachedOperations = operationsStore.cachedConfig()
     private val initialNotificationSnapshot = localEpisodeNotificationStore.snapshot(
         profileStore.activeProfileId(),
     )
@@ -150,9 +214,16 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             downloads = downloadRepository.downloads(),
             downloadSettings = downloadRepository.settings(),
             notificationSubscribedSeriesIds = initialNotificationSnapshot.subscribedSeriesIds,
-            localNotifications = initialNotificationSnapshot.notifications,
-            unreadNotificationCount = initialNotificationSnapshot.unreadCount,
+            localNotifications = mergeNotificationCenterItems(
+                initialNotificationSnapshot.notifications,
+                operationsStore.systemNotifications(),
+            ),
+            unreadNotificationCount = initialNotificationSnapshot.unreadCount +
+                operationsStore.systemNotifications().count { !it.read },
             episodeNotificationsEnabled = initialNotificationSnapshot.settings.enabled,
+            operations = initialCachedOperations?.let { cached ->
+                initialOperationsUiState(cached.config, cached.fetchedAtEpochMs, operationsDeviceIsTv)
+            } ?: OperationsUiState(),
         ),
     )
     val state: StateFlow<HulkUiState> = mutableState.asStateFlow()
@@ -167,6 +238,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var diagnosticsJob: Job? = null
     private var profileLibraryRefreshJob: Job? = null
     private var notificationScanJob: Job? = null
+    private var operationsRefreshJob: Job? = null
+    private var operationsDownloadJob: Job? = null
+    private var activeOperationsConfig: OperationsConfig? = initialCachedOperations?.config
+    private var activeOperationsFetchedAtEpochMs: Long = initialCachedOperations?.fetchedAtEpochMs ?: 0L
+    private val presentedOperationsMessageIds = linkedSetOf<String>()
+    private val dismissedOptionalUpdateVersionCodes = linkedSetOf<Int>()
     private var notificationUiReady: Boolean = false
     private var notificationCenterReturnScreen = HulkScreen.MAIN
     private var playerReturnScreen = HulkScreen.MAIN
@@ -182,6 +259,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val movieCardProbeAttempted = mutableSetOf<Int>()
 
     init {
+        initialCachedOperations?.let { cached ->
+            applyOperationsConfig(
+                config = cached.config,
+                source = OperationsConfigSource.CACHE,
+                fetchedAtEpochMs = cached.fetchedAtEpochMs,
+            )
+        }
+        refreshOperations(force = true)
         restoreSession()
         viewModelScope.launch {
             while (isActive) {
@@ -233,6 +318,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectDestination(destination: MainDestination) {
+        if (
+            destination == MainDestination.DOWNLOADS &&
+            !mutableState.value.operations.features.downloadsEnabled
+        ) return
         val current = mutableState.value
         val currentCatalogType = current.destination.catalogTypeOrNull()
         if (currentCatalogType != null) {
@@ -405,6 +494,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
+        refreshOperations(force = true)
         val types = when (mutableState.value.destination) {
             MainDestination.HOME -> setOf(ContentType.MOVIE, ContentType.SERIES)
             MainDestination.LIVE -> setOf(ContentType.LIVE)
@@ -644,6 +734,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadSelectedMovie(): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
+        }
         val activeSession = session ?: return "سجل الدخول اولا لبدء التحميل."
         val movie = mutableState.value.selectedItem?.takeIf { it.type == ContentType.MOVIE }
             ?: return "تعذر تحديد الفيلم."
@@ -651,6 +744,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadEpisode(episode: Episode): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
+        }
         val activeSession = session ?: return "سجل الدخول اولا لبدء التحميل."
         val series = mutableState.value.selectedSeries ?: return "تعذر تحديد المسلسل."
         return enqueueDownload(
@@ -684,12 +780,18 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleWifiOnly(): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
+        }
         val settings = downloadRepository.setWifiOnly(!mutableState.value.downloadSettings.wifiOnly)
         mutableState.update { it.copy(downloadSettings = settings, downloads = downloadRepository.downloads()) }
         return if (settings.wifiOnly) "تم تفعيل التحميل عبر واي فاي فقط." else "تم السماح بالتحميل عبر جميع الشبكات."
     }
 
     fun toggleDownloadSchedule(): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
+        }
         val current = mutableState.value.downloadSettings.scheduleMode
         val next = if (current == DownloadScheduleMode.NOW) DownloadScheduleMode.NIGHT else DownloadScheduleMode.NOW
         val settings = downloadRepository.setScheduleMode(next)
@@ -702,6 +804,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cycleConcurrentDownloads(): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
+        }
         val current = mutableState.value.downloadSettings.concurrentDownloads
         val next = if (current >= 3) 1 else current + 1
         val settings = downloadRepository.setConcurrentDownloads(next)
@@ -710,6 +815,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cycleDownloadPriority(item: OfflineDownload): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
+        }
         val downloads = downloadRepository.cyclePriority(item.downloadId)
         val updated = downloads.firstOrNull { it.downloadId == item.downloadId }
         mutableState.update { it.copy(downloads = downloads) }
@@ -720,33 +828,38 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun retryDownload(item: OfflineDownload): String = when (item.status) {
-        OfflineStatus.COMPLETED -> "التحميل مكتمل وجاهز للتشغيل."
-        OfflineStatus.QUEUED,
-        OfflineStatus.CHECKING,
-        OfflineStatus.DOWNLOADING,
-        -> {
-            mutableState.update { it.copy(downloads = downloadRepository.pause(item.downloadId)) }
-            "تم ايقاف التحميل مؤقتا."
+    fun retryDownload(item: OfflineDownload): String {
+        if (!mutableState.value.operations.features.downloadsEnabled) {
+            return "التنزيلات متوقفة مؤقتًا."
         }
-        OfflineStatus.PAUSED,
-        OfflineStatus.WAITING_SCHEDULE,
-        OfflineStatus.WAITING_NETWORK,
-        OfflineStatus.WAITING_STORAGE,
-        -> {
-            if (downloadRepository.resume(item.downloadId)) {
-                mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                "جار استئناف التحميل من اخر نقطة."
-            } else {
-                rebuildDownload(item)
+        return when (item.status) {
+            OfflineStatus.COMPLETED -> "التحميل مكتمل وجاهز للتشغيل."
+            OfflineStatus.QUEUED,
+            OfflineStatus.CHECKING,
+            OfflineStatus.DOWNLOADING,
+            -> {
+                mutableState.update { it.copy(downloads = downloadRepository.pause(item.downloadId)) }
+                "تم ايقاف التحميل مؤقتا."
             }
-        }
-        OfflineStatus.FAILED -> {
-            if (downloadRepository.resume(item.downloadId)) {
-                mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                "جار اعادة المحاولة من اخر نقطة."
-            } else {
-                rebuildDownload(item)
+            OfflineStatus.PAUSED,
+            OfflineStatus.WAITING_SCHEDULE,
+            OfflineStatus.WAITING_NETWORK,
+            OfflineStatus.WAITING_STORAGE,
+            -> {
+                if (downloadRepository.resume(item.downloadId)) {
+                    mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
+                    "جار استئناف التحميل من اخر نقطة."
+                } else {
+                    rebuildDownload(item)
+                }
+            }
+            OfflineStatus.FAILED -> {
+                if (downloadRepository.resume(item.downloadId)) {
+                    mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
+                    "جار اعادة المحاولة من اخر نقطة."
+                } else {
+                    rebuildDownload(item)
+                }
             }
         }
     }
@@ -811,6 +924,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         series: ContentItem,
         onResult: (String) -> Unit,
     ) {
+        if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
+            onResult("تنبيهات الحلقات متوقفة مؤقتًا.")
+            return
+        }
         if (series.type != ContentType.SERIES || series.id <= 0) {
             onResult("تعذر تفعيل تنبيهات هذا المسلسل.")
             return
@@ -919,6 +1036,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleEpisodeNotificationMaster(onResult: (String) -> Unit) {
+        if (!mutableState.value.operations.features.episodeNotificationsEnabled) {
+            onResult("تنبيهات الحلقات متوقفة مؤقتًا.")
+            return
+        }
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         if (accountId == null) {
@@ -973,11 +1094,18 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun markNotificationRead(notificationId: String) {
+        val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId } ?: return
         val profileId = profileStore.activeProfileId()
-        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                localEpisodeNotificationStore.markRead(profileId, notificationId, accountId)
+                when (item) {
+                    is LocalNotificationItem.Episode -> accountId?.let {
+                        localEpisodeNotificationStore.markRead(profileId, notificationId, it)
+                    }
+                    is LocalNotificationItem.System ->
+                        operationsStore.markSystemNotificationRead(notificationId)
+                }
             }
             refreshNotificationState(clearPopup = false)
         }
@@ -985,21 +1113,29 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun markAllNotificationsRead() {
         val profileId = profileStore.activeProfileId()
-        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                localEpisodeNotificationStore.markAllRead(profileId, accountId)
+                accountId?.let { localEpisodeNotificationStore.markAllRead(profileId, it) }
+                operationsStore.markAllSystemNotificationsRead()
             }
             refreshNotificationState(clearPopup = false)
         }
     }
 
     fun deleteNotification(notificationId: String) {
+        val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId } ?: return
         val profileId = profileStore.activeProfileId()
-        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                localEpisodeNotificationStore.deleteNotification(profileId, notificationId, accountId)
+                when (item) {
+                    is LocalNotificationItem.Episode -> accountId?.let {
+                        localEpisodeNotificationStore.deleteNotification(profileId, notificationId, it)
+                    }
+                    is LocalNotificationItem.System ->
+                        operationsStore.deleteSystemNotification(notificationId)
+                }
             }
             refreshNotificationState(clearPopup = false)
         }
@@ -1007,10 +1143,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearNotifications() {
         val profileId = profileStore.activeProfileId()
-        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                localEpisodeNotificationStore.clearNotifications(profileId, accountId)
+                accountId?.let { localEpisodeNotificationStore.clearNotifications(profileId, it) }
+                operationsStore.clearSystemNotifications()
             }
             refreshNotificationState(clearPopup = true)
         }
@@ -1020,6 +1157,17 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         notificationId: String,
         onResult: (String?) -> Unit = {},
     ) {
+        val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId }
+        if (item is LocalNotificationItem.System) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    operationsStore.markSystemNotificationRead(notificationId)
+                }
+                refreshNotificationState(clearPopup = false)
+                onResult(null)
+            }
+            return
+        }
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         if (accountId == null) {
@@ -1027,9 +1175,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            val notification = localEpisodeNotificationStore.snapshot(profileId)
-                .notifications
-                .firstOrNull { it.id == notificationId }
+            val notification = (item as? LocalNotificationItem.Episode)?.notification
+                ?: localEpisodeNotificationStore.snapshot(profileId)
+                    .notifications
+                    .firstOrNull { it.id == notificationId }
             if (notification == null) {
                 onResult("هذا الإشعار لم يعد متاحًا.")
                 return@launch
@@ -1108,7 +1257,276 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppResumed() {
+        refreshOperations(force = false)
         scanSubscribedSeries(NotificationScanTrigger.APP_RESUME)
+    }
+
+    fun retryOperations() {
+        refreshOperations(force = true)
+    }
+
+    fun dismissOptionalOperationsUpdate() {
+        val operations = mutableState.value.operations
+        if (operations.updateDecision != OperationsUpdateDecision.OPTIONAL) return
+        dismissedOptionalUpdateVersionCodes += operations.update.latestVersionCode
+        mutableState.update { state ->
+            state.copy(
+                operations = state.operations.copy(
+                    updateDecision = OperationsUpdateDecision.NONE,
+                    download = OperationsDownloadUiState(),
+                ),
+            )
+        }
+    }
+
+    fun startOperationsUpdate() {
+        val operations = mutableState.value.operations
+        if (
+            operations.updateDecision == OperationsUpdateDecision.NONE ||
+            operationsDownloadJob?.isActive == true
+        ) return
+        mutableState.update { state ->
+            state.copy(
+                operations = state.operations.copy(
+                    download = OperationsDownloadUiState(
+                        status = OperationsDownloadStatus.DOWNLOADING,
+                        progressPercent = 0,
+                    ),
+                ),
+            )
+        }
+        operationsDownloadJob = viewModelScope.launch {
+            val result = operationsInstaller.downloadAndOpen(operations.update) { progress ->
+                mutableState.update { state ->
+                    if (state.operations.update.latestVersionCode != operations.update.latestVersionCode) {
+                        state
+                    } else {
+                        state.copy(
+                            operations = state.operations.copy(
+                                download = state.operations.download.copy(
+                                    status = OperationsDownloadStatus.DOWNLOADING,
+                                    progressPercent = progress,
+                                ),
+                            ),
+                        )
+                    }
+                }
+            }
+            mutableState.update { state ->
+                if (state.operations.update.latestVersionCode != operations.update.latestVersionCode) {
+                    state
+                } else {
+                    state.copy(
+                        operations = state.operations.copy(
+                            download = when (result) {
+                                OperationsInstallResult.InstallerOpened -> OperationsDownloadUiState(
+                                    status = OperationsDownloadStatus.INSTALLER_OPENED,
+                                    progressPercent = 100,
+                                    message = "تم التحقق من التحديث. أكمل التثبيت من مثبت Android.",
+                                )
+                                OperationsInstallResult.UnknownSourcesBlocked -> OperationsDownloadUiState(
+                                    status = OperationsDownloadStatus.UNKNOWN_SOURCES_BLOCKED,
+                                    message = "اسمح لـ HULK SA بتثبيت التطبيقات من هذا المصدر ثم أعد المحاولة.",
+                                )
+                                is OperationsInstallResult.Failure -> OperationsDownloadUiState(
+                                    status = OperationsDownloadStatus.FAILED,
+                                    message = result.message,
+                                )
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun openOperationsInstallSettings(onResult: (String) -> Unit = {}) {
+        onResult(
+            if (operationsInstaller.openUnknownSourcesSettings()) {
+                "فعّل السماح بالتثبيت ثم ارجع واضغط تحديث التطبيق."
+            } else {
+                "تعذر فتح إعدادات التثبيت على هذا الجهاز. افتح إعدادات الأمان يدويًا."
+            },
+        )
+    }
+
+    fun confirmOperationsAnnouncement() {
+        val popup = mutableState.value.operations.announcementPopup ?: return
+        presentedOperationsMessageIds += popup.id
+        if (popup.showOnce) {
+            operationsStore.acknowledgeMessage(popup.id)
+        }
+        updateOperationsAnnouncementPresentation()
+    }
+
+    private fun refreshOperations(force: Boolean) {
+        if (operationsRefreshJob?.isActive == true) return
+        val cached = operationsStore.cachedConfig()
+        val nowEpochMs = System.currentTimeMillis()
+        if (
+            !force &&
+            cached != null &&
+            nowEpochMs - cached.fetchedAtEpochMs in 0 until OPERATIONS_CACHE_TTL_MS
+        ) return
+
+        operationsRefreshJob = viewModelScope.launch {
+            when (val result = operationsClient.fetch()) {
+                is OperationsFetchResult.Success -> {
+                    if (operationsStore.saveConfig(result.rawJson, result.fetchedAtEpochMs)) {
+                        applyOperationsConfig(
+                            config = result.config,
+                            source = OperationsConfigSource.NETWORK,
+                            fetchedAtEpochMs = result.fetchedAtEpochMs,
+                        )
+                    } else {
+                        applyOperationsFailure()
+                    }
+                }
+                OperationsFetchResult.Failure -> applyOperationsFailure()
+            }
+        }
+    }
+
+    private fun applyOperationsFailure() {
+        val cached = operationsStore.cachedConfig()
+        when {
+            cached != null -> applyOperationsConfig(
+                config = cached.config,
+                source = OperationsConfigSource.CACHE,
+                fetchedAtEpochMs = cached.fetchedAtEpochMs,
+            )
+            activeOperationsConfig != null -> applyOperationsConfig(
+                config = checkNotNull(activeOperationsConfig),
+                source = OperationsConfigSource.CACHE,
+                fetchedAtEpochMs = activeOperationsFetchedAtEpochMs,
+            )
+            else -> mutableState.update { state ->
+                state.copy(
+                    operations = state.operations.copy(
+                        source = OperationsConfigSource.DEFAULT,
+                        updateDecision = OperationsUpdateDecision.NONE,
+                        service = state.operations.service.copy(
+                            status = OperationsServiceStatus.OPERATIONAL,
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun applyOperationsConfig(
+        config: OperationsConfig,
+        source: OperationsConfigSource,
+        fetchedAtEpochMs: Long,
+    ) {
+        activeOperationsConfig = config
+        activeOperationsFetchedAtEpochMs = fetchedAtEpochMs
+        val nowEpochMs = System.currentTimeMillis()
+        val activeAnnouncements = eligibleOperationsAnnouncements(
+            announcements = config.announcements,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            isTv = operationsDeviceIsTv,
+            nowEpochSeconds = nowEpochMs / 1_000L,
+            acknowledgedMessageIds = emptySet(),
+            presentedMessageIds = emptySet(),
+        )
+        operationsStore.recordImportantAnnouncements(
+            announcements = activeAnnouncements,
+            generatedAtEpochSeconds = config.generatedAtEpochSeconds,
+        )
+        val acknowledged = operationsStore.acknowledgedMessageIds()
+        val announcementPopup = eligibleOperationsAnnouncements(
+            announcements = config.announcements,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            isTv = operationsDeviceIsTv,
+            nowEpochSeconds = nowEpochMs / 1_000L,
+            acknowledgedMessageIds = acknowledged,
+            presentedMessageIds = presentedOperationsMessageIds,
+        ).firstOrNull()
+        val persistentAnnouncement = activePersistentOperationsAnnouncement(
+            announcements = config.announcements,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            isTv = operationsDeviceIsTv,
+            nowEpochSeconds = nowEpochMs / 1_000L,
+        )
+        var updateDecision = evaluateOperationsUpdatePolicy(
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            update = config.update,
+            source = source,
+            cacheAgeMs = nowEpochMs - fetchedAtEpochMs,
+        )
+        if (
+            updateDecision == OperationsUpdateDecision.OPTIONAL &&
+            config.update.latestVersionCode in dismissedOptionalUpdateVersionCodes
+        ) {
+            updateDecision = OperationsUpdateDecision.NONE
+        }
+        val service = config.service.copy(
+            status = effectiveOperationsServiceStatus(config.service, source),
+        )
+        val updateChanged =
+            mutableState.value.operations.update.latestVersionCode != config.update.latestVersionCode
+        if (updateChanged) {
+            operationsDownloadJob?.cancel()
+            operationsDownloadJob = null
+        }
+
+        if (!config.features.episodeNotificationsEnabled) {
+            notificationScanJob?.cancel()
+        }
+        mutableState.update { state ->
+            val safeDestination = if (
+                !config.features.downloadsEnabled && state.destination == MainDestination.DOWNLOADS
+            ) {
+                MainDestination.HOME
+            } else {
+                state.destination
+            }
+            state.copy(
+                destination = safeDestination,
+                catalogs = if (safeDestination != state.destination) {
+                    catalogsForDestination(safeDestination, state.catalogs)
+                } else {
+                    state.catalogs
+                },
+                notificationPopup = if (config.features.episodeNotificationsEnabled) {
+                    state.notificationPopup
+                } else {
+                    null
+                },
+                operations = OperationsUiState(
+                    source = source,
+                    updateDecision = updateDecision,
+                    update = config.update,
+                    service = service,
+                    features = config.features,
+                    announcementPopup = announcementPopup,
+                    persistentAnnouncement = persistentAnnouncement,
+                    download = if (updateChanged) OperationsDownloadUiState() else state.operations.download,
+                ),
+            )
+        }
+        refreshNotificationState(clearPopup = false)
+    }
+
+    private fun updateOperationsAnnouncementPresentation() {
+        val config = activeOperationsConfig ?: run {
+            mutableState.update { state ->
+                state.copy(operations = state.operations.copy(announcementPopup = null))
+            }
+            return
+        }
+        val next = eligibleOperationsAnnouncements(
+            announcements = config.announcements,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            isTv = operationsDeviceIsTv,
+            nowEpochSeconds = System.currentTimeMillis() / 1_000L,
+            acknowledgedMessageIds = operationsStore.acknowledgedMessageIds(),
+            presentedMessageIds = presentedOperationsMessageIds,
+        ).firstOrNull()
+        mutableState.update { state ->
+            state.copy(operations = state.operations.copy(announcementPopup = next))
+        }
     }
 
     fun setNotificationUiReady(ready: Boolean) {
@@ -1140,6 +1558,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             snapshot.notifications
         }
+        val notificationCenterItems = mergeNotificationCenterItems(
+            episodeNotifications = safeNotifications,
+            systemNotifications = operationsStore.systemNotifications(),
+        )
         val safeSubscribed = snapshot.subscriptions.asSequence()
             .filter(EpisodeNotificationSubscription::enabled)
             .map(EpisodeNotificationSubscription::seriesId)
@@ -1150,8 +1572,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 ?.takeIf { !clearPopup && it.profileId == profile.id }
             state.copy(
                 notificationSubscribedSeriesIds = safeSubscribed,
-                localNotifications = safeNotifications,
-                unreadNotificationCount = safeNotifications.count { !it.read },
+                localNotifications = notificationCenterItems,
+                unreadNotificationCount = notificationCenterItems.count { !it.read },
                 episodeNotificationsEnabled = snapshot.settings.enabled,
                 notificationPopup = retainedPopup,
             )
@@ -1193,6 +1615,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         expectedProfileId: String,
         expectedProfileKind: ProfileKind,
     ) {
+        if (!mutableState.value.operations.features.episodeNotificationsEnabled) return
         if (
             expectedAccountId == null ||
             localEpisodeNotificationStore.activeAccountId() != expectedAccountId ||
@@ -1236,6 +1659,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scanSubscribedSeries(trigger: NotificationScanTrigger) {
+        if (!mutableState.value.operations.features.episodeNotificationsEnabled) return
         val activeSession = session ?: return
         val profile = profileStore.activeProfile()
         val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
@@ -1363,12 +1787,16 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             !notificationUiReady ||
             state.notificationPopup != null ||
             !state.episodeNotificationsEnabled ||
+            !state.operations.features.episodeNotificationsEnabled ||
             state.screen == HulkScreen.PLAYER ||
             state.screen == HulkScreen.LOGIN ||
             state.screen == HulkScreen.NOTIFICATION_CENTER
         ) return
         val profileId = profileStore.activeProfileId()
-        val popup = buildEpisodeNotificationPopups(state.localNotifications).firstOrNull()
+        val episodeNotifications = state.localNotifications.mapNotNull { item ->
+            (item as? LocalNotificationItem.Episode)?.notification
+        }
+        val popup = buildEpisodeNotificationPopups(episodeNotifications).firstOrNull()
             ?.takeIf { it.profileId == profileId }
             ?: return
         mutableState.update { it.copy(notificationPopup = popup) }
@@ -1540,6 +1968,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
+        val operationsState = mutableState.value.operations
         repository.logout()
         session = null
         notificationScanJob?.cancel()
@@ -1562,6 +1991,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             unreadNotificationCount = 0,
             episodeNotificationsEnabled = true,
             notificationPopup = null,
+            operations = operationsState,
         )
     }
 
@@ -1602,6 +2032,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     ensureCatalog(ContentType.MOVIE)
                     ensureCatalog(ContentType.SERIES)
+                    refreshOperations(force = false)
                     refreshNotificationState(clearPopup = true)
                     scanSubscribedSeries(NotificationScanTrigger.APP_START)
                 }
