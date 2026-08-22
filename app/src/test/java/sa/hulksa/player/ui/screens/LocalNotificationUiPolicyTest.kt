@@ -16,13 +16,15 @@ class LocalNotificationUiPolicyTest {
         )
 
         profiles.forEach { metrics ->
-            assertTrue(metrics.horizontalPaddingDp in 18..48)
-            assertTrue(metrics.topPaddingDp in 14..32)
-            assertTrue(metrics.maxContentWidthDp in 720..1120)
-            assertTrue(metrics.posterWidthDp in 64..88)
+            assertTrue(metrics.horizontalPaddingDp in 16..36)
+            assertTrue(metrics.topPaddingDp in 12..28)
+            assertTrue(metrics.maxContentWidthDp in 620..980)
+            assertTrue(metrics.posterWidthDp in 58..78)
             assertTrue(abs(metrics.posterHeightDp - metrics.posterWidthDp * 1.5f) <= 2f)
         }
-        assertTrue(profiles.zipWithNext().all { (first, second) -> first.maxContentWidthDp <= second.maxContentWidthDp })
+        assertTrue(profiles.zipWithNext().all { (first, second) ->
+            first.maxContentWidthDp <= second.maxContentWidthDp
+        })
     }
 
     @Test
@@ -31,6 +33,22 @@ class LocalNotificationUiPolicyTest {
         assertEquals(1, nextLocalNotificationFocusIndex(0, 3, movingDown = true))
         assertEquals(1, nextLocalNotificationFocusIndex(2, 3, movingDown = false))
         assertNull(nextLocalNotificationFocusIndex(2, 3, movingDown = true))
+    }
+
+    @Test
+    fun notificationHeaderEntryAlwaysProvidesReachableTopAction() {
+        assertEquals(
+            NotificationHeaderEntry.BACK,
+            notificationHeaderEntry(unreadCount = 0, hasNotifications = false),
+        )
+        assertEquals(
+            NotificationHeaderEntry.READ_ALL,
+            notificationHeaderEntry(unreadCount = 2, hasNotifications = true),
+        )
+        assertEquals(
+            NotificationHeaderEntry.CLEAR_ALL,
+            notificationHeaderEntry(unreadCount = 0, hasNotifications = true),
+        )
     }
 
     @Test
