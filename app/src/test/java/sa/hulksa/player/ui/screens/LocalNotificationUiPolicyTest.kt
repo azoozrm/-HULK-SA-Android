@@ -37,18 +37,47 @@ class LocalNotificationUiPolicyTest {
 
     @Test
     fun notificationHeaderEntryAlwaysProvidesReachableTopAction() {
+        assertEquals(NotificationHeaderEntry.BACK, notificationHeaderEntry(0, false))
+        assertEquals(NotificationHeaderEntry.READ_ALL, notificationHeaderEntry(2, true))
+        assertEquals(NotificationHeaderEntry.CLEAR_ALL, notificationHeaderEntry(0, true))
+    }
+
+    @Test
+    fun notificationHeaderFocusGraphStopsAtEdgesAndNeverJumps() {
         assertEquals(
-            NotificationHeaderEntry.BACK,
-            notificationHeaderEntry(unreadCount = 0, hasNotifications = false),
+            NotificationHeaderFocusNode.READ_ALL,
+            notificationHeaderMove(NotificationHeaderFocusNode.BACK, unreadCount = 2, hasNotifications = true, direction = "left"),
+        )
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.BACK, 2, true, "right"))
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.BACK, 2, true, "up"))
+
+        assertEquals(
+            NotificationHeaderFocusNode.CLEAR_ALL,
+            notificationHeaderMove(NotificationHeaderFocusNode.READ_ALL, 2, true, "left"),
         )
         assertEquals(
-            NotificationHeaderEntry.READ_ALL,
-            notificationHeaderEntry(unreadCount = 2, hasNotifications = true),
+            NotificationHeaderFocusNode.BACK,
+            notificationHeaderMove(NotificationHeaderFocusNode.READ_ALL, 2, true, "right"),
+        )
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.READ_ALL, 2, true, "up"))
+
+        assertEquals(
+            NotificationHeaderFocusNode.READ_ALL,
+            notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 2, true, "right"),
+        )
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 2, true, "left"))
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 2, true, "up"))
+
+        assertEquals(
+            NotificationHeaderFocusNode.CLEAR_ALL,
+            notificationHeaderMove(NotificationHeaderFocusNode.BACK, 0, true, "down"),
         )
         assertEquals(
-            NotificationHeaderEntry.CLEAR_ALL,
-            notificationHeaderEntry(unreadCount = 0, hasNotifications = true),
+            NotificationHeaderFocusNode.BACK,
+            notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 0, true, "right"),
         )
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.CLEAR_ALL, 0, true, "left"))
+        assertNull(notificationHeaderMove(NotificationHeaderFocusNode.BACK, 0, false, "down"))
     }
 
     @Test
