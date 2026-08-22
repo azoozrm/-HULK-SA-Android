@@ -28,6 +28,9 @@ import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.ProfileKind
 
+internal const val TV_CHANNEL_DISPLAY_NAME = "HULK SA • أكمل المشاهدة"
+internal const val TV_CONTINUE_WATCHING_LABEL = "أكمل المشاهدة"
+
 sealed interface TvPlatformSyncResult {
     data object Unsupported : TvPlatformSyncResult
     data class Synced(
@@ -54,18 +57,23 @@ class TvHomeChannelManager(context: Context) {
         scope: TvProfileScope,
         history: List<HistoryEntry>,
         verifiedKidsContentKeys: Set<String>,
+        kidsVerified: Boolean,
+        landscapeArtworkByContentKey: Map<String, String>,
     ): TvPlatformSyncResult = providerOperation {
+        if (scope.profileKind == ProfileKind.KIDS && !kidsVerified) {
+            return@providerOperation clearPublishedProgramsLocked()
+        }
         val suppressed = preferences.suppressedProviderIds(scope.profileId)
         val desired = TvContinueWatchingMapper.map(
             scope = scope,
             history = history,
             verifiedKidsContentKeys = verifiedKidsContentKeys,
             suppressedProviderIds = suppressed,
+            landscapeArtworkByContentKey = landscapeArtworkByContentKey,
         )
         val channelId = ensureChannel()
         if (channelId < 0L) throw IOException("Android TV channel insertion failed")
-        reconcilePreviewPrograms(channelId, desired)
-        reconcileWatchNextPrograms(desired)
+        reconcilePrograms(channelId, desired)
         TvPlatformSyncResult.Synced(
             channelId = channelId,
             previewProgramCount = desired.size,
@@ -74,6 +82,10 @@ class TvHomeChannelManager(context: Context) {
     }
 
     suspend fun clearPublishedPrograms(): TvPlatformSyncResult = providerOperation {
+        clearPublishedProgramsLocked()
+    }
+
+    private fun clearPublishedProgramsLocked(): TvPlatformSyncResult {
         var removed = 0
         findChannelId()?.let { channelId ->
             queryPreviewPrograms(channelId).forEach { program ->
@@ -89,7 +101,7 @@ class TvHomeChannelManager(context: Context) {
             )
             removed++
         }
-        TvPlatformSyncResult.Cleared(removed)
+        return TvPlatformSyncResult.Cleared(removed)
     }
 
     suspend fun handleProgramDisabled(action: String?, programId: Long) {
@@ -155,12 +167,21 @@ class TvHomeChannelManager(context: Context) {
     }
 
     private fun ensureChannel(): Long {
-        findChannelId()?.let { return it }
+        findChannelId()?.let { channelId ->
+            val metadata = PreviewChannel.Builder()
+                .setDisplayName(CHANNEL_NAME)
+                .setDescription(TV_CONTINUE_WATCHING_LABEL)
+                .setAppLinkIntentUri(Uri.parse(TvDeepLinkRouter.uri(TvDeepLinkTarget.Home)))
+                .setInternalProviderId(CHANNEL_PROVIDER_ID)
+                .build()
+            helper.updatePreviewChannel(channelId, metadata)
+            return channelId
+        }
         val logo = ContextCompat.getDrawable(appContext, R.mipmap.ic_launcher_tv)?.toBitmap()
             ?: throw IOException("HULK SA TV channel logo is unavailable")
         val channel = PreviewChannel.Builder()
             .setDisplayName(CHANNEL_NAME)
-            .setDescription(CONTINUE_WATCHING_LABEL)
+            .setDescription(TV_CONTINUE_WATCHING_LABEL)
             .setAppLinkIntentUri(Uri.parse(TvDeepLinkRouter.uri(TvDeepLinkTarget.Home)))
             .setInternalProviderId(CHANNEL_PROVIDER_ID)
             .setLogo(logo)
@@ -185,13 +206,24 @@ class TvHomeChannelManager(context: Context) {
         return discovered
     }
 
-    private fun reconcilePreviewPrograms(
+    /** Deletes stale entries from both tables before publishing anything for the active profile. */
+    private fun reconcilePrograms(
         channelId: Long,
         desired: List<TvContinueWatchingItem>,
     ) {
-        val plan = planTvProgramSync(queryPreviewPrograms(channelId), desired)
-        plan.deleteIds.forEach(helper::deletePreviewProgram)
-        plan.upserts.forEach { upsert ->
+        val previewPlan = planTvProgramSync(queryPreviewPrograms(channelId), desired)
+        val watchNextPlan = planTvProgramSync(queryWatchNextPrograms(), desired)
+
+        previewPlan.deleteIds.forEach(helper::deletePreviewProgram)
+        watchNextPlan.deleteIds.forEach { id ->
+            appContext.contentResolver.delete(
+                TvContractCompat.buildWatchNextProgramUri(id),
+                null,
+                null,
+            )
+        }
+
+        previewPlan.upserts.forEach { upsert ->
             val program = buildPreviewProgram(channelId, upsert.item)
             if (upsert.existingId == null) {
                 if (helper.publishPreviewProgram(program) < 0L) {
@@ -201,18 +233,7 @@ class TvHomeChannelManager(context: Context) {
                 helper.updatePreviewProgram(upsert.existingId, program)
             }
         }
-    }
-
-    private fun reconcileWatchNextPrograms(desired: List<TvContinueWatchingItem>) {
-        val plan = planTvProgramSync(queryWatchNextPrograms(), desired)
-        plan.deleteIds.forEach { id ->
-            appContext.contentResolver.delete(
-                TvContractCompat.buildWatchNextProgramUri(id),
-                null,
-                null,
-            )
-        }
-        plan.upserts.forEach { upsert ->
+        watchNextPlan.upserts.forEach { upsert ->
             val program = buildWatchNextProgram(upsert.item)
             if (upsert.existingId == null) {
                 if (helper.publishWatchNextProgram(program) < 0L) {
@@ -290,9 +311,9 @@ class TvHomeChannelManager(context: Context) {
             .setChannelId(channelId)
             .setType(item.programType())
             .setTitle(item.title)
-            .setDescription(CONTINUE_WATCHING_LABEL)
-            .setPosterArtUri(item.safePosterUri())
-            .setPosterArtAspectRatio(TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_MOVIE_POSTER)
+            .setDescription(TV_CONTINUE_WATCHING_LABEL)
+            .setPosterArtUri(item.safeArtworkUri())
+            .setPosterArtAspectRatio(item.artworkAspectRatio.tvProviderValue())
             .setIntentUri(Uri.parse(item.deepLinkUri))
             .setInternalProviderId(item.providerId)
             .setContentId(item.providerId)
@@ -309,9 +330,9 @@ class TvHomeChannelManager(context: Context) {
             .setWatchNextType(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE)
             .setLastEngagementTimeUtcMillis(item.updatedAtEpochMs)
             .setTitle(item.title)
-            .setDescription(CONTINUE_WATCHING_LABEL)
-            .setPosterArtUri(item.safePosterUri())
-            .setPosterArtAspectRatio(TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_MOVIE_POSTER)
+            .setDescription(TV_CONTINUE_WATCHING_LABEL)
+            .setPosterArtUri(item.safeArtworkUri())
+            .setPosterArtAspectRatio(item.artworkAspectRatio.tvProviderValue())
             .setIntentUri(Uri.parse(item.deepLinkUri))
             .setInternalProviderId(item.providerId)
             .setContentId(item.providerId)
@@ -342,6 +363,11 @@ class TvHomeChannelManager(context: Context) {
         TvContinueWatchingType.EPISODE -> TvContractCompat.PreviewPrograms.TYPE_TV_EPISODE
     }
 
+    private fun TvProgramArtworkAspectRatio.tvProviderValue(): Int = when (this) {
+        TvProgramArtworkAspectRatio.LANDSCAPE_16_9 ->
+            TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_16_9
+    }
+
     private fun PreviewProgram.tvProviderId(): String? =
         internalProviderId?.takeIf { it.startsWith(TV_PROGRAM_PROVIDER_PREFIX) }
             ?: contentId?.takeIf { it.startsWith(TV_PROGRAM_PROVIDER_PREFIX) }
@@ -350,9 +376,9 @@ class TvHomeChannelManager(context: Context) {
         internalProviderId?.takeIf { it.startsWith(TV_PROGRAM_PROVIDER_PREFIX) }
             ?: contentId?.takeIf { it.startsWith(TV_PROGRAM_PROVIDER_PREFIX) }
 
-    private fun TvContinueWatchingItem.safePosterUri(): Uri {
+    private fun TvContinueWatchingItem.safeArtworkUri(): Uri {
         val fallback = Uri.parse("android.resource://${appContext.packageName}/${R.mipmap.ic_launcher_tv}")
-        val raw = posterUrl?.trim()?.takeIf(String::isNotEmpty) ?: return fallback
+        val raw = landscapeImageUrl?.trim()?.takeIf(String::isNotEmpty) ?: return fallback
         return runCatching {
             val parsed = Uri.parse(raw)
             val schemeAllowed = parsed.scheme.equals("http", true) || parsed.scheme.equals("https", true)
@@ -372,8 +398,7 @@ class TvHomeChannelManager(context: Context) {
         positionMs.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 
     private companion object {
-        const val CHANNEL_NAME = "HULK SA"
-        const val CONTINUE_WATCHING_LABEL = "أكمل المشاهدة"
+        const val CHANNEL_NAME = TV_CHANNEL_DISPLAY_NAME
         const val CHANNEL_PROVIDER_ID = "hulk:v230:continue-watching-channel"
         val providerMutex = Mutex()
     }
@@ -387,22 +412,44 @@ class TvPlatformIntegration(context: Context) {
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val channelManager = TvHomeChannelManager(appContext)
 
-    suspend fun syncActiveProfile(): TvPlatformSyncResult = withContext(Dispatchers.IO) {
-        val accountId = accountScopeStore.activeAccountId()
-            ?: return@withContext channelManager.clearPublishedPrograms()
+    fun activeProfileScope(): TvProfileScope? {
+        val accountId = accountScopeStore.activeAccountId() ?: return null
         val profile = profileStore.activeProfile()
+        return TvProfileScope(
+            accountId = accountId,
+            profileId = profile.id,
+            profileKind = profile.kind,
+        )
+    }
+
+    suspend fun syncActiveProfile(
+        expectedProfileScopeId: String,
+        kidsVerified: Boolean,
+        landscapeArtworkByContentKey: Map<String, String>,
+    ): TvPlatformSyncResult = withContext(Dispatchers.IO) {
+        val scope = activeProfileScope()
+            ?: return@withContext channelManager.clearPublishedPrograms()
+        if (
+            scope.providerScopeId != expectedProfileScopeId ||
+            (scope.profileKind == ProfileKind.KIDS && !kidsVerified)
+        ) {
+            return@withContext channelManager.clearPublishedPrograms()
+        }
+        val history = userLibrary.history()
+        val verifiedKidsContentKeys = if (scope.profileKind == ProfileKind.KIDS) {
+            kidsContentFilterStore.allowedKeys()
+        } else {
+            emptySet()
+        }
+        if (activeProfileScope()?.providerScopeId != expectedProfileScopeId) {
+            return@withContext channelManager.clearPublishedPrograms()
+        }
         channelManager.sync(
-            scope = TvProfileScope(
-                accountId = accountId,
-                profileId = profile.id,
-                profileKind = profile.kind,
-            ),
-            history = userLibrary.history(),
-            verifiedKidsContentKeys = if (profile.kind == ProfileKind.KIDS) {
-                kidsContentFilterStore.allowedKeys()
-            } else {
-                emptySet()
-            },
+            scope = scope,
+            history = history,
+            verifiedKidsContentKeys = verifiedKidsContentKeys,
+            kidsVerified = kidsVerified,
+            landscapeArtworkByContentKey = landscapeArtworkByContentKey,
         )
     }
 

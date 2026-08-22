@@ -20,14 +20,19 @@ class TvPlatformIntegrationTest {
 
     @Test
     fun movieDeepLinkParsing() {
-        assertEquals(TvDeepLinkTarget.Movie(41), TvDeepLinkRouter.parse("hulksa://movie/41"))
-        assertEquals(
-            TvDeepLinkTarget.Movie(41, resumePlayback = true),
-            TvDeepLinkRouter.parse("hulksa://movie/41?resume=true"),
+        val scopeId = standardScope("A").providerScopeId
+        val scoped = TvDeepLinkTarget.Movie(
+            movieId = 41,
+            resumePlayback = true,
+            profileScopeId = scopeId,
         )
-        assertEquals("hulksa://movie/41?resume=true", TvDeepLinkRouter.uri(
-            TvDeepLinkTarget.Movie(41, resumePlayback = true),
-        ))
+
+        assertEquals(TvDeepLinkTarget.Movie(41), TvDeepLinkRouter.parse("hulksa://movie/41"))
+        assertEquals(scoped, TvDeepLinkRouter.parse(TvDeepLinkRouter.uri(scoped)))
+        assertEquals(
+            "hulksa://movie/41?resume=true&scope=$scopeId",
+            TvDeepLinkRouter.uri(scoped),
+        )
     }
 
     @Test
@@ -38,13 +43,24 @@ class TvPlatformIntegrationTest {
 
     @Test
     fun episodeDeepLinkParsing() {
-        val target = TvDeepLinkTarget.Episode(82, 503, resumePlayback = true)
-        assertEquals(target, TvDeepLinkRouter.parse("hulksa://episode/82/503?resume=true"))
-        assertEquals("hulksa://episode/82/503?resume=true", TvDeepLinkRouter.uri(target))
+        val scopeId = standardScope("A").providerScopeId
+        val target = TvDeepLinkTarget.Episode(
+            seriesId = 82,
+            episodeId = 503,
+            resumePlayback = true,
+            profileScopeId = scopeId,
+        )
+
+        assertEquals(target, TvDeepLinkRouter.parse(TvDeepLinkRouter.uri(target)))
+        assertEquals(
+            "hulksa://episode/82/503?resume=true&scope=$scopeId",
+            TvDeepLinkRouter.uri(target),
+        )
     }
 
     @Test
     fun invalidDeepLinkFailsSafely() {
+        val scopeId = standardScope("A").providerScopeId
         listOf(
             null,
             "",
@@ -56,6 +72,10 @@ class TvPlatformIntegrationTest {
             "hulksa://episode/82",
             "hulksa://user:secret@movie/41",
             "hulksa://movie/41?username=secret",
+            "hulksa://movie/41?resume=true",
+            "hulksa://movie/41?scope=$scopeId",
+            "hulksa://movie/41?resume=true&scope=profile_A",
+            "hulksa://movie/41?resume=true&resume=true",
             "hulksa://movie/41#fragment",
         ).forEach { assertNull(TvDeepLinkRouter.parse(it)) }
     }
@@ -84,57 +104,239 @@ class TvPlatformIntegrationTest {
     }
 
     @Test
-    fun watchHistoryMapsToContinueWatching() {
-        val history = listOf(
-            episodeHistory(updatedAt = 300L),
-            movieHistory(id = 41, updatedAt = 100L),
-        )
-        val items = TvContinueWatchingMapper.map(standardScope("A"), history, emptySet())
-        val capped = TvContinueWatchingMapper.map(
+    fun previewProgramUsesLandscapeAspectRatioAndLocalBackdrop() {
+        val item = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(movieHistory(id = 41)),
+            verifiedKidsContentKeys = emptySet(),
+            landscapeArtworkByContentKey = mapOf("MOVIE:41" to "https://images.example/41-wide.jpg"),
+        ).single()
+        val posterFallback = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(movieHistory(id = 42)),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+
+        assertEquals(TvProgramArtworkAspectRatio.LANDSCAPE_16_9, item.artworkAspectRatio)
+        assertEquals("https://images.example/41-wide.jpg", item.landscapeImageUrl)
+        assertEquals(25_000L, item.positionMs)
+        assertEquals(100_000L, item.durationMs)
+        assertTrue(item.providerId.startsWith(TV_PROGRAM_PROVIDER_PREFIX))
+        assertTrue("scope=${item.scope.providerScopeId}" in item.deepLinkUri)
+        assertEquals("https://images.example/42.jpg", posterFallback.landscapeImageUrl)
+        assertEquals("HULK SA • أكمل المشاهدة", TV_CHANNEL_DISPLAY_NAME)
+        assertEquals("أكمل المشاهدة", TV_CONTINUE_WATCHING_LABEL)
+    }
+
+    @Test
+    fun profileAProgramsDoNotRemainAfterSwitchToProfileB() {
+        val profileA = TvContinueWatchingMapper.map(
             standardScope("A"),
-            List(25) { index -> movieHistory(id = 100 + index, updatedAt = index.toLong()) },
+            listOf(movieHistory(id = 41), episodeHistory()),
             emptySet(),
         )
-
-        assertEquals(2, items.size)
-        assertEquals(20, capped.size)
-        assertTrue(items.first().type == TvContinueWatchingType.MOVIE)
-        assertTrue(items.any { it.type == TvContinueWatchingType.EPISODE })
-        assertEquals("hulksa://movie/41?resume=true", items.first { it.contentId == 41 }.deepLinkUri)
-        assertEquals(
-            "hulksa://episode/82/503?resume=true",
-            items.first { it.type == TvContinueWatchingType.EPISODE }.deepLinkUri,
+        val profileB = TvContinueWatchingMapper.map(
+            standardScope("B"),
+            listOf(movieHistory(id = 42)),
+            emptySet(),
         )
-        assertEquals(25_000L, items.first { it.contentId == 41 }.positionMs)
-        assertTrue(
-            resolveTvDeepLink(
-                target = TvDeepLinkTarget.Movie(41, resumePlayback = true),
-                movieCatalog = movies,
-                seriesCatalog = seriesCatalog,
-                history = history,
-                profileKind = ProfileKind.STANDARD,
-                verifiedKidsContentKeys = emptySet(),
-            ) is TvDeepLinkResolution.OpenMovie,
+        val syncPlan = planTvProgramSync(
+            existing = profileA.mapIndexed { index, item ->
+                ExistingTvProgram(index.toLong() + 1L, item.providerId)
+            },
+            desired = profileB,
+        )
+
+        assertEquals(setOf(1L, 2L), syncPlan.deleteIds)
+        assertEquals(profileB.single().providerId, syncPlan.upserts.single().item.providerId)
+        assertTrue(syncPlan.upserts.none { it.item.scope.profileId == "A" })
+    }
+
+    @Test
+    fun providerIdsDifferBetweenProfilesForSameContent() {
+        val profileA = TvContinueWatchingMapper.map(
+            standardScope("A"),
+            listOf(movieHistory(id = 41)),
+            emptySet(),
+        ).single()
+        val profileB = TvContinueWatchingMapper.map(
+            standardScope("B"),
+            listOf(movieHistory(id = 41)),
+            emptySet(),
+        ).single()
+
+        assertTrue(profileA.providerId != profileB.providerId)
+        assertTrue(profileA.deepLinkUri != profileB.deepLinkUri)
+        assertTrue(profileA.providerId.startsWith("$TV_PROGRAM_PROVIDER_PREFIX${profileA.scope.providerScopeId}:"))
+        assertTrue(profileB.providerId.startsWith("$TV_PROGRAM_PROVIDER_PREFIX${profileB.scope.providerScopeId}:"))
+    }
+
+    @Test
+    fun profileSwitchClearsPreviousThenPublishesNew() {
+        val profileA = standardScope("A")
+        val profileB = standardScope("B")
+
+        assertEquals(
+            listOf(TvProfilePublicationPhase.CLEAR, TvProfilePublicationPhase.PUBLISH),
+            planTvProfilePublication(
+                previouslyPublishedScopeId = profileA.providerScopeId,
+                activeScopeId = profileB.providerScopeId,
+                hasSession = true,
+                profileResolved = true,
+                kidsVerificationRequired = false,
+                kidsVerified = true,
+            ),
         )
     }
 
     @Test
-    fun completedContentIsNotPublished() {
-        val completed = movieHistory(id = 41, position = 92_000L, duration = 100_000L)
-        val zeroPosition = movieHistory(id = 42, position = 0L, duration = 100_000L)
-        val unknownDuration = movieHistory(id = 43, position = 10_000L, duration = 0L)
+    fun kidsPendingDoesNotPublish() {
+        val kidsScope = TvProfileScope("account", "kids", ProfileKind.KIDS)
 
+        assertEquals(
+            listOf(TvProfilePublicationPhase.CLEAR),
+            planTvProfilePublication(
+                previouslyPublishedScopeId = standardScope("A").providerScopeId,
+                activeScopeId = kidsScope.providerScopeId,
+                hasSession = true,
+                profileResolved = true,
+                kidsVerificationRequired = true,
+                kidsVerified = false,
+            ),
+        )
+    }
+
+    @Test
+    fun logoutClearsAllHulkPrograms() {
+        val desired = TvContinueWatchingMapper.map(
+            standardScope("A"),
+            listOf(movieHistory(41), episodeHistory()),
+            emptySet(),
+        )
+        val existing = desired.mapIndexed { index, item ->
+            ExistingTvProgram(index.toLong() + 1L, item.providerId)
+        }
+        val clearPlan = planTvProgramSync(existing = existing, desired = emptyList())
+
+        assertTrue(clearPlan.upserts.isEmpty())
+        assertEquals(setOf(1L, 2L), clearPlan.deleteIds)
+        assertTrue(existing.all { it.providerId.startsWith(TV_PROGRAM_PROVIDER_PREFIX) })
+    }
+
+    @Test
+    fun invalidSessionUsesClearOnlyPlan() {
+        assertEquals(
+            listOf(TvProfilePublicationPhase.CLEAR),
+            planTvProfilePublication(
+                previouslyPublishedScopeId = standardScope("A").providerScopeId,
+                activeScopeId = null,
+                hasSession = false,
+                profileResolved = false,
+                kidsVerificationRequired = false,
+                kidsVerified = false,
+            ),
+        )
+    }
+
+    @Test
+    fun existingSessionDeepLinkDoesNotGoToLogin() {
+        assertEquals(
+            TvDeepLinkDispatchDecision.DISPATCH,
+            decideTvDeepLinkDispatch(
+                sessionRestorationComplete = true,
+                hasSession = true,
+                profileResolved = true,
+                kidsVerificationRequired = false,
+                kidsVerified = true,
+            ),
+        )
+    }
+
+    @Test
+    fun deepLinkWaitsForSessionRestoration() {
+        assertEquals(
+            TvDeepLinkDispatchDecision.WAIT_FOR_SESSION_RESTORATION,
+            decideTvDeepLinkDispatch(
+                sessionRestorationComplete = false,
+                hasSession = false,
+                profileResolved = false,
+                kidsVerificationRequired = false,
+                kidsVerified = false,
+            ),
+        )
+    }
+
+    @Test
+    fun staleProfileProgramDeepLinkFailsSafely() {
+        val profileA = standardScope("A")
+        val profileB = standardScope("B")
+        val resolution = resolveTvDeepLink(
+            target = TvDeepLinkTarget.Movie(
+                movieId = movie.id,
+                resumePlayback = true,
+                profileScopeId = profileA.providerScopeId,
+            ),
+            movieCatalog = movies,
+            seriesCatalog = seriesCatalog,
+            history = listOf(movieHistory(movie.id)),
+            profileKind = ProfileKind.STANDARD,
+            verifiedKidsContentKeys = emptySet(),
+            activeProfileScopeId = profileB.providerScopeId,
+        )
+
+        assertEquals(TvDeepLinkResolution.StaleProfile, resolution)
+    }
+
+    @Test
+    fun firstPlaybackProgressTriggersSyncQuickly() {
+        assertFalse(shouldSyncTvProgress(0L, 4_999L, 100_000L))
+        assertTrue(shouldSyncTvProgress(0L, 5_000L, 100_000L))
+    }
+
+    @Test
+    fun twelveSecondMeaningfulProgressTriggersSync() {
+        assertTrue(shouldSyncTvProgress(5_000L, 17_000L, 100_000L))
+        assertTrue(shouldSyncTvProgress(30_000L, 18_000L, 100_000L))
+    }
+
+    @Test
+    fun tinyProgressChangesDoNotSyncRepeatedly() {
+        assertFalse(shouldSyncTvProgress(5_000L, 10_000L, 100_000L))
+        assertFalse(shouldSyncTvProgress(5_000L, 15_999L, 100_000L))
+    }
+
+    @Test
+    fun completionAtNinetyTwoPercentRemovesProgram() {
+        val completed = movieHistory(id = 41, position = 92_000L, duration = 100_000L)
+
+        assertTrue(shouldSyncTvProgress(80_000L, 92_000L, 100_000L))
         assertTrue(
             TvContinueWatchingMapper.map(
                 standardScope("A"),
-                listOf(completed, zeroPosition, unknownDuration),
+                listOf(completed),
                 emptySet(),
             ).isEmpty(),
         )
     }
 
     @Test
-    fun duplicateSyncDoesNotCreateDuplicatePrograms() {
+    fun continueWatchingSortsByUpdatedAtDescending() {
+        val items = TvContinueWatchingMapper.map(
+            standardScope("A"),
+            listOf(
+                movieHistory(id = 41, updatedAt = 100L),
+                episodeHistory(id = 503, updatedAt = 300L),
+                movieHistory(id = 42, updatedAt = 200L),
+            ),
+            emptySet(),
+        )
+
+        assertEquals(listOf(300L, 200L, 100L), items.map(TvContinueWatchingItem::updatedAtEpochMs))
+        assertEquals(TvContinueWatchingType.EPISODE, items.first().type)
+    }
+
+    @Test
+    fun duplicateSyncRemainsIdempotent() {
         val desired = TvContinueWatchingMapper.map(
             standardScope("A"),
             listOf(movieHistory(id = 41)),
@@ -160,39 +362,43 @@ class TvPlatformIntegrationTest {
     }
 
     @Test
-    fun profileAContentDoesNotAppearInProfileB() {
-        val profileAItems = TvContinueWatchingMapper.map(
-            standardScope("A"),
-            listOf(movieHistory(id = 41)),
-            emptySet(),
-        )
-        val profileBItems = TvContinueWatchingMapper.map(
-            standardScope("B"),
-            listOf(episodeHistory(id = 504)),
-            emptySet(),
-        )
-
-        assertTrue(profileAItems.all { it.scope.profileId == "A" })
-        assertTrue(profileBItems.all { it.scope.profileId == "B" })
-        assertTrue(profileBItems.none { it.contentId == 41 })
-    }
-
-    @Test
-    fun logoutClearsUserSpecificPublishedEntries() {
-        val plan = planTvProgramSync(
-            existing = listOf(
-                ExistingTvProgram(1L, "${TV_PROGRAM_PROVIDER_PREFIX}movie:41"),
-                ExistingTvProgram(2L, "${TV_PROGRAM_PROVIDER_PREFIX}episode:82:503"),
+    fun movieAndEpisodeMixedHistoryRemainsCorrect() {
+        val scope = standardScope("A")
+        val items = TvContinueWatchingMapper.map(
+            scope = scope,
+            history = listOf(
+                episodeHistory(updatedAt = 300L),
+                movieHistory(id = 41, updatedAt = 100L),
             ),
-            desired = emptyList(),
+            verifiedKidsContentKeys = emptySet(),
+            landscapeArtworkByContentKey = mapOf(
+                "MOVIE:41" to "https://images.example/movie-wide.jpg",
+                "SERIES:82" to "https://images.example/series-wide.jpg",
+            ),
         )
 
-        assertTrue(plan.upserts.isEmpty())
-        assertEquals(setOf(1L, 2L), plan.deleteIds)
+        assertEquals(2, items.size)
+        assertEquals(setOf(TvContinueWatchingType.MOVIE, TvContinueWatchingType.EPISODE), items.mapTo(mutableSetOf()) { it.type })
+        assertEquals("https://images.example/series-wide.jpg", items.first().landscapeImageUrl)
+        assertTrue(items.all { "scope=${scope.providerScopeId}" in it.deepLinkUri })
+        assertEquals(25_000L, items.first { it.type == TvContinueWatchingType.MOVIE }.positionMs)
+        assertEquals(82, items.first { it.type == TvContinueWatchingType.EPISODE }.seriesId)
     }
 
     @Test
-    fun unsupportedOrNonTvDeviceFailsSafely() {
+    fun historyMappingIsCappedAtTwenty() {
+        val items = TvContinueWatchingMapper.map(
+            standardScope("A"),
+            List(25) { index -> movieHistory(id = 100 + index, updatedAt = index.toLong()) },
+            emptySet(),
+        )
+
+        assertEquals(20, items.size)
+        assertEquals(124, items.first().contentId)
+    }
+
+    @Test
+    fun unsupportedTvProviderFailsSafely() {
         assertFalse(isTvPlatformSupported(false, 36, true))
         assertFalse(isTvPlatformSupported(true, 25, true))
         assertFalse(isTvPlatformSupported(true, 36, false))
@@ -209,9 +415,7 @@ class TvPlatformIntegrationTest {
             profileKind = ProfileKind.STANDARD,
             verifiedKidsContentKeys = emptySet(),
         )
-        val episodes = listOf(
-            Episode(503, "Episode", 1, 2, "mp4", null, null),
-        )
+        val episodes = listOf(Episode(503, "Episode", 1, 2, "mp4", null, null))
 
         assertEquals(TvDeepLinkResolution.MissingContent, missingMovie)
         assertNull(findTvDeepLinkEpisode(episodes, 999))
@@ -232,6 +436,7 @@ class TvPlatformIntegrationTest {
         rating = null,
         year = null,
         containerExtension = "mp4",
+        backdropUrl = "https://images.example/$id-wide.jpg",
     )
 
     private fun movieHistory(

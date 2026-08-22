@@ -14,6 +14,7 @@ sealed interface TvDeepLinkTarget {
     data class Movie(
         val movieId: Int,
         val resumePlayback: Boolean = false,
+        val profileScopeId: String? = null,
     ) : TvDeepLinkTarget
 
     data class Series(val seriesId: Int) : TvDeepLinkTarget
@@ -22,18 +23,21 @@ sealed interface TvDeepLinkTarget {
         val seriesId: Int,
         val episodeId: Int,
         val resumePlayback: Boolean = false,
+        val profileScopeId: String? = null,
     ) : TvDeepLinkTarget
 }
 
 /**
  * Strict, non-sensitive URI contract used by Android TV programs.
  *
- * Only positive content identifiers and the fixed `resume=true` signal are accepted. Account,
- * profile, reseller, host and credential data never form part of a URI.
+ * Only positive content identifiers, the fixed `resume=true` signal, and an optional opaque
+ * profile-scope digest are accepted. Raw account/profile identifiers, reseller data, hosts and
+ * credentials never form part of a URI.
  */
 object TvDeepLinkRouter {
     private const val SCHEME = "hulksa"
-    private const val RESUME_QUERY = "resume=true"
+    private const val RESUME_PARAMETER = "resume=true"
+    private const val SCOPE_PARAMETER_PREFIX = "scope="
     private const val MAX_URI_LENGTH = 256
 
     fun parse(rawUri: String?): TvDeepLinkTarget? {
@@ -55,25 +59,28 @@ object TvDeepLinkRouter {
             .orEmpty()
             .split('/')
             .filter(String::isNotEmpty)
-        val resume = when (uri.rawQuery) {
-            null -> false
-            RESUME_QUERY -> true
-            else -> return null
-        }
+        val query = parseQuery(uri.rawQuery) ?: return null
 
         return when (host) {
-            "home" -> TvDeepLinkTarget.Home.takeIf { segments.isEmpty() && !resume }
+            "home" -> TvDeepLinkTarget.Home.takeIf {
+                segments.isEmpty() && !query.resumePlayback && query.profileScopeId == null
+            }
             "movie" -> segments.singlePositiveId()?.let { movieId ->
-                TvDeepLinkTarget.Movie(movieId, resumePlayback = resume)
+                TvDeepLinkTarget.Movie(
+                    movieId = movieId,
+                    resumePlayback = query.resumePlayback,
+                    profileScopeId = query.profileScopeId,
+                )
             }
             "series" -> segments.singlePositiveId()
-                ?.takeIf { !resume }
+                ?.takeIf { !query.resumePlayback && query.profileScopeId == null }
                 ?.let { TvDeepLinkTarget.Series(it) }
             "episode" -> segments.twoPositiveIds()?.let { (seriesId, episodeId) ->
                 TvDeepLinkTarget.Episode(
                     seriesId = seriesId,
                     episodeId = episodeId,
-                    resumePlayback = resume,
+                    resumePlayback = query.resumePlayback,
+                    profileScopeId = query.profileScopeId,
                 )
             }
             else -> null
@@ -84,15 +91,48 @@ object TvDeepLinkRouter {
         TvDeepLinkTarget.Home -> "$SCHEME://home"
         is TvDeepLinkTarget.Movie -> buildString {
             append("$SCHEME://movie/${target.movieId}")
-            if (target.resumePlayback) append("?$RESUME_QUERY")
+            appendPlaybackQuery(target.resumePlayback, target.profileScopeId)
         }
         is TvDeepLinkTarget.Series -> "$SCHEME://series/${target.seriesId}"
         is TvDeepLinkTarget.Episode -> buildString {
             append("$SCHEME://episode/${target.seriesId}/${target.episodeId}")
-            if (target.resumePlayback) append("?$RESUME_QUERY")
+            appendPlaybackQuery(target.resumePlayback, target.profileScopeId)
         }
     }
+
+    private fun parseQuery(rawQuery: String?): ParsedTvDeepLinkQuery? {
+        if (rawQuery == null) return ParsedTvDeepLinkQuery()
+        val parts = rawQuery.split('&')
+        if (parts.isEmpty() || parts.any(String::isBlank) || parts.distinct().size != parts.size) {
+            return null
+        }
+        val resume = RESUME_PARAMETER in parts
+        val scopeParts = parts.filter { it.startsWith(SCOPE_PARAMETER_PREFIX) }
+        if (scopeParts.size > 1) return null
+        val scope = scopeParts.singleOrNull()?.removePrefix(SCOPE_PARAMETER_PREFIX)
+        if (resume != (scope != null) || (scope != null && !isValidTvProfileScopeId(scope))) {
+            return null
+        }
+        if (parts.any { it != RESUME_PARAMETER && it !in scopeParts }) return null
+        return ParsedTvDeepLinkQuery(resumePlayback = resume, profileScopeId = scope)
+    }
+
+    private fun StringBuilder.appendPlaybackQuery(
+        resumePlayback: Boolean,
+        profileScopeId: String?,
+    ) {
+        require(profileScopeId == null || isValidTvProfileScopeId(profileScopeId))
+        require(resumePlayback == (profileScopeId != null))
+        if (!resumePlayback) return
+        append("?$RESUME_PARAMETER")
+        profileScopeId?.let { append("&$SCOPE_PARAMETER_PREFIX$it") }
+    }
 }
+
+private data class ParsedTvDeepLinkQuery(
+    val resumePlayback: Boolean = false,
+    val profileScopeId: String? = null,
+)
 
 private fun List<String>.singlePositiveId(): Int? =
     singleOrNull()?.positiveContentId()
@@ -121,6 +161,29 @@ sealed interface TvDeepLinkResolution {
     ) : TvDeepLinkResolution
     data object MissingContent : TvDeepLinkResolution
     data object BlockedForKids : TvDeepLinkResolution
+    data object StaleProfile : TvDeepLinkResolution
+}
+
+enum class TvDeepLinkDispatchDecision {
+    WAIT_FOR_SESSION_RESTORATION,
+    SHOW_LOGIN,
+    WAIT_FOR_PROFILE,
+    DISPATCH,
+}
+
+/** Pure gate for activity/session/profile readiness before a TV deep link is resolved. */
+internal fun decideTvDeepLinkDispatch(
+    sessionRestorationComplete: Boolean,
+    hasSession: Boolean,
+    profileResolved: Boolean,
+    kidsVerificationRequired: Boolean,
+    kidsVerified: Boolean,
+): TvDeepLinkDispatchDecision = when {
+    !sessionRestorationComplete -> TvDeepLinkDispatchDecision.WAIT_FOR_SESSION_RESTORATION
+    !hasSession -> TvDeepLinkDispatchDecision.SHOW_LOGIN
+    !profileResolved || (kidsVerificationRequired && !kidsVerified) ->
+        TvDeepLinkDispatchDecision.WAIT_FOR_PROFILE
+    else -> TvDeepLinkDispatchDecision.DISPATCH
 }
 
 internal fun resolveTvDeepLink(
@@ -130,7 +193,16 @@ internal fun resolveTvDeepLink(
     history: List<HistoryEntry>,
     profileKind: ProfileKind,
     verifiedKidsContentKeys: Set<String>,
+    activeProfileScopeId: String? = null,
 ): TvDeepLinkResolution {
+    val targetScopeId = when (target) {
+        is TvDeepLinkTarget.Movie -> target.profileScopeId
+        is TvDeepLinkTarget.Episode -> target.profileScopeId
+        else -> null
+    }
+    if (targetScopeId != null && targetScopeId != activeProfileScopeId) {
+        return TvDeepLinkResolution.StaleProfile
+    }
     return when (target) {
         TvDeepLinkTarget.Home -> TvDeepLinkResolution.OpenHome
         is TvDeepLinkTarget.Movie -> {

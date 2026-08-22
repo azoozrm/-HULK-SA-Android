@@ -221,6 +221,7 @@ fun ProfileAwareHulkApp(
             return
         }
 
+        if (isTelevisionDevice) viewModel.beginTvPlatformProfileSwitch()
         switching = true
         managingProfiles = false
         createProfileRequested = false
