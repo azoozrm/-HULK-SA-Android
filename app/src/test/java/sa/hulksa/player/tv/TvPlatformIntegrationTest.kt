@@ -104,6 +104,52 @@ class TvPlatformIntegrationTest {
     }
 
     @Test
+    fun channelMetadataUsesBrandOnlyDisplayName() {
+        assertEquals("HULK SA", TV_CHANNEL_DISPLAY_NAME)
+        assertEquals("اكمل المشاهدة", TV_CONTINUE_WATCHING_LABEL)
+    }
+
+    @Test
+    fun movieProgramUsesClearConciseDescription() {
+        val item = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(
+                movieHistory(
+                    id = 41,
+                    position = 6_120_000L,
+                    duration = 7_200_000L,
+                ),
+            ),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+
+        assertEquals(
+            "فيلم • تم الوصول إلى 1س 42د • المتبقي 18د",
+            item.description,
+        )
+    }
+
+    @Test
+    fun episodeProgramUsesClearConciseDescription() {
+        val item = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(
+                episodeHistory().copy(
+                    positionMs = 1_380_000L,
+                    durationMs = 2_400_000L,
+                    episodeNumber = 4,
+                ),
+            ),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+
+        assertEquals(
+            "مسلسل • الموسم 1 • الحلقة 4 • تم الوصول إلى 23د • المتبقي 17د",
+            item.description,
+        )
+    }
+
+    @Test
     fun previewProgramUsesLandscapeAspectRatioAndLocalBackdrop() {
         val item = TvContinueWatchingMapper.map(
             scope = standardScope("A"),
@@ -124,8 +170,27 @@ class TvPlatformIntegrationTest {
         assertTrue(item.providerId.startsWith(TV_PROGRAM_PROVIDER_PREFIX))
         assertTrue("scope=${item.scope.providerScopeId}" in item.deepLinkUri)
         assertEquals("https://images.example/42.jpg", posterFallback.landscapeImageUrl)
-        assertEquals("HULK SA • أكمل المشاهدة", TV_CHANNEL_DISPLAY_NAME)
-        assertEquals("أكمل المشاهدة", TV_CONTINUE_WATCHING_LABEL)
+    }
+
+    @Test
+    fun invalidOrMissingBackdropFallsBackToSafePoster() {
+        val missingBackdrop = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(movieHistory(id = 41)),
+            verifiedKidsContentKeys = emptySet(),
+        ).single()
+        val unsafeBackdrop = TvContinueWatchingMapper.map(
+            scope = standardScope("A"),
+            history = listOf(movieHistory(id = 41)),
+            verifiedKidsContentKeys = emptySet(),
+            landscapeArtworkByContentKey = mapOf(
+                "MOVIE:41" to "https://user:secret@images.example/unsafe-wide.jpg",
+            ),
+        ).single()
+
+        assertEquals("https://images.example/41.jpg", missingBackdrop.landscapeImageUrl)
+        assertEquals("https://images.example/41.jpg", unsafeBackdrop.landscapeImageUrl)
+        assertNull(selectTvProgramArtwork("file:///private/backdrop.jpg", "javascript:bad"))
     }
 
     @Test

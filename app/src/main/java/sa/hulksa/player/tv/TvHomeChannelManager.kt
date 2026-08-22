@@ -28,8 +28,8 @@ import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.ProfileKind
 
-internal const val TV_CHANNEL_DISPLAY_NAME = "HULK SA • أكمل المشاهدة"
-internal const val TV_CONTINUE_WATCHING_LABEL = "أكمل المشاهدة"
+internal const val TV_CHANNEL_DISPLAY_NAME = "HULK SA"
+internal const val TV_CONTINUE_WATCHING_LABEL = "اكمل المشاهدة"
 
 sealed interface TvPlatformSyncResult {
     data object Unsupported : TvPlatformSyncResult
@@ -311,7 +311,7 @@ class TvHomeChannelManager(context: Context) {
             .setChannelId(channelId)
             .setType(item.programType())
             .setTitle(item.title)
-            .setDescription(TV_CONTINUE_WATCHING_LABEL)
+            .setDescription(item.description)
             .setPosterArtUri(item.safeArtworkUri())
             .setPosterArtAspectRatio(item.artworkAspectRatio.tvProviderValue())
             .setIntentUri(Uri.parse(item.deepLinkUri))
@@ -330,7 +330,7 @@ class TvHomeChannelManager(context: Context) {
             .setWatchNextType(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE)
             .setLastEngagementTimeUtcMillis(item.updatedAtEpochMs)
             .setTitle(item.title)
-            .setDescription(TV_CONTINUE_WATCHING_LABEL)
+            .setDescription(item.description)
             .setPosterArtUri(item.safeArtworkUri())
             .setPosterArtAspectRatio(item.artworkAspectRatio.tvProviderValue())
             .setIntentUri(Uri.parse(item.deepLinkUri))
@@ -378,17 +378,8 @@ class TvHomeChannelManager(context: Context) {
 
     private fun TvContinueWatchingItem.safeArtworkUri(): Uri {
         val fallback = Uri.parse("android.resource://${appContext.packageName}/${R.mipmap.ic_launcher_tv}")
-        val raw = landscapeImageUrl?.trim()?.takeIf(String::isNotEmpty) ?: return fallback
-        return runCatching {
-            val parsed = Uri.parse(raw)
-            val schemeAllowed = parsed.scheme.equals("http", true) || parsed.scheme.equals("https", true)
-            val sensitiveQuery = parsed.query.orEmpty().lowercase().let { query ->
-                listOf("username=", "password=", "access_code=", "token=").any(query::contains)
-            }
-            parsed.takeIf {
-                schemeAllowed && !parsed.host.isNullOrBlank() && parsed.userInfo == null && !sensitiveQuery
-            } ?: fallback
-        }.getOrDefault(fallback)
+        val raw = landscapeImageUrl?.takeIf(::isSafeTvProgramArtworkUrl) ?: return fallback
+        return Uri.parse(raw)
     }
 
     private fun TvContinueWatchingItem.durationAsInt(): Int =

@@ -1,7 +1,9 @@
 package sa.hulksa.player.tv
 
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.Locale
 import kotlin.math.abs
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.ProfileKind
@@ -55,6 +57,7 @@ data class TvContinueWatchingItem(
     val type: TvContinueWatchingType,
     val title: String,
     val episodeTitle: String?,
+    val description: String,
     val landscapeImageUrl: String?,
     val artworkAspectRatio: TvProgramArtworkAspectRatio,
     val contentId: Int,
@@ -142,9 +145,15 @@ private fun HistoryEntry.toCandidate(
                 type = TvContinueWatchingType.MOVIE,
                 title = title,
                 episodeTitle = null,
-                landscapeImageUrl = landscapeArtworkByContentKey["MOVIE:$streamId"]
-                    ?.takeIf(String::isNotBlank)
-                    ?: posterUrl,
+                description = formatTvContinueWatchingDescription(
+                    type = TvContinueWatchingType.MOVIE,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                ),
+                landscapeImageUrl = selectTvProgramArtwork(
+                    landscapeUrl = landscapeArtworkByContentKey["MOVIE:$streamId"],
+                    posterUrl = posterUrl,
+                ),
                 artworkAspectRatio = TvProgramArtworkAspectRatio.LANDSCAPE_16_9,
                 contentId = streamId,
                 seriesId = null,
@@ -178,9 +187,17 @@ private fun HistoryEntry.toCandidate(
                 type = TvContinueWatchingType.EPISODE,
                 title = seriesTitle?.takeIf { it.isNotBlank() } ?: title,
                 episodeTitle = episodeTitle?.takeIf { it.isNotBlank() } ?: title,
-                landscapeImageUrl = landscapeArtworkByContentKey["SERIES:$parentSeriesId"]
-                    ?.takeIf(String::isNotBlank)
-                    ?: posterUrl,
+                description = formatTvContinueWatchingDescription(
+                    type = TvContinueWatchingType.EPISODE,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    seasonNumber = season,
+                    episodeNumber = episodeNumber,
+                ),
+                landscapeImageUrl = selectTvProgramArtwork(
+                    landscapeUrl = landscapeArtworkByContentKey["SERIES:$parentSeriesId"],
+                    posterUrl = posterUrl,
+                ),
                 artworkAspectRatio = TvProgramArtworkAspectRatio.LANDSCAPE_16_9,
                 contentId = streamId,
                 seriesId = parentSeriesId,
@@ -203,6 +220,62 @@ private fun HistoryEntry.toCandidate(
         else -> null
     }
 }
+
+internal fun formatTvContinueWatchingDescription(
+    type: TvContinueWatchingType,
+    positionMs: Long,
+    durationMs: Long,
+    seasonNumber: Int? = null,
+    episodeNumber: Int? = null,
+): String {
+    val parts = mutableListOf(if (type == TvContinueWatchingType.MOVIE) "فيلم" else "مسلسل")
+    if (type == TvContinueWatchingType.EPISODE) {
+        seasonNumber?.takeIf { it > 0 }?.let { parts += "الموسم $it" }
+        episodeNumber?.takeIf { it > 0 }?.let { parts += "الحلقة $it" }
+    }
+    parts += "تم الوصول إلى ${formatTvPlaybackTime(positionMs, roundUp = false)}"
+    val remaining = formatTvPlaybackTime(
+        valueMs = (durationMs - positionMs).coerceAtLeast(0L),
+        roundUp = true,
+    )
+    parts += "المتبقي $remaining"
+    return parts.joinToString(" • ")
+}
+
+private fun formatTvPlaybackTime(valueMs: Long, roundUp: Boolean): String {
+    if (valueMs <= 0L) return "0د"
+    val minuteMs = 60_000L
+    val totalMinutes = if (roundUp) {
+        valueMs / minuteMs + if (valueMs % minuteMs == 0L) 0L else 1L
+    } else {
+        valueMs / minuteMs
+    }
+    if (totalMinutes <= 0L) return "أقل من دقيقة"
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return when {
+        hours <= 0L -> "${minutes}د"
+        minutes <= 0L -> "${hours}س"
+        else -> "${hours}س ${minutes}د"
+    }
+}
+
+internal fun selectTvProgramArtwork(
+    landscapeUrl: String?,
+    posterUrl: String?,
+): String? = sequenceOf(landscapeUrl, posterUrl)
+    .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+    .firstOrNull(::isSafeTvProgramArtworkUrl)
+
+internal fun isSafeTvProgramArtworkUrl(rawUrl: String): Boolean = runCatching {
+    val uri = URI(rawUrl)
+    val schemeAllowed =
+        uri.scheme.equals("http", true) || uri.scheme.equals("https", true)
+    val sensitiveQuery = uri.rawQuery.orEmpty().lowercase(Locale.ROOT).let { query ->
+        listOf("username=", "password=", "access_code=", "token=").any(query::contains)
+    }
+    schemeAllowed && !uri.host.isNullOrBlank() && uri.userInfo == null && !sensitiveQuery
+}.getOrDefault(false)
 
 data class ExistingTvProgram(
     val id: Long,
