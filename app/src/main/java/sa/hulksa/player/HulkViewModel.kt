@@ -76,6 +76,13 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.ProfileKind
+import sa.hulksa.player.tv.TvDeepLinkResolution
+import sa.hulksa.player.tv.TvDeepLinkRouter
+import sa.hulksa.player.tv.TvDeepLinkTarget
+import sa.hulksa.player.tv.TvPlatformIntegration
+import sa.hulksa.player.tv.findTvDeepLinkEpisode
+import sa.hulksa.player.tv.resolveTvDeepLink
+import sa.hulksa.player.tv.shouldSyncTvProgress
 
 enum class HulkScreen {
     LOGIN,
@@ -203,6 +210,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val operationsClient = OperationsClient()
     private val operationsInstaller = OperationsApkInstaller(application)
     private val operationsDeviceIsTv = application.isTelevisionDevice()
+    private val tvPlatformIntegration = TvPlatformIntegration(application)
     private val initialCachedOperations = operationsStore.cachedConfig()
     private val initialNotificationSnapshot = localEpisodeNotificationStore.snapshot(
         profileStore.activeProfileId(),
@@ -240,6 +248,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var notificationScanJob: Job? = null
     private var operationsRefreshJob: Job? = null
     private var operationsDownloadJob: Job? = null
+    private var tvPlatformSyncJob: Job? = null
+    private var tvDeepLinkEpisodeJob: Job? = null
+    private var tvPlatformProfileReady: Boolean = false
+    private var pendingTvDeepLink: TvDeepLinkTarget? = null
     private var activeOperationsConfig: OperationsConfig? = initialCachedOperations?.config
     private var activeOperationsFetchedAtEpochMs: Long = initialCachedOperations?.fetchedAtEpochMs ?: 0L
     private val presentedOperationsMessageIds = linkedSetOf<String>()
@@ -315,6 +327,38 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             ),
             remember,
         )
+    }
+
+    fun handleTvDeepLink(rawUri: String?) {
+        if (!operationsDeviceIsTv) return
+        val target = TvDeepLinkRouter.parse(rawUri)
+        if (target == null) {
+            pendingTvDeepLink = null
+            tvDeepLinkEpisodeJob?.cancel()
+            tvDeepLinkEpisodeJob = null
+            if (!rawUri.isNullOrBlank()) {
+                mutableState.update { it.copy(errorMessage = "تعذر فتح هذا الرابط.") }
+            }
+            return
+        }
+        tvDeepLinkEpisodeJob?.cancel()
+        tvDeepLinkEpisodeJob = null
+        pendingTvDeepLink = target
+        resolvePendingTvDeepLink()
+    }
+
+    fun setTvPlatformProfileReady(ready: Boolean) {
+        if (!operationsDeviceIsTv) return
+        if (!ready) {
+            tvPlatformProfileReady = false
+            tvDeepLinkEpisodeJob?.cancel()
+            tvDeepLinkEpisodeJob = null
+            clearTvPlatformPrograms()
+            return
+        }
+        tvPlatformProfileReady = true
+        scheduleTvPlatformSync(immediate = true)
+        resolvePendingTvDeepLink()
     }
 
     fun selectDestination(destination: MainDestination) {
@@ -893,13 +937,21 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onPlaybackProgress(request: PlaybackRequest, positionMs: Long, durationMs: Long) {
         if (request.isLive) return
+        val previousPositionMs = mutableState.value.history
+            .firstOrNull { it.key == request.historyKey }
+            ?.positionMs
+            ?: 0L
         val updated = userLibrary.updateProgress(request, positionMs, durationMs)
         mutableState.update { it.copy(history = updated) }
+        if (shouldSyncTvProgress(previousPositionMs, positionMs, durationMs)) {
+            scheduleTvPlatformSync(immediate = positionMs.toDouble() / durationMs.coerceAtLeast(1L) >= .92)
+        }
     }
 
     fun removeHistoryEntry(key: String) {
         val updated = userLibrary.removeHistory(key)
         mutableState.update { it.copy(history = updated) }
+        scheduleTvPlatformSync(immediate = true)
     }
 
     fun toggleFavorite(item: ContentItem) {
@@ -1247,6 +1299,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(notificationPopup = null) }
         refreshNotificationState(clearPopup = true)
         scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
+        scheduleTvPlatformSync(immediate = true)
     }
 
     fun removeNotificationProfileData(profileId: String) {
@@ -1259,6 +1312,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun onAppResumed() {
         refreshOperations(force = false)
         scanSubscribedSeries(NotificationScanTrigger.APP_RESUME)
+        scheduleTvPlatformSync(immediate = false)
+        resolvePendingTvDeepLink()
     }
 
     fun retryOperations() {
@@ -1820,6 +1875,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearHistory() {
         mutableState.update { it.copy(history = userLibrary.clearHistory()) }
+        scheduleTvPlatformSync(immediate = true)
     }
 
     fun refreshAccount(onResult: (String) -> Unit) {
@@ -1969,6 +2025,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun logout() {
         val operationsState = mutableState.value.operations
+        tvPlatformProfileReady = false
+        pendingTvDeepLink = null
+        tvDeepLinkEpisodeJob?.cancel()
+        tvDeepLinkEpisodeJob = null
+        clearTvPlatformPrograms()
         repository.logout()
         session = null
         notificationScanJob?.cancel()
@@ -2078,11 +2139,179 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             loadingTypes = state.loadingTypes - type,
                         )
                     }
+                    resolvePendingTvDeepLink()
                 }
                 .onFailure { error ->
                     mutableState.update { it.copy(loadingTypes = it.loadingTypes - type) }
                     showFailure(error)
                 }
+        }
+    }
+
+    private fun resolvePendingTvDeepLink() {
+        val target = pendingTvDeepLink ?: return
+        if (!operationsDeviceIsTv || !tvPlatformProfileReady) return
+        val activeSession = session ?: return
+        val profile = profileStore.activeProfile()
+        when (
+            val resolution = resolveTvDeepLink(
+                target = target,
+                movieCatalog = loadedCatalogs[ContentType.MOVIE],
+                seriesCatalog = loadedCatalogs[ContentType.SERIES],
+                history = mutableState.value.history,
+                profileKind = profile.kind,
+                verifiedKidsContentKeys = kidsContentFilterStore.allowedKeys(),
+            )
+        ) {
+            TvDeepLinkResolution.OpenHome -> {
+                pendingTvDeepLink = null
+                tvDeepLinkEpisodeJob?.cancel()
+                tvDeepLinkEpisodeJob = null
+                openSafeTvHome(message = null)
+            }
+            is TvDeepLinkResolution.AwaitCatalog -> ensureCatalog(resolution.type)
+            is TvDeepLinkResolution.OpenMovie -> {
+                pendingTvDeepLink = null
+                tvDeepLinkEpisodeJob?.cancel()
+                tvDeepLinkEpisodeJob = null
+                if (resolution.resumePlayback) {
+                    playerReturnScreen = HulkScreen.MAIN
+                    startPlayback(repository.playback(activeSession, resolution.item))
+                } else {
+                    open(resolution.item)
+                }
+            }
+            is TvDeepLinkResolution.OpenSeries -> {
+                pendingTvDeepLink = null
+                tvDeepLinkEpisodeJob?.cancel()
+                tvDeepLinkEpisodeJob = null
+                openSeries(item = resolution.item, target = null, activeSession = activeSession)
+            }
+            is TvDeepLinkResolution.OpenEpisode -> {
+                if (resolution.resumePlayback) {
+                    openResumeEpisodeFromTvLink(target, resolution, activeSession, profile.id)
+                } else {
+                    pendingTvDeepLink = null
+                    tvDeepLinkEpisodeJob?.cancel()
+                    tvDeepLinkEpisodeJob = null
+                    openSeries(
+                        item = resolution.series,
+                        target = SeriesEpisodeTarget(
+                            seriesId = resolution.series.id,
+                            seasonNumber = 0,
+                            episodeNumber = 0,
+                            episodeId = resolution.episodeId,
+                        ),
+                        activeSession = activeSession,
+                    )
+                }
+            }
+            TvDeepLinkResolution.MissingContent -> failPendingTvDeepLink(
+                "هذا المحتوى لم يعد متاحًا.",
+            )
+            TvDeepLinkResolution.BlockedForKids -> failPendingTvDeepLink(
+                "هذا المحتوى غير متاح في ملف الأطفال.",
+            )
+        }
+    }
+
+    private fun openResumeEpisodeFromTvLink(
+        target: TvDeepLinkTarget,
+        resolution: TvDeepLinkResolution.OpenEpisode,
+        activeSession: AuthenticatedSession,
+        expectedProfileId: String,
+    ) {
+        if (tvDeepLinkEpisodeJob?.isActive == true) return
+        tvDeepLinkEpisodeJob = viewModelScope.launch {
+            try {
+                val bundle = repository.seriesBundle(activeSession, resolution.series.id)
+                if (
+                    pendingTvDeepLink != target ||
+                    session !== activeSession ||
+                    !tvPlatformProfileReady ||
+                    profileStore.activeProfileId() != expectedProfileId
+                ) return@launch
+
+                val rechecked = resolveTvDeepLink(
+                    target = target,
+                    movieCatalog = loadedCatalogs[ContentType.MOVIE],
+                    seriesCatalog = loadedCatalogs[ContentType.SERIES],
+                    history = mutableState.value.history,
+                    profileKind = profileStore.activeProfile().kind,
+                    verifiedKidsContentKeys = kidsContentFilterStore.allowedKeys(),
+                )
+                if (rechecked == TvDeepLinkResolution.BlockedForKids) {
+                    failPendingTvDeepLink("هذا المحتوى غير متاح في ملف الأطفال.")
+                    return@launch
+                }
+                if (rechecked !is TvDeepLinkResolution.OpenEpisode) {
+                    failPendingTvDeepLink("هذا المحتوى لم يعد متاحًا.")
+                    return@launch
+                }
+                val episode = findTvDeepLinkEpisode(bundle.episodes, resolution.episodeId)
+                    ?: run {
+                        failPendingTvDeepLink("هذا المحتوى لم يعد متاحًا.")
+                        return@launch
+                    }
+                pendingTvDeepLink = null
+                playerReturnScreen = HulkScreen.MAIN
+                startPlayback(repository.playback(activeSession, resolution.series, episode))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (pendingTvDeepLink == target) {
+                    failPendingTvDeepLink("تعذر فتح هذا المحتوى الآن.")
+                }
+            }
+        }
+    }
+
+    private fun failPendingTvDeepLink(message: String) {
+        pendingTvDeepLink = null
+        openSafeTvHome(message)
+    }
+
+    private fun openSafeTvHome(message: String?) {
+        detailsJob?.cancel()
+        detailsJob = null
+        playerReturnScreen = HulkScreen.MAIN
+        mutableState.update {
+            it.copy(
+                screen = HulkScreen.MAIN,
+                destination = MainDestination.HOME,
+                selectedItem = null,
+                selectedSeries = null,
+                selectedDetails = null,
+                episodes = emptyList(),
+                seriesEpisodeTarget = null,
+                playback = null,
+                isLoading = false,
+                errorMessage = message,
+            )
+        }
+        ensureDestinationCatalogs(MainDestination.HOME)
+    }
+
+    private fun scheduleTvPlatformSync(immediate: Boolean) {
+        if (
+            !operationsDeviceIsTv ||
+            !tvPlatformProfileReady ||
+            session == null
+        ) return
+        tvPlatformSyncJob?.cancel()
+        tvPlatformSyncJob = viewModelScope.launch {
+            if (!immediate) delay(TV_PLATFORM_SYNC_DEBOUNCE_MS)
+            if (tvPlatformProfileReady && session != null) {
+                tvPlatformIntegration.syncActiveProfile()
+            }
+        }
+    }
+
+    private fun clearTvPlatformPrograms() {
+        if (!operationsDeviceIsTv) return
+        tvPlatformSyncJob?.cancel()
+        tvPlatformSyncJob = viewModelScope.launch {
+            tvPlatformIntegration.clearUserContent()
         }
     }
 
@@ -2131,6 +2360,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
         if (invalidSession) {
+            tvPlatformProfileReady = false
+            pendingTvDeepLink = null
+            tvDeepLinkEpisodeJob?.cancel()
+            tvDeepLinkEpisodeJob = null
+            clearTvPlatformPrograms()
             repository.logout()
             session = null
             notificationScanJob?.cancel()
@@ -2158,5 +2392,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
         private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
         private const val EPISODE_NOTIFICATION_SCAN_CONCURRENCY = 3
+        private const val TV_PLATFORM_SYNC_DEBOUNCE_MS = 350L
     }
 }
