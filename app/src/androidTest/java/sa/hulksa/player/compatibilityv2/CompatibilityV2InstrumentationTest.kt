@@ -186,8 +186,8 @@ class CompatibilityV2InstrumentationTest {
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
-            var loginAction = device.findObject(By.text("دخول الى HULK"))
-            var subscribeAction = device.findObject(By.text("اشترك او جدد"))
+            var loginAction = device.findObject(By.text("دخول إلى HULK"))
+            var subscribeAction = device.findObject(By.text("اشتراك أو تجديد"))
             repeat(6) {
                 val loginVisible = loginAction?.visibleBounds?.height()?.let { it > 0 } == true
                 val subscribeVisible = subscribeAction?.visibleBounds?.height()?.let { it > 0 } == true
@@ -201,8 +201,8 @@ class CompatibilityV2InstrumentationTest {
                     )
                     instrumentation.waitForIdleSync()
                     SystemClock.sleep(350L)
-                    loginAction = device.findObject(By.text("دخول الى HULK"))
-                    subscribeAction = device.findObject(By.text("اشترك او جدد"))
+                    loginAction = device.findObject(By.text("دخول إلى HULK"))
+                    subscribeAction = device.findObject(By.text("اشتراك أو تجديد"))
                 }
             }
             assertNotNull("Login action was not exposed while the IME was active", loginAction)
