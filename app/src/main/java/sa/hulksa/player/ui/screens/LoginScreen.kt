@@ -203,6 +203,7 @@ fun LoginScreen(
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (isTv) Modifier else Modifier.imePadding())
+        val layoutWidth = maxWidth
 
         Box(
             modifier = contentModifier,
@@ -212,18 +213,18 @@ fun LoginScreen(
                 val groupMaxWidth = if (isTv) 1220.dp else 1040.dp
                 val groupMaxHeight = if (isTv) 820.dp else 720.dp
                 val centerGap = when {
-                    isTv && maxWidth >= 1600.dp -> 56.dp
+                    isTv && layoutWidth >= 1600.dp -> 56.dp
                     isTv -> 40.dp
                     else -> 28.dp
                 }
                 val cardMaxWidth = when {
-                    isTv && maxWidth >= 1600.dp -> 580.dp
-                    isTv && maxWidth >= 1200.dp -> 550.dp
+                    isTv && layoutWidth >= 1600.dp -> 580.dp
+                    isTv && layoutWidth >= 1200.dp -> 550.dp
                     isTv -> 500.dp
                     else -> 470.dp
                 }
                 val availableGroupWidth = minOf(
-                    maxWidth - (contentHorizontalPadding * 2),
+                    layoutWidth - (contentHorizontalPadding * 2),
                     groupMaxWidth,
                 )
                 val cardWidth = minOf(cardMaxWidth, availableGroupWidth * .58f)
