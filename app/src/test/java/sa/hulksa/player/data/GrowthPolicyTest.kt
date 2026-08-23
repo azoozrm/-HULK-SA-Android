@@ -253,7 +253,7 @@ class GrowthPolicyTest {
 
     @Test
     fun remainingOneDayShowsTomorrowCopy() {
-        assertEquals("اشتراكك ينتهي غدًا", bannerAt(1)!!.title)
+        assertEquals("اشتراكك ينتهي غدا", bannerAt(1)!!.title)
     }
 
     @Test
