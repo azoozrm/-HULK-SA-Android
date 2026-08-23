@@ -133,6 +133,17 @@ internal fun GrowthQrDialog(
                     fontSize = 15.sp,
                     textAlign = TextAlign.Center,
                 )
+                Text(
+                    text = "امسح رمز QR بكاميرا جوالك",
+                    color = colors.goldBright,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(colors.gold.copy(alpha = .10f))
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
 
                 GrowthQrImage(
                     content = link.url.orEmpty(),
