@@ -64,8 +64,10 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -466,63 +468,237 @@ private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
     val colors = LocalHulkColors.current
 
     Canvas(modifier = modifier.background(colors.background)) {
+        val wideScene = size.width >= size.height * 1.18f
+        val architecturalStroke = 1.dp.toPx()
+        val structuralLine = Color.White.copy(alpha = .055f)
+        val structuralHighlight = Color.White.copy(alpha = .085f)
+        val brassLine = colors.goldDeep.copy(alpha = .12f)
+
         drawRect(
-            brush = Brush.horizontalGradient(
-                colors = listOf(
-                    Color(0xFF15160F),
-                    Color(0xFF0B0C08),
-                    Color(0xFF050604),
-                    Color(0xFF020302),
+            brush =
+                if (wideScene) {
+                    Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to Color(0xFF191910),
+                            .34f to Color(0xFF10110C),
+                            .62f to Color(0xFF080906),
+                            1f to Color(0xFF020302),
+                        ),
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0f to Color(0xFF191910),
+                            .28f to Color(0xFF10110C),
+                            .58f to Color(0xFF080906),
+                            1f to Color(0xFF020302),
+                        ),
+                    )
+                },
+        )
+
+        drawRect(
+            brush = Brush.verticalGradient(
+                colorStops = arrayOf(
+                    0f to Color(0xFF020302).copy(alpha = .58f),
+                    .22f to Color.Transparent,
+                    .68f to Color.Transparent,
+                    1f to Color(0xFF010201).copy(alpha = .74f),
                 ),
             ),
         )
 
-        val vanishingPoint = Offset(size.width * .34f, size.height * .43f)
-        val architecturalLine = Color.White.copy(alpha = .020f)
-        val brassLine = colors.goldDeep.copy(alpha = .028f)
-        val stroke = 1.dp.toPx()
+        if (wideScene) {
+            val vanishingPoint = Offset(size.width * .39f, size.height * .46f)
+            val sceneEdge = size.width * .64f
 
-        listOf(
-            Offset(0f, 0f),
-            Offset(0f, size.height * .22f),
-            Offset(0f, size.height * .74f),
-            Offset(0f, size.height),
-            Offset(size.width * .16f, size.height),
-            Offset(size.width * .30f, size.height),
-        ).forEachIndexed { index, origin ->
-            drawLine(
-                color = if (index % 2 == 0) architecturalLine else brassLine,
-                start = origin,
-                end = vanishingPoint,
-                strokeWidth = stroke,
+            val ceilingPlane = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(sceneEdge, 0f)
+                lineTo(vanishingPoint.x, vanishingPoint.y)
+                lineTo(0f, size.height * .27f)
+                close()
+            }
+            drawPath(
+                path = ceilingPlane,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF242317).copy(alpha = .46f),
+                        Color(0xFF10110C).copy(alpha = .18f),
+                        Color.Transparent,
+                    ),
+                    start = Offset(0f, 0f),
+                    end = vanishingPoint,
+                ),
             )
-        }
 
-        listOf(.08f, .18f, .28f, .39f).forEachIndexed { index, fraction ->
+            val floorPlane = Path().apply {
+                moveTo(0f, size.height * .76f)
+                lineTo(vanishingPoint.x, vanishingPoint.y)
+                lineTo(sceneEdge, size.height)
+                lineTo(0f, size.height)
+                close()
+            }
+            drawPath(
+                path = floorPlane,
+                brush = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        .62f to Color(0xFF17170F).copy(alpha = .34f),
+                        1f to Color(0xFF050604).copy(alpha = .82f),
+                    ),
+                ),
+            )
+
+            val wallRibs = listOf(.035f, .15f, .27f, .38f, .48f, .57f)
+            wallRibs.forEachIndexed { index, fraction ->
+                val x = size.width * fraction
+                val progress = (x / sceneEdge).coerceIn(0f, 1f)
+                val top = size.height * .10f + (vanishingPoint.y - size.height * .10f) * progress
+                val bottom = size.height * .90f + (vanishingPoint.y - size.height * .90f) * progress
+
+                drawLine(
+                    color = if (index == 2 || index == 4) brassLine else structuralLine,
+                    start = Offset(x, top),
+                    end = Offset(x, bottom),
+                    strokeWidth = if (index == 2) architecturalStroke * 1.35f else architecturalStroke,
+                )
+
+                if (index < wallRibs.lastIndex) {
+                    val nextX = size.width * wallRibs[index + 1]
+                    val nextProgress = (nextX / sceneEdge).coerceIn(0f, 1f)
+                    val nextTop =
+                        size.height * .10f +
+                            (vanishingPoint.y - size.height * .10f) * nextProgress
+                    val nextBottom =
+                        size.height * .90f +
+                            (vanishingPoint.y - size.height * .90f) * nextProgress
+                    val wallPanel = Path().apply {
+                        moveTo(x, top)
+                        lineTo(nextX, nextTop)
+                        lineTo(nextX, nextBottom)
+                        lineTo(x, bottom)
+                        close()
+                    }
+                    drawPath(
+                        path = wallPanel,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = if (index % 2 == 0) .018f else .007f),
+                                colors.goldDeep.copy(alpha = if (index == 1) .032f else .010f),
+                                Color.Transparent,
+                            ),
+                            start = Offset(x, top),
+                            end = Offset(nextX, nextBottom),
+                        ),
+                    )
+                }
+            }
+
+            listOf(.08f, .24f, .43f).forEachIndexed { index, fraction ->
+                val lightStart = size.width * fraction
+                val lightEnd = lightStart + size.width * if (index == 1) .026f else .018f
+                val ceilingLight = Path().apply {
+                    moveTo(lightStart, 0f)
+                    lineTo(lightEnd, 0f)
+                    lineTo(vanishingPoint.x + size.width * .006f, vanishingPoint.y)
+                    lineTo(vanishingPoint.x - size.width * .006f, vanishingPoint.y)
+                    close()
+                }
+                drawPath(
+                    path = ceilingLight,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            colors.goldBright.copy(alpha = if (index == 1) .15f else .09f),
+                            colors.goldDeep.copy(alpha = .025f),
+                            Color.Transparent,
+                        ),
+                        start = Offset(lightStart, 0f),
+                        end = vanishingPoint,
+                    ),
+                )
+            }
+
+            listOf(.04f, .19f, .34f, .51f, .62f).forEachIndexed { index, fraction ->
+                drawLine(
+                    color = if (index == 2) brassLine else structuralLine,
+                    start = Offset(size.width * fraction, size.height),
+                    end = vanishingPoint,
+                    strokeWidth = architecturalStroke,
+                )
+            }
+
             drawLine(
-                color = if (index == 2) brassLine else architecturalLine,
-                start = Offset(size.width * fraction, size.height * .12f),
-                end = Offset(size.width * fraction, size.height * .88f),
-                strokeWidth = stroke,
+                color = structuralHighlight,
+                start = Offset(0f, size.height * .76f),
+                end = vanishingPoint,
+                strokeWidth = architecturalStroke,
+            )
+            drawLine(
+                color = structuralHighlight,
+                start = Offset(0f, size.height * .27f),
+                end = vanishingPoint,
+                strokeWidth = architecturalStroke,
+            )
+        } else {
+            val vanishingPoint = Offset(size.width * .50f, size.height * .18f)
+
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to colors.goldDeep.copy(alpha = .11f),
+                        .30f to Color(0xFF11120C).copy(alpha = .22f),
+                        .48f to Color.Transparent,
+                        1f to Color.Transparent,
+                    ),
+                ),
+            )
+
+            listOf(0f, .16f, .34f, .66f, .84f, 1f).forEachIndexed { index, fraction ->
+                drawLine(
+                    color = if (index == 2 || index == 3) brassLine else structuralLine,
+                    start = Offset(size.width * fraction, 0f),
+                    end = vanishingPoint,
+                    strokeWidth = architecturalStroke,
+                )
+            }
+            drawLine(
+                color = structuralHighlight,
+                start = Offset(0f, size.height * .34f),
+                end = Offset(size.width, size.height * .34f),
+                strokeWidth = architecturalStroke,
             )
         }
 
         drawRect(
-            brush = Brush.horizontalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    colors.background.copy(alpha = .08f),
-                    colors.background.copy(alpha = .52f),
-                    colors.background.copy(alpha = .86f),
-                ),
-            ),
+            brush =
+                if (wideScene) {
+                    Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to Color.Transparent,
+                            .38f to Color.Transparent,
+                            .62f to colors.background.copy(alpha = .58f),
+                            1f to colors.background.copy(alpha = .94f),
+                        ),
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0f to Color.Transparent,
+                            .30f to Color.Transparent,
+                            .58f to colors.background.copy(alpha = .24f),
+                            1f to colors.background.copy(alpha = .58f),
+                        ),
+                    )
+                },
         )
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(
-                    colors.background.copy(alpha = .52f),
-                    Color.Transparent,
-                    colors.background.copy(alpha = .66f),
+                colorStops = arrayOf(
+                    0f to colors.background.copy(alpha = .42f),
+                    .18f to Color.Transparent,
+                    .70f to Color.Transparent,
+                    1f to colors.background.copy(alpha = .70f),
                 ),
             ),
         )
@@ -530,10 +706,13 @@ private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
             brush = Brush.radialGradient(
                 colors = listOf(
                     Color.Transparent,
-                    colors.background.copy(alpha = .70f),
+                    colors.background.copy(alpha = .58f),
                 ),
-                center = Offset(size.width * .45f, size.height * .48f),
-                radius = maxOf(size.width, size.height) * .78f,
+                center = Offset(
+                    size.width * if (wideScene) .35f else .50f,
+                    size.height * if (wideScene) .48f else .28f,
+                ),
+                radius = maxOf(size.width, size.height) * .82f,
             ),
         )
     }
@@ -544,14 +723,60 @@ private fun LoginBrandRegion(
     logoSize: Dp,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalHulkColors.current
+
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center,
     ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .clearAndSetSemantics { },
+        ) {
+            val anchor = Offset(size.width * .50f, size.height * .60f)
+            val treatmentStroke = 1.dp.toPx()
+
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        .24f to Color.White.copy(alpha = .012f),
+                        .50f to colors.goldDeep.copy(alpha = .050f),
+                        .76f to Color.White.copy(alpha = .012f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+                topLeft = Offset(0f, size.height * .16f),
+                size = Size(size.width, size.height * .64f),
+            )
+
+            listOf(.08f, .28f, .72f, .92f).forEachIndexed { index, fraction ->
+                drawLine(
+                    color =
+                        if (index == 1 || index == 2) {
+                            colors.goldDeep.copy(alpha = .075f)
+                        } else {
+                            Color.White.copy(alpha = .045f)
+                        },
+                    start = Offset(size.width * fraction, size.height),
+                    end = anchor,
+                    strokeWidth = treatmentStroke,
+                )
+            }
+
+            drawLine(
+                color = Color.White.copy(alpha = .040f),
+                start = Offset(size.width * .16f, size.height * .78f),
+                end = Offset(size.width * .84f, size.height * .78f),
+                strokeWidth = treatmentStroke,
+            )
+        }
+
         BrandLogo(
             modifier = Modifier
                 .size(logoSize)
-                .alpha(.96f)
+                .alpha(.94f)
                 .clearAndSetSemantics { },
             contentScale = ContentScale.Fit,
         )
@@ -630,12 +855,12 @@ private fun LoginPanel(
         horizontalAlignment = Alignment.End,
     ) {
         Text(
-            text = "مرحبا بك",
+            text = "اهلا بك",
             color = colors.text,
             fontSize = policy.titleSizeSp.sp,
             lineHeight = (policy.titleSizeSp + if (policy.compact) 5 else 7).sp,
             fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Right,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(2.dp))
@@ -644,7 +869,7 @@ private fun LoginPanel(
             color = colors.textMuted,
             fontSize = policy.descriptionSizeSp.sp,
             lineHeight = (policy.descriptionSizeSp + if (policy.compact) 4 else 7).sp,
-            textAlign = TextAlign.Right,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(if (policy.compact) 8.dp else 18.dp))
@@ -739,7 +964,8 @@ private fun LoginPanel(
             minHeight = policy.optionHeight,
             textSizeSp = policy.optionTextSizeSp,
             modifier = Modifier
-                .align(Alignment.End)
+                // Screen-level RTL makes Start the physical right edge of the card.
+                .align(Alignment.Start)
                 .then(
                     if (isTv) {
                         Modifier.widthIn(min = 220.dp, max = 320.dp)
@@ -763,7 +989,8 @@ private fun LoginPanel(
             minHeight = policy.optionHeight,
             textSizeSp = policy.optionTextSizeSp,
             modifier = Modifier
-                .align(Alignment.End)
+                // Screen-level RTL makes Start the physical right edge of the card.
+                .align(Alignment.Start)
                 .then(
                     if (isTv) {
                         Modifier.widthIn(min = 220.dp, max = 320.dp)
