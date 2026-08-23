@@ -100,6 +100,7 @@ data class OperationsConfig(
     val update: OperationsUpdateConfig,
     val announcements: List<OperationsAnnouncement>,
     val features: OperationsFeatureFlags,
+    val growth: OperationsGrowthConfig = OperationsGrowthConfig(),
 )
 
 data class CachedOperationsConfig(
@@ -134,6 +135,7 @@ data class OperationsUiState(
     val update: OperationsUpdateConfig = OperationsUpdateConfig(),
     val service: OperationsServiceConfig = OperationsServiceConfig(),
     val features: OperationsFeatureFlags = OperationsFeatureFlags(),
+    val growth: OperationsGrowthConfig = OperationsGrowthConfig(),
     val announcementPopup: OperationsAnnouncement? = null,
     val persistentAnnouncement: OperationsAnnouncement? = null,
     val download: OperationsDownloadUiState = OperationsDownloadUiState(),
@@ -304,6 +306,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
             }
         }
     }
+    val growth = parseOperationsGrowth(root.optJSONObject("growth"))
 
     OperationsConfig(
         schemaVersion = schemaVersion,
@@ -312,6 +315,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
         update = update,
         announcements = announcements,
         features = OperationsFeatureFlags.fromRemote(remoteFeatures),
+        growth = growth,
     )
 }.getOrNull()
 

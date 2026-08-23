@@ -14,6 +14,7 @@ return [
         'timezone' => 'Asia/Riyadh',
         'session_name' => 'hulk_operations_admin',
         'max_apk_bytes' => 629145600,
+        'max_growth_qr_bytes' => 2097152,
         'login_max_attempts' => 5,
         'login_lock_seconds' => 900,
         'api_cache_seconds' => 60,

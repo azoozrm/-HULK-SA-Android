@@ -58,12 +58,18 @@ document.addEventListener('click', function (event) {
 document.addEventListener('submit', function (event) {
     const form = event.target;
     const action = form.querySelector('[name="action"]')?.value || '';
+    const growthCommand = event.submitter?.getAttribute('name') === 'growth_command'
+        ? event.submitter.value
+        : '';
     let message = form.getAttribute('data-confirm');
     if (action === 'update_service_status' && form.querySelector('[name="status"]')?.value === 'MAINTENANCE') {
         message = 'هل تريد تشغيل وضع الصيانة؟';
     }
     if (action === 'update_release_policy' && form.querySelector('[name="required"]')?.checked) {
         message = 'هل تريد تفعيل التحديث الإجباري؟';
+    }
+    if (growthCommand === 'delete_renewal_qr' || growthCommand === 'delete_support_qr') {
+        message = 'هل تريد حذف QR المخصص والعودة إلى الوضع التلقائي؟';
     }
     if (message && !window.confirm(message)) {
         event.preventDefault();

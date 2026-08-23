@@ -123,6 +123,67 @@ function ops_feature_snapshot(PDO $db): array
     return ops_normalize_feature_flags($statement->fetchAll());
 }
 
+function ops_growth_snapshot(PDO $db): array
+{
+    $renewalUrl = ops_growth_renewal_url((string) ops_setting($db, 'growth_renewal_url', ''));
+    $supportUrl = ops_growth_support_url((string) ops_setting($db, 'growth_support_url', ''));
+    $renewalMode = ops_growth_qr_mode((string) ops_setting($db, 'growth_renewal_qr_mode', 'AUTO'))
+        ?? 'AUTO';
+    $supportMode = ops_growth_qr_mode((string) ops_setting($db, 'growth_support_qr_mode', 'AUTO'))
+        ?? 'AUTO';
+    $days = ops_growth_days_before_expiry(ops_setting($db, 'growth_renewal_banner_days', '7')) ?? 7;
+
+    return [
+        'enabled' => ops_setting($db, 'growth_enabled', '0') === '1',
+        'renewal' => [
+            'enabled' => ops_setting($db, 'growth_renewal_enabled', '0') === '1' && $renewalUrl !== null,
+            'title' => ops_growth_safe_text(
+                (string) ops_setting($db, 'growth_renewal_title', ''),
+                'التجديد والموقع'
+            ),
+            'url' => $renewalUrl,
+            'displayText' => ops_growth_safe_text(
+                (string) ops_setting($db, 'growth_renewal_display_text', ''),
+                'hulksa.com'
+            ),
+            'qrMode' => $renewalMode,
+            'customQrUrl' => ops_growth_custom_qr_url($db, 'renewal'),
+        ],
+        'support' => [
+            'enabled' => ops_setting($db, 'growth_support_enabled', '0') === '1' && $supportUrl !== null,
+            'title' => ops_growth_safe_text(
+                (string) ops_setting($db, 'growth_support_title', ''),
+                'الدعم الفني'
+            ),
+            'url' => $supportUrl,
+            'displayText' => ops_growth_safe_text(
+                (string) ops_setting($db, 'growth_support_display_text', ''),
+                'رقم واتساب HULK SA'
+            ),
+            'qrMode' => $supportMode,
+            'customQrUrl' => ops_growth_custom_qr_url($db, 'support'),
+        ],
+        'renewalBanner' => [
+            'enabled' => ops_setting($db, 'growth_renewal_banner_enabled', '0') === '1',
+            'daysBeforeExpiry' => $days,
+        ],
+    ];
+}
+
+function ops_growth_custom_qr_url(PDO $db, string $slot): ?string
+{
+    $key = $slot === 'renewal' ? 'growth_renewal_custom_qr_path' : 'growth_support_custom_qr_path';
+    $relativePath = trim((string) ops_setting($db, $key, ''));
+    if (!ops_growth_custom_qr_path_is_safe($relativePath, $slot)) {
+        return null;
+    }
+    $absolutePath = dirname(__DIR__) . '/' . $relativePath;
+    if (!is_file($absolutePath)) {
+        return null;
+    }
+    return ops_public_url($relativePath);
+}
+
 function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
 {
     $currentTime = $now ?? new DateTimeImmutable('now');
@@ -139,5 +200,6 @@ function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
         'announcement' => $announcements[0] ?? null,
         'announcements' => $announcements,
         'features' => ops_feature_snapshot($db),
+        'growth' => ops_growth_snapshot($db),
     ];
 }

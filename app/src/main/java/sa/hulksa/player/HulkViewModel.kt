@@ -187,6 +187,7 @@ private fun initialOperationsUiState(
         update = config.update,
         service = effectiveService,
         features = config.features,
+        growth = config.growth,
         persistentAnnouncement = activePersistentOperationsAnnouncement(
             announcements = config.announcements,
             currentVersionCode = BuildConfig.VERSION_CODE,
@@ -1592,6 +1593,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     update = config.update,
                     service = service,
                     features = config.features,
+                    growth = config.growth,
                     announcementPopup = announcementPopup,
                     persistentAnnouncement = persistentAnnouncement,
                     download = if (updateChanged) OperationsDownloadUiState() else state.operations.download,

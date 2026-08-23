@@ -10,6 +10,7 @@ function ops_admin_page_start(string $title, string $section, array $admin): voi
         'announcements' => 'الرسائل',
         'service' => 'حالة الخدمة',
         'features' => 'المميزات',
+        'growth' => 'TV Growth',
         'audit' => 'سجل العمليات',
     ];
     ?>
@@ -20,7 +21,7 @@ function ops_admin_page_start(string $title, string $section, array $admin): voi
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="robots" content="noindex,nofollow">
         <title><?= ops_e($title) ?> — مركز عمليات HULK</title>
-        <link rel="stylesheet" href="../assets/app.css?v=2.2.1">
+        <link rel="stylesheet" href="../assets/app.css?v=2.4.0">
     </head>
     <body>
     <div class="shell">
@@ -50,7 +51,7 @@ function ops_admin_page_end(): void
     ?>
         </main>
     </div>
-    <script src="../assets/app.js?v=2.2.3" defer></script>
+    <script src="../assets/app.js?v=2.4.0" defer></script>
     </body>
     </html>
     <?php

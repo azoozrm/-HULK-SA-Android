@@ -1,6 +1,8 @@
 package sa.hulksa.player.ui.screens
 
+import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -20,7 +22,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -50,7 +51,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
@@ -62,7 +62,6 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.SupportAgent
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -96,7 +95,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
@@ -113,7 +111,12 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
-import sa.hulksa.player.model.AccountInfo
+import sa.hulksa.player.data.GrowthAction
+import sa.hulksa.player.data.GrowthDestination
+import sa.hulksa.player.data.RenewalBannerContent
+import sa.hulksa.player.data.evaluateRenewalBanner
+import sa.hulksa.player.data.link
+import sa.hulksa.player.data.resolveGrowthAction
 import sa.hulksa.player.model.CapabilityFinding
 import sa.hulksa.player.model.CapabilityStatus
 import sa.hulksa.player.model.Category
@@ -146,17 +149,21 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import androidx.compose.foundation.layout.navigationBarsPadding
 
-private const val WEBSITE_URL = "https://hulksa.com/"
-private const val ACCOUNT_URL = "https://hulksa.com/account/login.php"
-private const val APPS_URL = "https://hulksa.com/hulk-app/"
-private const val SUPPORT_URL = "https://wa.me/966506349935"
 private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
+
+private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
+        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+    true
+}.getOrDefault(false)
 
 internal data class TvPageSafeInsets(
     val horizontalDp: Float,
@@ -394,6 +401,25 @@ fun MainShellScreen(
         val key = "${item.type.name}:${item.id}"
         favoriteOverrides[key] ?: isFavorite(item)
     }
+    var growthQrDestination by remember { mutableStateOf<GrowthDestination?>(null) }
+    val openGrowthDestination: (GrowthDestination) -> Unit = { destination ->
+        when (resolveGrowthAction(state.operations.growth, destination, isTv)) {
+            GrowthAction.OPEN_QR -> growthQrDestination = destination
+            GrowthAction.OPEN_URL -> {
+                val url = state.operations.growth.link(destination).url.orEmpty()
+                if (!launchGrowthUrl(context, url)) {
+                    Toast.makeText(context, "تعذر فتح الرابط على هذا الجهاز", Toast.LENGTH_SHORT).show()
+                }
+            }
+            GrowthAction.NO_ACTION -> Unit
+        }
+    }
+    LaunchedEffect(growthQrDestination, state.operations.growth, isTv) {
+        val destination = growthQrDestination ?: return@LaunchedEffect
+        if (resolveGrowthAction(state.operations.growth, destination, isTv) != GrowthAction.OPEN_QR) {
+            growthQrDestination = null
+        }
+    }
     val toggleFavoriteWithFeedback: (ContentItem) -> Unit = { pressedItem ->
         if (!favoriteActionLocked) {
             favoriteActionLocked = true
@@ -442,6 +468,7 @@ fun MainShellScreen(
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
+                        onGrowthAction = openGrowthDestination,
                         onSelectDestination = rememberingSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
@@ -483,6 +510,7 @@ fun MainShellScreen(
                         onToggleFavorite = toggleFavoriteWithFeedback,
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
+                        onGrowthAction = openGrowthDestination,
                         onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
@@ -503,6 +531,16 @@ fun MainShellScreen(
                     onSelect = rememberingSelectDestination,
                     navigationMemory = navigationMemory,
                     entries = navigationEntries,
+                )
+            }
+        }
+        growthQrDestination?.let { destination ->
+            val link = state.operations.growth.link(destination)
+            if (resolveGrowthAction(state.operations.growth, destination, isTv) == GrowthAction.OPEN_QR) {
+                GrowthQrDialog(
+                    destination = destination,
+                    link = link,
+                    onDismiss = { growthQrDestination = null },
                 )
             }
         }
@@ -947,6 +985,7 @@ private fun DestinationContent(
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
+    onGrowthAction: (GrowthDestination) -> Unit,
     onSelectDestination: (MainDestination) -> Unit,
     onClearHistory: () -> Unit,
     onPlayDownload: (OfflineDownload) -> Unit,
@@ -972,6 +1011,7 @@ private fun DestinationContent(
             onToggleFavorite = onToggleFavorite,
             onRefresh = onRefresh,
             onOpenNotifications = onOpenNotifications,
+            onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
         )
         MainDestination.LIVE -> LiveCatalogScreen(state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onToggleFavorite, onRefresh)
@@ -1009,6 +1049,7 @@ private fun DestinationContent(
             notificationMasterEnabled = state.episodeNotificationsEnabled,
             episodeNotificationsAvailable = state.operations.features.episodeNotificationsEnabled,
             onToggleEpisodeNotificationMaster = onToggleEpisodeNotificationMaster,
+            onGrowthAction = onGrowthAction,
             onLogout = onLogout,
         )
     }
@@ -1025,6 +1066,7 @@ private fun CinemaHomeScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotifications: () -> Unit,
+    onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
     val homeContent = navigationMemory.homeContent(state)
@@ -1068,8 +1110,14 @@ private fun CinemaHomeScreen(
     val homeSeries = remember(series, featured) { series.filterNot { it.type == featured?.type && it.id == featured.id } }
     val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
     val remembered = navigationMemory.position(MainDestination.HOME)
+    val renewalBanner = evaluateRenewalBanner(
+        growth = state.operations.growth,
+        expiresAtEpochSeconds = state.account?.expiresAtEpochSeconds,
+    )
 
-    var rowCursor = 1 + if (state.errorMessage != null) 1 else 0
+    var rowCursor = 1
+    val renewalBannerRow = if (renewalBanner != null) rowCursor++ else -1
+    if (state.errorMessage != null) rowCursor++
     val continueRow = if (continueWatching.isNotEmpty()) rowCursor++ else -1
     val downloadsRow = if (activeDownloads.isNotEmpty()) rowCursor++ else -1
     val becauseRow = if (becauseYouWatched.isNotEmpty()) rowCursor++ else -1
@@ -1081,7 +1129,7 @@ private fun CinemaHomeScreen(
     val lastLiveRow = if (lastLive != null) rowCursor++ else -1
     val popularLiveRow = if (suggestedLive.isNotEmpty()) rowCursor++ else -1
     val rowIndexByKey = mapOf(
-        "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
+        "renewal-banner" to renewalBannerRow, "continue" to continueRow, "downloads" to downloadsRow, "because-watched" to becauseRow,
         "recommended" to recommendedRow, "recent-movies" to moviesRow, "recent-series" to seriesRow, "top-movies" to topMoviesRow,
         "top-series" to topSeriesRow, "last-live" to lastLiveRow, "popular-live" to popularLiveRow,
     )
@@ -1118,6 +1166,36 @@ private fun CinemaHomeScreen(
                 )
             }
         }
+        if (renewalBanner != null) {
+            item {
+                val bannerRequester = remember { FocusRequester() }
+                LaunchedEffect(remembered.rowKey, renewalBanner) {
+                    if (remembered.rowKey == "renewal-banner") {
+                        runCatching { bannerRequester.requestFocus() }
+                    }
+                }
+                HomeSectionPadding(isTv) {
+                    RenewalBanner(
+                        content = renewalBanner,
+                        isTv = isTv,
+                        onClick = { onGrowthAction(GrowthDestination.RENEWAL) },
+                        modifier = Modifier.restoreFocus(
+                            remembered.rowKey == "renewal-banner",
+                            bannerRequester,
+                        ),
+                        onFocused = {
+                            navigationMemory.save(
+                                MainDestination.HOME,
+                                "renewal-banner",
+                                0,
+                                "renewal-banner",
+                                0,
+                            )
+                        },
+                    )
+                }
+            }
+        }
         if (state.errorMessage != null) {
             item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
         }
@@ -1149,6 +1227,90 @@ private fun CinemaHomeScreen(
         if (suggestedLive.isNotEmpty()) {
             item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
+    }
+}
+
+@Composable
+private fun RenewalBanner(
+    content: RenewalBannerContent,
+    isTv: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (isTv) 18.dp else 15.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (isTv) Modifier else Modifier.padding(horizontal = 14.dp))
+            .heightIn(min = if (isTv) 88.dp else 76.dp)
+            .clip(shape)
+            .background(
+                if (focused) colors.gold.copy(alpha = .16f) else Color(0xFF13140F),
+            )
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) colors.goldBright else colors.gold.copy(alpha = .30f),
+                shape = shape,
+            )
+            .onFocusChanged { focusState ->
+                focused = focusState.isFocused
+                if (focusState.isFocused) onFocused()
+            }
+            .clickable(role = Role.Button, onClick = onClick)
+            .focusable()
+            .padding(
+                horizontal = if (isTv) 22.dp else 16.dp,
+                vertical = if (isTv) 15.dp else 12.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (isTv) 48.dp else 42.dp)
+                .clip(CircleShape)
+                .background(colors.gold.copy(alpha = if (focused) .22f else .12f))
+                .border(1.dp, colors.gold.copy(alpha = .38f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Language,
+                contentDescription = null,
+                tint = colors.goldBright,
+                modifier = Modifier.size(if (isTv) 25.dp else 22.dp),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = content.title,
+                color = colors.text,
+                fontSize = if (isTv) 19.sp else 16.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = content.subtitle,
+                color = colors.textMuted,
+                fontSize = if (isTv) 13.sp else 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = if (isTv) "اضغط OK" else "فتح",
+            color = colors.goldBright,
+            fontSize = if (isTv) 12.sp else 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(99.dp))
+                .background(colors.gold.copy(alpha = .12f))
+                .padding(horizontal = 11.dp, vertical = 7.dp),
+        )
     }
 }
 
@@ -2656,84 +2818,6 @@ private fun HistoryGrid(
 }
 
 @Composable
-private fun SettingsScreen(
-    state: HulkUiState,
-    isTv: Boolean,
-    onRefreshAll: () -> Unit,
-    onClearHistory: () -> Unit,
-    onRunDiagnostics: () -> Unit,
-    onLogout: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
-    val open: (String) -> Unit = { url -> runCatching { uriHandler.openUri(url) }; Unit }
-    val account = state.account
-    val settingsListState = rememberLazyListState()
-    LaunchedEffect(Unit) {
-        settingsListState.scrollToItem(0)
-    }
-    LazyColumn(
-        state = settingsListState,
-        modifier = Modifier
-            .fillMaxSize()
-            .adaptiveTvPageSafePadding(isTv, mobileHorizontal = 0.dp),
-        contentPadding = if (isTv) {
-            PaddingValues(bottom = 24.dp)
-        } else {
-            PaddingValues(15.dp)
-        },
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        item { PageTitle("الحساب والاعدادات", "ادارة اشتراكك وتجربة المشاهدة", 0, Icons.Rounded.Settings) }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                AccountMetric("الحساب", account?.username?.let { "••••${it.takeLast(4)}" } ?: "—", Modifier.weight(1f))
-                AccountMetric("حالة الاشتراك", account?.status ?: "—", Modifier.weight(1f))
-                AccountMetric("الصلاحية", account?.let(::accountExpiry) ?: "—", Modifier.weight(1f))
-                AccountMetric("الاتصالات", account?.let { "${it.activeConnections} / ${it.maxConnections}" } ?: "—", Modifier.weight(1f))
-            }
-        }
-        item {
-            Column {
-                Text("خدمات HULK SA", color = colors.text, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                Text("الموقع اصبح امتدادا للتطبيق", color = colors.textMuted, fontSize = 11.sp)
-                Spacer(Modifier.height(11.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                    WebsiteCard(Icons.Rounded.Language, "اشتراك او تجديد", "hulksa.com", { open(WEBSITE_URL) }, Modifier.weight(1f))
-                    WebsiteCard(Icons.Rounded.Person, "حساب العميل", "دخول برمز البريد", { open(ACCOUNT_URL) }, Modifier.weight(1f))
-                    WebsiteCard(Icons.Rounded.SupportAgent, "الدعم الفني", "واتساب الرسمي", { open(SUPPORT_URL) }, Modifier.weight(1f))
-                    WebsiteCard(Icons.Rounded.Apps, "مركز التطبيقات", "كل اجهزتك", { open(APPS_URL) }, Modifier.weight(1f))
-                }
-            }
-        }
-        item {
-            SettingsStrip("الملفات الشخصية") {
-                FocusButton(
-                    "تغيير المستخدم",
-                    sa.hulksa.player.ui.LocalProfileSwitchRequester.current,
-                    primary = false,
-                    compact = true,
-                )
-            }
-        }
-        item {
-            SettingsStrip("المحتوى والبيانات") {
-                FocusButton("تحديث المكتبة", onRefreshAll, compact = true)
-                FocusButton("مسح سجل المشاهدة", onClearHistory, primary = false, compact = true, enabled = state.history.isNotEmpty())
-            }
-        }
-        item {
-            SettingsStrip("التطبيق") {
-                Text("HULK SA  •  الاصدار ${BuildConfig.VERSION_NAME}", color = colors.textMuted, fontSize = 12.sp)
-                Spacer(Modifier.weight(1f))
-                FocusButton("تسجيل الخروج", onLogout, primary = false, compact = true)
-            }
-        }
-    }
-}
-
-@Composable
 private fun DiagnosticsCenter(
     state: DiagnosticsState,
     isTv: Boolean,
@@ -3051,56 +3135,6 @@ private fun diagnosticsReportText(report: ServerDiagnosticsReport): String = bui
     }
     appendLine()
     appendLine("ملاحظة: التقرير لا يحتوي اسم المستخدم او كلمة المرور او روابط البث الخاصة.")
-}
-
-@Composable
-private fun AccountMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    val colors = LocalHulkColors.current
-    Column(
-        modifier = modifier.clip(RoundedCornerShape(15.dp)).background(Color(0xFF11120E)).padding(horizontal = 15.dp, vertical = 13.dp),
-    ) {
-        Text(label, color = colors.textMuted, fontSize = 10.sp)
-        Spacer(Modifier.height(4.dp))
-        Text(value, color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun WebsiteCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalHulkColors.current
-    var focused by remember { mutableStateOf(false) }
-    val lift by animateFloatAsState(if (focused) 1.035f else 1f, label = "websiteCardScale")
-    Column(
-        modifier = modifier
-            .graphicsLayer { scaleX = lift; scaleY = lift }
-            .height(115.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (focused) colors.gold else Color(0xFF11120E))
-            .border(if (focused) 2.dp else 0.dp, if (focused) colors.goldBright else Color.Transparent, RoundedCornerShape(16.dp))
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(15.dp),
-    ) {
-        Icon(icon, title, tint = if (focused) Color.Black else colors.goldBright, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.weight(1f))
-        Text(title, color = if (focused) Color.Black else colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text(subtitle, color = if (focused) Color.Black.copy(alpha = .65f) else colors.textMuted, fontSize = 10.sp, maxLines = 1)
-    }
-}
-
-@Composable
-private fun SettingsStrip(title: String, content: @Composable RowScope.() -> Unit) {
-    val colors = LocalHulkColors.current
-    Column {
-        Text(title, color = colors.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(9.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(Color(0xFF11120E)).padding(15.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            content = content,
-        )
-    }
 }
 
 @Composable
@@ -3727,17 +3761,6 @@ private fun categoryMatches(
     FAVORITES_CATEGORY_ID -> isFavorite(item)
     CONTINUE_CATEGORY_ID -> false
     else -> item.categoryId == selectedId
-}
-
-private fun accountExpiry(account: AccountInfo): String {
-    val epoch = account.expiresAtEpochSeconds ?: return "اشتراك فعال"
-    val millis = epoch * 1000L
-    val days = TimeUnit.MILLISECONDS.toDays(millis - System.currentTimeMillis())
-    return if (days >= 0) {
-        "متبقي $days يوم · ${SimpleDateFormat("yyyy/MM/dd", Locale.forLanguageTag("ar-SA")).format(Date(millis))}"
-    } else {
-        "منتهي"
-    }
 }
 
 private data class DestinationEntry(val destination: MainDestination, val icon: ImageVector, val label: String)
