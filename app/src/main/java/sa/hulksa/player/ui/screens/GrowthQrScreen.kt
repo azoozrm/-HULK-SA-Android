@@ -93,7 +93,15 @@ internal fun GrowthQrDialog(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            val qrSize = minOf(maxWidth * .55f, maxHeight * .47f, 360.dp).coerceAtLeast(220.dp)
+            // Some Android TV launchers expose substantially less vertical dp than the
+            // physical 720p/1080p height suggests. Reserve a real bottom budget for the
+            // focused Back button instead of letting the QR consume that space.
+            val compactHeight = maxHeight < 620.dp
+            val qrSize = minOf(
+                maxWidth * if (compactHeight) .48f else .55f,
+                maxHeight * if (compactHeight) .38f else .44f,
+                if (compactHeight) 300.dp else 340.dp,
+            ).coerceAtLeast(if (compactHeight) 170.dp else 210.dp)
             val qrPixels = with(LocalDensity.current) { qrSize.roundToPx().coerceIn(256, 1_400) }
             val shape = RoundedCornerShape(24.dp)
             Column(
@@ -103,14 +111,17 @@ internal fun GrowthQrDialog(
                     .clip(shape)
                     .background(Color(0xFF11120E))
                     .border(1.dp, colors.gold.copy(alpha = .42f), shape)
-                    .padding(horizontal = 28.dp, vertical = 20.dp),
+                    .padding(
+                        horizontal = if (compactHeight) 24.dp else 28.dp,
+                        vertical = if (compactHeight) 12.dp else 18.dp,
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(11.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compactHeight) 7.dp else 9.dp),
             ) {
                 Text(
                     text = "HULK SA",
                     color = colors.goldBright,
-                    fontSize = 17.sp,
+                    fontSize = if (compactHeight) 15.sp else 17.sp,
                     fontWeight = FontWeight.Black,
                 )
                 Text(
@@ -119,7 +130,7 @@ internal fun GrowthQrDialog(
                         GrowthDestination.SUPPORT -> "الدعم الفني"
                     },
                     color = colors.text,
-                    fontSize = 28.sp,
+                    fontSize = if (compactHeight) 25.sp else 28.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
@@ -130,19 +141,22 @@ internal fun GrowthQrDialog(
                         GrowthDestination.SUPPORT -> "تواصل معنا عبر واتساب"
                     },
                     color = colors.textMuted,
-                    fontSize = 15.sp,
+                    fontSize = if (compactHeight) 14.sp else 15.sp,
                     textAlign = TextAlign.Center,
                 )
                 Text(
                     text = "امسح رمز QR بكاميرا جوالك",
                     color = colors.goldBright,
-                    fontSize = 13.sp,
+                    fontSize = if (compactHeight) 12.sp else 13.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .clip(RoundedCornerShape(99.dp))
                         .background(colors.gold.copy(alpha = .10f))
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                        .padding(
+                            horizontal = if (compactHeight) 12.dp else 14.dp,
+                            vertical = if (compactHeight) 5.dp else 7.dp,
+                        ),
                 )
 
                 GrowthQrImage(
@@ -158,19 +172,22 @@ internal fun GrowthQrDialog(
                 Text(
                     text = "\u2066${link.displayText.ifBlank { link.url.orEmpty() }}\u2069",
                     color = colors.text,
-                    fontSize = 17.sp,
+                    fontSize = if (compactHeight) 16.sp else 17.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     style = TextStyle(textDirection = TextDirection.Ltr),
                     maxLines = 1,
                 )
-                Spacer(Modifier.height(1.dp))
+                Spacer(Modifier.height(if (compactHeight) 0.dp else 1.dp))
                 FocusButton(
                     text = "رجوع",
                     onClick = onDismiss,
                     primary = false,
                     compact = true,
-                    modifier = Modifier.focusRequester(backRequester).widthIn(min = 160.dp),
+                    modifier = Modifier
+                        .focusRequester(backRequester)
+                        .widthIn(min = 160.dp)
+                        .padding(bottom = if (compactHeight) 2.dp else 4.dp),
                 )
             }
         }
