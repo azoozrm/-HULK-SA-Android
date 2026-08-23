@@ -189,7 +189,7 @@ fun evaluateRenewalBanner(
     }
     val subtitle = when {
         safeRemainingDays >= 2 -> "جدد اشتراكك بسهولة من جوالك"
-        safeRemainingDays >= 0 -> "جدد اشتراكك الآن"
+        safeRemainingDays >= 0 -> "جدد اشتراكك الان"
         else -> "جدد اشتراكك للمتابعة"
     }
     return RenewalBannerContent(safeRemainingDays, title, subtitle)
