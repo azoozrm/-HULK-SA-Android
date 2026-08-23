@@ -88,4 +88,98 @@ ops_test(!ops_csrf_tokens_match('abc', 'different'), 'mismatched CSRF token is r
 ops_test(ops_is_sha256(hash('sha256', 'HULK SA')), 'server generated SHA-256 is valid');
 ops_test(ops_safe_message_key('msg-001') === 'MSG-001', 'message key is stable and normalized');
 
+ops_test(
+    ops_growth_renewal_url('https://hulksa.com/') === 'https://hulksa.com/',
+    'trusted renewal URL is accepted'
+);
+ops_test(
+    ops_growth_renewal_url('https://renew.hulksa.com/path') === 'https://renew.hulksa.com/path',
+    'trusted renewal subdomain is accepted'
+);
+ops_test(ops_growth_renewal_url('http://hulksa.com/') === null, 'HTTP renewal URL is rejected');
+ops_test(ops_growth_renewal_url('https://example.com/') === null, 'off-host renewal URL is rejected');
+ops_test(
+    ops_growth_renewal_url('https://user:pass@hulksa.com/') === null,
+    'renewal URL credentials are rejected'
+);
+ops_test(
+    ops_growth_renewal_url('https://hulksa.com/?token=secret') === null,
+    'renewal URL query data is rejected'
+);
+ops_test(
+    ops_growth_support_url('https://wa.me/966506349935') === 'https://wa.me/966506349935',
+    'official wa.me URL is accepted'
+);
+ops_test(
+    ops_growth_support_url('https://api.whatsapp.com/send?phone=966506349935&app_absent=0') !== null,
+    'official whatsapp.com URL is accepted'
+);
+ops_test(ops_growth_support_url('https://example.com/support') === null, 'off-host support URL is rejected');
+ops_test(ops_growth_support_url('https://wa.me/not-a-number') === null, 'invalid wa.me number is rejected');
+ops_test(
+    ops_growth_support_url('https://api.whatsapp.com/send?phone=966506349935&token=x') === null,
+    'unknown WhatsApp query key is rejected'
+);
+ops_test(
+    ops_growth_support_url('https://api.whatsapp.com/send?ph%6fne=966506349935') === null,
+    'encoded WhatsApp query keys are rejected'
+);
+ops_test(ops_growth_qr_mode('auto') === 'AUTO', 'AUTO QR mode is normalized');
+ops_test(ops_growth_qr_mode('CUSTOM') === 'CUSTOM', 'CUSTOM QR mode is accepted');
+ops_test(ops_growth_qr_mode('REMOTE') === null, 'unknown QR mode is rejected');
+ops_test(ops_growth_days_before_expiry(1) === 1, 'renewal day lower bound is accepted');
+ops_test(ops_growth_days_before_expiry(30) === 30, 'renewal day upper bound is accepted');
+ops_test(ops_growth_days_before_expiry(0) === null, 'renewal day below range is rejected');
+ops_test(ops_growth_days_before_expiry(31) === null, 'renewal day above range is rejected');
+
+$growthFileName = ops_growth_qr_file_name('renewal', 'png', str_repeat("\x01", 16));
+ops_test(
+    $growthFileName === 'growth-renewal-' . str_repeat('01', 16) . '.png',
+    'growth QR filename is server generated'
+);
+ops_test(
+    ops_growth_custom_qr_path_is_safe('growth-media/' . $growthFileName, 'renewal'),
+    'generated renewal QR path is accepted'
+);
+ops_test(
+    !ops_growth_custom_qr_path_is_safe('https://example.com/qr.png', 'renewal'),
+    'external custom QR path is rejected'
+);
+ops_test(
+    ops_growth_qr_descriptor_errors(
+        'qr.png',
+        'image/png',
+        1024,
+        2048,
+        "\x89PNG\r\n\x1a\nDATA",
+        512,
+        512
+    ) === [],
+    'valid PNG QR descriptor is accepted'
+);
+ops_test(
+    ops_growth_qr_descriptor_errors(
+        'qr.webp',
+        'image/webp',
+        1024,
+        2048,
+        "RIFF\x00\x00\x00\x00WEBP",
+        512,
+        512
+    ) === [],
+    'valid WebP QR descriptor is accepted'
+);
+ops_test(
+    ops_growth_qr_descriptor_errors('shell.php', 'text/x-php', 100, 2048, '<?php echo 1;', 0, 0) !== [],
+    'PHP QR upload is rejected'
+);
+ops_test(
+    ops_growth_qr_descriptor_errors('qr.png', 'image/png', 4096, 2048, "\x89PNG\r\n\x1a\nDATA", 512, 512) !== [],
+    'oversized QR upload is rejected'
+);
+ops_test(
+    ops_growth_qr_descriptor_errors('qr.png', 'image/png', 1024, 2048, "\x89PNG\r\n\x1a\nDATA", 600, 400) !== [],
+    'non-square QR image is rejected'
+);
+
 fwrite(STDOUT, "PASS: {$tests} HULK Operations backend policy checks.\n");

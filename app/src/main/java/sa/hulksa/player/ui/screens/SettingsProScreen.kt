@@ -29,7 +29,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SupportAgent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,8 +51,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +68,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
+import sa.hulksa.player.data.GrowthDestination
+import sa.hulksa.player.data.isGrowthLinkUsable
 import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.DownloadScheduleMode
@@ -75,11 +79,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private const val SETTINGS_WEBSITE_URL = "https://hulksa.com/"
-private const val SETTINGS_ACCOUNT_URL = "https://hulksa.com/account/login.php"
-private const val SETTINGS_APPS_URL = "https://hulksa.com/hulk-app/"
-private const val SETTINGS_SUPPORT_URL = "https://wa.me/966506349935"
 
 private enum class SettingsConfirmation {
     CLEAR_HISTORY,
@@ -105,9 +104,7 @@ private class SettingsFocusGraph {
     val refreshLibrary = FocusRequester()
     val clearHistory = FocusRequester()
     val subscribe = FocusRequester()
-    val customerAccount = FocusRequester()
     val support = FocusRequester()
-    val apps = FocusRequester()
     val logout = FocusRequester()
 }
 
@@ -126,10 +123,10 @@ internal fun SettingsProScreen(
     notificationMasterEnabled: Boolean,
     episodeNotificationsAvailable: Boolean,
     onToggleEpisodeNotificationMaster: () -> Unit,
+    onGrowthAction: (GrowthDestination) -> Unit,
     onLogout: () -> Unit,
 ) {
     val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
     val profileSwitch = LocalProfileSwitchRequester.current
     val settingsStore = remember(context) { SettingsProStore(context) }
     val scope = rememberCoroutineScope()
@@ -141,10 +138,6 @@ internal fun SettingsProScreen(
 
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-    }
-
-    fun open(url: String) {
-        runCatching { uriHandler.openUri(url) }
     }
 
     fun restoreFocusAfterDialog(requester: FocusRequester) {
@@ -177,6 +170,26 @@ internal fun SettingsProScreen(
         state.downloads.sumOf { download -> maxOf(download.bytesDownloaded, 0L) }
     }
     val historyAvailable = state.history.isNotEmpty()
+    val growth = state.operations.growth
+    val renewalAvailable = growth.enabled && isGrowthLinkUsable(
+        GrowthDestination.RENEWAL,
+        growth.renewal,
+    )
+    val supportAvailable = growth.enabled && isGrowthLinkUsable(
+        GrowthDestination.SUPPORT,
+        growth.support,
+    )
+    val firstGrowthRequester = when {
+        renewalAvailable -> focus.subscribe
+        supportAvailable -> focus.support
+        else -> focus.logout
+    }
+    val lastGrowthRequester = when {
+        supportAvailable -> focus.support
+        renewalAvailable -> focus.subscribe
+        historyAvailable -> focus.clearHistory
+        else -> focus.refreshLibrary
+    }
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize(),
@@ -247,8 +260,6 @@ internal fun SettingsProScreen(
                     onFocused = {
                         if (isTv) {
                             scope.launch {
-                                // Let Compose finish moving focus, then make the page header
-                                // the authoritative top anchor instead of the focused row.
                                 yield()
                                 scrollState.scrollTo(0)
                             }
@@ -452,7 +463,7 @@ internal fun SettingsProScreen(
                     expanded = expandedLayout,
                     focusRequester = focus.refreshLibrary,
                     upRequester = focus.switchProfile,
-                    downRequester = if (historyAvailable) focus.clearHistory else focus.subscribe,
+                    downRequester = if (historyAvailable) focus.clearHistory else firstGrowthRequester,
                     onClick = onRefreshLibrary,
                 )
                 SettingsDivider()
@@ -463,52 +474,48 @@ internal fun SettingsProScreen(
                     expanded = expandedLayout,
                     focusRequester = focus.clearHistory,
                     upRequester = focus.refreshLibrary,
-                    downRequester = focus.subscribe,
+                    downRequester = firstGrowthRequester,
                     onClick = { pendingConfirmation = SettingsConfirmation.CLEAR_HISTORY },
                 )
             }
 
-            SettingsPanel(title = "الخدمات", expanded = expandedLayout) {
-                SettingsMenuRow(
-                    label = "الاشتراك أو التجديد",
-                    value = "",
-                    accentValue = true,
-                    expanded = expandedLayout,
-                    focusRequester = focus.subscribe,
-                    upRequester = if (historyAvailable) focus.clearHistory else focus.refreshLibrary,
-                    downRequester = focus.customerAccount,
-                    onClick = { open(SETTINGS_WEBSITE_URL) },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "حساب العميل",
-                    value = "",
-                    expanded = expandedLayout,
-                    focusRequester = focus.customerAccount,
-                    upRequester = focus.subscribe,
-                    downRequester = focus.support,
-                    onClick = { open(SETTINGS_ACCOUNT_URL) },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "الدعم الفني",
-                    value = "",
-                    expanded = expandedLayout,
-                    focusRequester = focus.support,
-                    upRequester = focus.customerAccount,
-                    downRequester = focus.apps,
-                    onClick = { open(SETTINGS_SUPPORT_URL) },
-                )
-                SettingsDivider()
-                SettingsMenuRow(
-                    label = "مركز التطبيقات",
-                    value = "",
-                    expanded = expandedLayout,
-                    focusRequester = focus.apps,
-                    upRequester = focus.support,
-                    downRequester = focus.logout,
-                    onClick = { open(SETTINGS_APPS_URL) },
-                )
+            if (renewalAvailable || supportAvailable) {
+                SettingsPanel(title = "خدمات HULK SA", expanded = expandedLayout) {
+                    if (renewalAvailable) {
+                        SettingsMenuRow(
+                            label = "الموقع الالكتروني",
+                            subtitle = "جدد اشتراكك من موقع HULK SA",
+                            value = "",
+                            accentValue = true,
+                            expanded = expandedLayout,
+                            leadingIcon = Icons.Rounded.Language,
+                            focusRequester = focus.subscribe,
+                            upRequester = if (historyAvailable) focus.clearHistory else focus.refreshLibrary,
+                            downRequester = if (supportAvailable) focus.support else focus.logout,
+                            onClick = { onGrowthAction(GrowthDestination.RENEWAL) },
+                        )
+                    }
+                    if (renewalAvailable && supportAvailable) SettingsDivider()
+                    if (supportAvailable) {
+                        SettingsMenuRow(
+                            label = "الدعم الفني",
+                            subtitle = "تواصل معنا عبر واتساب",
+                            value = "",
+                            expanded = expandedLayout,
+                            leadingIcon = Icons.Rounded.SupportAgent,
+                            focusRequester = focus.support,
+                            upRequester = if (renewalAvailable) {
+                                focus.subscribe
+                            } else if (historyAvailable) {
+                                focus.clearHistory
+                            } else {
+                                focus.refreshLibrary
+                            },
+                            downRequester = focus.logout,
+                            onClick = { onGrowthAction(GrowthDestination.SUPPORT) },
+                        )
+                    }
+                }
             }
 
             SettingsPanel(title = "حول التطبيق", expanded = expandedLayout) {
@@ -527,7 +534,7 @@ internal fun SettingsProScreen(
                     value = "",
                     expanded = expandedLayout,
                     focusRequester = focus.logout,
-                    upRequester = focus.apps,
+                    upRequester = lastGrowthRequester,
                     downRequester = FocusRequester.Cancel,
                     onClick = { pendingConfirmation = SettingsConfirmation.LOGOUT },
                 )
@@ -944,6 +951,8 @@ private fun SettingsMetric(label: String, value: String, expanded: Boolean, modi
 private fun SettingsMenuRow(
     label: String,
     value: String,
+    subtitle: String? = null,
+    leadingIcon: ImageVector? = null,
     accentValue: Boolean = false,
     enabled: Boolean = true,
     expanded: Boolean,
@@ -990,15 +999,42 @@ private fun SettingsMenuRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (expanded) 16.dp else 12.dp),
     ) {
-        Text(
-            text = label,
-            color = colors.text,
-            fontSize = if (expanded) 16.sp else 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-            maxLines = if (expanded) 1 else 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        leadingIcon?.let { icon ->
+            Box(
+                modifier = Modifier
+                    .size(if (expanded) 39.dp else 35.dp)
+                    .clip(CircleShape)
+                    .background(colors.gold.copy(alpha = if (focused) .18f else .09f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = colors.goldBright,
+                    modifier = Modifier.size(if (expanded) 21.dp else 19.dp),
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                color = colors.text,
+                fontSize = if (expanded) 16.sp else 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = if (expanded) 1 else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            subtitle?.takeIf(String::isNotBlank)?.let { supportingText ->
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = supportingText,
+                    color = colors.textMuted,
+                    fontSize = if (expanded) 12.sp else 11.sp,
+                    maxLines = if (expanded) 1 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (value.isNotBlank()) {
             Text(
                 text = value,

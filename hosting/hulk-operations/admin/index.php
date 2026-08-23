@@ -16,7 +16,7 @@ try {
     exit('تعذر تشغيل لوحة الإدارة. تحقق من قاعدة البيانات وملف config.php.');
 }
 
-$allowedSections = ['dashboard', 'releases', 'announcements', 'service', 'features', 'audit'];
+$allowedSections = ['dashboard', 'releases', 'announcements', 'service', 'features', 'growth', 'audit'];
 $section = (string) ($_GET['section'] ?? 'dashboard');
 if (!in_array($section, $allowedSections, true)) {
     $section = 'dashboard';
@@ -41,7 +41,8 @@ if ($section === 'dashboard') {
         . 'SELECT MAX(updated_at) AS changed_at FROM app_releases '
         . 'UNION ALL SELECT MAX(updated_at) FROM app_announcements '
         . 'UNION ALL SELECT MAX(updated_at) FROM app_feature_flags '
-        . 'UNION ALL SELECT MAX(updated_at) FROM app_service_status'
+        . 'UNION ALL SELECT MAX(updated_at) FROM app_service_status '
+        . 'UNION ALL SELECT MAX(updated_at) FROM app_settings'
         . ') AS operations_changes'
     )->fetchColumn();
 } elseif ($section === 'releases') {
@@ -63,6 +64,8 @@ if ($section === 'dashboard') {
 } elseif ($section === 'features') {
     $featureRows = $db->query('SELECT * FROM app_feature_flags ORDER BY flag_key')->fetchAll();
     $features = ops_normalize_feature_flags($featureRows);
+} elseif ($section === 'growth') {
+    $growth = ops_growth_snapshot($db);
 } else {
     $auditRows = $db->query(
         'SELECT a.*, u.username FROM app_admin_audit a '
@@ -77,6 +80,7 @@ $titles = [
     'announcements' => 'الرسائل العامة',
     'service' => 'حالة الخدمة',
     'features' => 'المميزات التشغيلية',
+    'growth' => 'HULK TV Growth',
     'audit' => 'سجل العمليات',
 ];
 
@@ -276,6 +280,86 @@ ops_admin_flash($flash);
             </article>
         <?php endforeach; ?>
     </section>
+
+<?php elseif ($section === 'growth'): ?>
+    <?php
+    $growthRenewal = $growth['renewal'];
+    $growthSupport = $growth['support'];
+    $growthBanner = $growth['renewalBanner'];
+    ?>
+    <header class="page-head">
+        <div><h1>HULK TV Growth</h1><p>روابط التجديد والدعم وQR وبانر قرب انتهاء الاشتراك بدون تحديث APK.</p></div>
+        <span class="status <?= (bool) $growth['enabled'] ? 'ok' : 'bad' ?>"><?= (bool) $growth['enabled'] ? 'الميزة مفعلة' : 'الميزة معطلة' ?></span>
+    </header>
+    <form method="post" enctype="multipart/form-data" class="growth-form">
+        <input type="hidden" name="csrf_token" value="<?= ops_e($csrf) ?>">
+        <input type="hidden" name="action" value="save_growth">
+
+        <section class="card growth-master">
+            <label class="check switch-line"><input type="checkbox" name="growth_enabled" value="1" <?= (bool) $growth['enabled'] ? 'checked' : '' ?>> تفعيل HULK TV Growth</label>
+            <p class="muted">عند التعطيل يتجاهل التطبيق روابط Growth والبانر بالكامل، ولا تتأثر أي ميزة تشغيل أخرى.</p>
+        </section>
+
+        <section class="grid two growth-grid">
+            <article class="card growth-card">
+                <div class="growth-card-head">
+                    <div><h2>التجديد والموقع</h2><p class="muted">QR للتلفزيون وفتح مباشر على الجوال والتابلت.</p></div>
+                    <label class="check"><input type="checkbox" name="growth_renewal_enabled" value="1" <?= (bool) $growthRenewal['enabled'] ? 'checked' : '' ?>> تفعيل</label>
+                </div>
+                <div class="form-grid">
+                    <div class="field"><label>العنوان</label><input name="growth_renewal_title" maxlength="80" value="<?= ops_e((string) $growthRenewal['title']) ?>" required></div>
+                    <div class="field"><label>النص الظاهر</label><input name="growth_renewal_display_text" maxlength="80" dir="ltr" value="<?= ops_e((string) $growthRenewal['displayText']) ?>" required></div>
+                    <div class="field full"><label>الرابط — HTTPS داخل hulksa.com فقط</label><input name="growth_renewal_url" type="url" maxlength="2048" dir="ltr" value="<?= ops_e((string) $growthRenewal['url']) ?>" required></div>
+                    <fieldset class="field full qr-mode"><legend>طريقة QR</legend>
+                        <label class="check"><input type="radio" name="growth_renewal_qr_mode" value="AUTO" <?= $growthRenewal['qrMode'] === 'AUTO' ? 'checked' : '' ?>> تلقائي من الرابط</label>
+                        <label class="check"><input type="radio" name="growth_renewal_qr_mode" value="CUSTOM" <?= $growthRenewal['qrMode'] === 'CUSTOM' ? 'checked' : '' ?>> QR مخصص</label>
+                    </fieldset>
+                    <div class="field full"><label>رفع أو تغيير QR مخصص — PNG أو WebP مربع، بحد أقصى 2MB</label><input name="growth_renewal_custom_qr" type="file" accept="image/png,image/webp,.png,.webp"></div>
+                </div>
+                <div class="qr-preview-wrap">
+                    <?php if ($growthRenewal['customQrUrl']): ?>
+                        <img class="qr-preview" src="<?= ops_e((string) $growthRenewal['customQrUrl']) ?>" alt="معاينة QR التجديد" loading="lazy">
+                        <button class="button danger" type="submit" name="growth_command" value="delete_renewal_qr" formnovalidate>حذف QR المخصص</button>
+                    <?php else: ?>
+                        <div class="qr-auto-preview"><strong>AUTO</strong><span>يولّد التطبيق QR عالي التباين من الرابط الحالي.</span></div>
+                    <?php endif; ?>
+                </div>
+            </article>
+
+            <article class="card growth-card">
+                <div class="growth-card-head">
+                    <div><h2>الدعم الفني</h2><p class="muted">رابط WhatsApp رسمي فقط، بدون أي بيانات حساب.</p></div>
+                    <label class="check"><input type="checkbox" name="growth_support_enabled" value="1" <?= (bool) $growthSupport['enabled'] ? 'checked' : '' ?>> تفعيل</label>
+                </div>
+                <div class="form-grid">
+                    <div class="field"><label>العنوان</label><input name="growth_support_title" maxlength="80" value="<?= ops_e((string) $growthSupport['title']) ?>" required></div>
+                    <div class="field"><label>الرقم الظاهر</label><input name="growth_support_display_text" maxlength="80" dir="ltr" value="<?= ops_e((string) $growthSupport['displayText']) ?>" required></div>
+                    <div class="field full"><label>رابط WhatsApp — wa.me أو whatsapp.com</label><input name="growth_support_url" type="url" maxlength="2048" dir="ltr" value="<?= ops_e((string) $growthSupport['url']) ?>" required></div>
+                    <fieldset class="field full qr-mode"><legend>طريقة QR</legend>
+                        <label class="check"><input type="radio" name="growth_support_qr_mode" value="AUTO" <?= $growthSupport['qrMode'] === 'AUTO' ? 'checked' : '' ?>> تلقائي من الرابط</label>
+                        <label class="check"><input type="radio" name="growth_support_qr_mode" value="CUSTOM" <?= $growthSupport['qrMode'] === 'CUSTOM' ? 'checked' : '' ?>> QR مخصص</label>
+                    </fieldset>
+                    <div class="field full"><label>رفع أو تغيير QR مخصص — PNG أو WebP مربع، بحد أقصى 2MB</label><input name="growth_support_custom_qr" type="file" accept="image/png,image/webp,.png,.webp"></div>
+                </div>
+                <div class="qr-preview-wrap">
+                    <?php if ($growthSupport['customQrUrl']): ?>
+                        <img class="qr-preview" src="<?= ops_e((string) $growthSupport['customQrUrl']) ?>" alt="معاينة QR الدعم" loading="lazy">
+                        <button class="button danger" type="submit" name="growth_command" value="delete_support_qr" formnovalidate>حذف QR المخصص</button>
+                    <?php else: ?>
+                        <div class="qr-auto-preview"><strong>AUTO</strong><span>يولّد التطبيق QR عالي التباين من رابط WhatsApp.</span></div>
+                    <?php endif; ?>
+                </div>
+            </article>
+        </section>
+
+        <section class="card growth-banner-card">
+            <div><h2>بانر التجديد</h2><p class="muted">يظهر بعد Hero وقبل أول قسم محتوى عند اقتراب انتهاء الاشتراك.</p></div>
+            <label class="check"><input type="checkbox" name="growth_renewal_banner_enabled" value="1" <?= (bool) $growthBanner['enabled'] ? 'checked' : '' ?>> تفعيل البانر</label>
+            <div class="field days-field"><label>يظهر قبل انتهاء الاشتراك بـ</label><div class="input-suffix"><input name="growth_renewal_banner_days" type="number" min="1" max="30" value="<?= (int) $growthBanner['daysBeforeExpiry'] ?>" required><span>يومًا</span></div></div>
+        </section>
+
+        <div class="actions growth-publish"><button class="button" type="submit" name="growth_command" value="save">حفظ ونشر</button></div>
+    </form>
 
 <?php else: ?>
     <header class="page-head"><div><h1>سجل العمليات</h1><p>يسجل التغييرات الإدارية المهمة فقط، بدون كلمات مرور أو أسرار.</p></div></header>

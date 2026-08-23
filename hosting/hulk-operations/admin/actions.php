@@ -114,6 +114,252 @@ function ops_uploaded_apk_metadata(array $file): array
     ];
 }
 
+function ops_growth_post_text(string $key, int $maximum = 80): string
+{
+    $value = trim((string) ($_POST[$key] ?? ''));
+    if ($value === '' || ops_text_length($value) > $maximum) {
+        throw new InvalidArgumentException('أحد نصوص HULK TV Growth غير صالح.');
+    }
+    return $value;
+}
+
+function ops_uploaded_growth_qr_metadata(array $file, string $slot): ?array
+{
+    $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($error === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    if ($error !== UPLOAD_ERR_OK) {
+        throw new InvalidArgumentException('لم يكتمل رفع صورة QR.');
+    }
+    $temporaryPath = (string) ($file['tmp_name'] ?? '');
+    if ($temporaryPath === '' || !is_uploaded_file($temporaryPath)) {
+        throw new InvalidArgumentException('صورة QR المرفوعة غير موثوقة.');
+    }
+
+    $sizeBytes = (int) ($file['size'] ?? 0);
+    $maximumBytes = min(
+        5242880,
+        max(1, (int) (ops_load_config()['app']['max_growth_qr_bytes'] ?? 2097152))
+    );
+    $mime = '';
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        if ($finfo !== false) {
+            $detected = finfo_file($finfo, $temporaryPath);
+            $mime = is_string($detected) ? $detected : '';
+            finfo_close($finfo);
+        }
+    }
+    $header = (string) file_get_contents($temporaryPath, false, null, 0, 12);
+    $imageInfo = @getimagesize($temporaryPath);
+    $width = is_array($imageInfo) ? (int) ($imageInfo[0] ?? 0) : 0;
+    $height = is_array($imageInfo) ? (int) ($imageInfo[1] ?? 0) : 0;
+    $errors = ops_growth_qr_descriptor_errors(
+        (string) ($file['name'] ?? ''),
+        $mime,
+        $sizeBytes,
+        $maximumBytes,
+        $header,
+        $width,
+        $height
+    );
+    if ($errors !== []) {
+        throw new InvalidArgumentException(implode(' ', $errors));
+    }
+
+    $extension = strtolower((string) pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+    $fileName = ops_growth_qr_file_name($slot, $extension);
+    return [
+        'temporary_path' => $temporaryPath,
+        'relative_path' => 'growth-media/' . $fileName,
+        'destination' => dirname(__DIR__) . '/growth-media/' . $fileName,
+        'extension' => $extension,
+        'size_bytes' => $sizeBytes,
+    ];
+}
+
+function ops_move_growth_qr(array $metadata): void
+{
+    $directory = dirname((string) $metadata['destination']);
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+        throw new RuntimeException('تعذر إنشاء مجلد صور Growth.');
+    }
+    if (!move_uploaded_file((string) $metadata['temporary_path'], (string) $metadata['destination'])) {
+        throw new RuntimeException('تعذر حفظ صورة QR.');
+    }
+    chmod((string) $metadata['destination'], 0644);
+}
+
+function ops_growth_safe_unlink(string $relativePath, string $slot): void
+{
+    if (!ops_growth_custom_qr_path_is_safe($relativePath, $slot)) {
+        return;
+    }
+    $absolutePath = dirname(__DIR__) . '/' . $relativePath;
+    if (is_file($absolutePath)) {
+        @unlink($absolutePath);
+    }
+}
+
+function ops_delete_growth_qr(PDO $db, array $admin, string $slot): string
+{
+    if (!in_array($slot, ['renewal', 'support'], true)) {
+        throw new InvalidArgumentException('نوع QR غير صالح.');
+    }
+    $prefix = $slot === 'renewal' ? 'growth_renewal' : 'growth_support';
+    $pathKey = $prefix . '_custom_qr_path';
+    $modeKey = $prefix . '_qr_mode';
+    $oldPath = trim((string) ops_setting($db, $pathKey, ''));
+
+    $db->beginTransaction();
+    try {
+        ops_set_setting($db, $pathKey, '');
+        ops_set_setting($db, $modeKey, 'AUTO');
+        ops_audit($db, (int) $admin['id'], 'GROWTH_QR_DELETED', [
+            'slot' => $slot,
+            'qr_mode' => 'AUTO',
+        ]);
+        $db->commit();
+    } catch (Throwable $exception) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $exception;
+    }
+    ops_growth_safe_unlink($oldPath, $slot);
+    return 'تم حذف QR المخصص والعودة إلى الوضع التلقائي.';
+}
+
+function ops_save_growth(PDO $db, array $admin): string
+{
+    $command = trim((string) ($_POST['growth_command'] ?? 'save'));
+    if ($command === 'delete_renewal_qr') {
+        return ops_delete_growth_qr($db, $admin, 'renewal');
+    }
+    if ($command === 'delete_support_qr') {
+        return ops_delete_growth_qr($db, $admin, 'support');
+    }
+    if ($command !== 'save') {
+        throw new InvalidArgumentException('أمر Growth غير صالح.');
+    }
+
+    $renewalUrl = ops_growth_renewal_url((string) ($_POST['growth_renewal_url'] ?? ''));
+    if ($renewalUrl === null) {
+        throw new InvalidArgumentException('رابط التجديد يجب أن يكون HTTPS داخل hulksa.com.');
+    }
+    $supportUrl = ops_growth_support_url((string) ($_POST['growth_support_url'] ?? ''));
+    if ($supportUrl === null) {
+        throw new InvalidArgumentException('رابط الدعم يجب أن يكون رابط WhatsApp رسميًا وآمنًا.');
+    }
+    $renewalMode = ops_growth_qr_mode((string) ($_POST['growth_renewal_qr_mode'] ?? ''));
+    $supportMode = ops_growth_qr_mode((string) ($_POST['growth_support_qr_mode'] ?? ''));
+    if ($renewalMode === null || $supportMode === null) {
+        throw new InvalidArgumentException('طريقة QR غير صالحة.');
+    }
+    $days = ops_growth_days_before_expiry($_POST['growth_renewal_banner_days'] ?? null);
+    if ($days === null) {
+        throw new InvalidArgumentException('أيام بانر التجديد يجب أن تكون بين 1 و30.');
+    }
+
+    $values = [
+        'growth_enabled' => ops_post_bool('growth_enabled') ? '1' : '0',
+        'growth_renewal_enabled' => ops_post_bool('growth_renewal_enabled') ? '1' : '0',
+        'growth_renewal_title' => ops_growth_post_text('growth_renewal_title'),
+        'growth_renewal_url' => $renewalUrl,
+        'growth_renewal_display_text' => ops_growth_post_text('growth_renewal_display_text'),
+        'growth_renewal_qr_mode' => $renewalMode,
+        'growth_renewal_custom_qr_path' => trim((string) ops_setting($db, 'growth_renewal_custom_qr_path', '')),
+        'growth_support_enabled' => ops_post_bool('growth_support_enabled') ? '1' : '0',
+        'growth_support_title' => ops_growth_post_text('growth_support_title'),
+        'growth_support_url' => $supportUrl,
+        'growth_support_display_text' => ops_growth_post_text('growth_support_display_text'),
+        'growth_support_qr_mode' => $supportMode,
+        'growth_support_custom_qr_path' => trim((string) ops_setting($db, 'growth_support_custom_qr_path', '')),
+        'growth_renewal_banner_enabled' => ops_post_bool('growth_renewal_banner_enabled') ? '1' : '0',
+        'growth_renewal_banner_days' => (string) $days,
+    ];
+    foreach (['renewal', 'support'] as $slot) {
+        $pathKey = 'growth_' . $slot . '_custom_qr_path';
+        if ($values[$pathKey] !== '' && !ops_growth_custom_qr_path_is_safe($values[$pathKey], $slot)) {
+            $values[$pathKey] = '';
+        }
+    }
+
+    $pendingUploads = [];
+    foreach (['renewal', 'support'] as $slot) {
+        $field = 'growth_' . $slot . '_custom_qr';
+        $metadata = ops_uploaded_growth_qr_metadata($_FILES[$field] ?? [], $slot);
+        if ($metadata !== null) {
+            $pendingUploads[$slot] = $metadata;
+        }
+    }
+    $uploads = [];
+    try {
+        foreach ($pendingUploads as $slot => $metadata) {
+            ops_move_growth_qr($metadata);
+            $uploads[$slot] = $metadata;
+            $values['growth_' . $slot . '_custom_qr_path'] = (string) $metadata['relative_path'];
+        }
+    } catch (Throwable $exception) {
+        foreach ($uploads as $metadata) {
+            @unlink((string) $metadata['destination']);
+        }
+        throw $exception;
+    }
+
+    $oldValues = [];
+    foreach (array_keys($values) as $key) {
+        $oldValues[$key] = (string) ops_setting($db, $key, '');
+    }
+    $changedKeys = [];
+    foreach ($values as $key => $value) {
+        if ($oldValues[$key] !== $value) {
+            $changedKeys[] = $key;
+        }
+    }
+
+    try {
+        $db->beginTransaction();
+        foreach ($values as $key => $value) {
+            ops_set_setting($db, $key, $value);
+        }
+        ops_audit($db, (int) $admin['id'], 'GROWTH_CONFIG_PUBLISHED', [
+            'changed_fields' => implode(',', $changedKeys),
+            'enabled' => $values['growth_enabled'] === '1',
+            'renewal_enabled' => $values['growth_renewal_enabled'] === '1',
+            'support_enabled' => $values['growth_support_enabled'] === '1',
+            'renewal_qr_mode' => $renewalMode,
+            'support_qr_mode' => $supportMode,
+            'days_before_expiry' => $days,
+        ]);
+        foreach ($uploads as $slot => $metadata) {
+            ops_audit($db, (int) $admin['id'], 'GROWTH_QR_REPLACED', [
+                'slot' => $slot,
+                'extension' => $metadata['extension'],
+                'size_bytes' => $metadata['size_bytes'],
+            ]);
+        }
+        $db->commit();
+    } catch (Throwable $exception) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        foreach ($uploads as $metadata) {
+            @unlink((string) $metadata['destination']);
+        }
+        throw $exception;
+    }
+
+    foreach ($uploads as $slot => $metadata) {
+        $oldPath = $oldValues['growth_' . $slot . '_custom_qr_path'];
+        if ($oldPath !== (string) $metadata['relative_path']) {
+            ops_growth_safe_unlink($oldPath, $slot);
+        }
+    }
+    return 'تم حفظ ونشر إعدادات HULK TV Growth.';
+}
+
 function ops_upload_release(PDO $db, array $admin): void
 {
     $versionName = trim((string) ($_POST['version_name'] ?? ''));
@@ -500,6 +746,10 @@ function ops_admin_handle_post(PDO $db, array $admin, string $section): never
                 ops_toggle_feature_flag($db, $admin);
                 $section = 'features';
                 $message = 'تم تحديث الميزة.';
+                break;
+            case 'save_growth':
+                $message = ops_save_growth($db, $admin);
+                $section = 'growth';
                 break;
             default:
                 throw new InvalidArgumentException('الإجراء غير معروف.');

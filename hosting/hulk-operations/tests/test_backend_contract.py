@@ -132,6 +132,107 @@ class OperationsBackendContractTest(unittest.TestCase):
         bootstrap = self.read("bootstrap.php")
         self.assertIn("password|secret|token|credential", bootstrap)
 
+    def test_growth_uses_existing_settings_and_safe_migration(self) -> None:
+        schema = self.read("schema.sql")
+        migration = self.read("migrations/2026-08-23-v240-growth-lite.sql")
+        migration_rules = self.read("migrations/.htaccess")
+        self.assertNotIn("CREATE TABLE", migration)
+        self.assertIn("INSERT IGNORE INTO app_settings", migration)
+        self.assertIn("Options -Indexes", migration_rules)
+        self.assertIn("Require all denied", migration_rules)
+        for key in (
+            "growth_enabled",
+            "growth_renewal_url",
+            "growth_support_url",
+            "growth_renewal_qr_mode",
+            "growth_support_qr_mode",
+            "growth_renewal_banner_days",
+        ):
+            self.assertIn(key, schema)
+            self.assertIn(key, migration)
+
+    def test_growth_admin_is_integrated_and_csrf_protected(self) -> None:
+        dashboard = self.read("admin/index.php")
+        layout = self.read("admin/_layout.php")
+        actions = self.read("admin/actions.php")
+        self.assertIn("'growth' => 'TV Growth'", layout)
+        self.assertIn("HULK TV Growth", dashboard)
+        self.assertIn('name="action" value="save_growth"', dashboard)
+        self.assertIn('name="csrf_token"', dashboard)
+        self.assertIn("case 'save_growth':", actions)
+        self.assertIn("ops_require_csrf", actions)
+
+    def test_growth_url_and_day_validation_are_closed(self) -> None:
+        policies = self.read("lib/policies.php")
+        actions = self.read("admin/actions.php")
+        self.assertIn("ops_growth_renewal_url", policies)
+        self.assertIn("ops_growth_support_url", policies)
+        self.assertIn("['AUTO', 'CUSTOM']", policies)
+        self.assertIn("$days >= 1 && $days <= 30", policies)
+        self.assertIn("رابط التجديد يجب أن يكون HTTPS داخل hulksa.com", actions)
+        self.assertIn("رابط WhatsApp رسميًا وآمنًا", actions)
+
+    def test_growth_qr_upload_is_restricted_and_non_executable(self) -> None:
+        actions = self.read("admin/actions.php")
+        policies = self.read("lib/policies.php")
+        media_rules = self.read("growth-media/.htaccess")
+        for marker in (
+            "is_uploaded_file",
+            "finfo_file",
+            "getimagesize",
+            "ops_growth_qr_file_name",
+            "move_uploaded_file",
+            "max_growth_qr_bytes",
+        ):
+            self.assertIn(marker, actions)
+        self.assertIn("PNG أو WebP", policies)
+        self.assertRegex(media_rules, re.compile(r"php|phtml|phar", re.IGNORECASE))
+        self.assertIn("Require all denied", media_rules)
+        self.assertIn("Options -Indexes -ExecCGI", media_rules)
+
+    def test_growth_custom_qr_replacement_and_deletion_are_audited(self) -> None:
+        actions = self.read("admin/actions.php")
+        self.assertIn("GROWTH_CONFIG_PUBLISHED", actions)
+        self.assertIn("GROWTH_QR_REPLACED", actions)
+        self.assertIn("GROWTH_QR_DELETED", actions)
+        self.assertIn("ops_growth_safe_unlink", actions)
+        self.assertIn("delete_renewal_qr", actions)
+        self.assertIn("delete_support_qr", actions)
+        self.assertIn("$db->beginTransaction()", actions)
+
+    def test_public_api_emits_optional_growth_without_schema_bump(self) -> None:
+        operations = self.read("lib/operations.php")
+        self.assertIn("'schemaVersion' => 1", operations)
+        self.assertIn("'growth' => ops_growth_snapshot($db)", operations)
+        self.assertIn("'customQrUrl'", operations)
+        self.assertIn("'daysBeforeExpiry'", operations)
+        self.assertIn("ops_growth_custom_qr_path_is_safe", operations)
+        self.assertIn("is_file($absolutePath)", operations)
+
+    def test_growth_admin_layout_remains_mobile_adaptive(self) -> None:
+        dashboard = self.read("admin/index.php")
+        styles = self.read("assets/app.css")
+        self.assertIn("growth-form", dashboard)
+        self.assertIn("growth-grid", dashboard)
+        self.assertIn("growth-banner-card", dashboard)
+        self.assertIn("@media (max-width: 650px)", styles)
+        self.assertIn(".growth-card-head", styles)
+        self.assertIn(".growth-publish .button { width: 100%; }", styles)
+
+    def test_growth_has_no_reseller_or_tracking_integration(self) -> None:
+        growth_sources = "\n".join(
+            self.read(path)
+            for path in (
+                "lib/operations.php",
+                "lib/policies.php",
+                "admin/actions.php",
+                "admin/index.php",
+            )
+        ).lower()
+        self.assertNotIn("reseller", growth_sources)
+        self.assertNotIn("firebase", growth_sources)
+        self.assertNotIn("analytics", growth_sources)
+
 
 if __name__ == "__main__":
     unittest.main()
