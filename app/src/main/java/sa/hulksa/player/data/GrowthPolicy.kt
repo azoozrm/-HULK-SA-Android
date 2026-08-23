@@ -183,7 +183,7 @@ fun evaluateRenewalBanner(
     val title = when (safeRemainingDays) {
         in 3..Int.MAX_VALUE -> "اشتراكك ينتهي خلال $safeRemainingDays أيام"
         2 -> "اشتراكك ينتهي خلال يومين"
-        1 -> "اشتراكك ينتهي غدًا"
+        1 -> "اشتراكك ينتهي غدا"
         0 -> "اشتراكك ينتهي اليوم"
         else -> "انتهى اشتراكك"
     }
