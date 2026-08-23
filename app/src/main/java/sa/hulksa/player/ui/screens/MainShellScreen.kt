@@ -1229,7 +1229,7 @@ private fun CinemaHero(
     val configuration = LocalConfiguration.current
     val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
     val heroHeight = when {
-        isTv -> 374.dp
+        isTv -> 410.dp
         isPortraitPhone -> (configuration.screenHeightDp * .58f).coerceIn(420f, 520f).dp
         else -> 288.dp
     }
@@ -1296,11 +1296,11 @@ private fun CinemaHero(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) .58f else 1f)
+                .fillMaxWidth(if (isTv) .64f else 1f)
                 .padding(
                     start = if (isTv) 27.dp else 18.dp,
                     end = if (isTv) 27.dp else 18.dp,
-                    bottom = if (isTv) 38.dp else 24.dp,
+                    bottom = if (isTv) 28.dp else 24.dp,
                 ),
         ) {
             Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -1308,13 +1308,13 @@ private fun CinemaHero(
             Text(
                 item.name,
                 color = Color.White,
-                fontSize = if (isTv) 39.sp else 28.sp,
-                lineHeight = if (isTv) 47.sp else 34.sp,
+                fontSize = if (isTv) 36.sp else 28.sp,
+                lineHeight = if (isTv) 42.sp else 34.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(if (isTv) 8.dp else 9.dp))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -1326,10 +1326,10 @@ private fun CinemaHero(
                 HomeHeroTechnicalPills(item, isTv = true)
             }
             item.plot?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.height(10.dp))
-                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(if (isTv) 8.dp else 10.dp))
+                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = if (isTv) 17.sp else 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.height(15.dp))
+            Spacer(Modifier.height(if (isTv) 12.dp else 15.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 FocusButton(
                     if (item.type == ContentType.SERIES) "عرض الحلقات" else "شاهد الان",
