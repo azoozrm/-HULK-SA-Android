@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -108,25 +107,17 @@ internal fun GrowthQrDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(11.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .clip(RoundedCornerShape(99.dp))
-                            .background(colors.goldBright),
-                    )
-                    Text(
-                        text = "HULK SA",
-                        color = colors.goldBright,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                }
                 Text(
-                    text = link.title,
+                    text = "HULK SA",
+                    color = colors.goldBright,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    text = when (destination) {
+                        GrowthDestination.RENEWAL -> "الموقع الالكتروني"
+                        GrowthDestination.SUPPORT -> "الدعم الفني"
+                    },
                     color = colors.text,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Black,
@@ -135,8 +126,8 @@ internal fun GrowthQrDialog(
                 )
                 Text(
                     text = when (destination) {
-                        GrowthDestination.RENEWAL -> "امسح الرمز بكاميرا جوالك"
-                        GrowthDestination.SUPPORT -> "امسح الرمز للتواصل عبر واتساب"
+                        GrowthDestination.RENEWAL -> "جدد اشتراكك من موقع HULK SA"
+                        GrowthDestination.SUPPORT -> "تواصل معنا عبر واتساب"
                     },
                     color = colors.textMuted,
                     fontSize = 15.sp,
