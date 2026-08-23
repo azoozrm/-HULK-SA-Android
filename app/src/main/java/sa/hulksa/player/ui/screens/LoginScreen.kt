@@ -64,10 +64,8 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -265,7 +263,7 @@ private fun resolveLoginLayoutPolicy(
         buttonTextSizeSp = if (isTv && !compactHeight) 17 else 15,
         panelScrollable =
             composition == LoginComposition.PREMIUM_SPLIT &&
-                (compactHeight || fontScale >= 1.3f || imeVisible),
+                (compactHeight || fontScale >= 1.3f || (!isTv && imeVisible)),
         compact = compactHeight,
     )
 }
@@ -339,125 +337,125 @@ fun LoginScreen(
                     detectTapGestures(onTap = { dismissKeyboard() })
                 },
         ) {
-        val imeVisible = WindowInsets.ime.getBottom(density) > 0
-        val policy = resolveLoginLayoutPolicy(
-            isTv = isTv,
-            width = maxWidth,
-            height = maxHeight,
-            fontScale = density.fontScale,
-            imeVisible = imeVisible,
-        )
-
-        PremiumCinematicBackground(Modifier.fillMaxSize())
-
-        if (isStarting) {
-            LoadingRing(
-                label = "جاري التجهيز...",
-                modifier = Modifier.align(Alignment.Center),
-            )
-            return@BoxWithConstraints
-        }
-
-        val panel: @Composable (Modifier) -> Unit = { modifier ->
-            LoginPanel(
-                accessCode = accessCode,
-                onAccessCodeChange = { accessCode = it },
-                username = username,
-                onUsernameChange = { username = it },
-                password = password,
-                onPasswordChange = { password = it },
-                showPassword = showPassword,
-                onShowPasswordChange = { showPassword = !showPassword },
-                rememberAccount = rememberAccount,
-                onRememberChange = { rememberAccount = !rememberAccount },
-                isLoading = isLoading,
+            val imeVisible = WindowInsets.ime.getBottom(density) > 0
+            val policy = resolveLoginLayoutPolicy(
                 isTv = isTv,
-                errorMessage = errorMessage,
-                onSubmit = submit,
-                onOpenWebsite = openWebsite,
-                onNonTextFocus = hideKeyboard,
-                initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
-                policy = policy,
-                modifier = modifier,
+                width = maxWidth,
+                height = maxHeight,
+                fontScale = density.fontScale,
+                imeVisible = imeVisible,
             )
-        }
+
+            PremiumCinematicBackground(Modifier.fillMaxSize())
+
+            if (isStarting) {
+                LoadingRing(
+                    label = "جاري التجهيز...",
+                    modifier = Modifier.align(Alignment.Center),
+                )
+                return@BoxWithConstraints
+            }
+
+            val panel: @Composable (Modifier) -> Unit = { modifier ->
+                LoginPanel(
+                    accessCode = accessCode,
+                    onAccessCodeChange = { accessCode = it },
+                    username = username,
+                    onUsernameChange = { username = it },
+                    password = password,
+                    onPasswordChange = { password = it },
+                    showPassword = showPassword,
+                    onShowPasswordChange = { showPassword = !showPassword },
+                    rememberAccount = rememberAccount,
+                    onRememberChange = { rememberAccount = !rememberAccount },
+                    isLoading = isLoading,
+                    isTv = isTv,
+                    errorMessage = errorMessage,
+                    onSubmit = submit,
+                    onOpenWebsite = openWebsite,
+                    onNonTextFocus = hideKeyboard,
+                    initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
+                    policy = policy,
+                    modifier = modifier,
+                )
+            }
 
             when (policy.composition) {
-            LoginComposition.PREMIUM_SPLIT -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(
-                            if (isTv) {
-                                Modifier.padding(
-                                    horizontal = policy.horizontalSafeInset,
-                                    vertical = policy.verticalSafeInset,
-                                )
-                            } else {
-                                Modifier
-                                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                                    .padding(
-                                        horizontal = policy.pageHorizontalPadding,
-                                        vertical = if (policy.compact) 8.dp else 12.dp,
-                                    )
-                            },
-                        )
-                        .imePadding(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
+                LoginComposition.PREMIUM_SPLIT -> {
+                    Row(
                         modifier = Modifier
-                            .weight(1.08f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center,
+                            .fillMaxSize()
+                            .then(
+                                if (isTv) {
+                                    Modifier.padding(
+                                        horizontal = policy.horizontalSafeInset,
+                                        vertical = policy.verticalSafeInset,
+                                    )
+                                } else {
+                                    Modifier
+                                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                                        .padding(
+                                            horizontal = policy.pageHorizontalPadding,
+                                            vertical = if (policy.compact) 8.dp else 12.dp,
+                                        )
+                                },
+                            )
+                            .then(if (isTv) Modifier else Modifier.imePadding()),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1.08f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            panel(
+                                Modifier
+                                    .widthIn(max = policy.cardMaxWidth)
+                                    .fillMaxWidth(),
+                            )
+                        }
+
+                        Spacer(Modifier.width(policy.splitGap))
+
+                        LoginBrandRegion(
+                            logoSize = policy.logoSize,
+                            modifier = Modifier
+                                .weight(.92f)
+                                .fillMaxHeight(),
+                        )
+                    }
+                }
+
+                LoginComposition.CENTERED -> {
+                    val pageScrollState = rememberScrollState()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .imePadding()
+                            .verticalScroll(pageScrollState)
+                            .padding(
+                                horizontal = policy.pageHorizontalPadding,
+                                vertical = if (policy.compact) 8.dp else 12.dp,
+                            ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        LoginBrandRegion(
+                            logoSize = policy.logoSize,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(policy.brandRegionHeight),
+                        )
+                        Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
                         panel(
                             Modifier
                                 .widthIn(max = policy.cardMaxWidth)
                                 .fillMaxWidth(),
                         )
+                        Spacer(Modifier.height(16.dp))
                     }
-
-                    Spacer(Modifier.width(policy.splitGap))
-
-                    LoginBrandRegion(
-                        logoSize = policy.logoSize,
-                        modifier = Modifier
-                            .weight(.92f)
-                            .fillMaxHeight(),
-                    )
                 }
-            }
-
-            LoginComposition.CENTERED -> {
-                val pageScrollState = rememberScrollState()
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                        .imePadding()
-                        .verticalScroll(pageScrollState)
-                        .padding(
-                            horizontal = policy.pageHorizontalPadding,
-                            vertical = if (policy.compact) 8.dp else 12.dp,
-                        ),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    LoginBrandRegion(
-                        logoSize = policy.logoSize,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(policy.brandRegionHeight),
-                    )
-                    Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
-                    panel(
-                        Modifier
-                            .widthIn(max = policy.cardMaxWidth)
-                            .fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
             }
         }
     }
@@ -469,28 +467,29 @@ private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
 
     Canvas(modifier = modifier.background(colors.background)) {
         val wideScene = size.width >= size.height * 1.18f
-        val architecturalStroke = 1.dp.toPx()
-        val structuralLine = Color.White.copy(alpha = .055f)
-        val structuralHighlight = Color.White.copy(alpha = .085f)
-        val brassLine = colors.goldDeep.copy(alpha = .12f)
+        val brandCenter = Offset(
+            size.width * if (wideScene) .28f else .50f,
+            size.height * if (wideScene) .49f else .18f,
+        )
 
         drawRect(
             brush =
                 if (wideScene) {
                     Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0f to Color(0xFF191910),
-                            .34f to Color(0xFF10110C),
-                            .62f to Color(0xFF080906),
+                            0f to Color(0xFF12120D),
+                            .28f to Color(0xFF0D0E0A),
+                            .55f to Color(0xFF080906),
+                            .76f to Color(0xFF050604),
                             1f to Color(0xFF020302),
                         ),
                     )
                 } else {
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0f to Color(0xFF191910),
-                            .28f to Color(0xFF10110C),
-                            .58f to Color(0xFF080906),
+                            0f to Color(0xFF12120D),
+                            .24f to Color(0xFF0B0C08),
+                            .50f to Color(0xFF070805),
                             1f to Color(0xFF020302),
                         ),
                     )
@@ -498,177 +497,49 @@ private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
         )
 
         drawRect(
-            brush = Brush.verticalGradient(
+            brush = Brush.radialGradient(
                 colorStops = arrayOf(
-                    0f to Color(0xFF020302).copy(alpha = .58f),
-                    .22f to Color.Transparent,
-                    .68f to Color.Transparent,
-                    1f to Color(0xFF010201).copy(alpha = .74f),
+                    0f to colors.goldDeep.copy(alpha = if (wideScene) .20f else .14f),
+                    .22f to colors.goldDeep.copy(alpha = .08f),
+                    .52f to Color(0xFF18150C).copy(alpha = .035f),
+                    1f to Color.Transparent,
                 ),
+                center = brandCenter,
+                radius = maxOf(size.width, size.height) * if (wideScene) .43f else .34f,
             ),
         )
 
-        if (wideScene) {
-            val vanishingPoint = Offset(size.width * .39f, size.height * .46f)
-            val sceneEdge = size.width * .64f
-
-            val ceilingPlane = Path().apply {
-                moveTo(0f, 0f)
-                lineTo(sceneEdge, 0f)
-                lineTo(vanishingPoint.x, vanishingPoint.y)
-                lineTo(0f, size.height * .27f)
-                close()
-            }
-            drawPath(
-                path = ceilingPlane,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF242317).copy(alpha = .46f),
-                        Color(0xFF10110C).copy(alpha = .18f),
-                        Color.Transparent,
-                    ),
-                    start = Offset(0f, 0f),
-                    end = vanishingPoint,
+        drawRect(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0f to Color.White.copy(alpha = .055f),
+                    .20f to colors.goldBright.copy(alpha = .028f),
+                    .58f to Color.Transparent,
+                    1f to Color.Transparent,
                 ),
-            )
-
-            val floorPlane = Path().apply {
-                moveTo(0f, size.height * .76f)
-                lineTo(vanishingPoint.x, vanishingPoint.y)
-                lineTo(sceneEdge, size.height)
-                lineTo(0f, size.height)
-                close()
-            }
-            drawPath(
-                path = floorPlane,
-                brush = Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0f to Color.Transparent,
-                        .62f to Color(0xFF17170F).copy(alpha = .34f),
-                        1f to Color(0xFF050604).copy(alpha = .82f),
-                    ),
+                center = Offset(
+                    size.width * if (wideScene) .18f else .50f,
+                    size.height * if (wideScene) .08f else 0f,
                 ),
-            )
+                radius = maxOf(size.width, size.height) * .48f,
+            ),
+        )
 
-            val wallRibs = listOf(.035f, .15f, .27f, .38f, .48f, .57f)
-            wallRibs.forEachIndexed { index, fraction ->
-                val x = size.width * fraction
-                val progress = (x / sceneEdge).coerceIn(0f, 1f)
-                val top = size.height * .10f + (vanishingPoint.y - size.height * .10f) * progress
-                val bottom = size.height * .90f + (vanishingPoint.y - size.height * .90f) * progress
-
-                drawLine(
-                    color = if (index == 2 || index == 4) brassLine else structuralLine,
-                    start = Offset(x, top),
-                    end = Offset(x, bottom),
-                    strokeWidth = if (index == 2) architecturalStroke * 1.35f else architecturalStroke,
-                )
-
-                if (index < wallRibs.lastIndex) {
-                    val nextX = size.width * wallRibs[index + 1]
-                    val nextProgress = (nextX / sceneEdge).coerceIn(0f, 1f)
-                    val nextTop =
-                        size.height * .10f +
-                            (vanishingPoint.y - size.height * .10f) * nextProgress
-                    val nextBottom =
-                        size.height * .90f +
-                            (vanishingPoint.y - size.height * .90f) * nextProgress
-                    val wallPanel = Path().apply {
-                        moveTo(x, top)
-                        lineTo(nextX, nextTop)
-                        lineTo(nextX, nextBottom)
-                        lineTo(x, bottom)
-                        close()
-                    }
-                    drawPath(
-                        path = wallPanel,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = if (index % 2 == 0) .018f else .007f),
-                                colors.goldDeep.copy(alpha = if (index == 1) .032f else .010f),
-                                Color.Transparent,
-                            ),
-                            start = Offset(x, top),
-                            end = Offset(nextX, nextBottom),
-                        ),
-                    )
-                }
-            }
-
-            listOf(.08f, .24f, .43f).forEachIndexed { index, fraction ->
-                val lightStart = size.width * fraction
-                val lightEnd = lightStart + size.width * if (index == 1) .026f else .018f
-                val ceilingLight = Path().apply {
-                    moveTo(lightStart, 0f)
-                    lineTo(lightEnd, 0f)
-                    lineTo(vanishingPoint.x + size.width * .006f, vanishingPoint.y)
-                    lineTo(vanishingPoint.x - size.width * .006f, vanishingPoint.y)
-                    close()
-                }
-                drawPath(
-                    path = ceilingLight,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            colors.goldBright.copy(alpha = if (index == 1) .15f else .09f),
-                            colors.goldDeep.copy(alpha = .025f),
-                            Color.Transparent,
-                        ),
-                        start = Offset(lightStart, 0f),
-                        end = vanishingPoint,
-                    ),
-                )
-            }
-
-            listOf(.04f, .19f, .34f, .51f, .62f).forEachIndexed { index, fraction ->
-                drawLine(
-                    color = if (index == 2) brassLine else structuralLine,
-                    start = Offset(size.width * fraction, size.height),
-                    end = vanishingPoint,
-                    strokeWidth = architecturalStroke,
-                )
-            }
-
-            drawLine(
-                color = structuralHighlight,
-                start = Offset(0f, size.height * .76f),
-                end = vanishingPoint,
-                strokeWidth = architecturalStroke,
-            )
-            drawLine(
-                color = structuralHighlight,
-                start = Offset(0f, size.height * .27f),
-                end = vanishingPoint,
-                strokeWidth = architecturalStroke,
-            )
-        } else {
-            val vanishingPoint = Offset(size.width * .50f, size.height * .18f)
-
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0f to colors.goldDeep.copy(alpha = .11f),
-                        .30f to Color(0xFF11120C).copy(alpha = .22f),
-                        .48f to Color.Transparent,
-                        1f to Color.Transparent,
-                    ),
+        drawRect(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0f to colors.goldDeep.copy(alpha = .065f),
+                    .26f to colors.goldDeep.copy(alpha = .025f),
+                    .68f to Color.Transparent,
+                    1f to Color.Transparent,
                 ),
-            )
-
-            listOf(0f, .16f, .34f, .66f, .84f, 1f).forEachIndexed { index, fraction ->
-                drawLine(
-                    color = if (index == 2 || index == 3) brassLine else structuralLine,
-                    start = Offset(size.width * fraction, 0f),
-                    end = vanishingPoint,
-                    strokeWidth = architecturalStroke,
-                )
-            }
-            drawLine(
-                color = structuralHighlight,
-                start = Offset(0f, size.height * .34f),
-                end = Offset(size.width, size.height * .34f),
-                strokeWidth = architecturalStroke,
-            )
-        }
+                center = Offset(
+                    size.width * if (wideScene) .27f else .50f,
+                    size.height * if (wideScene) .93f else .36f,
+                ),
+                radius = maxOf(size.width, size.height) * .52f,
+            ),
+        )
 
         drawRect(
             brush =
@@ -676,8 +547,9 @@ private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
                     Brush.horizontalGradient(
                         colorStops = arrayOf(
                             0f to Color.Transparent,
-                            .38f to Color.Transparent,
-                            .62f to colors.background.copy(alpha = .58f),
+                            .32f to Color.Transparent,
+                            .56f to colors.background.copy(alpha = .34f),
+                            .72f to colors.background.copy(alpha = .70f),
                             1f to colors.background.copy(alpha = .94f),
                         ),
                     )
@@ -685,34 +557,34 @@ private fun PremiumCinematicBackground(modifier: Modifier = Modifier) {
                     Brush.verticalGradient(
                         colorStops = arrayOf(
                             0f to Color.Transparent,
-                            .30f to Color.Transparent,
-                            .58f to colors.background.copy(alpha = .24f),
-                            1f to colors.background.copy(alpha = .58f),
+                            .23f to Color.Transparent,
+                            .45f to colors.background.copy(alpha = .20f),
+                            .70f to colors.background.copy(alpha = .58f),
+                            1f to colors.background.copy(alpha = .82f),
                         ),
                     )
                 },
         )
+
         drawRect(
             brush = Brush.verticalGradient(
                 colorStops = arrayOf(
-                    0f to colors.background.copy(alpha = .42f),
-                    .18f to Color.Transparent,
-                    .70f to Color.Transparent,
-                    1f to colors.background.copy(alpha = .70f),
+                    0f to colors.background.copy(alpha = .46f),
+                    .17f to Color.Transparent,
+                    .67f to Color.Transparent,
+                    1f to colors.background.copy(alpha = .76f),
                 ),
             ),
         )
+
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
                     Color.Transparent,
-                    colors.background.copy(alpha = .58f),
+                    colors.background.copy(alpha = .62f),
                 ),
-                center = Offset(
-                    size.width * if (wideScene) .35f else .50f,
-                    size.height * if (wideScene) .48f else .28f,
-                ),
-                radius = maxOf(size.width, size.height) * .82f,
+                center = brandCenter,
+                radius = maxOf(size.width, size.height) * .90f,
             ),
         )
     }
@@ -724,62 +596,46 @@ private fun LoginBrandRegion(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
+    val frameShape = RoundedCornerShape(28.dp)
 
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .clearAndSetSemantics { },
-        ) {
-            val anchor = Offset(size.width * .50f, size.height * .60f)
-            val treatmentStroke = 1.dp.toPx()
-
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    colorStops = arrayOf(
-                        0f to Color.Transparent,
-                        .24f to Color.White.copy(alpha = .012f),
-                        .50f to colors.goldDeep.copy(alpha = .050f),
-                        .76f to Color.White.copy(alpha = .012f),
-                        1f to Color.Transparent,
-                    ),
-                ),
-                topLeft = Offset(0f, size.height * .16f),
-                size = Size(size.width, size.height * .64f),
-            )
-
-            listOf(.08f, .28f, .72f, .92f).forEachIndexed { index, fraction ->
-                drawLine(
-                    color =
-                        if (index == 1 || index == 2) {
-                            colors.goldDeep.copy(alpha = .075f)
-                        } else {
-                            Color.White.copy(alpha = .045f)
-                        },
-                    start = Offset(size.width * fraction, size.height),
-                    end = anchor,
-                    strokeWidth = treatmentStroke,
+                .size(logoSize + 44.dp)
+                .shadow(
+                    elevation = 10.dp,
+                    shape = frameShape,
+                    clip = false,
                 )
-            }
-
-            drawLine(
-                color = Color.White.copy(alpha = .040f),
-                start = Offset(size.width * .16f, size.height * .78f),
-                end = Offset(size.width * .84f, size.height * .78f),
-                strokeWidth = treatmentStroke,
+                .clip(frameShape)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xE612140F),
+                            Color(0xF0080A07),
+                        ),
+                    ),
+                )
+                .border(
+                    width = 1.5.dp,
+                    color = colors.gold.copy(alpha = .72f),
+                    shape = frameShape,
+                )
+                .padding(20.dp)
+                .clearAndSetSemantics { },
+            contentAlignment = Alignment.Center,
+        ) {
+            BrandLogo(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(.98f)
+                    .clearAndSetSemantics { },
+                contentScale = ContentScale.Fit,
             )
         }
-
-        BrandLogo(
-            modifier = Modifier
-                .size(logoSize)
-                .alpha(.94f)
-                .clearAndSetSemantics { },
-            contentScale = ContentScale.Fit,
-        )
     }
 }
 
@@ -865,7 +721,7 @@ private fun LoginPanel(
         )
         Spacer(Modifier.height(2.dp))
         Text(
-            text = "ادخل بيانات اشتراكك للمتابعه",
+            text = "ادخل بيانات اشتراكك للمتابعة",
             color = colors.textMuted,
             fontSize = policy.descriptionSizeSp.sp,
             lineHeight = (policy.descriptionSizeSp + if (policy.compact) 4 else 7).sp,
@@ -880,6 +736,7 @@ private fun LoginPanel(
             label = "كود الدخول",
             icon = Icons.Rounded.Key,
             textSizeSp = policy.fieldTextSizeSp,
+            bringIntoViewOnFocus = !isTv,
             modifier = Modifier
                 .focusRequester(accessRequester)
                 .focusProperties {
@@ -906,6 +763,7 @@ private fun LoginPanel(
             label = "اسم المستخدم",
             icon = Icons.Rounded.Person,
             textSizeSp = policy.fieldTextSizeSp,
+            bringIntoViewOnFocus = !isTv,
             modifier = Modifier
                 .focusRequester(usernameRequester)
                 .focusProperties {
@@ -932,6 +790,7 @@ private fun LoginPanel(
             label = "كلمة المرور",
             icon = Icons.Rounded.Lock,
             textSizeSp = policy.fieldTextSizeSp,
+            bringIntoViewOnFocus = !isTv,
             modifier = Modifier
                 .focusRequester(passwordRequester)
                 .focusProperties {
@@ -964,7 +823,6 @@ private fun LoginPanel(
             minHeight = policy.optionHeight,
             textSizeSp = policy.optionTextSizeSp,
             modifier = Modifier
-                // Screen-level RTL makes Start the physical right edge of the card.
                 .align(Alignment.Start)
                 .then(
                     if (isTv) {
@@ -989,7 +847,6 @@ private fun LoginPanel(
             minHeight = policy.optionHeight,
             textSizeSp = policy.optionTextSizeSp,
             modifier = Modifier
-                // Screen-level RTL makes Start the physical right edge of the card.
                 .align(Alignment.Start)
                 .then(
                     if (isTv) {
@@ -1077,6 +934,7 @@ private fun LoginTextField(
     label: String,
     icon: ImageVector,
     textSizeSp: Int,
+    bringIntoViewOnFocus: Boolean = true,
     modifier: Modifier = Modifier,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -1104,8 +962,8 @@ private fun LoginTextField(
         label = "loginFieldIcon",
     )
 
-    LaunchedEffect(focused) {
-        if (focused) bringIntoViewRequester.bringIntoView()
+    LaunchedEffect(focused, bringIntoViewOnFocus) {
+        if (focused && bringIntoViewOnFocus) bringIntoViewRequester.bringIntoView()
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -1113,7 +971,13 @@ private fun LoginTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = modifier
-                .bringIntoViewRequester(bringIntoViewRequester)
+                .then(
+                    if (bringIntoViewOnFocus) {
+                        Modifier.bringIntoViewRequester(bringIntoViewRequester)
+                    } else {
+                        Modifier
+                    },
+                )
                 .onFocusChanged { focused = it.isFocused }
                 .clip(shape)
                 .background(background)
