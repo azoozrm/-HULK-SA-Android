@@ -69,8 +69,12 @@ import kotlinx.coroutines.yield
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.data.GrowthDestination
-import sa.hulksa.player.data.isGrowthLinkUsable
+import sa.hulksa.player.data.OperationsApkInstaller
+import sa.hulksa.player.data.OperationsDownloadStatus
+import sa.hulksa.player.data.OperationsInstallResult
 import sa.hulksa.player.data.SettingsProStore
+import sa.hulksa.player.data.isGrowthLinkUsable
+import sa.hulksa.player.data.isInstallableOperationsUpdate
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.DownloadScheduleMode
 import sa.hulksa.player.ui.LocalProfileSwitchRequester
@@ -105,6 +109,7 @@ private class SettingsFocusGraph {
     val clearHistory = FocusRequester()
     val subscribe = FocusRequester()
     val support = FocusRequester()
+    val updateApp = FocusRequester()
     val logout = FocusRequester()
 }
 
@@ -129,12 +134,14 @@ internal fun SettingsProScreen(
     val context = LocalContext.current
     val profileSwitch = LocalProfileSwitchRequester.current
     val settingsStore = remember(context) { SettingsProStore(context) }
+    val updateInstaller = remember(context) { OperationsApkInstaller(context) }
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val focus = remember { SettingsFocusGraph() }
     var playback by remember(state.account?.username) { mutableStateOf(settingsStore.playbackSettings()) }
     var cacheBytes by remember { mutableLongStateOf(0L) }
     var pendingConfirmation by remember { mutableStateOf<SettingsConfirmation?>(null) }
+    var isManualUpdateRunning by remember { mutableStateOf(false) }
 
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -145,6 +152,49 @@ internal fun SettingsProScreen(
         scope.launch {
             delay(90L)
             runCatching { requester.requestFocus() }
+        }
+    }
+
+    fun updateApp() {
+        if (
+            isManualUpdateRunning ||
+            state.operations.download.status == OperationsDownloadStatus.DOWNLOADING
+        ) return
+
+        val update = state.operations.update
+        when {
+            update.latestVersionCode <= BuildConfig.VERSION_CODE -> {
+                toast("لديك أحدث إصدار")
+            }
+
+            !isInstallableOperationsUpdate(update) -> {
+                toast("التحديث غير متاح للتثبيت حاليا")
+            }
+
+            else -> {
+                isManualUpdateRunning = true
+                scope.launch {
+                    try {
+                        when (val result = updateInstaller.downloadAndOpen(update) { }) {
+                            OperationsInstallResult.InstallerOpened -> Unit
+                            OperationsInstallResult.UnknownSourcesBlocked -> {
+                                val opened = updateInstaller.openUnknownSourcesSettings()
+                                toast(
+                                    if (opened) {
+                                        "فعل تثبيت التطبيقات ثم ارجع واضغط تحديث التطبيق"
+                                    } else {
+                                        "فعل تثبيت التطبيقات من مصادر غير معروفة ثم حاول مرة أخرى"
+                                    },
+                                )
+                            }
+
+                            is OperationsInstallResult.Failure -> toast(result.message)
+                        }
+                    } finally {
+                        isManualUpdateRunning = false
+                    }
+                }
+            }
         }
     }
 
@@ -182,7 +232,7 @@ internal fun SettingsProScreen(
     val firstGrowthRequester = when {
         renewalAvailable -> focus.subscribe
         supportAvailable -> focus.support
-        else -> focus.logout
+        else -> focus.updateApp
     }
     val lastGrowthRequester = when {
         supportAvailable -> focus.support
@@ -190,6 +240,8 @@ internal fun SettingsProScreen(
         historyAvailable -> focus.clearHistory
         else -> focus.refreshLibrary
     }
+    val updateBusy =
+        isManualUpdateRunning || state.operations.download.status == OperationsDownloadStatus.DOWNLOADING
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize(),
@@ -485,13 +537,13 @@ internal fun SettingsProScreen(
                         SettingsMenuRow(
                             label = "الموقع الالكتروني",
                             subtitle = "جدد اشتراكك من موقع HULK SA",
-                            value = "",
+                            value = if (isTv) "اضغط OK" else "",
                             accentValue = true,
                             expanded = expandedLayout,
                             leadingIcon = Icons.Rounded.Language,
                             focusRequester = focus.subscribe,
                             upRequester = if (historyAvailable) focus.clearHistory else focus.refreshLibrary,
-                            downRequester = if (supportAvailable) focus.support else focus.logout,
+                            downRequester = if (supportAvailable) focus.support else focus.updateApp,
                             onClick = { onGrowthAction(GrowthDestination.RENEWAL) },
                         )
                     }
@@ -500,7 +552,8 @@ internal fun SettingsProScreen(
                         SettingsMenuRow(
                             label = "الدعم الفني",
                             subtitle = "تواصل معنا عبر واتساب",
-                            value = "",
+                            value = if (isTv) "اضغط OK" else "",
+                            accentValue = true,
                             expanded = expandedLayout,
                             leadingIcon = Icons.Rounded.SupportAgent,
                             focusRequester = focus.support,
@@ -511,7 +564,7 @@ internal fun SettingsProScreen(
                             } else {
                                 focus.refreshLibrary
                             },
-                            downRequester = focus.logout,
+                            downRequester = focus.updateApp,
                             onClick = { onGrowthAction(GrowthDestination.SUPPORT) },
                         )
                     }
@@ -519,26 +572,32 @@ internal fun SettingsProScreen(
             }
 
             SettingsPanel(title = "حول التطبيق", expanded = expandedLayout) {
-                SettingsInfoRow("HULK SA", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", expandedLayout)
-                SettingsDivider()
-                SettingsInfoRow("Android", "${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}", expandedLayout)
+                SettingsInfoRow("اصدار HULK SA", BuildConfig.VERSION_NAME, expandedLayout)
                 SettingsDivider()
                 SettingsInfoRow(
-                    "الجهاز",
+                    "اصدار Android",
+                    Build.VERSION.RELEASE.orEmpty().trim().ifBlank { "Android" },
+                    expandedLayout,
+                )
+                SettingsDivider()
+                SettingsInfoRow(
+                    "نوع الجهاز",
                     "${Build.MANUFACTURER.orEmpty().trim()} ${Build.MODEL.orEmpty().trim()}".trim().ifBlank { "Android" },
                     expandedLayout,
                 )
                 SettingsDivider()
-                SettingsMenuRow(
-                    label = "تسجيل الخروج",
-                    value = "",
-                    expanded = expandedLayout,
-                    focusRequester = focus.logout,
-                    upRequester = lastGrowthRequester,
-                    downRequester = FocusRequester.Cancel,
-                    onClick = { pendingConfirmation = SettingsConfirmation.LOGOUT },
-                )
+                SettingsInfoRow("مطور التطبيق", "Mega Store", expandedLayout)
             }
+
+            SettingsAboutActions(
+                expanded = expandedLayout,
+                updateBusy = updateBusy,
+                updateRequester = focus.updateApp,
+                logoutRequester = focus.logout,
+                upRequester = lastGrowthRequester,
+                onUpdate = ::updateApp,
+                onLogout = { pendingConfirmation = SettingsConfirmation.LOGOUT },
+            )
         }
 
         pendingConfirmation?.let { confirmation ->
@@ -598,6 +657,138 @@ internal fun SettingsProScreen(
                 },
             )
         }
+    }
+}
+
+@Composable
+private fun SettingsAboutActions(
+    expanded: Boolean,
+    updateBusy: Boolean,
+    updateRequester: FocusRequester,
+    logoutRequester: FocusRequester,
+    upRequester: FocusRequester,
+    onUpdate: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    if (expanded) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SettingsStandaloneAction(
+                label = if (updateBusy) "جاري تنزيل التحديث" else "تحديث التطبيق",
+                primary = true,
+                busy = updateBusy,
+                expanded = true,
+                modifier = Modifier.weight(1f),
+                focusRequester = updateRequester,
+                upRequester = upRequester,
+                downRequester = FocusRequester.Cancel,
+                leftRequester = logoutRequester,
+                onClick = onUpdate,
+            )
+            SettingsStandaloneAction(
+                label = "تسجيل الخروج",
+                primary = false,
+                expanded = true,
+                modifier = Modifier.weight(1f),
+                focusRequester = logoutRequester,
+                upRequester = upRequester,
+                downRequester = FocusRequester.Cancel,
+                rightRequester = updateRequester,
+                onClick = onLogout,
+            )
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            SettingsStandaloneAction(
+                label = if (updateBusy) "جاري تنزيل التحديث" else "تحديث التطبيق",
+                primary = true,
+                busy = updateBusy,
+                expanded = false,
+                modifier = Modifier.fillMaxWidth(),
+                focusRequester = updateRequester,
+                upRequester = upRequester,
+                downRequester = logoutRequester,
+                onClick = onUpdate,
+            )
+            SettingsStandaloneAction(
+                label = "تسجيل الخروج",
+                primary = false,
+                expanded = false,
+                modifier = Modifier.fillMaxWidth(),
+                focusRequester = logoutRequester,
+                upRequester = updateRequester,
+                downRequester = FocusRequester.Cancel,
+                onClick = onLogout,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsStandaloneAction(
+    label: String,
+    primary: Boolean,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+    busy: Boolean = false,
+    focusRequester: FocusRequester? = null,
+    upRequester: FocusRequester? = null,
+    downRequester: FocusRequester? = null,
+    leftRequester: FocusRequester? = null,
+    rightRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(if (expanded) 14.dp else 12.dp)
+
+    Box(
+        modifier = modifier
+            .heightIn(min = if (expanded) 60.dp else 54.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                if (upRequester != null) up = upRequester
+                if (downRequester != null) down = downRequester
+                if (leftRequester != null) left = leftRequester
+                if (rightRequester != null) right = rightRequester
+            }
+            .graphicsLayer { alpha = if (busy) .72f else 1f }
+            .clip(shape)
+            .background(
+                when {
+                    focused -> colors.gold.copy(alpha = .20f)
+                    primary -> colors.gold.copy(alpha = .11f)
+                    else -> Color(0xFF10110E)
+                },
+            )
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = when {
+                    focused -> colors.goldBright.copy(alpha = .92f)
+                    primary -> colors.gold.copy(alpha = .30f)
+                    else -> colors.gold.copy(alpha = .13f)
+                },
+                shape = shape,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(enabled = !busy, role = Role.Button, onClick = onClick)
+            .focusable()
+            .padding(horizontal = if (expanded) 18.dp else 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (primary || focused) colors.goldBright else colors.text,
+            fontSize = if (expanded) 16.sp else 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
