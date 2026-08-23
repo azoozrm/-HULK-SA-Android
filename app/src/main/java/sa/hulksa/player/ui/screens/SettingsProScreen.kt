@@ -260,8 +260,6 @@ internal fun SettingsProScreen(
                     onFocused = {
                         if (isTv) {
                             scope.launch {
-                                // Let Compose finish moving focus, then make the page header
-                                // the authoritative top anchor instead of the focused row.
                                 yield()
                                 scrollState.scrollTo(0)
                             }
@@ -485,8 +483,8 @@ internal fun SettingsProScreen(
                 SettingsPanel(title = "خدمات HULK SA", expanded = expandedLayout) {
                     if (renewalAvailable) {
                         SettingsMenuRow(
-                            label = growth.renewal.title,
-                            subtitle = "جدد اشتراكك أو تفضل بزيارة موقع HULK SA",
+                            label = "الموقع الالكتروني",
+                            subtitle = "جدد اشتراكك من موقع HULK SA",
                             value = "",
                             accentValue = true,
                             expanded = expandedLayout,
@@ -500,8 +498,8 @@ internal fun SettingsProScreen(
                     if (renewalAvailable && supportAvailable) SettingsDivider()
                     if (supportAvailable) {
                         SettingsMenuRow(
-                            label = growth.support.title,
-                            subtitle = "تواصل معنا بسهولة من جوالك",
+                            label = "الدعم الفني",
+                            subtitle = "تواصل معنا عبر واتساب",
                             value = "",
                             expanded = expandedLayout,
                             leadingIcon = Icons.Rounded.SupportAgent,
