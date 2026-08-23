@@ -135,8 +135,11 @@ class OperationsBackendContractTest(unittest.TestCase):
     def test_growth_uses_existing_settings_and_safe_migration(self) -> None:
         schema = self.read("schema.sql")
         migration = self.read("migrations/2026-08-23-v240-growth-lite.sql")
+        migration_rules = self.read("migrations/.htaccess")
         self.assertNotIn("CREATE TABLE", migration)
         self.assertIn("INSERT IGNORE INTO app_settings", migration)
+        self.assertIn("Options -Indexes", migration_rules)
+        self.assertIn("Require all denied", migration_rules)
         for key in (
             "growth_enabled",
             "growth_renewal_url",
