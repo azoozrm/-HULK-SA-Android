@@ -1,6 +1,7 @@
 package sa.hulksa.player
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -25,6 +26,7 @@ class TvMainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        dispatchDeepLink(intent)
         voiceSearchDelegate = VoiceSearchDelegate(
             activity = this,
             onTranscript = viewModel::updateSearch,
@@ -41,6 +43,12 @@ class TvMainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        dispatchDeepLink(intent)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -82,6 +90,11 @@ class TvMainActivity : ComponentActivity() {
                 inputMethodManager?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
             }
         }
+    }
+
+    private fun dispatchDeepLink(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        viewModel.handleTvDeepLink(intent.dataString)
     }
 
     @Suppress("DEPRECATION")

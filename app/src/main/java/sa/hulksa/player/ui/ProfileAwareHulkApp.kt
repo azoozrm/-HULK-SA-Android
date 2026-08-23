@@ -221,6 +221,7 @@ fun ProfileAwareHulkApp(
             return
         }
 
+        if (isTelevisionDevice) viewModel.beginTvPlatformProfileSwitch()
         switching = true
         managingProfiles = false
         createProfileRequested = false
@@ -379,15 +380,15 @@ fun ProfileAwareHulkApp(
         activeProfile?.kind,
         kidsSnapshot?.isAvailable,
     ) {
-        viewModel.setNotificationUiReady(
-            ready = authenticated &&
-                resolvedForSession &&
-                !showPicker &&
-                !managingProfiles &&
-                unlockProfile == null &&
-                securityProfile == null &&
-                (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true),
-        )
+        val profileReady = authenticated &&
+            resolvedForSession &&
+            !showPicker &&
+            !managingProfiles &&
+            unlockProfile == null &&
+            securityProfile == null &&
+            (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true)
+        viewModel.setNotificationUiReady(ready = profileReady)
+        if (isTelevisionDevice) viewModel.setTvPlatformProfileReady(ready = profileReady)
     }
 
     val appContentFocusRequester = remember { FocusRequester() }
