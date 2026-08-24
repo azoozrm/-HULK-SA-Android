@@ -145,6 +145,7 @@ class UserLibrary(context: Context) {
 
     fun resumePosition(key: String): Long {
         val entry = history().firstOrNull { it.key == key } ?: return 0L
+        if (entry.positionMs < MIN_RESUME_POSITION_MS) return 0L
         if (entry.durationMs > 0L && entry.positionMs.toDouble() / entry.durationMs >= COMPLETED_RATIO) return 0L
         return entry.positionMs
     }
@@ -235,6 +236,7 @@ class UserLibrary(context: Context) {
         const val KEY_HISTORY = "history"
         const val KEY_PROFILE_SCOPE_MIGRATION_V1 = "profile_scope_migration_v1"
         const val MAX_HISTORY = 100
+        const val MIN_RESUME_POSITION_MS = 30_000L
         const val COMPLETED_RATIO = .92
     }
 }
