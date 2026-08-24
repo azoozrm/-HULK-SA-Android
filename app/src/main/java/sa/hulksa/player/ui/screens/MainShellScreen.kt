@@ -87,7 +87,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -3303,7 +3302,6 @@ private fun ReorderableCatalogCategoryBar(
                     if (isTv) selectedFocusTarget()?.second?.requestFocus()
                 }
             }
-            .focusRestorer()
             .focusGroup()
             .onFocusChanged { focusState ->
                 val entering = focusState.hasFocus && !categoryBarHasFocus
@@ -3470,7 +3468,6 @@ private fun ReorderableLiveCategoryBar(
                     if (isTv) selectedFocusTarget()?.second?.requestFocus()
                 }
             }
-            .focusRestorer()
             .focusGroup()
             .onFocusChanged { focusState ->
                 val entering = focusState.hasFocus && !categoryBarHasFocus
