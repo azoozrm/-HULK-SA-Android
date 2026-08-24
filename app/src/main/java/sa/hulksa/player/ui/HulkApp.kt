@@ -80,6 +80,11 @@ fun HulkApp(
     val notify: (String) -> Unit = { message ->
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
+    val isTransientCatalogSearch: (MainDestination) -> Boolean = { destination ->
+        destination == MainDestination.LIVE ||
+            destination == MainDestination.MOVIES ||
+            destination == MainDestination.SERIES
+    }
     val openWithLiveContext: (ContentItem) -> Unit = { item ->
         if (item.type == ContentType.LIVE) {
             val launchContext = when (state.destination) {
@@ -89,27 +94,44 @@ fun HulkApp(
             }
             context.saveLiveTvProLaunchContext(launchContext)
         }
+        if (isTransientCatalogSearch(state.destination) && state.searchQuery.isNotBlank()) {
+            catalogNavigationMemory.save(
+                destination = state.destination,
+                categoryId = state.selectedCategoryId,
+                query = "",
+            )
+            viewModel.updateSearch("")
+        }
         viewModel.open(item)
     }
 
     val selectDestinationWithProfileContext: (MainDestination) -> Unit = { destination ->
+        val sourceUsesTransientSearch = isTransientCatalogSearch(state.destination)
         catalogNavigationMemory.save(
             destination = state.destination,
             categoryId = state.selectedCategoryId,
-            query = state.searchQuery,
+            query = if (sourceUsesTransientSearch) "" else state.searchQuery,
         )
         viewModel.selectDestination(destination)
         if (destination.isProfileCatalogDestination()) {
-            viewModel.updateSearch(catalogNavigationMemory.query(destination))
+            viewModel.updateSearch(
+                if (isTransientCatalogSearch(destination)) "" else catalogNavigationMemory.query(destination),
+            )
             viewModel.selectCategory(catalogNavigationMemory.category(destination))
+        } else if (sourceUsesTransientSearch && state.searchQuery.isNotBlank()) {
+            viewModel.updateSearch("")
         }
     }
     val selectCategoryWithProfileContext: (String?) -> Unit = { categoryId ->
+        val clearSearch = isTransientCatalogSearch(state.destination)
         catalogNavigationMemory.save(
             destination = state.destination,
             categoryId = categoryId,
-            query = state.searchQuery,
+            query = if (clearSearch) "" else state.searchQuery,
         )
+        if (clearSearch && state.searchQuery.isNotBlank()) {
+            viewModel.updateSearch("")
+        }
         viewModel.selectCategory(categoryId)
     }
     val searchCatalogWithProfileContext: (String) -> Unit = { query ->

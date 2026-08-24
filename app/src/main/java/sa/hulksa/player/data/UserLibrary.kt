@@ -146,7 +146,7 @@ class UserLibrary(context: Context) {
     fun resumePosition(key: String): Long {
         val entry = history().firstOrNull { it.key == key } ?: return 0L
         if (entry.durationMs > 0L && entry.positionMs.toDouble() / entry.durationMs >= COMPLETED_RATIO) return 0L
-        return entry.positionMs
+        return entry.positionMs.coerceAtLeast(0L)
     }
 
     fun clearHistory(): List<HistoryEntry> {

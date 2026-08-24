@@ -123,7 +123,6 @@ private const val PLAYER_CONTINUE_CATEGORY = "__player_continue__"
 private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
 private const val LIVE_PLAYER_HISTORY_PREFS = "live_player_history"
 private const val PREF_IDS = "ids"
-private const val RESUME_PROMPT_THRESHOLD_MS = 30_000L
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
@@ -254,7 +253,7 @@ fun PlayerScreen(
     var seekBarFocused by remember(request) { mutableStateOf(false) }
     var focusTimelineOnReveal by remember(request) { mutableStateOf(false) }
     var resumePromptVisible by remember(request) {
-        mutableStateOf(playbackSettings.resumePlayback && !request.isLive && request.resumePositionMs >= RESUME_PROMPT_THRESHOLD_MS)
+        mutableStateOf(playbackSettings.resumePlayback && !request.isLive && request.resumePositionMs > 0L)
     }
     var nextCountdown by remember(request) { mutableIntStateOf(-1) }
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
