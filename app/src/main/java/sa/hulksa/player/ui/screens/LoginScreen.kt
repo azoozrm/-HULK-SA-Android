@@ -304,6 +304,7 @@ fun LoginScreen(
     val tvInitialFocusRequester = remember { FocusRequester() }
     val submitRequester = remember { FocusRequester() }
     val subscribeRequester = remember { FocusRequester() }
+    var lastCardFocusRequester by remember { mutableStateOf(submitRequester) }
     var initialTvFocusRequested by remember { mutableStateOf(false) }
     var showSubscriptionQr by rememberSaveable { mutableStateOf(false) }
     val loginRenewalLink = remember {
@@ -425,6 +426,7 @@ fun LoginScreen(
                     onSubmit = submit,
                     onOpenWebsite = openWebsite,
                     onNonTextFocus = hideKeyboard,
+                    onCardFocusChanged = { lastCardFocusRequester = it },
                     initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
                     showSecondaryAction = !secondaryInBrand,
                     submitRequester = submitRequester,
@@ -484,16 +486,16 @@ fun LoginScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             if (secondaryInBrand) {
-                                Spacer(Modifier.height(if (policy.compact) 12.dp else 18.dp))
+                                Spacer(Modifier.height(if (policy.compact) 24.dp else 30.dp))
                                 LoginSubscriptionAction(
                                     onClick = { showSubscriptionQr = true },
                                     onNonTextFocus = hideKeyboard,
-                                    submitRequester = submitRequester,
+                                    returnRequester = lastCardFocusRequester,
                                     subscribeRequester = subscribeRequester,
                                     policy = policy,
                                     modifier = Modifier
-                                        .fillMaxWidth(.72f)
-                                        .widthIn(max = 320.dp),
+                                        .fillMaxWidth(.78f)
+                                        .widthIn(max = 340.dp),
                                 )
                             }
                         }
@@ -521,16 +523,16 @@ fun LoginScreen(
                                 .height(policy.brandRegionHeight),
                         )
                         if (secondaryInBrand) {
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(if (policy.compact) 16.dp else 22.dp))
                             LoginSubscriptionAction(
                                 onClick = { showSubscriptionQr = true },
                                 onNonTextFocus = hideKeyboard,
-                                submitRequester = submitRequester,
+                                returnRequester = lastCardFocusRequester,
                                 subscribeRequester = subscribeRequester,
                                 policy = policy,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .widthIn(max = 320.dp),
+                                    .widthIn(max = 340.dp),
                             )
                             Spacer(Modifier.height(10.dp))
                         } else {
@@ -739,7 +741,7 @@ private fun LoginBrandRegion(
 private fun LoginSubscriptionAction(
     onClick: () -> Unit,
     onNonTextFocus: () -> Unit,
-    submitRequester: FocusRequester,
+    returnRequester: FocusRequester,
     subscribeRequester: FocusRequester,
     policy: LoginLayoutPolicy,
     modifier: Modifier = Modifier,
@@ -750,16 +752,17 @@ private fun LoginSubscriptionAction(
         enabled = true,
         loading = false,
         primary = false,
-        minHeight = policy.secondaryActionHeight,
-        textSizeSp = policy.buttonTextSizeSp,
+        featuredSecondary = true,
+        minHeight = policy.secondaryActionHeight + if (policy.compact) 4.dp else 6.dp,
+        textSizeSp = policy.buttonTextSizeSp + 1,
         onFocused = onNonTextFocus,
         modifier = modifier
             .focusRequester(subscribeRequester)
             .focusProperties {
-                up = submitRequester
+                up = FocusRequester.Cancel
                 down = FocusRequester.Cancel
                 left = FocusRequester.Cancel
-                right = FocusRequester.Cancel
+                right = returnRequester
             },
     )
 }
@@ -782,6 +785,7 @@ private fun LoginPanel(
     onSubmit: () -> Unit,
     onOpenWebsite: () -> Unit,
     onNonTextFocus: () -> Unit,
+    onCardFocusChanged: (FocusRequester) -> Unit,
     initialFocusRequester: FocusRequester?,
     showSecondaryAction: Boolean,
     submitRequester: FocusRequester,
@@ -798,6 +802,7 @@ private fun LoginPanel(
     val panelScrollState = rememberScrollState()
     val panelShape = RoundedCornerShape(policy.cardRadius)
     val displayedError = errorMessage?.withoutArabicHamzas()
+    val secondaryOutsidePanel = !showSecondaryAction
 
     LaunchedEffect(isLoading, errorMessage) {
         if (!isLoading && !errorMessage.isNullOrBlank()) {
@@ -874,12 +879,13 @@ private fun LoginPanel(
             icon = Icons.Rounded.Key,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
+            onFocused = { onCardFocusChanged(accessRequester) },
             modifier = Modifier
                 .focusRequester(accessRequester)
                 .focusProperties {
                     up = FocusRequester.Cancel
                     down = usernameRequester
-                    left = FocusRequester.Cancel
+                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth()
@@ -901,12 +907,13 @@ private fun LoginPanel(
             icon = Icons.Rounded.Person,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
+            onFocused = { onCardFocusChanged(usernameRequester) },
             modifier = Modifier
                 .focusRequester(usernameRequester)
                 .focusProperties {
                     up = accessRequester
                     down = passwordRequester
-                    left = FocusRequester.Cancel
+                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth()
@@ -928,12 +935,13 @@ private fun LoginPanel(
             icon = Icons.Rounded.Lock,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
+            onFocused = { onCardFocusChanged(passwordRequester) },
             modifier = Modifier
                 .focusRequester(passwordRequester)
                 .focusProperties {
                     up = usernameRequester
                     down = rememberRequester
-                    left = FocusRequester.Cancel
+                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth()
@@ -954,7 +962,7 @@ private fun LoginPanel(
         Spacer(
             Modifier.height(
                 if (isTv) {
-                    if (policy.compact) 10.dp else 14.dp
+                    if (policy.compact) 12.dp else 16.dp
                 } else {
                     if (policy.compact) 8.dp else 12.dp
                 },
@@ -977,7 +985,10 @@ private fun LoginPanel(
                 text = "تذكر الحساب",
                 checked = rememberAccount,
                 onClick = onRememberChange,
-                onFocused = onNonTextFocus,
+                onFocused = {
+                    onNonTextFocus()
+                    onCardFocusChanged(rememberRequester)
+                },
                 minHeight = policy.optionHeight,
                 textSizeSp = policy.optionTextSizeSp,
                 modifier = Modifier
@@ -986,7 +997,7 @@ private fun LoginPanel(
                     .focusProperties {
                         up = passwordRequester
                         down = showPasswordRequester
-                        left = FocusRequester.Cancel
+                        left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
                         right = FocusRequester.Cancel
                     },
             )
@@ -994,7 +1005,10 @@ private fun LoginPanel(
                 text = "اظهر كلمة المرور",
                 checked = showPassword,
                 onClick = onShowPasswordChange,
-                onFocused = onNonTextFocus,
+                onFocused = {
+                    onNonTextFocus()
+                    onCardFocusChanged(showPasswordRequester)
+                },
                 minHeight = policy.optionHeight,
                 textSizeSp = policy.optionTextSizeSp,
                 modifier = Modifier
@@ -1003,23 +1017,23 @@ private fun LoginPanel(
                     .focusProperties {
                         up = rememberRequester
                         down = submitRequester
-                        left = FocusRequester.Cancel
+                        left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
                         right = FocusRequester.Cancel
                     },
             )
         }
 
         if (isTv) {
-            Spacer(Modifier.height(if (policy.compact) 7.dp else 9.dp))
-            val errorShape = RoundedCornerShape(9.dp)
+            Spacer(Modifier.height(if (policy.compact) 9.dp else 11.dp))
+            val errorShape = RoundedCornerShape(10.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(32.dp)
+                    .height(if (policy.compact) 40.dp else 42.dp)
                     .clip(errorShape)
                     .background(
                         if (displayedError != null) {
-                            Color(0xFF351214).copy(alpha = .94f)
+                            Color(0xFF2B0F12).copy(alpha = .98f)
                         } else {
                             Color.Transparent
                         },
@@ -1027,13 +1041,13 @@ private fun LoginPanel(
                     .border(
                         width = if (displayedError != null) 1.dp else 0.dp,
                         color = if (displayedError != null) {
-                            Color(0xFFB85C63).copy(alpha = .72f)
+                            Color(0xFFCF6670).copy(alpha = .82f)
                         } else {
                             Color.Transparent
                         },
                         shape = errorShape,
                     )
-                    .padding(horizontal = 9.dp)
+                    .padding(horizontal = 12.dp)
                     .semantics {
                         if (displayedError != null) {
                             liveRegion = LiveRegionMode.Polite
@@ -1049,16 +1063,16 @@ private fun LoginPanel(
                         Icon(
                             imageVector = Icons.Rounded.WarningAmber,
                             contentDescription = null,
-                            tint = Color(0xFFFFA8A8),
-                            modifier = Modifier.size(16.dp),
+                            tint = Color(0xFFFFB4AB),
+                            modifier = Modifier.size(if (policy.compact) 18.dp else 20.dp),
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             text = displayedError,
                             color = Color(0xFFFFDAD6),
-                            fontSize = if (policy.compact) 11.sp else 12.sp,
-                            lineHeight = if (policy.compact) 14.sp else 15.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontSize = if (policy.compact) 12.sp else 13.sp,
+                            lineHeight = if (policy.compact) 15.sp else 17.sp,
+                            fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Right,
                             maxLines = 2,
                             modifier = Modifier.weight(1f),
@@ -1077,7 +1091,15 @@ private fun LoginPanel(
             }
         }
 
-        Spacer(Modifier.height(if (policy.compact) 0.dp else 8.dp))
+        Spacer(
+            Modifier.height(
+                if (isTv) {
+                    if (policy.compact) 6.dp else 8.dp
+                } else {
+                    if (policy.compact) 0.dp else 8.dp
+                },
+            ),
+        )
         LoginActionButton(
             text = "دخول الى HULK",
             onClick = onSubmit,
@@ -1086,13 +1108,16 @@ private fun LoginPanel(
             primary = true,
             minHeight = policy.primaryActionHeight,
             textSizeSp = policy.buttonTextSizeSp,
-            onFocused = onNonTextFocus,
+            onFocused = {
+                onNonTextFocus()
+                onCardFocusChanged(submitRequester)
+            },
             modifier = Modifier
                 .focusRequester(submitRequester)
                 .focusProperties {
                     up = showPasswordRequester
-                    down = subscribeRequester
-                    left = FocusRequester.Cancel
+                    down = if (showSecondaryAction) subscribeRequester else FocusRequester.Cancel
+                    left = if (secondaryOutsidePanel) subscribeRequester else FocusRequester.Cancel
                     right = FocusRequester.Cancel
                 }
                 .fillMaxWidth(),
@@ -1107,7 +1132,10 @@ private fun LoginPanel(
                 primary = false,
                 minHeight = policy.secondaryActionHeight,
                 textSizeSp = policy.buttonTextSizeSp,
-                onFocused = onNonTextFocus,
+                onFocused = {
+                    onNonTextFocus()
+                    onCardFocusChanged(subscribeRequester)
+                },
                 modifier = Modifier
                     .focusRequester(subscribeRequester)
                     .focusProperties {
@@ -1139,6 +1167,7 @@ private fun LoginTextField(
     icon: ImageVector,
     textSizeSp: Int,
     bringIntoViewOnFocus: Boolean = true,
+    onFocused: () -> Unit = {},
     modifier: Modifier = Modifier,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -1182,7 +1211,10 @@ private fun LoginTextField(
                         Modifier
                     },
                 )
-                .onFocusChanged { focused = it.isFocused }
+                .onFocusChanged {
+                    focused = it.isFocused
+                    if (it.isFocused) onFocused()
+                }
                 .clip(shape)
                 .background(background)
                 .border(if (focused) 2.dp else 1.dp, border, shape)
@@ -1329,6 +1361,7 @@ private fun LoginActionButton(
     textSizeSp: Int,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
+    featuredSecondary: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -1338,6 +1371,8 @@ private fun LoginActionButton(
             !enabled && primary -> colors.gold.copy(alpha = .58f)
             primary && focused -> colors.goldBright
             primary -> colors.gold
+            featuredSecondary && focused -> Color(0xFF302B17)
+            featuredSecondary -> Color(0xFF1A1810)
             focused -> Color(0xFF24251D)
             else -> Color(0xFF12140F)
         },
@@ -1347,19 +1382,32 @@ private fun LoginActionButton(
         targetValue = when {
             focused -> colors.goldBright
             primary -> colors.gold.copy(alpha = .64f)
+            featuredSecondary -> colors.gold.copy(alpha = .78f)
             else -> colors.gold.copy(alpha = .44f)
         },
         label = "loginButtonOutline",
     )
     val textColor = if (primary) Color(0xFF111006) else colors.goldBright
     val displayText = if (loading) "جاري الدخول..." else text
+    val outlineWidth = when {
+        focused -> 2.dp
+        featuredSecondary -> 1.5.dp
+        else -> 1.dp
+    }
 
     Box(
         modifier = modifier
             .heightIn(min = minHeight)
+            .then(
+                if (featuredSecondary) {
+                    Modifier.shadow(6.dp, shape = shape, clip = false)
+                } else {
+                    Modifier
+                },
+            )
             .clip(shape)
             .background(background)
-            .border(if (focused) 2.dp else 1.dp, outline, shape)
+            .border(outlineWidth, outline, shape)
             .semantics(mergeDescendants = true) {
                 contentDescription = displayText
                 if (!enabled) disabled()
