@@ -66,16 +66,23 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         self.assertIn("cancelPendingLiveZap()", pro_text)
         self.assertIn("dismissLiveZapIndicator()", pro_text)
 
-    def test_live_category_strip_restores_selected_focus_context(self) -> None:
+    def test_live_category_strip_routes_entry_directly_to_selected_focus(self) -> None:
         text = self.read(MAIN_SHELL)
         start = text.index("private fun ReorderableLiveCategoryBar(")
         end = text.index("private fun LiveCategoryChip(", start)
         block = text[start:end]
         self.assertIn("selectedCategoryFocusIndex(", block)
-        self.assertIn("restoreSelectedCategoryFocus()", block)
-        self.assertIn("listState.scrollToItem(targetIndex)", block)
-        self.assertIn("requester.requestFocus()", block)
-        self.assertIn(".onFocusChanged { focusState ->", block)
+        self.assertIn("fun selectedFocusTarget(): Pair<Int, FocusRequester>?", block)
+        self.assertIn("onEnter = {", block)
+        self.assertIn("selectedFocusTarget()?.second?.requestFocus()", block)
+        self.assertIn("var categoryBarHasFocus by remember", block)
+        self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == null", block)
+        self.assertIn(
+            "canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID",
+            block,
+        )
+        self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == category.id", block)
+        self.assertNotIn("restoreSelectedCategoryFocus()", block)
 
 
 if __name__ == "__main__":
