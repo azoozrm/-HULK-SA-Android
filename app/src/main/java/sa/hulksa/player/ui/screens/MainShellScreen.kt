@@ -3227,7 +3227,6 @@ private fun ReorderableCatalogCategoryBar(
         stableCategoryIds.associateWith { FocusRequester() }
     }
     var categoryBarHasFocus by remember(type) { mutableStateOf(false) }
-    var restoringSelectedFocus by remember(type) { mutableStateOf(false) }
     val ordered = remember(categories, ids) {
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
@@ -3252,18 +3251,6 @@ private fun ReorderableCatalogCategoryBar(
             else -> selectedId?.let(categoryFocusRequesters::get)
         } ?: return null
         return targetIndex to requester
-    }
-
-    fun restoreSelectedCategoryFocus() {
-        if (!isTv || restoringSelectedFocus) return
-        val (targetIndex, requester) = selectedFocusTarget() ?: return
-        restoringSelectedFocus = true
-        scope.launch {
-            listState.scrollToItem(targetIndex)
-            delay(40L)
-            runCatching { requester.requestFocus() }
-            restoringSelectedFocus = false
-        }
     }
 
     LaunchedEffect(selectedId, ordered) {
@@ -3303,11 +3290,7 @@ private fun ReorderableCatalogCategoryBar(
                 }
             }
             .focusGroup()
-            .onFocusChanged { focusState ->
-                val entering = focusState.hasFocus && !categoryBarHasFocus
-                categoryBarHasFocus = focusState.hasFocus
-                if (entering) restoreSelectedCategoryFocus()
-            },
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus },
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 24.dp, vertical = 8.dp),
     ) {
@@ -3317,7 +3300,11 @@ private fun ReorderableCatalogCategoryBar(
                 { onSelect(null) },
                 primary = selectedId == null,
                 compact = true,
-                modifier = Modifier.focusRequester(allFocusRequester),
+                modifier = Modifier
+                    .focusRequester(allFocusRequester)
+                    .focusProperties {
+                        canFocus = !isTv || categoryBarHasFocus || selectedId == null
+                    },
             )
         }
         item {
@@ -3326,7 +3313,11 @@ private fun ReorderableCatalogCategoryBar(
                 { onSelect(FAVORITES_CATEGORY_ID) },
                 primary = selectedId == FAVORITES_CATEGORY_ID,
                 compact = true,
-                modifier = Modifier.focusRequester(favoritesFocusRequester),
+                modifier = Modifier
+                    .focusRequester(favoritesFocusRequester)
+                    .focusProperties {
+                        canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
+                    },
             )
         }
         item {
@@ -3335,7 +3326,11 @@ private fun ReorderableCatalogCategoryBar(
                 { onSelect(CONTINUE_CATEGORY_ID) },
                 primary = selectedId == CONTINUE_CATEGORY_ID,
                 compact = true,
-                modifier = Modifier.focusRequester(continueFocusRequester),
+                modifier = Modifier
+                    .focusRequester(continueFocusRequester)
+                    .focusProperties {
+                        canFocus = !isTv || categoryBarHasFocus || selectedId == CONTINUE_CATEGORY_ID
+                    },
             )
         }
         items(ordered, key = Category::id) { category ->
@@ -3348,7 +3343,11 @@ private fun ReorderableCatalogCategoryBar(
                 onLongClick = { moving = category.id },
                 onMoveLeft = { move(category.id, 1) },
                 onMoveRight = { move(category.id, -1) },
-                modifier = Modifier.focusRequester(categoryFocusRequesters.getValue(category.id)),
+                modifier = Modifier
+                    .focusRequester(categoryFocusRequesters.getValue(category.id))
+                    .focusProperties {
+                        canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
+                    },
             )
         }
     }
@@ -3394,7 +3393,6 @@ private fun ReorderableLiveCategoryBar(
         stableCategoryIds.associateWith { FocusRequester() }
     }
     var categoryBarHasFocus by remember { mutableStateOf(false) }
-    var restoringSelectedFocus by remember { mutableStateOf(false) }
     val ordered = remember(categories, ids) {
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
@@ -3418,18 +3416,6 @@ private fun ReorderableLiveCategoryBar(
             else -> selectedId?.let(categoryFocusRequesters::get)
         } ?: return null
         return targetIndex to requester
-    }
-
-    fun restoreSelectedCategoryFocus() {
-        if (!isTv || restoringSelectedFocus) return
-        val (targetIndex, requester) = selectedFocusTarget() ?: return
-        restoringSelectedFocus = true
-        scope.launch {
-            listState.scrollToItem(targetIndex)
-            delay(40L)
-            runCatching { requester.requestFocus() }
-            restoringSelectedFocus = false
-        }
     }
 
     LaunchedEffect(selectedId, ordered) {
@@ -3469,11 +3455,7 @@ private fun ReorderableLiveCategoryBar(
                 }
             }
             .focusGroup()
-            .onFocusChanged { focusState ->
-                val entering = focusState.hasFocus && !categoryBarHasFocus
-                categoryBarHasFocus = focusState.hasFocus
-                if (entering) restoreSelectedCategoryFocus()
-            },
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus },
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
     ) {
@@ -3483,7 +3465,11 @@ private fun ReorderableLiveCategoryBar(
                 { onSelect(null) },
                 primary = selectedId == null,
                 compact = true,
-                modifier = Modifier.focusRequester(allFocusRequester),
+                modifier = Modifier
+                    .focusRequester(allFocusRequester)
+                    .focusProperties {
+                        canFocus = !isTv || categoryBarHasFocus || selectedId == null
+                    },
             )
         }
         item {
@@ -3492,7 +3478,11 @@ private fun ReorderableLiveCategoryBar(
                 { onSelect(FAVORITES_CATEGORY_ID) },
                 primary = selectedId == FAVORITES_CATEGORY_ID,
                 compact = true,
-                modifier = Modifier.focusRequester(favoritesFocusRequester),
+                modifier = Modifier
+                    .focusRequester(favoritesFocusRequester)
+                    .focusProperties {
+                        canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
+                    },
             )
         }
         items(ordered, key = Category::id) { category ->
@@ -3502,7 +3492,11 @@ private fun ReorderableLiveCategoryBar(
                     { onSelect(category.id) },
                     primary = selectedId == category.id,
                     compact = true,
-                    modifier = Modifier.focusRequester(categoryFocusRequesters.getValue(category.id)),
+                    modifier = Modifier
+                        .focusRequester(categoryFocusRequesters.getValue(category.id))
+                        .focusProperties {
+                            canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
+                        },
                 )
             } else {
                 LiveCategoryChip(
@@ -3516,7 +3510,11 @@ private fun ReorderableLiveCategoryBar(
                     onLongClick = { moving = category.id },
                     onMoveLeft = { move(category.id, 1) },
                     onMoveRight = { move(category.id, -1) },
-                    modifier = Modifier.focusRequester(categoryFocusRequesters.getValue(category.id)),
+                    modifier = Modifier
+                        .focusRequester(categoryFocusRequesters.getValue(category.id))
+                        .focusProperties {
+                            canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
+                        },
                 )
             }
         }
