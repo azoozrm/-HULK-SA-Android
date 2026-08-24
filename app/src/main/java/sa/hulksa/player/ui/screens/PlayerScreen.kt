@@ -214,6 +214,19 @@ fun PlayerScreen(
     val adaptiveUi = LocalAdaptiveUi.current
     val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     val localPlayback = remember(request) { request.usesOnlyLocalMedia() }
+    val playerDisplayTitle = remember(request) {
+        val seriesTitle = request.seriesTitle?.trim().orEmpty()
+        val episodeTitle = request.episodeTitle?.trim().orEmpty()
+        if (
+            request.streamKind.equals("series", ignoreCase = true) &&
+            seriesTitle.isNotBlank() &&
+            episodeTitle.startsWith(seriesTitle, ignoreCase = true)
+        ) {
+            episodeTitle
+        } else {
+            request.title
+        }
+    }
     var candidateIndex by remember(request) { mutableIntStateOf(0) }
     var retryNonce by remember(request) { mutableIntStateOf(0) }
     var pendingSeekMs by remember(request) { mutableLongStateOf(0L) }
@@ -904,7 +917,7 @@ fun PlayerScreen(
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
             PlayerTopBar(
-                title = request.title,
+                title = playerDisplayTitle,
                 isLive = request.isLive,
                 quality = qualityLabel(videoHeight),
                 speed = playbackSpeed,
@@ -984,7 +997,7 @@ fun PlayerScreen(
 
         if (resumePromptVisible) {
             ResumePrompt(
-                title = request.title,
+                title = playerDisplayTitle,
                 positionMs = request.resumePositionMs,
                 onResume = {
                     player.seekTo(request.resumePositionMs)
@@ -1177,7 +1190,7 @@ private fun PlayerTopBar(
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (isLive) "● مباشر الان" else "HULK Player", color = if (isLive) Color(0xFFFF5A61) else colors.goldBright, fontSize = 11.sp)
+                Text(if (isLive) "● مباشر الان" else "HULK SA", color = if (isLive) Color(0xFFFF5A61) else colors.goldBright, fontSize = 11.sp)
                 Text(quality, color = colors.textMuted, fontSize = 11.sp)
                 if (!isLive && speed != 1f) Text(speedLabel(speed), color = colors.textMuted, fontSize = 11.sp)
             }
