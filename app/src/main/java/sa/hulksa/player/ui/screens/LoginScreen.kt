@@ -83,6 +83,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -709,7 +710,7 @@ private fun LoginPanel(
     val panelShape = RoundedCornerShape(policy.cardRadius)
     val displayedError = errorMessage?.withoutArabicHamzas()
 
-    LaunchedEffect(isLoading, errorMessage, username, password) {
+    LaunchedEffect(isLoading, errorMessage) {
         if (!isLoading && !errorMessage.isNullOrBlank()) {
             when (resolveLoginErrorTarget(errorMessage, username, password)) {
                 LoginErrorTarget.ACCESS_CODE -> runCatching { accessRequester.requestFocus() }
@@ -1250,15 +1251,16 @@ private fun LoginActionButton(
             .border(if (focused) 2.dp else 1.dp, outline, shape)
             .semantics(mergeDescendants = true) {
                 contentDescription = displayText
+                if (!enabled) disabled()
             }
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
             .clickable(
-                enabled = enabled,
+                enabled = true,
                 role = Role.Button,
-                onClick = onClick,
+                onClick = { if (enabled) onClick() },
             )
             .padding(horizontal = 18.dp, vertical = 11.dp),
         contentAlignment = Alignment.Center,
