@@ -1,6 +1,9 @@
 package sa.hulksa.player.ui.screens
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
@@ -47,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -217,7 +221,7 @@ private fun resolveLoginLayoutPolicy(
             else -> 22.dp
         },
         cardVerticalPadding = when {
-            isTv && compactHeight -> 22.dp
+            isTv && compactHeight -> 18.dp
             isTv && height >= 720.dp -> 30.dp
             isTv -> 26.dp
             compactHeight -> 20.dp
@@ -245,7 +249,7 @@ private fun resolveLoginLayoutPolicy(
             isTv -> 54.dp
             else -> 50.dp
         },
-        optionHeight = if (isTv && compactHeight) 44.dp else 48.dp,
+        optionHeight = if (isTv && compactHeight) 42.dp else 48.dp,
         logoSize = logoSize,
         brandRegionHeight = brandRegionHeight,
         titleSizeSp = when {
@@ -262,8 +266,9 @@ private fun resolveLoginLayoutPolicy(
         optionTextSizeSp = if (isTv && !compactHeight) 15 else 14,
         buttonTextSizeSp = if (isTv && !compactHeight) 17 else 15,
         panelScrollable =
-            composition == LoginComposition.PREMIUM_SPLIT &&
-                (compactHeight || fontScale >= 1.3f || (!isTv && imeVisible)),
+            !isTv &&
+                composition == LoginComposition.PREMIUM_SPLIT &&
+                (compactHeight || fontScale >= 1.3f || imeVisible),
         compact = compactHeight,
     )
 }
@@ -281,6 +286,7 @@ fun LoginScreen(
     val focusManager = LocalFocusManager.current
     val view = LocalView.current
     val density = LocalDensity.current
+    val activity = remember(view.context) { view.context.findActivity() }
     val tvInitialFocusRequester = remember { FocusRequester() }
     val persistedAccessCode = remember(view.context) {
         sa.hulksa.player.data.AccountSessionStore(view.context).lastAccessCode().orEmpty()
@@ -290,6 +296,17 @@ fun LoginScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
     var rememberAccount by rememberSaveable { mutableStateOf(true) }
+
+    DisposableEffect(isTv, activity) {
+        if (isTv && activity != null) {
+            val window = activity.window
+            val previousSoftInputMode = window.attributes.softInputMode
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+            onDispose { window.setSoftInputMode(previousSoftInputMode) }
+        } else {
+            onDispose { }
+        }
+    }
 
     val hideKeyboard: () -> Unit = {
         keyboardController?.hide()
@@ -728,7 +745,7 @@ private fun LoginPanel(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (policy.compact) 8.dp else 18.dp))
+        Spacer(Modifier.height(if (policy.compact) 4.dp else 18.dp))
 
         LoginTextField(
             value = accessCode,
@@ -755,7 +772,7 @@ private fun LoginPanel(
                 onNext = { runCatching { usernameRequester.requestFocus() } },
             ),
         )
-        Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
+        Spacer(Modifier.height(if (policy.compact) 2.dp else 10.dp))
 
         LoginTextField(
             value = username,
@@ -782,7 +799,7 @@ private fun LoginPanel(
                 onNext = { runCatching { passwordRequester.requestFocus() } },
             ),
         )
-        Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
+        Spacer(Modifier.height(if (policy.compact) 2.dp else 10.dp))
 
         LoginTextField(
             value = password,
@@ -813,7 +830,7 @@ private fun LoginPanel(
             ),
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
         )
-        Spacer(Modifier.height(if (policy.compact) 2.dp else 8.dp))
+        Spacer(Modifier.height(if (policy.compact) 1.dp else 8.dp))
 
         LoginOption(
             text = "تذكر الحساب",
@@ -864,7 +881,33 @@ private fun LoginPanel(
                 },
         )
 
-        if (displayedError != null) {
+        if (isTv) {
+            Spacer(Modifier.height(4.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(22.dp)
+                    .semantics {
+                        if (displayedError != null) {
+                            liveRegion = LiveRegionMode.Polite
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (displayedError != null) {
+                    Text(
+                        text = displayedError,
+                        color = Color(0xFFFFB4AB),
+                        fontSize = if (policy.compact) 12.sp else 13.sp,
+                        lineHeight = if (policy.compact) 16.sp else 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        } else if (displayedError != null) {
             Spacer(Modifier.height(8.dp))
             Box(
                 modifier = Modifier.semantics {
@@ -875,7 +918,7 @@ private fun LoginPanel(
             }
         }
 
-        Spacer(Modifier.height(if (policy.compact) 4.dp else 13.dp))
+        Spacer(Modifier.height(if (policy.compact) 2.dp else 13.dp))
         LoginActionButton(
             text = "دخول الى HULK",
             onClick = onSubmit,
@@ -1194,6 +1237,13 @@ private fun LoginActionButton(
         }
     }
 }
+
+private tailrec fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 
 private fun String.withoutArabicHamzas(): String =
     replace('أ', 'ا')
