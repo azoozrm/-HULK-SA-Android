@@ -98,6 +98,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import sa.hulksa.player.data.GrowthDestination
+import sa.hulksa.player.data.OperationsGrowthLinkConfig
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.LoadingRing
@@ -302,6 +304,15 @@ fun LoginScreen(
     val submitRequester = remember { FocusRequester() }
     val subscribeRequester = remember { FocusRequester() }
     var initialTvFocusRequested by remember { mutableStateOf(false) }
+    var showSubscriptionQr by rememberSaveable { mutableStateOf(false) }
+    val loginRenewalLink = remember {
+        OperationsGrowthLinkConfig(
+            enabled = true,
+            title = "اشتراك جديد",
+            url = HULK_WEBSITE,
+            displayText = "hulksa.com",
+        )
+    }
     val persistedAccessCode = remember(view.context) {
         sa.hulksa.player.data.AccountSessionStore(view.context).lastAccessCode().orEmpty()
     }
@@ -474,7 +485,7 @@ fun LoginScreen(
                             if (secondaryInBrand) {
                                 Spacer(Modifier.height(if (policy.compact) 12.dp else 18.dp))
                                 LoginSubscriptionAction(
-                                    onOpenWebsite = openWebsite,
+                                    onClick = { showSubscriptionQr = true },
                                     onNonTextFocus = hideKeyboard,
                                     submitRequester = submitRequester,
                                     subscribeRequester = subscribeRequester,
@@ -511,7 +522,7 @@ fun LoginScreen(
                         if (secondaryInBrand) {
                             Spacer(Modifier.height(8.dp))
                             LoginSubscriptionAction(
-                                onOpenWebsite = openWebsite,
+                                onClick = { showSubscriptionQr = true },
                                 onNonTextFocus = hideKeyboard,
                                 submitRequester = submitRequester,
                                 subscribeRequester = subscribeRequester,
@@ -532,6 +543,14 @@ fun LoginScreen(
                         Spacer(Modifier.height(16.dp))
                     }
                 }
+            }
+
+            if (secondaryInBrand && showSubscriptionQr) {
+                GrowthQrDialog(
+                    destination = GrowthDestination.RENEWAL,
+                    link = loginRenewalLink,
+                    onDismiss = { showSubscriptionQr = false },
+                )
             }
         }
     }
@@ -717,48 +736,31 @@ private fun LoginBrandRegion(
 
 @Composable
 private fun LoginSubscriptionAction(
-    onOpenWebsite: () -> Unit,
+    onClick: () -> Unit,
     onNonTextFocus: () -> Unit,
     submitRequester: FocusRequester,
     subscribeRequester: FocusRequester,
     policy: LoginLayoutPolicy,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
-
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        LoginActionButton(
-            text = "اشتراك او تجديد",
-            onClick = onOpenWebsite,
-            enabled = true,
-            loading = false,
-            primary = false,
-            minHeight = policy.secondaryActionHeight,
-            textSizeSp = policy.buttonTextSizeSp,
-            onFocused = onNonTextFocus,
-            modifier = Modifier
-                .focusRequester(subscribeRequester)
-                .focusProperties {
-                    up = submitRequester
-                    down = FocusRequester.Cancel
-                    left = FocusRequester.Cancel
-                    right = FocusRequester.Cancel
-                }
-                .fillMaxWidth(),
-        )
-        Spacer(Modifier.height(if (policy.compact) 4.dp else 7.dp))
-        Text(
-            text = "hulksa.com",
-            color = colors.textMuted.copy(alpha = .78f),
-            fontSize = if (policy.compact) 11.sp else 12.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    LoginActionButton(
+        text = "اشتراك جديد",
+        onClick = onClick,
+        enabled = true,
+        loading = false,
+        primary = false,
+        minHeight = policy.secondaryActionHeight,
+        textSizeSp = policy.buttonTextSizeSp,
+        onFocused = onNonTextFocus,
+        modifier = modifier
+            .focusRequester(subscribeRequester)
+            .focusProperties {
+                up = submitRequester
+                down = FocusRequester.Cancel
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+            },
+    )
 }
 
 @Composable
