@@ -3298,6 +3298,11 @@ private fun ReorderableCatalogCategoryBar(
     LazyRow(
         state = listState,
         modifier = Modifier
+            .focusProperties {
+                onEnter = {
+                    if (isTv) selectedFocusTarget()?.second?.requestFocus()
+                }
+            }
             .focusRestorer()
             .focusGroup()
             .onFocusChanged { focusState ->
@@ -3460,6 +3465,11 @@ private fun ReorderableLiveCategoryBar(
     LazyRow(
         state = listState,
         modifier = Modifier
+            .focusProperties {
+                onEnter = {
+                    if (isTv) selectedFocusTarget()?.second?.requestFocus()
+                }
+            }
             .focusRestorer()
             .focusGroup()
             .onFocusChanged { focusState ->
