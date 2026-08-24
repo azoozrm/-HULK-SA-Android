@@ -109,6 +109,13 @@ private enum class LoginComposition {
     CENTERED,
 }
 
+private enum class LoginErrorTarget {
+    ACCESS_CODE,
+    USERNAME,
+    PASSWORD,
+    NONE,
+}
+
 private data class LoginLayoutPolicy(
     val composition: LoginComposition,
     val horizontalSafeInset: Dp,
@@ -190,16 +197,16 @@ private fun resolveLoginLayoutPolicy(
     val logoSize = when {
         isTv -> (minOf(width, height) * .38f).coerceIn(180.dp, 250.dp)
         width >= 600.dp -> (minOf(width, height) * .25f).coerceIn(120.dp, 190.dp)
-        imeVisible -> 76.dp
-        else -> (minOf(width, height) * .28f).coerceIn(84.dp, 124.dp)
+        imeVisible -> 60.dp
+        else -> (minOf(width, height) * .20f).coerceIn(68.dp, 88.dp)
     }
     val brandRegionHeight = when {
         composition == LoginComposition.PREMIUM_SPLIT -> height
-        imeVisible -> 78.dp
+        imeVisible -> 72.dp
         width >= 840.dp -> 176.dp
         width >= 600.dp -> 152.dp
-        compactHeight -> 104.dp
-        else -> 132.dp
+        compactHeight -> 96.dp
+        else -> 116.dp
     }
     val cardMaxHeight = when {
         isTv -> (height * .88f).coerceAtLeast(360.dp)
@@ -249,7 +256,11 @@ private fun resolveLoginLayoutPolicy(
             isTv -> 54.dp
             else -> 50.dp
         },
-        optionHeight = if (isTv && compactHeight) 42.dp else 48.dp,
+        optionHeight = when {
+            isTv && compactHeight -> 38.dp
+            isTv -> 42.dp
+            else -> 48.dp
+        },
         logoSize = logoSize,
         brandRegionHeight = brandRegionHeight,
         titleSizeSp = when {
@@ -288,6 +299,7 @@ fun LoginScreen(
     val density = LocalDensity.current
     val activity = remember(view.context) { view.context.findActivity() }
     val tvInitialFocusRequester = remember { FocusRequester() }
+    var initialTvFocusRequested by remember { mutableStateOf(false) }
     val persistedAccessCode = remember(view.context) {
         sa.hulksa.player.data.AccountSessionStore(view.context).lastAccessCode().orEmpty()
     }
@@ -321,7 +333,11 @@ fun LoginScreen(
     }
     val submit = {
         if (!isLoading && !isStarting) {
-            dismissKeyboard()
+            if (isTv) {
+                hideKeyboard()
+            } else {
+                dismissKeyboard()
+            }
             onLogin(accessCode, username.trim(), password, rememberAccount)
         }
     }
@@ -330,17 +346,20 @@ fun LoginScreen(
         Unit
     }
 
-    LaunchedEffect(isLoading, isStarting) {
+    LaunchedEffect(isTv, isLoading, isStarting) {
         if (isLoading || isStarting) {
             hideKeyboard()
-            focusManager.clearFocus(force = true)
+            if (!isTv) {
+                focusManager.clearFocus(force = true)
+            }
         }
     }
-    LaunchedEffect(isTv, isStarting, isLoading) {
-        if (isTv && !isStarting && !isLoading) {
+    LaunchedEffect(isTv, isStarting, isLoading, initialTvFocusRequested) {
+        if (isTv && !initialTvFocusRequested && !isStarting && !isLoading) {
             withFrameNanos { }
             hideKeyboard()
             runCatching { tvInitialFocusRequester.requestFocus() }
+            initialTvFocusRequested = true
             withFrameNanos { }
             hideKeyboard()
         }
@@ -690,6 +709,17 @@ private fun LoginPanel(
     val panelShape = RoundedCornerShape(policy.cardRadius)
     val displayedError = errorMessage?.withoutArabicHamzas()
 
+    LaunchedEffect(isLoading, errorMessage, username, password) {
+        if (!isLoading && !errorMessage.isNullOrBlank()) {
+            when (resolveLoginErrorTarget(errorMessage, username, password)) {
+                LoginErrorTarget.ACCESS_CODE -> runCatching { accessRequester.requestFocus() }
+                LoginErrorTarget.USERNAME -> runCatching { usernameRequester.requestFocus() }
+                LoginErrorTarget.PASSWORD -> runCatching { passwordRequester.requestFocus() }
+                LoginErrorTarget.NONE -> Unit
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .then(
@@ -745,7 +775,7 @@ private fun LoginPanel(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (policy.compact) 4.dp else 18.dp))
+        Spacer(Modifier.height(if (policy.compact) 12.dp else 20.dp))
 
         LoginTextField(
             value = accessCode,
@@ -883,10 +913,29 @@ private fun LoginPanel(
 
         if (isTv) {
             Spacer(Modifier.height(4.dp))
+            val errorShape = RoundedCornerShape(10.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(22.dp)
+                    .height(38.dp)
+                    .clip(errorShape)
+                    .background(
+                        if (displayedError != null) {
+                            Color(0xFF4B171A).copy(alpha = .78f)
+                        } else {
+                            Color.Transparent
+                        },
+                    )
+                    .border(
+                        width = if (displayedError != null) 1.dp else 0.dp,
+                        color = if (displayedError != null) {
+                            Color(0xFFFF8A80).copy(alpha = .58f)
+                        } else {
+                            Color.Transparent
+                        },
+                        shape = errorShape,
+                    )
+                    .padding(horizontal = 10.dp)
                     .semantics {
                         if (displayedError != null) {
                             liveRegion = LiveRegionMode.Polite
@@ -897,12 +946,12 @@ private fun LoginPanel(
                 if (displayedError != null) {
                     Text(
                         text = displayedError,
-                        color = Color(0xFFFFB4AB),
+                        color = Color(0xFFFFDAD6),
                         fontSize = if (policy.compact) 12.sp else 13.sp,
-                        lineHeight = if (policy.compact) 16.sp else 18.sp,
-                        fontWeight = FontWeight.Medium,
+                        lineHeight = if (policy.compact) 15.sp else 17.sp,
+                        fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
-                        maxLines = 1,
+                        maxLines = 2,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -1116,7 +1165,7 @@ private fun LoginOption(
                 role = Role.Checkbox,
                 onValueChange = { onClick() },
             )
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+            .padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val checkShape = RoundedCornerShape(6.dp)
@@ -1235,6 +1284,21 @@ private fun LoginActionButton(
                 maxLines = 1,
             )
         }
+    }
+}
+
+private fun resolveLoginErrorTarget(
+    errorMessage: String,
+    username: String,
+    password: String,
+): LoginErrorTarget {
+    val normalized = errorMessage.withoutArabicHamzas()
+    return when {
+        "كود الدخول" in normalized || "كود دخول" in normalized -> LoginErrorTarget.ACCESS_CODE
+        "اسم المستخدم وكلمة المرور" in normalized && username.isBlank() -> LoginErrorTarget.USERNAME
+        "اسم المستخدم وكلمة المرور" in normalized && password.isEmpty() -> LoginErrorTarget.PASSWORD
+        "بيانات الاشتراك غير صحيحة" in normalized -> LoginErrorTarget.USERNAME
+        else -> LoginErrorTarget.NONE
     }
 }
 
