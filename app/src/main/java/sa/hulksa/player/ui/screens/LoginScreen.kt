@@ -486,16 +486,14 @@ fun LoginScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             if (secondaryInBrand) {
-                                Spacer(Modifier.height(if (policy.compact) 24.dp else 30.dp))
+                                Spacer(Modifier.height(if (policy.compact) 30.dp else 32.dp))
                                 LoginSubscriptionAction(
                                     onClick = { showSubscriptionQr = true },
                                     onNonTextFocus = hideKeyboard,
                                     returnRequester = lastCardFocusRequester,
                                     subscribeRequester = subscribeRequester,
                                     policy = policy,
-                                    modifier = Modifier
-                                        .fillMaxWidth(.78f)
-                                        .widthIn(max = 340.dp),
+                                    modifier = Modifier.width(policy.logoSize + 44.dp),
                                 )
                             }
                         }
@@ -523,16 +521,14 @@ fun LoginScreen(
                                 .height(policy.brandRegionHeight),
                         )
                         if (secondaryInBrand) {
-                            Spacer(Modifier.height(if (policy.compact) 16.dp else 22.dp))
+                            Spacer(Modifier.height(if (policy.compact) 24.dp else 28.dp))
                             LoginSubscriptionAction(
                                 onClick = { showSubscriptionQr = true },
                                 onNonTextFocus = hideKeyboard,
                                 returnRequester = lastCardFocusRequester,
                                 subscribeRequester = subscribeRequester,
                                 policy = policy,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .widthIn(max = 340.dp),
+                                modifier = Modifier.width(policy.logoSize + 44.dp),
                             )
                             Spacer(Modifier.height(10.dp))
                         } else {
@@ -979,7 +975,7 @@ private fun LoginPanel(
                         Modifier.fillMaxWidth()
                     },
                 ),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             LoginOption(
                 text = "تذكر الحساب",
@@ -1024,16 +1020,16 @@ private fun LoginPanel(
         }
 
         if (isTv) {
-            Spacer(Modifier.height(if (policy.compact) 9.dp else 11.dp))
+            Spacer(Modifier.height(if (policy.compact) 10.dp else 12.dp))
             val errorShape = RoundedCornerShape(10.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (policy.compact) 40.dp else 42.dp)
+                    .height(if (policy.compact) 38.dp else 40.dp)
                     .clip(errorShape)
                     .background(
                         if (displayedError != null) {
-                            Color(0xFF2B0F12).copy(alpha = .98f)
+                            Color(0xFF240D0F).copy(alpha = .98f)
                         } else {
                             Color.Transparent
                         },
@@ -1041,7 +1037,7 @@ private fun LoginPanel(
                     .border(
                         width = if (displayedError != null) 1.dp else 0.dp,
                         color = if (displayedError != null) {
-                            Color(0xFFCF6670).copy(alpha = .82f)
+                            Color(0xFFA44D56).copy(alpha = .72f)
                         } else {
                             Color.Transparent
                         },
@@ -1063,16 +1059,16 @@ private fun LoginPanel(
                         Icon(
                             imageVector = Icons.Rounded.WarningAmber,
                             contentDescription = null,
-                            tint = Color(0xFFFFB4AB),
+                            tint = Color(0xFFF0A2A2),
                             modifier = Modifier.size(if (policy.compact) 18.dp else 20.dp),
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = displayedError,
-                            color = Color(0xFFFFDAD6),
+                            color = Color(0xFFFFE0DC),
                             fontSize = if (policy.compact) 12.sp else 13.sp,
                             lineHeight = if (policy.compact) 15.sp else 17.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             textAlign = TextAlign.Right,
                             maxLines = 2,
                             modifier = Modifier.weight(1f),
@@ -1094,7 +1090,7 @@ private fun LoginPanel(
         Spacer(
             Modifier.height(
                 if (isTv) {
-                    if (policy.compact) 6.dp else 8.dp
+                    if (policy.compact) 10.dp else 12.dp
                 } else {
                     if (policy.compact) 0.dp else 8.dp
                 },
