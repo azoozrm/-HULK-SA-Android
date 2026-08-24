@@ -202,14 +202,12 @@ private fun resolveLoginLayoutPolicy(
     val logoSize = when {
         isTv -> (minOf(width, height) * .38f).coerceIn(180.dp, 250.dp)
         width >= 600.dp -> (minOf(width, height) * .25f).coerceIn(120.dp, 190.dp)
-        imeVisible -> 60.dp
-        else -> (minOf(width, height) * .20f).coerceIn(68.dp, 88.dp)
+        else -> (width * .20f).coerceIn(68.dp, 88.dp)
     }
     val brandRegionHeight = when {
         composition == LoginComposition.PREMIUM_SPLIT -> height
         width >= 600.dp -> logoSize + 44.dp
-        imeVisible -> 72.dp
-        compactHeight -> 96.dp
+        width < 360.dp -> 96.dp
         else -> 116.dp
     }
     val cardMaxHeight = when {
@@ -1021,7 +1019,7 @@ private fun LoginPanel(
             )
         }
 
-        if (isTv) {
+        if (isTv && displayedError != null) {
             Spacer(Modifier.height(6.dp))
             val errorShape = RoundedCornerShape(10.dp)
             Box(
@@ -1029,56 +1027,42 @@ private fun LoginPanel(
                     .fillMaxWidth()
                     .height(if (policy.compact) 38.dp else 40.dp)
                     .clip(errorShape)
-                    .background(
-                        if (displayedError != null) {
-                            Color(0xFF240D0F).copy(alpha = .98f)
-                        } else {
-                            Color.Transparent
-                        },
-                    )
+                    .background(Color(0xFF240D0F).copy(alpha = .98f))
                     .border(
-                        width = if (displayedError != null) 1.dp else 0.dp,
-                        color = if (displayedError != null) {
-                            Color(0xFFA44D56).copy(alpha = .72f)
-                        } else {
-                            Color.Transparent
-                        },
+                        width = 1.dp,
+                        color = Color(0xFFA44D56).copy(alpha = .72f),
                         shape = errorShape,
                     )
                     .padding(horizontal = 12.dp)
                     .semantics {
-                        if (displayedError != null) {
-                            liveRegion = LiveRegionMode.Polite
-                        }
+                        liveRegion = LiveRegionMode.Polite
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                if (displayedError != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.WarningAmber,
-                            contentDescription = null,
-                            tint = Color(0xFFF0A2A2),
-                            modifier = Modifier.size(if (policy.compact) 18.dp else 20.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = displayedError,
-                            color = Color(0xFFFFE0DC),
-                            fontSize = if (policy.compact) 12.sp else 13.sp,
-                            lineHeight = if (policy.compact) 15.sp else 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Right,
-                            maxLines = 2,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.WarningAmber,
+                        contentDescription = null,
+                        tint = Color(0xFFF0A2A2),
+                        modifier = Modifier.size(if (policy.compact) 18.dp else 20.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = displayedError,
+                        color = Color(0xFFFFE0DC),
+                        fontSize = if (policy.compact) 12.sp else 13.sp,
+                        lineHeight = if (policy.compact) 15.sp else 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Right,
+                        maxLines = 2,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
-        } else if (displayedError != null) {
+        } else if (!isTv && displayedError != null) {
             Spacer(Modifier.height(10.dp))
             Box(
                 modifier = Modifier.semantics {
@@ -1092,7 +1076,7 @@ private fun LoginPanel(
         Spacer(
             Modifier.height(
                 if (isTv) {
-                    6.dp
+                    if (displayedError != null) 6.dp else 10.dp
                 } else {
                     if (policy.compact) 0.dp else 8.dp
                 },
@@ -1123,7 +1107,7 @@ private fun LoginPanel(
         if (showSecondaryAction) {
             Spacer(Modifier.height(if (policy.compact) 4.dp else 9.dp))
             LoginActionButton(
-                text = "اشتراك او تجديد",
+                text = "اشتراك جديد",
                 onClick = onOpenWebsite,
                 enabled = true,
                 loading = false,
