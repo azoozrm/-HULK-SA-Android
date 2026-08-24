@@ -70,6 +70,8 @@ internal fun GrowthQrDialog(
     val colors = LocalHulkColors.current
     val backRequester = remember { FocusRequester() }
     val customUrl = normalizeGrowthCustomQrUrl(link.customQrUrl)
+    val newSubscriptionCopy =
+        destination == GrowthDestination.RENEWAL && link.title == "اشتراك جديد"
     var customImageFailed by remember(customUrl) { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -125,9 +127,10 @@ internal fun GrowthQrDialog(
                     fontWeight = FontWeight.Black,
                 )
                 Text(
-                    text = when (destination) {
-                        GrowthDestination.RENEWAL -> "الموقع الالكتروني"
-                        GrowthDestination.SUPPORT -> "الدعم الفني"
+                    text = when {
+                        newSubscriptionCopy -> "اشتراك جديد"
+                        destination == GrowthDestination.RENEWAL -> "الموقع الالكتروني"
+                        else -> "الدعم الفني"
                     },
                     color = colors.text,
                     fontSize = if (compactHeight) 25.sp else 28.sp,
@@ -136,9 +139,10 @@ internal fun GrowthQrDialog(
                     maxLines = 2,
                 )
                 Text(
-                    text = when (destination) {
-                        GrowthDestination.RENEWAL -> "جدد اشتراكك من موقع HULK SA"
-                        GrowthDestination.SUPPORT -> "تواصل معنا عبر واتساب"
+                    text = when {
+                        newSubscriptionCopy -> "اشترك الان من موقع HULK SA"
+                        destination == GrowthDestination.RENEWAL -> "جدد اشتراكك من موقع HULK SA"
+                        else -> "تواصل معنا عبر واتساب"
                     },
                     color = colors.textMuted,
                     fontSize = if (compactHeight) 14.sp else 15.sp,
