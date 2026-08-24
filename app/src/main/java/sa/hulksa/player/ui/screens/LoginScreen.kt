@@ -259,9 +259,9 @@ private fun resolveLoginLayoutPolicy(
             else -> 50.dp
         },
         optionHeight = when {
-            isTv && compactHeight -> 34.dp
-            isTv -> 38.dp
-            else -> 48.dp
+            isTv && compactHeight -> 30.dp
+            isTv -> 32.dp
+            else -> 40.dp
         },
         logoSize = logoSize,
         brandRegionHeight = brandRegionHeight,
@@ -975,7 +975,7 @@ private fun LoginPanel(
                         Modifier.fillMaxWidth()
                     },
                 ),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             LoginOption(
                 text = "تذكر الحساب",
@@ -1291,7 +1291,7 @@ private fun LoginOption(
                 role = Role.Checkbox,
                 onValueChange = { onClick() },
             )
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+            .padding(horizontal = 9.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val checkShape = RoundedCornerShape(6.dp)
