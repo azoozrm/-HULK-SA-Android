@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -486,14 +487,14 @@ fun LoginScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             if (secondaryInBrand) {
-                                Spacer(Modifier.height(if (policy.compact) 30.dp else 32.dp))
+                                Spacer(Modifier.height(if (policy.compact) 38.dp else 42.dp))
                                 LoginSubscriptionAction(
                                     onClick = { showSubscriptionQr = true },
                                     onNonTextFocus = hideKeyboard,
                                     returnRequester = lastCardFocusRequester,
                                     subscribeRequester = subscribeRequester,
                                     policy = policy,
-                                    modifier = Modifier.width(policy.logoSize + 44.dp),
+                                    modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
                                 )
                             }
                         }
@@ -521,14 +522,14 @@ fun LoginScreen(
                                 .height(policy.brandRegionHeight),
                         )
                         if (secondaryInBrand) {
-                            Spacer(Modifier.height(if (policy.compact) 24.dp else 28.dp))
+                            Spacer(Modifier.height(if (policy.compact) 30.dp else 34.dp))
                             LoginSubscriptionAction(
                                 onClick = { showSubscriptionQr = true },
                                 onNonTextFocus = hideKeyboard,
                                 returnRequester = lastCardFocusRequester,
                                 subscribeRequester = subscribeRequester,
                                 policy = policy,
-                                modifier = Modifier.width(policy.logoSize + 44.dp),
+                                modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
                             )
                             Spacer(Modifier.height(10.dp))
                         } else {
@@ -749,8 +750,9 @@ private fun LoginSubscriptionAction(
         loading = false,
         primary = false,
         featuredSecondary = true,
-        minHeight = policy.secondaryActionHeight + if (policy.compact) 4.dp else 6.dp,
-        textSizeSp = policy.buttonTextSizeSp + 1,
+        leadingIcon = Icons.Rounded.QrCode2,
+        minHeight = policy.secondaryActionHeight,
+        textSizeSp = policy.buttonTextSizeSp,
         onFocused = onNonTextFocus,
         modifier = modifier
             .focusRequester(subscribeRequester)
@@ -1020,7 +1022,7 @@ private fun LoginPanel(
         }
 
         if (isTv) {
-            Spacer(Modifier.height(if (policy.compact) 10.dp else 12.dp))
+            Spacer(Modifier.height(6.dp))
             val errorShape = RoundedCornerShape(10.dp)
             Box(
                 modifier = Modifier
@@ -1090,7 +1092,7 @@ private fun LoginPanel(
         Spacer(
             Modifier.height(
                 if (isTv) {
-                    if (policy.compact) 10.dp else 12.dp
+                    6.dp
                 } else {
                     if (policy.compact) 0.dp else 8.dp
                 },
@@ -1358,17 +1360,18 @@ private fun LoginActionButton(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
     featuredSecondary: Boolean = false,
+    leadingIcon: ImageVector? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(13.dp)
+    val shape = RoundedCornerShape(if (featuredSecondary) 11.dp else 13.dp)
     val background by animateColorAsState(
         targetValue = when {
             !enabled && primary -> colors.gold.copy(alpha = .58f)
             primary && focused -> colors.goldBright
             primary -> colors.gold
-            featuredSecondary && focused -> Color(0xFF302B17)
-            featuredSecondary -> Color(0xFF1A1810)
+            featuredSecondary && focused -> Color(0xFF1E2019)
+            featuredSecondary -> Color(0xFF151710)
             focused -> Color(0xFF24251D)
             else -> Color(0xFF12140F)
         },
@@ -1376,9 +1379,10 @@ private fun LoginActionButton(
     )
     val outline by animateColorAsState(
         targetValue = when {
+            featuredSecondary && focused -> colors.goldBright
+            featuredSecondary -> Color.White.copy(alpha = .12f)
             focused -> colors.goldBright
             primary -> colors.gold.copy(alpha = .64f)
-            featuredSecondary -> colors.gold.copy(alpha = .78f)
             else -> colors.gold.copy(alpha = .44f)
         },
         label = "loginButtonOutline",
@@ -1387,7 +1391,7 @@ private fun LoginActionButton(
     val displayText = if (loading) "جاري الدخول..." else text
     val outlineWidth = when {
         focused -> 2.dp
-        featuredSecondary -> 1.5.dp
+        featuredSecondary -> 1.dp
         else -> 1.dp
     }
 
@@ -1395,8 +1399,8 @@ private fun LoginActionButton(
         modifier = modifier
             .heightIn(min = minHeight)
             .then(
-                if (featuredSecondary) {
-                    Modifier.shadow(6.dp, shape = shape, clip = false)
+                if (featuredSecondary && focused) {
+                    Modifier.shadow(4.dp, shape = shape, clip = false)
                 } else {
                     Modifier
                 },
@@ -1429,6 +1433,13 @@ private fun LoginActionButton(
                     modifier = Modifier.size(19.dp),
                     color = textColor,
                     strokeWidth = 2.dp,
+                )
+            } else if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(if (featuredSecondary) 19.dp else 20.dp),
                 )
             }
             Text(
