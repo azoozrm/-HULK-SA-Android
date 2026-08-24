@@ -203,9 +203,8 @@ private fun resolveLoginLayoutPolicy(
     }
     val brandRegionHeight = when {
         composition == LoginComposition.PREMIUM_SPLIT -> height
+        width >= 600.dp -> logoSize + 44.dp
         imeVisible -> 72.dp
-        width >= 840.dp -> 176.dp
-        width >= 600.dp -> 152.dp
         compactHeight -> 96.dp
         else -> 116.dp
     }
@@ -300,6 +299,8 @@ fun LoginScreen(
     val density = LocalDensity.current
     val activity = remember(view.context) { view.context.findActivity() }
     val tvInitialFocusRequester = remember { FocusRequester() }
+    val submitRequester = remember { FocusRequester() }
+    val subscribeRequester = remember { FocusRequester() }
     var initialTvFocusRequested by remember { mutableStateOf(false) }
     val persistedAccessCode = remember(view.context) {
         sa.hulksa.player.data.AccountSessionStore(view.context).lastAccessCode().orEmpty()
@@ -382,6 +383,7 @@ fun LoginScreen(
                 fontScale = density.fontScale,
                 imeVisible = imeVisible,
             )
+            val secondaryInBrand = isTv || maxWidth >= 600.dp
 
             PremiumCinematicBackground(Modifier.fillMaxSize())
 
@@ -412,6 +414,9 @@ fun LoginScreen(
                     onOpenWebsite = openWebsite,
                     onNonTextFocus = hideKeyboard,
                     initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
+                    showSecondaryAction = !secondaryInBrand,
+                    submitRequester = submitRequester,
+                    subscribeRequester = subscribeRequester,
                     policy = policy,
                     modifier = modifier,
                 )
@@ -455,12 +460,31 @@ fun LoginScreen(
 
                         Spacer(Modifier.width(policy.splitGap))
 
-                        LoginBrandRegion(
-                            logoSize = policy.logoSize,
+                        Column(
                             modifier = Modifier
                                 .weight(.92f)
                                 .fillMaxHeight(),
-                        )
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            LoginBrandRegion(
+                                logoSize = policy.logoSize,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (secondaryInBrand) {
+                                Spacer(Modifier.height(if (policy.compact) 12.dp else 18.dp))
+                                LoginSubscriptionAction(
+                                    onOpenWebsite = openWebsite,
+                                    onNonTextFocus = hideKeyboard,
+                                    submitRequester = submitRequester,
+                                    subscribeRequester = subscribeRequester,
+                                    policy = policy,
+                                    modifier = Modifier
+                                        .fillMaxWidth(.72f)
+                                        .widthIn(max = 320.dp),
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -484,7 +508,22 @@ fun LoginScreen(
                                 .fillMaxWidth()
                                 .height(policy.brandRegionHeight),
                         )
-                        Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
+                        if (secondaryInBrand) {
+                            Spacer(Modifier.height(8.dp))
+                            LoginSubscriptionAction(
+                                onOpenWebsite = openWebsite,
+                                onNonTextFocus = hideKeyboard,
+                                submitRequester = submitRequester,
+                                subscribeRequester = subscribeRequester,
+                                policy = policy,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 320.dp),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                        } else {
+                            Spacer(Modifier.height(if (policy.compact) 4.dp else 10.dp))
+                        }
                         panel(
                             Modifier
                                 .widthIn(max = policy.cardMaxWidth)
@@ -677,6 +716,52 @@ private fun LoginBrandRegion(
 }
 
 @Composable
+private fun LoginSubscriptionAction(
+    onOpenWebsite: () -> Unit,
+    onNonTextFocus: () -> Unit,
+    submitRequester: FocusRequester,
+    subscribeRequester: FocusRequester,
+    policy: LoginLayoutPolicy,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        LoginActionButton(
+            text = "اشتراك او تجديد",
+            onClick = onOpenWebsite,
+            enabled = true,
+            loading = false,
+            primary = false,
+            minHeight = policy.secondaryActionHeight,
+            textSizeSp = policy.buttonTextSizeSp,
+            onFocused = onNonTextFocus,
+            modifier = Modifier
+                .focusRequester(subscribeRequester)
+                .focusProperties {
+                    up = submitRequester
+                    down = FocusRequester.Cancel
+                    left = FocusRequester.Cancel
+                    right = FocusRequester.Cancel
+                }
+                .fillMaxWidth(),
+        )
+        Spacer(Modifier.height(if (policy.compact) 4.dp else 7.dp))
+        Text(
+            text = "hulksa.com",
+            color = colors.textMuted.copy(alpha = .78f),
+            fontSize = if (policy.compact) 11.sp else 12.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
 private fun LoginPanel(
     accessCode: String,
     onAccessCodeChange: (String) -> Unit,
@@ -695,6 +780,9 @@ private fun LoginPanel(
     onOpenWebsite: () -> Unit,
     onNonTextFocus: () -> Unit,
     initialFocusRequester: FocusRequester?,
+    showSecondaryAction: Boolean,
+    submitRequester: FocusRequester,
+    subscribeRequester: FocusRequester,
     policy: LoginLayoutPolicy,
     modifier: Modifier = Modifier,
 ) {
@@ -704,8 +792,6 @@ private fun LoginPanel(
     val passwordRequester = remember { FocusRequester() }
     val rememberRequester = remember { FocusRequester() }
     val showPasswordRequester = remember { FocusRequester() }
-    val submitRequester = remember { FocusRequester() }
-    val subscribeRequester = remember { FocusRequester() }
     val panelScrollState = rememberScrollState()
     val panelShape = RoundedCornerShape(policy.cardRadius)
     val displayedError = errorMessage?.withoutArabicHamzas()
@@ -988,35 +1074,37 @@ private fun LoginPanel(
                 }
                 .fillMaxWidth(),
         )
-        Spacer(Modifier.height(if (policy.compact) 4.dp else 9.dp))
-        LoginActionButton(
-            text = "اشتراك او تجديد",
-            onClick = onOpenWebsite,
-            enabled = true,
-            loading = false,
-            primary = false,
-            minHeight = policy.secondaryActionHeight,
-            textSizeSp = policy.buttonTextSizeSp,
-            onFocused = onNonTextFocus,
-            modifier = Modifier
-                .focusRequester(subscribeRequester)
-                .focusProperties {
-                    up = submitRequester
-                    down = FocusRequester.Cancel
-                    left = FocusRequester.Cancel
-                    right = FocusRequester.Cancel
-                }
-                .fillMaxWidth(),
-        )
-        Spacer(Modifier.height(if (policy.compact) 2.dp else 8.dp))
-        Text(
-            text = "hulksa.com",
-            color = colors.textMuted.copy(alpha = .78f),
-            fontSize = if (policy.compact) 11.sp else 12.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (showSecondaryAction) {
+            Spacer(Modifier.height(if (policy.compact) 4.dp else 9.dp))
+            LoginActionButton(
+                text = "اشتراك او تجديد",
+                onClick = onOpenWebsite,
+                enabled = true,
+                loading = false,
+                primary = false,
+                minHeight = policy.secondaryActionHeight,
+                textSizeSp = policy.buttonTextSizeSp,
+                onFocused = onNonTextFocus,
+                modifier = Modifier
+                    .focusRequester(subscribeRequester)
+                    .focusProperties {
+                        up = submitRequester
+                        down = FocusRequester.Cancel
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    }
+                    .fillMaxWidth(),
+            )
+            Spacer(Modifier.height(if (policy.compact) 2.dp else 8.dp))
+            Text(
+                text = "hulksa.com",
+                color = colors.textMuted.copy(alpha = .78f),
+                fontSize = if (policy.compact) 11.sp else 12.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
