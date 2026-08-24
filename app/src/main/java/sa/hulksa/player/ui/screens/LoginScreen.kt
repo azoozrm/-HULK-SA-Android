@@ -229,7 +229,7 @@ private fun resolveLoginLayoutPolicy(
             else -> 22.dp
         },
         cardVerticalPadding = when {
-            isTv && compactHeight -> 18.dp
+            isTv && compactHeight -> 16.dp
             isTv && height >= 720.dp -> 30.dp
             isTv -> 26.dp
             compactHeight -> 20.dp
@@ -258,8 +258,8 @@ private fun resolveLoginLayoutPolicy(
             else -> 50.dp
         },
         optionHeight = when {
-            isTv && compactHeight -> 38.dp
-            isTv -> 42.dp
+            isTv && compactHeight -> 34.dp
+            isTv -> 38.dp
             else -> 48.dp
         },
         logoSize = logoSize,
@@ -861,7 +861,7 @@ private fun LoginPanel(
             ),
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
         )
-        Spacer(Modifier.height(if (policy.compact) 1.dp else 8.dp))
+        Spacer(Modifier.height(if (policy.compact) 0.dp else 6.dp))
 
         LoginOption(
             text = "تذكر الحساب",
@@ -913,12 +913,12 @@ private fun LoginPanel(
         )
 
         if (isTv) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             val errorShape = RoundedCornerShape(10.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(38.dp)
+                    .height(34.dp)
                     .clip(errorShape)
                     .background(
                         if (displayedError != null) {
@@ -968,7 +968,7 @@ private fun LoginPanel(
             }
         }
 
-        Spacer(Modifier.height(if (policy.compact) 2.dp else 13.dp))
+        Spacer(Modifier.height(if (policy.compact) 0.dp else 8.dp))
         LoginActionButton(
             text = "دخول الى HULK",
             onClick = onSubmit,
@@ -1166,7 +1166,7 @@ private fun LoginOption(
                 role = Role.Checkbox,
                 onValueChange = { onClick() },
             )
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val checkShape = RoundedCornerShape(6.dp)
