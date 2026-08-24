@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -949,15 +950,18 @@ private fun LoginPanel(
             ),
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
         )
-        Spacer(Modifier.height(if (policy.compact) 0.dp else 6.dp))
 
-        LoginOption(
-            text = "تذكر الحساب",
-            checked = rememberAccount,
-            onClick = onRememberChange,
-            onFocused = onNonTextFocus,
-            minHeight = policy.optionHeight,
-            textSizeSp = policy.optionTextSizeSp,
+        Spacer(
+            Modifier.height(
+                if (isTv) {
+                    if (policy.compact) 10.dp else 14.dp
+                } else {
+                    if (policy.compact) 8.dp else 12.dp
+                },
+            ),
+        )
+
+        Column(
             modifier = Modifier
                 .align(Alignment.Start)
                 .then(
@@ -966,51 +970,56 @@ private fun LoginPanel(
                     } else {
                         Modifier.fillMaxWidth()
                     },
-                )
-                .focusRequester(rememberRequester)
-                .focusProperties {
-                    up = passwordRequester
-                    down = showPasswordRequester
-                    left = FocusRequester.Cancel
-                    right = FocusRequester.Cancel
-                },
-        )
-        LoginOption(
-            text = "اظهر كلمة المرور",
-            checked = showPassword,
-            onClick = onShowPasswordChange,
-            onFocused = onNonTextFocus,
-            minHeight = policy.optionHeight,
-            textSizeSp = policy.optionTextSizeSp,
-            modifier = Modifier
-                .align(Alignment.Start)
-                .then(
-                    if (isTv) {
-                        Modifier.widthIn(min = 220.dp, max = 320.dp)
-                    } else {
-                        Modifier.fillMaxWidth()
+                ),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            LoginOption(
+                text = "تذكر الحساب",
+                checked = rememberAccount,
+                onClick = onRememberChange,
+                onFocused = onNonTextFocus,
+                minHeight = policy.optionHeight,
+                textSizeSp = policy.optionTextSizeSp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(rememberRequester)
+                    .focusProperties {
+                        up = passwordRequester
+                        down = showPasswordRequester
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
                     },
-                )
-                .focusRequester(showPasswordRequester)
-                .focusProperties {
-                    up = rememberRequester
-                    down = submitRequester
-                    left = FocusRequester.Cancel
-                    right = FocusRequester.Cancel
-                },
-        )
+            )
+            LoginOption(
+                text = "اظهر كلمة المرور",
+                checked = showPassword,
+                onClick = onShowPasswordChange,
+                onFocused = onNonTextFocus,
+                minHeight = policy.optionHeight,
+                textSizeSp = policy.optionTextSizeSp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(showPasswordRequester)
+                    .focusProperties {
+                        up = rememberRequester
+                        down = submitRequester
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    },
+            )
+        }
 
         if (isTv) {
-            Spacer(Modifier.height(2.dp))
-            val errorShape = RoundedCornerShape(10.dp)
+            Spacer(Modifier.height(if (policy.compact) 7.dp else 9.dp))
+            val errorShape = RoundedCornerShape(9.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp)
+                    .height(32.dp)
                     .clip(errorShape)
                     .background(
                         if (displayedError != null) {
-                            Color(0xFF4B171A).copy(alpha = .78f)
+                            Color(0xFF351214).copy(alpha = .94f)
                         } else {
                             Color.Transparent
                         },
@@ -1018,13 +1027,13 @@ private fun LoginPanel(
                     .border(
                         width = if (displayedError != null) 1.dp else 0.dp,
                         color = if (displayedError != null) {
-                            Color(0xFFFF8A80).copy(alpha = .58f)
+                            Color(0xFFB85C63).copy(alpha = .72f)
                         } else {
                             Color.Transparent
                         },
                         shape = errorShape,
                     )
-                    .padding(horizontal = 10.dp)
+                    .padding(horizontal = 9.dp)
                     .semantics {
                         if (displayedError != null) {
                             liveRegion = LiveRegionMode.Polite
@@ -1033,20 +1042,32 @@ private fun LoginPanel(
                 contentAlignment = Alignment.Center,
             ) {
                 if (displayedError != null) {
-                    Text(
-                        text = displayedError,
-                        color = Color(0xFFFFDAD6),
-                        fontSize = if (policy.compact) 12.sp else 13.sp,
-                        lineHeight = if (policy.compact) 15.sp else 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.WarningAmber,
+                            contentDescription = null,
+                            tint = Color(0xFFFFA8A8),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = displayedError,
+                            color = Color(0xFFFFDAD6),
+                            fontSize = if (policy.compact) 11.sp else 12.sp,
+                            lineHeight = if (policy.compact) 14.sp else 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Right,
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         } else if (displayedError != null) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Box(
                 modifier = Modifier.semantics {
                     liveRegion = LiveRegionMode.Polite
