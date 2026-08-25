@@ -28,10 +28,12 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.AccountScopeStore
 import sa.hulksa.player.data.HulkRepository
 import sa.hulksa.player.data.OperationsServiceStatus
 import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.ProfilePinCredentialStore
+import sa.hulksa.player.data.ProfileContentSearchHistoryStore
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
@@ -49,6 +51,7 @@ import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
 import sa.hulksa.player.ui.screens.RequiredUpdateScreen
+import sa.hulksa.player.ui.screens.removeLiveTvProProfileState
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
 
@@ -59,6 +62,7 @@ fun ProfileAwareHulkApp(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    val accountScopeStore = remember(context) { AccountScopeStore(context) }
     val profileStore = remember(context) { ProfileStore(context) }
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
     val profilePinCredentialStore = remember(context) { ProfilePinCredentialStore(context) }
@@ -525,8 +529,14 @@ fun ProfileAwareHulkApp(
                 success
             },
             onDelete = { profileId ->
+                val accountId = accountScopeStore.activeAccountId()
                 val deleted = profileStore.deleteProfile(profileId)
                 if (deleted) {
+                    if (accountId != null) {
+                        ProfileContentSearchHistoryStore(context)
+                            .removeProfileHistory(accountId, profileId)
+                        context.removeLiveTvProProfileState(accountId, profileId)
+                    }
                     profilePinCredentialStore.clearPin(profileId)
                     profilePreferencesStore.removeProfilePreferences(profileId)
                     navigationMemoryByProfile.remove(profileId)

@@ -121,7 +121,6 @@ private const val CONTROLS_TIMEOUT_MS = 5_000L
 private const val PLAYER_FAVORITES_CATEGORY = "__player_favorites__"
 private const val PLAYER_CONTINUE_CATEGORY = "__player_continue__"
 private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
-private const val LIVE_PLAYER_HISTORY_PREFS = "live_player_history"
 private const val PREF_IDS = "ids"
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
@@ -1862,24 +1861,17 @@ private fun LiveChannelBrowser(
         categoryOrderPrefs.edit().putString(PREF_IDS, values.joinToString(",")).apply()
     }
 
-    val liveHistoryPrefs = remember(context) {
-        context.getSharedPreferences(LIVE_PLAYER_HISTORY_PREFS, Context.MODE_PRIVATE)
+    val liveProfileScope = context.liveTvProStateScope()
+    var recentChannelIds by remember(catalog, liveProfileScope) {
+        mutableStateOf(context.liveTvProRecentChannelIds())
     }
-    var recentChannelIds by remember(catalog) {
-        mutableStateOf(
-            liveHistoryPrefs.getString(PREF_IDS, "")
-                .orEmpty()
-                .split(',')
-                .mapNotNull(String::toIntOrNull),
-        )
-    }
-    LaunchedEffect(currentStreamId, catalog) {
+    LaunchedEffect(currentStreamId, catalog, liveProfileScope) {
         if (catalog?.items?.any { it.id == currentStreamId } == true) {
             val updated = (listOf(currentStreamId) + recentChannelIds.filterNot { it == currentStreamId })
                 .take(60)
             if (updated != recentChannelIds) {
                 recentChannelIds = updated
-                liveHistoryPrefs.edit().putString(PREF_IDS, updated.joinToString(",")).apply()
+                context.saveLiveTvProRecentChannelIds(updated)
             }
         }
     }
