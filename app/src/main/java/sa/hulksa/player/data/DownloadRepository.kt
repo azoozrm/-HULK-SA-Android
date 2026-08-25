@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -37,9 +38,14 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlin.math.max
 
-class DownloadRepository(context: Context) {
+class DownloadRepository internal constructor(
+    context: Context,
+    internal val accountId: String,
+    private val preferences: SharedPreferences,
+) {
     private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val accountScopeStore = AccountScopeStore(appContext)
+    private val accountSessionStore = AccountSessionStore(appContext)
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
@@ -56,9 +62,12 @@ class DownloadRepository(context: Context) {
     private val calls = ConcurrentHashMap<Long, Call>()
     private val lock = Any()
     private val nextId = AtomicLong(System.currentTimeMillis())
+    @Volatile
+    private var accountBoundarySuspended = false
     private var cache = readStored().map(::recoverInterruptedState).toMutableList()
 
     init {
+        require(accountId.isNotBlank()) { "accountId must not be blank" }
         synchronized(lock) {
             normalizeQueueLocked()
             writeStoredLocked()
@@ -88,6 +97,20 @@ class DownloadRepository(context: Context) {
         }
         schedule()
         return snapshot
+    }
+
+    internal fun record(downloadId: Long): OfflineDownload? = item(downloadId)
+
+    internal fun suspendForAccountBoundary() {
+        accountBoundarySuspended = true
+        calls.values.forEach(Call::cancel)
+        jobs.values.forEach(Job::cancel)
+        synchronized(lock) {
+            cache = suspendDownloadsForAccountBoundary(cache).toMutableList()
+            writeStoredLocked(synchronous = true)
+        }
+        calls.clear()
+        jobs.clear()
     }
 
     fun settings(): DownloadSettings = DownloadSettings(
@@ -275,6 +298,18 @@ class DownloadRepository(context: Context) {
     }
 
     private fun schedule() {
+        if (accountBoundarySuspended) return
+        val metadata = accountSessionStore.metadata()
+        if (
+            metadata == null ||
+            metadata.isExpired() ||
+            authenticatedDownloadAccountId(
+                session = AuthenticatedSessionRegistry.current(),
+                metadata = metadata,
+            ) != accountId
+        ) {
+            return
+        }
         val limit = settings().concurrentDownloads
         val availableSlots = (limit - jobs.values.count { it.isActive }).coerceAtLeast(0)
         if (availableSlots == 0) return
@@ -322,6 +357,7 @@ class DownloadRepository(context: Context) {
     private suspend fun runDownload(downloadId: Long) {
         var attempt = item(downloadId)?.retryCount ?: 0
         while (currentCoroutineContext().isActive) {
+            if (accountScopeStore.activeAccountId() != accountId) return
             val current = item(downloadId) ?: return
             if (current.status == OfflineStatus.PAUSED || current.status == OfflineStatus.COMPLETED) return
 
@@ -863,7 +899,9 @@ class DownloadRepository(context: Context) {
     private fun selectedStorageTarget(): StorageTarget? {
         val targets = storageTargets()
         val preferred = preferences.getString(KEY_STORAGE_PATH, null)
-        return targets.firstOrNull { it.directory.absolutePath == preferred }
+        return targets.firstOrNull {
+            it.directory.absolutePath == preferred || it.directory.parentFile?.absolutePath == preferred
+        }
             ?: targets.firstOrNull { !it.removable }
             ?: targets.firstOrNull()
     }
@@ -882,8 +920,12 @@ class DownloadRepository(context: Context) {
     private fun storageTargets(): List<StorageTarget> = appContext
         .getExternalFilesDirs(Environment.DIRECTORY_MOVIES)
         .filterNotNull()
-        .mapIndexedNotNull { index, directory ->
+        .mapIndexedNotNull { index, baseDirectory ->
             runCatching {
+                val directory = File(
+                    baseDirectory,
+                    downloadAccountDirectoryName(accountId),
+                )
                 if (!directory.exists()) directory.mkdirs()
                 val removable = Environment.isExternalStorageRemovable(directory)
                 StorageTarget(
@@ -941,6 +983,7 @@ class DownloadRepository(context: Context) {
 
     private fun update(downloadId: Long, replacement: OfflineDownload) {
         synchronized(lock) {
+            if (accountBoundarySuspended) return
             val index = cache.indexOfFirst { it.downloadId == downloadId }
             if (index >= 0) {
                 cache[index] = replacement
@@ -950,7 +993,10 @@ class DownloadRepository(context: Context) {
     }
 
     private inline fun mutate(downloadId: Long, transform: (OfflineDownload) -> OfflineDownload) {
-        synchronized(lock) { mutateLocked(downloadId, transform) }
+        synchronized(lock) {
+            if (accountBoundarySuspended) return
+            mutateLocked(downloadId, transform)
+        }
     }
 
     private inline fun mutateLocked(downloadId: Long, transform: (OfflineDownload) -> OfflineDownload) {
@@ -1046,7 +1092,7 @@ class DownloadRepository(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    private fun writeStoredLocked() {
+    private fun writeStoredLocked(synchronous: Boolean = false) {
         val array = JSONArray()
         cache.forEach { item ->
             array.put(
@@ -1081,7 +1127,8 @@ class DownloadRepository(context: Context) {
                     .put("createdAtEpochMs", item.createdAtEpochMs),
             )
         }
-        preferences.edit().putString(KEY_DOWNLOADS, array.toString()).apply()
+        val editor = preferences.edit().putString(KEY_DOWNLOADS, array.toString())
+        if (synchronous) editor.commit() else editor.apply()
     }
 
     private fun parseTotalFromContentRange(value: String?): Long {
@@ -1144,7 +1191,6 @@ class DownloadRepository(context: Context) {
     private class PermanentDownloadException(message: String) : IOException(message)
 
     private companion object {
-        const val PREFERENCES_NAME = "hulk_downloads"
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_WIFI_ONLY = "wifi_only"
         const val KEY_SCHEDULE_MODE = "schedule_mode"
@@ -1182,6 +1228,27 @@ class DownloadRepository(context: Context) {
 internal const val DOWNLOAD_STALL_TIMEOUT_SECONDS = 30L
 internal const val DOWNLOAD_USER_AGENT = "HULK-SA-Android/0.9.3"
 internal const val DOWNLOAD_RANGE_CHUNK_BYTES = 4L * 1024L * 1024L
+
+internal fun suspendDownloadsForAccountBoundary(
+    records: List<OfflineDownload>,
+): List<OfflineDownload> = records.map { item ->
+    if (
+        item.status == OfflineStatus.QUEUED ||
+        item.status == OfflineStatus.CHECKING ||
+        item.status == OfflineStatus.DOWNLOADING ||
+        item.status == OfflineStatus.WAITING_SCHEDULE ||
+        item.status == OfflineStatus.WAITING_NETWORK ||
+        item.status == OfflineStatus.WAITING_STORAGE
+    ) {
+        item.copy(
+            status = OfflineStatus.PAUSED,
+            bytesPerSecond = 0L,
+            etaSeconds = -1L,
+        )
+    } else {
+        item
+    }
+}
 
 internal fun ensureDownloadContextActive(context: CoroutineContext) {
     context.ensureActive()

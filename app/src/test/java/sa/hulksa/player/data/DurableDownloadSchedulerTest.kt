@@ -7,13 +7,17 @@ class DurableDownloadSchedulerTest {
     @Test
     fun immediateDownloadUsesConnectedNetworkAndNoDelay() {
         val plan = durableDownloadWorkPlan(
+            accountId = "account-a",
             downloadId = 42L,
             wifiOnly = false,
             scheduledAtEpochMs = 0L,
             nowEpochMs = 10_000L,
         )
 
-        assertEquals("hulk_durable_download_42", plan.uniqueWorkName)
+        assertEquals(
+            durableDownloadUniqueWorkName("account-a", 42L),
+            plan.uniqueWorkName,
+        )
         assertEquals(0L, plan.initialDelayMs)
         assertEquals(30_000L, plan.backoffDelayMs)
         assertEquals(DurableDownloadNetworkRequirement.CONNECTED, plan.networkRequirement)
@@ -22,6 +26,7 @@ class DurableDownloadSchedulerTest {
     @Test
     fun wifiOnlyDownloadUsesUnmeteredConstraint() {
         val plan = durableDownloadWorkPlan(
+            accountId = "account-a",
             downloadId = 7L,
             wifiOnly = true,
             scheduledAtEpochMs = 0L,
@@ -34,6 +39,7 @@ class DurableDownloadSchedulerTest {
     @Test
     fun futureNightScheduleBecomesInitialDelay() {
         val plan = durableDownloadWorkPlan(
+            accountId = "account-a",
             downloadId = 9L,
             wifiOnly = false,
             scheduledAtEpochMs = 25_000L,
@@ -46,6 +52,7 @@ class DurableDownloadSchedulerTest {
     @Test
     fun elapsedScheduleNeverCreatesNegativeDelay() {
         val plan = durableDownloadWorkPlan(
+            accountId = "account-a",
             downloadId = 11L,
             wifiOnly = false,
             scheduledAtEpochMs = 5_000L,
@@ -58,6 +65,7 @@ class DurableDownloadSchedulerTest {
     @Test(expected = IllegalArgumentException::class)
     fun invalidDownloadIdIsRejected() {
         durableDownloadWorkPlan(
+            accountId = "account-a",
             downloadId = 0L,
             wifiOnly = false,
             scheduledAtEpochMs = 0L,

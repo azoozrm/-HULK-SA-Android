@@ -6,6 +6,7 @@ import org.json.JSONArray
 import sa.hulksa.player.model.OfflineStatus
 
 internal data class DurableDownloadPersistedRecord(
+    val accountId: String,
     val downloadId: Long,
     val title: String?,
     val status: OfflineStatus,
@@ -23,6 +24,7 @@ internal enum class DurableDownloadLifecycleAction {
 }
 
 internal data class DurableDownloadSchedulingState(
+    val accountId: String,
     val action: DurableDownloadLifecycleAction,
     val title: String?,
     val wifiOnly: Boolean,
@@ -50,6 +52,7 @@ internal fun durableDownloadSchedulingState(
     record: DurableDownloadPersistedRecord,
     wifiOnly: Boolean,
 ): DurableDownloadSchedulingState = DurableDownloadSchedulingState(
+    accountId = record.accountId,
     action = durableDownloadLifecycleAction(record.status),
     title = record.title,
     wifiOnly = wifiOnly,
@@ -74,10 +77,13 @@ internal fun shouldApplyDurableDownloadSchedulingState(
     return true
 }
 
-internal class DurableDownloadPreferenceStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
+internal class DurableDownloadPreferenceStore(
+    context: Context,
+    private val accountId: String,
+) {
+    private val preferences = DownloadAccountStorage(context.applicationContext).preferences(
         PREFERENCES_NAME,
-        Context.MODE_PRIVATE,
+        accountId,
     )
 
     fun snapshot(): DurableDownloadPreferenceSnapshot = DurableDownloadPreferenceSnapshot(
@@ -109,6 +115,7 @@ internal class DurableDownloadPreferenceStore(context: Context) {
                     }.getOrDefault(OfflineStatus.QUEUED)
                     add(
                         DurableDownloadPersistedRecord(
+                            accountId = accountId,
                             downloadId = downloadId,
                             title = data.optString("title").trim().takeIf(String::isNotEmpty),
                             status = status,

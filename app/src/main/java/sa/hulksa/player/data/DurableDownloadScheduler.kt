@@ -19,6 +19,7 @@ internal enum class DurableDownloadNetworkRequirement {
 }
 
 internal data class DurableDownloadWorkPlan(
+    val accountId: String,
     val downloadId: Long,
     val uniqueWorkName: String,
     val initialDelayMs: Long,
@@ -27,15 +28,19 @@ internal data class DurableDownloadWorkPlan(
 )
 
 internal fun durableDownloadWorkPlan(
+    accountId: String,
     downloadId: Long,
     wifiOnly: Boolean,
     scheduledAtEpochMs: Long,
     nowEpochMs: Long = System.currentTimeMillis(),
 ): DurableDownloadWorkPlan {
+    validateDownloadAccountId(accountId)
     require(downloadId > 0L) { "downloadId must be positive" }
+    val normalizedAccountId = accountId.trim()
     return DurableDownloadWorkPlan(
+        accountId = normalizedAccountId,
         downloadId = downloadId,
-        uniqueWorkName = "$UNIQUE_WORK_PREFIX$downloadId",
+        uniqueWorkName = durableDownloadUniqueWorkName(normalizedAccountId, downloadId),
         initialDelayMs = (scheduledAtEpochMs - nowEpochMs).coerceAtLeast(0L),
         backoffDelayMs = DURABLE_DOWNLOAD_BACKOFF_MS,
         networkRequirement = if (wifiOnly) {
@@ -46,17 +51,67 @@ internal fun durableDownloadWorkPlan(
     )
 }
 
+internal fun validateDownloadAccountId(accountId: String) {
+    require(accountId.isNotBlank()) { "accountId must not be blank" }
+}
+
+internal fun durableDownloadUniqueWorkName(accountId: String, downloadId: Long): String {
+    validateDownloadAccountId(accountId)
+    require(downloadId > 0L) { "downloadId must be positive" }
+    return "$UNIQUE_WORK_PREFIX${downloadAccountStorageKey(accountId)}_$downloadId"
+}
+
+internal fun durableDownloadAccountTag(accountId: String): String {
+    validateDownloadAccountId(accountId)
+    return "$DURABLE_DOWNLOAD_ACCOUNT_TAG_PREFIX${downloadAccountStorageKey(accountId)}"
+}
+
+internal enum class DownloadWorkerSessionGate {
+    ALLOW,
+    RETRY,
+    TERMINAL,
+}
+
+internal fun downloadWorkerSessionGate(
+    workerAccountId: String,
+    activeAccountId: String?,
+    metadata: AccountSessionMetadata?,
+    hasAuthenticatedSession: Boolean,
+    authenticatedSessionMatches: Boolean,
+): DownloadWorkerSessionGate {
+    val normalizedWorkerAccountId = workerAccountId.trim().takeIf(String::isNotEmpty)
+        ?: return DownloadWorkerSessionGate.TERMINAL
+    if (activeAccountId?.trim() != normalizedWorkerAccountId) {
+        return DownloadWorkerSessionGate.TERMINAL
+    }
+    if (metadata == null) return DownloadWorkerSessionGate.RETRY
+    if (
+        metadata.isExpired() ||
+        metadata.accountId.trim() != normalizedWorkerAccountId
+    ) {
+        return DownloadWorkerSessionGate.TERMINAL
+    }
+    if (!hasAuthenticatedSession) return DownloadWorkerSessionGate.RETRY
+    return if (authenticatedSessionMatches) {
+        DownloadWorkerSessionGate.ALLOW
+    } else {
+        DownloadWorkerSessionGate.TERMINAL
+    }
+}
+
 internal class DurableDownloadScheduler(
     context: Context,
     private val workManager: WorkManager = WorkManager.getInstance(context.applicationContext),
 ) {
     fun enqueue(
+        accountId: String,
         downloadId: Long,
         wifiOnly: Boolean,
         scheduledAtEpochMs: Long,
         title: String? = null,
     ) {
         val plan = durableDownloadWorkPlan(
+            accountId = accountId,
             downloadId = downloadId,
             wifiOnly = wifiOnly,
             scheduledAtEpochMs = scheduledAtEpochMs,
@@ -68,8 +123,12 @@ internal class DurableDownloadScheduler(
         )
     }
 
-    fun cancel(downloadId: Long) {
-        workManager.cancelUniqueWork("$UNIQUE_WORK_PREFIX$downloadId")
+    fun cancel(accountId: String, downloadId: Long) {
+        workManager.cancelUniqueWork(durableDownloadUniqueWorkName(accountId, downloadId))
+    }
+
+    fun cancelAccount(accountId: String) {
+        workManager.cancelAllWorkByTag(durableDownloadAccountTag(accountId))
     }
 }
 
@@ -83,6 +142,7 @@ private fun DurableDownloadWorkPlan.toWorkRequest(title: String?): OneTimeWorkRe
         .setRequiresStorageNotLow(true)
         .build()
     val input = Data.Builder()
+        .putString(KEY_DOWNLOAD_ACCOUNT_ID, accountId)
         .putLong(KEY_DOWNLOAD_ID, downloadId)
         .apply {
             title?.trim()?.takeIf(String::isNotEmpty)?.let { putString(KEY_DOWNLOAD_TITLE, it) }
@@ -98,6 +158,7 @@ private fun DurableDownloadWorkPlan.toWorkRequest(title: String?): OneTimeWorkRe
             TimeUnit.MILLISECONDS,
         )
         .addTag(DURABLE_DOWNLOAD_TAG)
+        .addTag(durableDownloadAccountTag(accountId))
         .build()
 }
 
@@ -106,15 +167,35 @@ internal class DownloadCoordinatorWorker(
     workerParameters: WorkerParameters,
 ) : CoroutineWorker(appContext, workerParameters) {
     override suspend fun doWork(): Result {
+        val accountId = inputData.getString(KEY_DOWNLOAD_ACCOUNT_ID)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: return Result.failure()
         val downloadId = inputData.getLong(KEY_DOWNLOAD_ID, -1L)
         if (downloadId <= 0L) return Result.failure()
+        val metadata = AccountSessionStore(applicationContext).metadata()
+        val session = AuthenticatedSessionRegistry.current()
+        when (
+            downloadWorkerSessionGate(
+                workerAccountId = accountId,
+                activeAccountId = AccountScopeStore(applicationContext).activeAccountId(),
+                metadata = metadata,
+                hasAuthenticatedSession = session != null,
+                authenticatedSessionMatches =
+                    authenticatedDownloadAccountId(session, metadata) == accountId,
+            )
+        ) {
+            DownloadWorkerSessionGate.TERMINAL -> return Result.success()
+            DownloadWorkerSessionGate.RETRY -> return Result.retry()
+            DownloadWorkerSessionGate.ALLOW -> Unit
+        }
         setForeground(
             DurableDownloadForeground(applicationContext).createInfo(
                 downloadId = downloadId,
                 title = inputData.getString(KEY_DOWNLOAD_TITLE),
             ),
         )
-        return when (DownloadExecutionEntryPoint(applicationContext).execute(downloadId)) {
+        return when (DownloadExecutionEntryPoint(applicationContext).execute(accountId, downloadId)) {
             DurableDownloadExecutionResult.COMPLETED,
             DurableDownloadExecutionResult.TERMINAL,
             -> Result.success()
@@ -125,7 +206,9 @@ internal class DownloadCoordinatorWorker(
 }
 
 internal const val KEY_DOWNLOAD_ID = "download_id"
+internal const val KEY_DOWNLOAD_ACCOUNT_ID = "download_account_id"
 internal const val KEY_DOWNLOAD_TITLE = "download_title"
 internal const val DURABLE_DOWNLOAD_TAG = "hulk_durable_download"
+private const val DURABLE_DOWNLOAD_ACCOUNT_TAG_PREFIX = "hulk_durable_download_account_"
 private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_"
 private const val DURABLE_DOWNLOAD_BACKOFF_MS = 30_000L

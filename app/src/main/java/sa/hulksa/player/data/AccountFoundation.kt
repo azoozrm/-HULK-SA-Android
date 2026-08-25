@@ -89,6 +89,16 @@ class AccountScopeStore(context: Context) {
         ?.trim()
         ?.takeIf(String::isNotBlank)
 
+    internal fun legacyOwnerAccountId(): String? = state.getString(KEY_LEGACY_OWNER_ACCOUNT_ID, null)
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+
+    internal fun registerActiveAccountListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener,
+    ) {
+        state.registerOnSharedPreferenceChangeListener(listener)
+    }
+
     @Synchronized
     fun bind(accountId: String): Boolean {
         val normalized = accountId.trim().takeIf(String::isNotBlank) ?: return false

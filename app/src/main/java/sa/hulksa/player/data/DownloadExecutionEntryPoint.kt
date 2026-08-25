@@ -42,20 +42,70 @@ internal fun durableDownloadExecutionDirective(
 
 internal class DownloadExecutionEntryPoint(
     context: Context,
-    private val repository: DownloadRepository = DownloadRepositoryProcessOwner.get(context),
+    private val accountSessionStore: AccountSessionStore = AccountSessionStore(context.applicationContext),
+    private val sessionProvider: suspend () -> sa.hulksa.player.model.AuthenticatedSession? = {
+        AuthenticatedSessionRegistry.current()
+    },
+    private val repositoryProvider: (String) -> DownloadRepository = { accountId ->
+        DownloadRepositoryProcessOwner.activate(context.applicationContext, accountId)
+    },
 ) {
-    suspend fun execute(downloadId: Long): DurableDownloadExecutionResult {
+    suspend fun execute(accountId: String, downloadId: Long): DurableDownloadExecutionResult {
+        validateDownloadAccountId(accountId)
         validateDurableDownloadId(downloadId)
-        return repository.executeScheduledDownload(downloadId)
+        val metadata = accountSessionStore.metadata()
+        val session = sessionProvider()
+        return when (
+            downloadWorkerSessionGate(
+                workerAccountId = accountId,
+                activeAccountId = accountSessionStore.activeAccountId(),
+                metadata = metadata,
+                hasAuthenticatedSession = session != null,
+                authenticatedSessionMatches =
+                    authenticatedDownloadAccountId(session, metadata) == accountId,
+            )
+        ) {
+            DownloadWorkerSessionGate.TERMINAL -> DurableDownloadExecutionResult.TERMINAL
+            DownloadWorkerSessionGate.RETRY -> DurableDownloadExecutionResult.RETRY
+            DownloadWorkerSessionGate.ALLOW -> {
+                val repository = repositoryProvider(accountId)
+                if (!downloadWorkerOwnsRecord(accountId, repository, downloadId)) {
+                    DurableDownloadExecutionResult.TERMINAL
+                } else {
+                    repository.executeScheduledDownload(accountId, downloadId)
+                }
+            }
+        }
     }
 }
 
+internal fun downloadWorkerOwnsRecord(
+    workerAccountId: String,
+    repository: DownloadRepository,
+    downloadId: Long,
+): Boolean = downloadWorkerOwnsRecord(
+    workerAccountId = workerAccountId,
+    repositoryAccountId = repository.accountId,
+    recordExists = repository.record(downloadId) != null,
+)
+
+internal fun downloadWorkerOwnsRecord(
+    workerAccountId: String,
+    repositoryAccountId: String,
+    recordExists: Boolean,
+): Boolean =
+    workerAccountId.trim().isNotEmpty() &&
+        repositoryAccountId == workerAccountId.trim() &&
+        recordExists
+
 internal suspend fun DownloadRepository.executeScheduledDownload(
+    accountId: String,
     downloadId: Long,
 ): DurableDownloadExecutionResult {
+    if (this.accountId != accountId) return DurableDownloadExecutionResult.TERMINAL
     var waitingRechecks = 0
     while (true) {
-        val item = downloads().firstOrNull { it.downloadId == downloadId }
+        val item = record(downloadId)
             ?: return DurableDownloadExecutionResult.TERMINAL
         when (durableDownloadExecutionDirective(item.status)) {
             DurableDownloadExecutionDirective.COMPLETED -> {
