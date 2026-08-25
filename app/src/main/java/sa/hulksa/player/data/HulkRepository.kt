@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
@@ -14,6 +15,13 @@ import sa.hulksa.player.model.ServerDiagnosticsReport
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.SeriesBundle
 import sa.hulksa.player.security.CredentialVault
+
+private val ACCOUNT_SESSION_COMMIT_LOCK = Any()
+
+private data class AccountSessionOwner(
+    val accountId: String,
+    val sessionId: String,
+)
 
 class HulkRepository(context: Context) {
     private val portalResolver = PortalResolver()
@@ -30,31 +38,49 @@ class HulkRepository(context: Context) {
         val portal = portalResolver.resolve(credentials.accessCode)
         val session = client.authenticate(portal, credentials)
         try {
-            accountSessionStore.recordAuthenticated(session)
-            AuthenticatedSessionRegistry.update(session)
-            if (remember) vault.save(credentials) else vault.clear()
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                accountSessionStore.recordAuthenticated(session)
+                AuthenticatedSessionRegistry.update(session)
+                if (remember) vault.save(credentials) else vault.clear()
+            }
         } catch (error: Throwable) {
-            vault.clear()
-            accountSessionStore.clearActiveSession()
-            AuthenticatedSessionRegistry.clear()
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                vault.clear()
+                accountSessionStore.clearActiveSession()
+                AuthenticatedSessionRegistry.clear()
+            }
             throw error
         }
         return session
     }
 
     suspend fun reauthenticate(session: AuthenticatedSession): AuthenticatedSession {
-        val portal = portalResolver.resolve(session.credentials.accessCode)
-        val refreshed = client.authenticate(portal, session.credentials)
-        accountSessionStore.recordAuthenticated(refreshed)
-        AuthenticatedSessionRegistry.update(refreshed)
+        val owner = currentSessionOwner() ?: throw staleReauthentication()
+        val refreshed = try {
+            val portal = portalResolver.resolve(session.credentials.accessCode)
+            client.authenticate(portal, session.credentials)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            if (!isCurrentSessionOwner(owner)) throw staleReauthentication()
+            throw error
+        }
+
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            if (!matchesCurrentSessionOwner(owner)) throw staleReauthentication()
+            accountSessionStore.recordAuthenticated(refreshed)
+            AuthenticatedSessionRegistry.update(refreshed)
+        }
         return refreshed
     }
 
     fun savedCredentials(): Credentials? {
         val credentials = vault.load()
         if (credentials == null) {
-            accountSessionStore.clearActiveSession()
-            AuthenticatedSessionRegistry.clear()
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                accountSessionStore.clearActiveSession()
+                AuthenticatedSessionRegistry.clear()
+            }
         }
         return credentials
     }
@@ -64,6 +90,7 @@ class HulkRepository(context: Context) {
     suspend fun currentAuthenticatedSession(): AuthenticatedSession? {
         AuthenticatedSessionRegistry.current()?.let { return it }
         val credentials = vault.load() ?: return null
+        val owner = currentSessionOwner() ?: return null
 
         repeat(2) { attempt ->
             val restored = runCatching {
@@ -71,9 +98,16 @@ class HulkRepository(context: Context) {
                 client.authenticate(portal, credentials)
             }.getOrNull()
             if (restored != null) {
-                accountSessionStore.recordAuthenticated(restored)
-                AuthenticatedSessionRegistry.update(restored)
-                return restored
+                val committed = synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                    if (!matchesCurrentSessionOwner(owner)) {
+                        false
+                    } else {
+                        accountSessionStore.recordAuthenticated(restored)
+                        AuthenticatedSessionRegistry.update(restored)
+                        true
+                    }
+                }
+                return if (committed) restored else null
             }
             if (attempt == 0) delay(350L)
         }
@@ -81,9 +115,11 @@ class HulkRepository(context: Context) {
     }
 
     fun logout() {
-        vault.clear()
-        accountSessionStore.clearActiveSession()
-        AuthenticatedSessionRegistry.clear()
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            vault.clear()
+            accountSessionStore.clearActiveSession()
+            AuthenticatedSessionRegistry.clear()
+        }
     }
 
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
@@ -162,6 +198,24 @@ class HulkRepository(context: Context) {
             recommendations = recommendations,
         )
     }
+
+    private fun currentSessionOwner(): AccountSessionOwner? =
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            accountSessionStore.metadata()?.let {
+                AccountSessionOwner(accountId = it.accountId, sessionId = it.sessionId)
+            }
+        }
+
+    private fun isCurrentSessionOwner(owner: AccountSessionOwner): Boolean =
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) { matchesCurrentSessionOwner(owner) }
+
+    private fun matchesCurrentSessionOwner(owner: AccountSessionOwner): Boolean {
+        val current = accountSessionStore.metadata() ?: return false
+        return current.accountId == owner.accountId && current.sessionId == owner.sessionId
+    }
+
+    private fun staleReauthentication(): CancellationException =
+        CancellationException("Stale account reauthentication result")
 }
 
 private fun VerifiedKidsCatalogSnapshot.hasOnlyTransientKidsFailures(): Boolean {

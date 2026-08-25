@@ -245,6 +245,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var session: AuthenticatedSession? = null
     private var sessionRestorationComplete: Boolean = false
     private val authenticationAttemptGate = AuthenticationAttemptGate()
+    private val accountRefreshCoordinator = AccountRefreshCoordinator()
     private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
@@ -2019,14 +2020,21 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             onResult("سجل الدخول اولا لتحديث بيانات الاشتراك.")
             return
         }
-        if (accountRefreshJob?.isActive == true) {
+        val attemptGeneration = accountRefreshCoordinator.tryStart() ?: run {
             onResult("تحديث بيانات الاشتراك يعمل حاليا.")
             return
         }
         mutableState.update { it.copy(isAccountRefreshing = true, errorMessage = null) }
         accountRefreshJob = viewModelScope.launch {
-            runCatching { repository.reauthenticate(activeSession) }
-                .onSuccess { refreshed ->
+            when (
+                val outcome = accountRefreshCoordinator.runCurrent(attemptGeneration) {
+                    repository.reauthenticate(activeSession)
+                }
+            ) {
+                null -> return@launch
+                is AccountRefreshOutcome.Success -> {
+                    accountRefreshJob = null
+                    val refreshed = outcome.value
                     session = refreshed
                     mutableState.update {
                         it.copy(
@@ -2037,13 +2045,18 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     onResult("تم تحديث بيانات الاشتراك من السيرفر.")
                 }
-                .onFailure { error ->
-                    mutableState.update { it.copy(isAccountRefreshing = false) }
+                is AccountRefreshOutcome.Failure -> {
+                    accountRefreshJob = null
+                    val error = outcome.error
                     val invalidSession = error is XtreamException.InvalidCredentials ||
                         error is XtreamException.SubscriptionInactive ||
                         error is PortalException.InvalidAccessCode ||
                         error is PortalException.ResellerInactive
-                    if (invalidSession) showFailure(error)
+                    if (invalidSession) {
+                        showFailure(error)
+                    } else {
+                        mutableState.update { it.copy(isAccountRefreshing = false) }
+                    }
                     onResult(
                         if (invalidSession) {
                             "تعذر تحديث الاشتراك. اعد تسجيل الدخول."
@@ -2052,6 +2065,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         },
                     )
                 }
+            }
         }
     }
 
@@ -2166,8 +2180,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         profileLibraryRefreshJob = null
     }
 
+    private fun invalidateAccountRefresh() {
+        accountRefreshCoordinator.invalidate()
+        accountRefreshJob?.cancel()
+        accountRefreshJob = null
+    }
+
     fun logout() {
         authenticationAttemptGate.invalidate()
+        invalidateAccountRefresh()
         loginJob?.cancel()
         loginJob = null
         invalidateDetailsRequest()
@@ -2183,7 +2204,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         notificationScanJob = null
         notificationUiReady = false
         clearCatalogMemory()
-        accountRefreshJob?.cancel()
         diagnosticsJob?.cancel()
         catalogJobs.values.forEach(Job::cancel)
         catalogJobs.clear()
@@ -2223,9 +2243,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         restoringSession: Boolean = false,
     ) {
         val attemptGeneration = authenticationAttemptGate.tryStart() ?: return
+        invalidateAccountRefresh()
         if (restoringSession) sessionRestorationComplete = false
         mutableState.update {
-            it.copy(isStarting = false, isLoading = true, errorMessage = null)
+            it.copy(
+                isStarting = false,
+                isLoading = true,
+                isAccountRefreshing = false,
+                errorMessage = null,
+            )
         }
         loginJob = viewModelScope.launch {
             try {
@@ -2618,6 +2644,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
         if (invalidSession) {
+            invalidateAccountRefresh()
             invalidateDetailsRequest()
             sessionRestorationComplete = true
             beginTvPlatformProfileTransition(resetPublishedScope = true)

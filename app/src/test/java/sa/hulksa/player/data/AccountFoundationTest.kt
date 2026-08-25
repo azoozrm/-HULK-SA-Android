@@ -82,10 +82,76 @@ class AccountFoundationTest {
     }
 
     @Test
-    fun sessionExpiryHonorsMissingAndExplicitExpiry() {
+    fun sessionExpiryHonorsMissingZeroAndExplicitExpiry() {
         assertFalse(isAccountSessionExpired(null, nowEpochSeconds = 1_000L))
+        assertFalse(isAccountSessionExpired(0L, nowEpochSeconds = 1_000L))
         assertFalse(isAccountSessionExpired(2_000L, nowEpochSeconds = 1_999L))
         assertTrue(isAccountSessionExpired(2_000L, nowEpochSeconds = 2_000L))
         assertTrue(isAccountSessionExpired(2_000L, nowEpochSeconds = 2_001L))
+    }
+
+    @Test
+    fun resumeRevalidationSkipsFreshServerValidation() {
+        assertFalse(
+            shouldRevalidateAccountOnResume(
+                authenticatedAtEpochMs = 900_000L,
+                lastAttemptElapsedMs = 0L,
+                nowEpochMs = 1_000_000L,
+                nowElapsedMs = 5_000L,
+                minimumAgeMs = 600_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun resumeRevalidationRunsWhenServerValidationIsStale() {
+        assertTrue(
+            shouldRevalidateAccountOnResume(
+                authenticatedAtEpochMs = 300_000L,
+                lastAttemptElapsedMs = 0L,
+                nowEpochMs = 1_000_000L,
+                nowElapsedMs = 700_000L,
+                minimumAgeMs = 600_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun resumeRevalidationThrottlesRecentFailedAttempt() {
+        assertFalse(
+            shouldRevalidateAccountOnResume(
+                authenticatedAtEpochMs = 100_000L,
+                lastAttemptElapsedMs = 650_000L,
+                nowEpochMs = 1_000_000L,
+                nowElapsedMs = 700_000L,
+                minimumAgeMs = 600_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun resumeRevalidationRequiresServerCheckWhenAuthenticationMetadataIsMissing() {
+        assertTrue(
+            shouldRevalidateAccountOnResume(
+                authenticatedAtEpochMs = 0L,
+                lastAttemptElapsedMs = 0L,
+                nowEpochMs = 1_000_000L,
+                nowElapsedMs = 700_000L,
+                minimumAgeMs = 600_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun resumeRevalidationRequiresServerCheckAfterWallClockRollback() {
+        assertTrue(
+            shouldRevalidateAccountOnResume(
+                authenticatedAtEpochMs = 1_100_000L,
+                lastAttemptElapsedMs = 0L,
+                nowEpochMs = 1_000_000L,
+                nowElapsedMs = 700_000L,
+                minimumAgeMs = 600_000L,
+            ),
+        )
     }
 }

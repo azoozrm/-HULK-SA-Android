@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
     private var currentScreen: HulkScreen = HulkScreen.LOGIN
     private lateinit var voiceSearchDelegate: VoiceSearchDelegate
+    private lateinit var subscriptionResumeEnforcer: SubscriptionResumeEnforcer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        subscriptionResumeEnforcer = SubscriptionResumeEnforcer(this, viewModel)
         voiceSearchDelegate = VoiceSearchDelegate(
             activity = this,
             onTranscript = viewModel::updateSearch,
@@ -92,7 +94,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.onAppResumed()
+        if (
+            ::subscriptionResumeEnforcer.isInitialized &&
+            !subscriptionResumeEnforcer.onResume()
+        ) {
+            viewModel.onAppResumed()
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
