@@ -2,15 +2,18 @@ package sa.hulksa.player.data
 
 import android.app.Application
 import android.content.Context
+import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.DownloadScheduleMode
 import sa.hulksa.player.model.DownloadSettings
+import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
+import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
 
 /**
- * Process-local owner for the stateful repository. WorkManager runs in the app
- * process by default, so sharing this instance prevents parallel OkHttp writers
- * from touching the same partial download file.
+ * Process-local owner for the stateful transfer engine. WorkManager runs in the
+ * application process by default, so one instance prevents parallel writers from
+ * touching the same owner-scoped partial file.
  */
 internal object DownloadRepositoryProcessOwner {
     @Volatile
@@ -27,40 +30,39 @@ internal object DownloadRepositoryProcessOwner {
 }
 
 /**
- * UI-facing facade over the single device-level download engine.
- *
- * The physical transfer queue remains shared by the device/process, while this
- * facade scopes visibility and ownership to the active profile. A physical file
- * can be owned by more than one profile when the same content is added from
- * multiple profiles, avoiding duplicate files while keeping each profile's
- * Downloads screen isolated.
+ * UI-facing account + profile ownership boundary. Every read and mutation is
+ * checked against the currently authenticated account and active profile.
  */
 internal class ProfileScopedDownloadRepository(context: Context) {
     private val appContext = context.applicationContext
     private val delegate = DownloadRepositoryProcessOwner.get(appContext)
     private val profileStore = ProfileStore(appContext)
-    private val ownershipStore = ProfileDownloadOwnershipStore(appContext)
+    private val accountSessionStore = AccountSessionStore(appContext)
 
-    init {
-        ownershipStore.migrateLegacy(delegate.downloads())
+    suspend fun initialize() {
+        delegate.initialize()
     }
 
-    fun downloads(): List<OfflineDownload> = ProfileDownloadSnapshotList(
-        allDownloads = delegate.downloads(),
-        activeProfileId = profileStore::activeProfileId,
-        ownersForExistingDownload = ownershipStore::ownersForExistingDownload,
+    fun downloads(): List<OfflineDownload> = visibleDownloads(
+        records = delegate.downloads(),
+        owner = activeOwner(),
     )
+
+    fun activeOwnerToken(): String? = activeOwner()?.let(::downloadOwnerStorageKey)
 
     fun settings(): DownloadSettings = delegate.settings()
 
     fun setWifiOnly(enabled: Boolean): DownloadSettings = delegate.setWifiOnly(enabled)
 
-    fun setScheduleMode(mode: DownloadScheduleMode): DownloadSettings = delegate.setScheduleMode(mode)
+    fun setScheduleMode(mode: DownloadScheduleMode): DownloadSettings {
+        val accountId = activeOwner()?.accountId ?: return delegate.settings()
+        return delegate.setScheduleMode(mode, accountId)
+    }
 
     fun setConcurrentDownloads(count: Int): DownloadSettings = delegate.setConcurrentDownloads(count)
 
     fun cyclePriority(downloadId: Long): List<OfflineDownload> {
-        if (owns(downloadId)) delegate.cyclePriority(downloadId)
+        activeOwner()?.let { delegate.cyclePriority(downloadId, it) }
         return downloads()
     }
 
@@ -70,194 +72,132 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         season: Int? = null,
         episodeNumber: Int? = null,
     ): DownloadRepository.EnqueueResult {
-        val profileId = profileStore.activeProfileId()
-        val existing = delegate.downloads().firstOrNull { it.historyKey == request.historyKey }
-        val ownersBefore = if (existing != null) {
-            ownershipStore.ownersForExistingDownload(request.historyKey)
-        } else {
-            ownershipStore.explicitOwners(request.historyKey).orEmpty()
-        }
-        val alreadyOwned = profileId in ownersBefore
-
-        ownershipStore.addOwner(
-            historyKey = request.historyKey,
-            profileId = profileId,
-            includeLegacyPrimary = existing != null,
+        val owner = activeOwner()
+            ?: return DownloadRepository.EnqueueResult.Failed("سجل الدخول لاختيار مالك التحميل بأمان.")
+        return delegate.enqueue(
+            owner = owner,
+            request = request,
+            seriesTitle = seriesTitle,
+            season = season,
+            episodeNumber = episodeNumber,
         )
-
-        return try {
-            delegate.enqueue(
-                request = request,
-                seriesTitle = seriesTitle,
-                season = season,
-                episodeNumber = episodeNumber,
-            ).also { result ->
-                if (result is DownloadRepository.EnqueueResult.Failed && !alreadyOwned) {
-                    ownershipStore.removeExplicitOwner(request.historyKey, profileId)
-                }
-            }
-        } catch (error: Throwable) {
-            if (!alreadyOwned) ownershipStore.removeExplicitOwner(request.historyKey, profileId)
-            throw error
-        }
     }
 
     fun pause(downloadId: Long): List<OfflineDownload> {
-        if (owns(downloadId)) delegate.pause(downloadId)
+        activeOwner()?.let { delegate.pause(downloadId, it) }
         return downloads()
     }
 
-    fun resume(downloadId: Long): Boolean = owns(downloadId) && delegate.resume(downloadId)
+    fun resume(downloadId: Long): Boolean {
+        val owner = activeOwner() ?: return false
+        return delegate.resume(downloadId, owner)
+    }
 
     fun remove(downloadId: Long): List<OfflineDownload> {
-        val item = delegate.downloads().firstOrNull { it.downloadId == downloadId }
-            ?: return downloads()
-        val profileId = profileStore.activeProfileId()
-        val owners = ownershipStore.ownersForExistingDownload(item.historyKey)
-        if (profileId !in owners) return downloads()
+        activeOwner()?.let { delegate.remove(downloadId, it) }
+        return downloads()
+    }
 
-        val remainingOwners = ownershipStore.removeExistingOwner(item.historyKey, profileId)
-        if (remainingOwners.isEmpty()) {
-            ownershipStore.clearOwners(item.historyKey)
-            delegate.remove(downloadId)
+    fun canAccess(downloadId: Long): Boolean {
+        val owner = activeOwner() ?: return false
+        return delegate.owns(downloadId, owner)
+    }
+
+    fun playableLocalUri(downloadId: Long): String? {
+        val owner = activeOwner() ?: return null
+        return delegate.playableLocalUri(downloadId, owner)
+    }
+
+    fun canAccess(downloadId: Long, expectedOwner: DownloadOwner): Boolean {
+        val active = activeOwner() ?: return false
+        val expected = expectedOwner.normalizedOrNull() ?: return false
+        if (active != expected) return false
+        return delegate.owns(downloadId, expected)
+    }
+
+    fun suspendActiveAccountForLogout() {
+        val accountId = accountSessionStore.metadata()?.accountId
+            ?: accountSessionStore.activeAccountId()
+            ?: return
+        delegate.suspendAccount(accountId)
+    }
+
+    suspend fun onAccountAuthenticated(): List<OfflineDownload> {
+        delegate.initialize()
+        val session = AuthenticatedSessionRegistry.current() ?: return emptyList()
+        val metadata = accountSessionStore.metadata() ?: return emptyList()
+        if (!authenticatedSessionMatchesMetadata(session, metadata)) return emptyList()
+        delegate.suspendAccountsExcept(metadata.accountId)
+        delegate.suspendAccount(metadata.accountId)
+        val existingProfileIds = profileStore.profiles().mapTo(mutableSetOf()) { it.id }
+        delegate.recordsForAccount(metadata.accountId).forEach { item ->
+            if (item.profileId !in existingProfileIds) return@forEach
+            val sources = if (item.status == OfflineStatus.COMPLETED) {
+                emptyList()
+            } else {
+                runCatching { resolveDownloadSources(session, item) }.getOrDefault(emptyList())
+            }
+            delegate.prepareForAuthenticatedOwner(
+                downloadId = item.downloadId,
+                owner = item.owner(),
+                refreshedSources = sources,
+            )
         }
         return downloads()
     }
 
-    private fun owns(downloadId: Long): Boolean {
-        val item = delegate.downloads().firstOrNull { it.downloadId == downloadId } ?: return false
-        return profileStore.activeProfileId() in ownershipStore.ownersForExistingDownload(item.historyKey)
+    fun ownerForProfileCleanup(profileId: String): DownloadOwner? {
+        val session = AuthenticatedSessionRegistry.current() ?: return null
+        val metadata = accountSessionStore.metadata() ?: return null
+        if (!authenticatedSessionMatchesMetadata(session, metadata)) return null
+        return DownloadOwner(metadata.accountId, profileId).normalizedOrNull()
+    }
+
+    fun removeProfile(owner: DownloadOwner): List<OfflineDownload> {
+        delegate.removeProfile(owner)
+        return downloads()
+    }
+
+    private fun activeOwner(): DownloadOwner? {
+        val session = AuthenticatedSessionRegistry.current() ?: return null
+        val metadata = accountSessionStore.metadata() ?: return null
+        if (!authenticatedSessionMatchesMetadata(session, metadata)) return null
+        return DownloadOwner(metadata.accountId, profileStore.activeProfileId()).normalizedOrNull()
     }
 }
 
-/**
- * A snapshot of physical download state with dynamic profile filtering.
- *
- * The physical entries are snapshotted so download progress comparisons still
- * work normally. The active profile and owner mapping are resolved when the list
- * is read, so the state update already performed during profile switching can
- * immediately render the new profile's Downloads list without waiting for the
- * ViewModel polling interval.
- */
-private class ProfileDownloadSnapshotList(
-    private val allDownloads: List<OfflineDownload>,
-    private val activeProfileId: () -> String,
-    private val ownersForExistingDownload: (String) -> Set<String>,
-) : AbstractList<OfflineDownload>() {
-    private fun current(): List<OfflineDownload> {
-        val profileId = activeProfileId()
-        return allDownloads.filter { item ->
-            profileId in ownersForExistingDownload(item.historyKey)
-        }
-    }
+internal fun authenticatedSessionMatchesMetadata(
+    session: AuthenticatedSession,
+    metadata: AccountSessionMetadata,
+): Boolean =
+    normalizedDownloadAccountId(metadata.accountId) != null &&
+        !metadata.isExpired() &&
+        metadata.username == session.credentials.username.trim() &&
+        metadata.portalBaseUrl.trim().trimEnd('/') == session.portal.baseUrl.trim().trimEnd('/')
 
-    override val size: Int
-        get() = current().size
+internal fun resolveDownloadSources(
+    session: AuthenticatedSession,
+    item: OfflineDownload,
+): List<String> = XtreamClient().playback(
+    session,
+    HistoryEntry(
+        key = item.historyKey,
+        title = item.title,
+        posterUrl = item.posterUrl,
+        streamKind = item.streamKind,
+        streamId = item.streamId,
+        extension = item.extension,
+        isLive = false,
+        positionMs = 0L,
+        durationMs = 0L,
+        updatedAtEpochMs = System.currentTimeMillis(),
+        seriesTitle = item.seriesTitle,
+        season = item.season,
+        episodeNumber = item.episodeNumber,
+    ),
+).candidates
 
-    override fun get(index: Int): OfflineDownload = current()[index]
-
-    override fun iterator(): Iterator<OfflineDownload> = current().iterator()
-
-    override fun listIterator(index: Int): ListIterator<OfflineDownload> = current().listIterator(index)
-}
-
-/**
- * Profile ownership metadata for physical device downloads.
- *
- * Ownership is stored by historyKey because DownloadRepository already enforces
- * one physical download per historyKey. This lets two profiles reference the
- * same on-device file without duplicating storage. Downloads created before
- * Multi Profile are migrated once to the primary profile.
- */
-private class ProfileDownloadOwnershipStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
-        Context.MODE_PRIVATE,
-    )
-
-    @Synchronized
-    fun migrateLegacy(downloads: List<OfflineDownload>) {
-        if (preferences.getBoolean(KEY_LEGACY_MIGRATION_COMPLETE, false)) return
-        val editor = preferences.edit()
-        downloads.forEach { item ->
-            val key = ownersKey(item.historyKey)
-            if (!preferences.contains(key)) {
-                editor.putStringSet(key, setOf(ProfileStore.PRIMARY_PROFILE_ID))
-            }
-        }
-        editor.putBoolean(KEY_LEGACY_MIGRATION_COMPLETE, true).commit()
-    }
-
-    @Synchronized
-    fun explicitOwners(historyKey: String): Set<String>? {
-        val key = ownersKey(historyKey)
-        if (!preferences.contains(key)) return null
-        return preferences.getStringSet(key, emptySet())
-            .orEmpty()
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .toSet()
-    }
-
-    @Synchronized
-    fun ownersForExistingDownload(historyKey: String): Set<String> =
-        explicitOwners(historyKey)
-            ?.takeIf(Set<String>::isNotEmpty)
-            ?: setOf(ProfileStore.PRIMARY_PROFILE_ID)
-
-    @Synchronized
-    fun addOwner(
-        historyKey: String,
-        profileId: String,
-        includeLegacyPrimary: Boolean,
-    ) {
-        val current = explicitOwners(historyKey)
-            ?: if (includeLegacyPrimary) setOf(ProfileStore.PRIMARY_PROFILE_ID) else emptySet()
-        val updated = current + profileId
-        preferences.edit().putStringSet(ownersKey(historyKey), updated).commit()
-    }
-
-    @Synchronized
-    fun removeExistingOwner(historyKey: String, profileId: String): Set<String> {
-        val updated = ownersForExistingDownload(historyKey) - profileId
-        if (updated.isEmpty()) {
-            preferences.edit().remove(ownersKey(historyKey)).commit()
-        } else {
-            preferences.edit().putStringSet(ownersKey(historyKey), updated).commit()
-        }
-        return updated
-    }
-
-    @Synchronized
-    fun removeExplicitOwner(historyKey: String, profileId: String) {
-        val current = explicitOwners(historyKey) ?: return
-        val updated = current - profileId
-        if (updated.isEmpty()) {
-            preferences.edit().remove(ownersKey(historyKey)).commit()
-        } else {
-            preferences.edit().putStringSet(ownersKey(historyKey), updated).commit()
-        }
-    }
-
-    @Synchronized
-    fun clearOwners(historyKey: String) {
-        preferences.edit().remove(ownersKey(historyKey)).commit()
-    }
-
-    private fun ownersKey(historyKey: String): String = "$KEY_OWNER_PREFIX$historyKey"
-
-    private companion object {
-        const val PREFERENCES_NAME = "hulk_profile_download_ownership_v1"
-        const val KEY_OWNER_PREFIX = "owners:"
-        const val KEY_LEGACY_MIGRATION_COMPLETE = "legacy_primary_migration_complete"
-    }
-}
-
-/**
- * More-specific overload used by AndroidViewModel callers. The underlying
- * DownloadRepository remains process-global for WorkManager and transport
- * safety, while the ViewModel sees only the active profile's owned downloads.
- */
+/** More-specific overload used by AndroidViewModel callers. */
 @Suppress("FunctionName")
 internal fun DownloadRepository(application: Application): ProfileScopedDownloadRepository =
     ProfileScopedDownloadRepository(application)

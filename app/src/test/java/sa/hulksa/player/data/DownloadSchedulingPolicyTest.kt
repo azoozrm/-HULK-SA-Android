@@ -75,6 +75,8 @@ class DownloadSchedulingPolicyTest {
         scheduledAtEpochMs: Long = 0L,
     ): OfflineDownload = OfflineDownload(
         downloadId = 1L,
+        accountId = "account-a",
+        profileId = "primary",
         historyKey = "movie:1",
         title = "Movie",
         posterUrl = null,

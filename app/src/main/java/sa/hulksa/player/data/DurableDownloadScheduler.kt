@@ -20,6 +20,7 @@ internal enum class DurableDownloadNetworkRequirement {
 
 internal data class DurableDownloadWorkPlan(
     val downloadId: Long,
+    val owner: DownloadOwner,
     val uniqueWorkName: String,
     val initialDelayMs: Long,
     val backoffDelayMs: Long,
@@ -28,14 +29,17 @@ internal data class DurableDownloadWorkPlan(
 
 internal fun durableDownloadWorkPlan(
     downloadId: Long,
+    owner: DownloadOwner,
     wifiOnly: Boolean,
     scheduledAtEpochMs: Long,
     nowEpochMs: Long = System.currentTimeMillis(),
 ): DurableDownloadWorkPlan {
     require(downloadId > 0L) { "downloadId must be positive" }
+    val normalizedOwner = requireNotNull(owner.normalizedOrNull()) { "A valid download owner is required" }
     return DurableDownloadWorkPlan(
         downloadId = downloadId,
-        uniqueWorkName = "$UNIQUE_WORK_PREFIX$downloadId",
+        owner = normalizedOwner,
+        uniqueWorkName = "$UNIQUE_WORK_PREFIX${downloadOwnerStorageKey(normalizedOwner)}_$downloadId",
         initialDelayMs = (scheduledAtEpochMs - nowEpochMs).coerceAtLeast(0L),
         backoffDelayMs = DURABLE_DOWNLOAD_BACKOFF_MS,
         networkRequirement = if (wifiOnly) {
@@ -52,28 +56,35 @@ internal class DurableDownloadScheduler(
 ) {
     fun enqueue(
         downloadId: Long,
+        owner: DownloadOwner,
         wifiOnly: Boolean,
         scheduledAtEpochMs: Long,
-        title: String? = null,
     ) {
         val plan = durableDownloadWorkPlan(
             downloadId = downloadId,
+            owner = owner,
             wifiOnly = wifiOnly,
             scheduledAtEpochMs = scheduledAtEpochMs,
         )
         workManager.enqueueUniqueWork(
             plan.uniqueWorkName,
             ExistingWorkPolicy.REPLACE,
-            plan.toWorkRequest(title),
+            plan.toWorkRequest(),
         )
     }
 
-    fun cancel(downloadId: Long) {
-        workManager.cancelUniqueWork("$UNIQUE_WORK_PREFIX$downloadId")
+    fun cancel(downloadId: Long, owner: DownloadOwner) {
+        val plan = durableDownloadWorkPlan(
+            downloadId = downloadId,
+            owner = owner,
+            wifiOnly = false,
+            scheduledAtEpochMs = 0L,
+        )
+        workManager.cancelUniqueWork(plan.uniqueWorkName)
     }
 }
 
-private fun DurableDownloadWorkPlan.toWorkRequest(title: String?): OneTimeWorkRequest {
+private fun DurableDownloadWorkPlan.toWorkRequest(): OneTimeWorkRequest {
     val requiredNetworkType = when (networkRequirement) {
         DurableDownloadNetworkRequirement.CONNECTED -> NetworkType.CONNECTED
         DurableDownloadNetworkRequirement.UNMETERED -> NetworkType.UNMETERED
@@ -84,9 +95,8 @@ private fun DurableDownloadWorkPlan.toWorkRequest(title: String?): OneTimeWorkRe
         .build()
     val input = Data.Builder()
         .putLong(KEY_DOWNLOAD_ID, downloadId)
-        .apply {
-            title?.trim()?.takeIf(String::isNotEmpty)?.let { putString(KEY_DOWNLOAD_TITLE, it) }
-        }
+        .putString(KEY_DOWNLOAD_ACCOUNT_ID, owner.accountId)
+        .putString(KEY_DOWNLOAD_PROFILE_ID, owner.profileId)
         .build()
     return OneTimeWorkRequestBuilder<DownloadCoordinatorWorker>()
         .setInputData(input)
@@ -108,13 +118,17 @@ internal class DownloadCoordinatorWorker(
     override suspend fun doWork(): Result {
         val downloadId = inputData.getLong(KEY_DOWNLOAD_ID, -1L)
         if (downloadId <= 0L) return Result.failure()
+        val owner = DownloadOwner(
+            accountId = inputData.getString(KEY_DOWNLOAD_ACCOUNT_ID).orEmpty(),
+            profileId = inputData.getString(KEY_DOWNLOAD_PROFILE_ID).orEmpty(),
+        ).normalizedOrNull() ?: return Result.failure()
         setForeground(
             DurableDownloadForeground(applicationContext).createInfo(
                 downloadId = downloadId,
-                title = inputData.getString(KEY_DOWNLOAD_TITLE),
+                owner = owner,
             ),
         )
-        return when (DownloadExecutionEntryPoint(applicationContext).execute(downloadId)) {
+        return when (DownloadExecutionEntryPoint(applicationContext).execute(downloadId, owner)) {
             DurableDownloadExecutionResult.COMPLETED,
             DurableDownloadExecutionResult.TERMINAL,
             -> Result.success()
@@ -125,7 +139,8 @@ internal class DownloadCoordinatorWorker(
 }
 
 internal const val KEY_DOWNLOAD_ID = "download_id"
-internal const val KEY_DOWNLOAD_TITLE = "download_title"
+internal const val KEY_DOWNLOAD_ACCOUNT_ID = "download_account_id"
+internal const val KEY_DOWNLOAD_PROFILE_ID = "download_profile_id"
 internal const val DURABLE_DOWNLOAD_TAG = "hulk_durable_download"
-private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_"
+private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_v2_"
 private const val DURABLE_DOWNLOAD_BACKOFF_MS = 30_000L

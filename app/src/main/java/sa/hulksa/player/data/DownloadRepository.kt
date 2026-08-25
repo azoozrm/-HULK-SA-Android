@@ -16,12 +16,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import org.json.JSONArray
-import org.json.JSONObject
 import sa.hulksa.player.model.DownloadScheduleMode
 import sa.hulksa.player.model.DownloadSettings
 import sa.hulksa.player.model.OfflineDownload
@@ -41,7 +42,10 @@ class DownloadRepository(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+    private val accountSessionStore = AccountSessionStore(appContext)
+    private val profileStore = ProfileStore(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val initializationMutex = Mutex()
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         // OkHttp resets this timeout whenever bytes arrive, so long downloads keep
@@ -56,21 +60,49 @@ class DownloadRepository(context: Context) {
     private val calls = ConcurrentHashMap<Long, Call>()
     private val lock = Any()
     private val nextId = AtomicLong(System.currentTimeMillis())
-    private var cache = readStored().map(::recoverInterruptedState).toMutableList()
+    @Volatile
+    private var initialized = false
+    private var cache = mutableListOf<OfflineDownload>()
+    private var quarantine = emptyList<QuarantinedDownload>()
 
-    init {
-        synchronized(lock) {
-            normalizeQueueLocked()
-            writeStoredLocked()
+    suspend fun initialize() {
+        if (initialized) return
+        withContext(Dispatchers.IO) {
+            initializationMutex.withLock {
+                if (!initialized) {
+                    val raw = runCatching { preferences.getString(KEY_DOWNLOADS, null) }.getOrNull()
+                    val snapshot = DownloadSchemaCodec.decode(raw)
+                    synchronized(lock) {
+                        cache = snapshot.records.map(::recoverInterruptedState).toMutableList()
+                        quarantine = snapshot.quarantined
+                        normalizeQueueLocked()
+                        initialized = if (snapshot.rewriteAllowed) {
+                            writeStoredLocked(commit = true)
+                        } else {
+                            true
+                        }
+                        if (!initialized) {
+                            cache.clear()
+                            quarantine = emptyList()
+                        }
+                    }
+                }
+            }
         }
         schedule()
     }
 
     fun downloads(): List<OfflineDownload> {
+        if (!initialized) return emptyList()
+        val activeAccountId = activeAuthenticatedAccountId()
         val snapshot = synchronized(lock) {
             var changed = false
             cache = cache.map { item ->
-                if (item.status == OfflineStatus.COMPLETED && !completedFileExists(item)) {
+                if (
+                    item.accountId == activeAccountId &&
+                    item.status == OfflineStatus.COMPLETED &&
+                    !completedFileExists(item)
+                ) {
                     changed = true
                     item.copy(
                         status = OfflineStatus.FAILED,
@@ -90,17 +122,22 @@ class DownloadRepository(context: Context) {
         return snapshot
     }
 
-    fun settings(): DownloadSettings = DownloadSettings(
-        wifiOnly = preferences.getBoolean(KEY_WIFI_ONLY, false),
-        scheduleMode = runCatching {
+    fun settings(): DownloadSettings {
+        val scheduleMode = runCatching {
             DownloadScheduleMode.valueOf(
                 preferences.getString(KEY_SCHEDULE_MODE, DownloadScheduleMode.NOW.name)
                     ?: DownloadScheduleMode.NOW.name,
             )
-        }.getOrDefault(DownloadScheduleMode.NOW),
-        concurrentDownloads = preferences.getInt(KEY_CONCURRENT_DOWNLOADS, DEFAULT_CONCURRENT_DOWNLOADS)
-            .coerceIn(1, MAX_CONCURRENT_DOWNLOADS),
-    )
+        }.getOrDefault(DownloadScheduleMode.NOW)
+        val concurrentDownloads = runCatching {
+            preferences.getInt(KEY_CONCURRENT_DOWNLOADS, DEFAULT_CONCURRENT_DOWNLOADS)
+        }.getOrDefault(DEFAULT_CONCURRENT_DOWNLOADS)
+        return DownloadSettings(
+            wifiOnly = storedWifiOnly(),
+            scheduleMode = scheduleMode,
+            concurrentDownloads = concurrentDownloads.coerceIn(1, MAX_CONCURRENT_DOWNLOADS),
+        )
+    }
 
     fun setWifiOnly(enabled: Boolean): DownloadSettings {
         preferences.edit().putBoolean(KEY_WIFI_ONLY, enabled).apply()
@@ -108,11 +145,13 @@ class DownloadRepository(context: Context) {
         return settings()
     }
 
-    fun setScheduleMode(mode: DownloadScheduleMode): DownloadSettings {
+    fun setScheduleMode(mode: DownloadScheduleMode, accountId: String): DownloadSettings {
+        val normalizedAccountId = normalizedDownloadAccountId(accountId) ?: return settings()
         preferences.edit().putString(KEY_SCHEDULE_MODE, mode.name).apply()
         val scheduledAt = if (mode == DownloadScheduleMode.NIGHT) nextNightStartEpochMs() else 0L
         synchronized(lock) {
             cache = cache.map { item ->
+                if (item.accountId != normalizedAccountId) return@map item
                 when (item.status) {
                     OfflineStatus.QUEUED,
                     OfflineStatus.WAITING_SCHEDULE,
@@ -128,7 +167,12 @@ class DownloadRepository(context: Context) {
                     else -> item
                 }
             }.toMutableList()
-            normalizeQueueLocked()
+            normalizeQueueLocked(
+                cache.asSequence()
+                    .filter { it.accountId == normalizedAccountId }
+                    .map { it.owner() }
+                    .toSet(),
+            )
             writeStoredLocked()
         }
         schedule()
@@ -141,9 +185,14 @@ class DownloadRepository(context: Context) {
         return settings()
     }
 
-    fun cyclePriority(downloadId: Long): List<OfflineDownload> {
-        synchronized(lock) {
-            mutateLocked(downloadId) { item ->
+    fun cyclePriority(downloadId: Long, owner: DownloadOwner): List<OfflineDownload> {
+        if (!initialized) return emptyList()
+        val normalizedOwner = owner.normalizedOrNull() ?: return downloads()
+        val owned = synchronized(lock) {
+            if (cache.none { it.downloadId == downloadId && it.isOwnedBy(normalizedOwner) }) {
+                return@synchronized false
+            }
+            mutateOwnedLocked(downloadId, normalizedOwner) { item ->
                 if (item.status == OfflineStatus.COMPLETED) item else item.copy(
                     priority = when (item.priority) {
                         1 -> -1
@@ -152,25 +201,34 @@ class DownloadRepository(context: Context) {
                     },
                 )
             }
-            normalizeQueueLocked()
+            normalizeQueueLocked(setOf(normalizedOwner))
             writeStoredLocked()
+            true
         }
+        if (!owned) return downloads()
         schedule()
         return downloads()
     }
 
     fun enqueue(
+        owner: DownloadOwner,
         request: PlaybackRequest,
         seriesTitle: String? = null,
         season: Int? = null,
         episodeNumber: Int? = null,
     ): EnqueueResult {
+        if (!initialized) return EnqueueResult.Failed("يتم تجهيز التحميلات المحلية. حاول مرة اخرى بعد لحظات.")
+        val normalizedOwner = owner.normalizedOrNull()
+            ?: return EnqueueResult.Failed("تعذر تحديد مالك التحميل بأمان.")
         require(!request.isLive) { "لا يمكن تحميل البث المباشر." }
+        val historyKey = normalizedDownloadHistoryKey(request.historyKey)
+            ?: return EnqueueResult.Failed("تعذر تحديد هوية المحتوى بأمان.")
         val sources = request.candidates.map(String::trim).filter(String::isNotBlank).distinct()
         if (sources.isEmpty()) return EnqueueResult.Failed("لا يوجد رابط صالح للتحميل.")
 
-        val target = selectedStorageTarget()
+        val baseTarget = selectedStorageTarget()
             ?: return EnqueueResult.Failed("مساحة التخزين غير متاحة على هذا الجهاز.")
+        val target = ownedStorageTarget(baseTarget, normalizedOwner)
         if (!target.directory.exists() && !target.directory.mkdirs()) {
             return EnqueueResult.Failed("تعذر تجهيز مجلد التحميل.")
         }
@@ -179,19 +237,33 @@ class DownloadRepository(context: Context) {
         }
 
         val extension = safeExtension(request.extension)
-        val fileName = buildFileName(request.title, request.streamId, extension)
+        val fileName = buildFileName(
+            title = request.title,
+            streamId = request.streamId,
+            extension = extension,
+            historyKey = historyKey,
+        )
         val finalFile = File(target.directory, fileName)
 
         val entry = synchronized(lock) {
-            cache.firstOrNull { it.historyKey == request.historyKey }?.let {
+            cache.firstOrNull {
+                it.isOwnedBy(normalizedOwner) && it.historyKey == historyKey
+            }?.let {
                 return EnqueueResult.AlreadyExists(it)
             }
             val id = nextUniqueIdLocked()
-            val queuePosition = (cache.maxOfOrNull(OfflineDownload::queuePosition) ?: -1) + 1
+            val queuePosition = cache
+                .asSequence()
+                .filter { it.isOwnedBy(normalizedOwner) }
+                .maxOfOrNull(OfflineDownload::queuePosition)
+                ?.plus(1)
+                ?: 0
             val scheduledAt = scheduledStartForNewDownload()
             OfflineDownload(
                 downloadId = id,
-                historyKey = request.historyKey,
+                accountId = normalizedOwner.accountId,
+                profileId = normalizedOwner.profileId,
+                historyKey = historyKey,
                 title = request.title,
                 posterUrl = request.posterUrl,
                 streamKind = request.streamKind,
@@ -218,9 +290,13 @@ class DownloadRepository(context: Context) {
         return EnqueueResult.Started(entry)
     }
 
-    fun pause(downloadId: Long): List<OfflineDownload> {
+    fun pause(downloadId: Long, owner: DownloadOwner): List<OfflineDownload> {
+        if (!initialized) return emptyList()
+        val normalizedOwner = owner.normalizedOrNull() ?: return downloads()
+        var owned = false
         synchronized(lock) {
-            mutateLocked(downloadId) { item ->
+            owned = cache.any { it.downloadId == downloadId && it.isOwnedBy(normalizedOwner) }
+            mutateOwnedLocked(downloadId, normalizedOwner) { item ->
                 if (item.status in ACTIVE_STATUSES) {
                     item.copy(
                         status = OfflineStatus.PAUSED,
@@ -233,18 +309,23 @@ class DownloadRepository(context: Context) {
                 }
             }
         }
+        if (!owned) return downloads()
         calls.remove(downloadId)?.cancel()
         jobs.remove(downloadId)?.cancel()
         return downloads()
     }
 
-    fun resume(downloadId: Long): Boolean {
+    fun resume(downloadId: Long, owner: DownloadOwner): Boolean {
+        if (!initialized) return false
+        val normalizedOwner = owner.normalizedOrNull() ?: return false
         val resumable = synchronized(lock) {
-            val item = cache.firstOrNull { it.downloadId == downloadId } ?: return@synchronized false
+            val item = cache.firstOrNull {
+                it.downloadId == downloadId && it.isOwnedBy(normalizedOwner)
+            } ?: return@synchronized false
             if (item.status == OfflineStatus.COMPLETED || item.sourceCandidates.isEmpty()) {
                 return@synchronized false
             }
-            mutateLocked(downloadId) {
+            mutateOwnedLocked(downloadId, normalizedOwner) {
                 it.copy(
                     status = OfflineStatus.QUEUED,
                     bytesPerSecond = 0L,
@@ -260,21 +341,167 @@ class DownloadRepository(context: Context) {
         return resumable
     }
 
-    fun remove(downloadId: Long): List<OfflineDownload> {
-        calls.remove(downloadId)?.cancel()
-        jobs.remove(downloadId)?.cancel()
+    fun remove(downloadId: Long, owner: DownloadOwner): List<OfflineDownload> {
+        if (!initialized) return emptyList()
+        val normalizedOwner = owner.normalizedOrNull() ?: return downloads()
         val removed = synchronized(lock) {
-            val item = cache.firstOrNull { it.downloadId == downloadId }
-            cache.removeAll { it.downloadId == downloadId }
-            normalizeQueueLocked()
+            val item = cache.firstOrNull {
+                it.downloadId == downloadId && it.isOwnedBy(normalizedOwner)
+            } ?: return@synchronized null
+            cache.removeAll { it.downloadId == downloadId && it.isOwnedBy(normalizedOwner) }
+            normalizeQueueLocked(setOf(normalizedOwner))
             writeStoredLocked()
             item
         }
-        removed?.let(::deleteDownloadFiles)
+        if (removed == null) return downloads()
+        calls.remove(downloadId)?.cancel()
+        jobs.remove(downloadId)?.cancel()
+        deleteDownloadFiles(removed)
+        return downloads()
+    }
+
+    fun owns(downloadId: Long, owner: DownloadOwner): Boolean {
+        if (!initialized) return false
+        val normalizedOwner = owner.normalizedOrNull() ?: return false
+        return synchronized(lock) {
+            cache.any { it.downloadId == downloadId && it.isOwnedBy(normalizedOwner) }
+        }
+    }
+
+    fun playableLocalUri(downloadId: Long, owner: DownloadOwner): String? {
+        if (!initialized) return null
+        val normalizedOwner = owner.normalizedOrNull() ?: return null
+        val record = synchronized(lock) {
+            cache.firstOrNull {
+                it.downloadId == downloadId &&
+                    it.isOwnedBy(normalizedOwner) &&
+                    it.status == OfflineStatus.COMPLETED
+            }
+        } ?: return null
+        val file = ownedFile(record)?.takeIf(File::exists) ?: return null
+        return Uri.fromFile(file).toString()
+    }
+
+    fun record(downloadId: Long): OfflineDownload? {
+        if (!initialized) return null
+        return item(downloadId)
+    }
+
+    fun recordsForAccount(accountId: String): List<OfflineDownload> {
+        if (!initialized) return emptyList()
+        val normalized = normalizedDownloadAccountId(accountId) ?: return emptyList()
+        return synchronized(lock) { cache.filter { it.accountId == normalized } }
+    }
+
+    fun prepareForAuthenticatedOwner(
+        downloadId: Long,
+        owner: DownloadOwner,
+        refreshedSources: List<String>,
+        nowEpochMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (!initialized) return false
+        val normalizedOwner = owner.normalizedOrNull() ?: return false
+        if (activeAuthenticatedAccountId() != normalizedOwner.accountId) return false
+        val prepared = synchronized(lock) {
+            val index = cache.indexOfFirst {
+                it.downloadId == downloadId && it.isOwnedBy(normalizedOwner)
+            }
+            if (index < 0) return@synchronized false
+            val replacement = prepareDownloadForAuthenticatedOwner(
+                item = cache[index],
+                owner = normalizedOwner,
+                refreshedSources = refreshedSources,
+                nowEpochMs = nowEpochMs,
+            ) ?: return@synchronized false
+            cache[index] = replacement
+            writeStoredLocked()
+            true
+        }
+        if (prepared) schedule()
+        return prepared
+    }
+
+    fun suspendForInactiveOwner(downloadId: Long, owner: DownloadOwner) {
+        if (!initialized) return
+        val normalizedOwner = owner.normalizedOrNull() ?: return
+        var changed = false
+        synchronized(lock) {
+            val index = cache.indexOfFirst {
+                it.downloadId == downloadId && it.isOwnedBy(normalizedOwner)
+            }
+            if (index < 0) return@synchronized
+            val replacement = suspendDownloadForAccountLogout(cache[index], normalizedOwner.accountId)
+            if (replacement != cache[index]) {
+                cache[index] = replacement
+                writeStoredLocked()
+                changed = true
+            }
+        }
+        if (changed) {
+            calls.remove(downloadId)?.cancel()
+            jobs.remove(downloadId)?.cancel()
+        }
+    }
+
+    fun suspendAccount(accountId: String) {
+        if (!initialized) return
+        val normalized = normalizedDownloadAccountId(accountId) ?: return
+        val affectedIds = mutableListOf<Long>()
+        synchronized(lock) {
+            cache = cache.map { item ->
+                val replacement = suspendDownloadForAccountLogout(item, normalized)
+                if (replacement != item) affectedIds += item.downloadId
+                replacement
+            }.toMutableList()
+            if (affectedIds.isNotEmpty()) writeStoredLocked()
+        }
+        affectedIds.forEach { downloadId ->
+            calls.remove(downloadId)?.cancel()
+            jobs.remove(downloadId)?.cancel()
+        }
+    }
+
+    fun suspendAccountsExcept(activeAccountId: String) {
+        if (!initialized) return
+        val normalizedActive = normalizedDownloadAccountId(activeAccountId) ?: return
+        val affectedIds = mutableListOf<Long>()
+        synchronized(lock) {
+            val replacements = suspendInactiveAccountDownloads(cache, normalizedActive)
+            cache.zip(replacements).forEach { (item, replacement) ->
+                if (replacement != item) affectedIds += item.downloadId
+            }
+            cache = replacements.toMutableList()
+            if (affectedIds.isNotEmpty()) writeStoredLocked()
+        }
+        affectedIds.forEach { downloadId ->
+            calls.remove(downloadId)?.cancel()
+            jobs.remove(downloadId)?.cancel()
+        }
+    }
+
+    fun removeProfile(owner: DownloadOwner): List<OfflineDownload> {
+        if (!initialized) return emptyList()
+        val normalizedOwner = owner.normalizedOrNull() ?: return downloads()
+        val deletion = synchronized(lock) {
+            partitionDownloadsForProfileDeletion(cache, normalizedOwner).also { result ->
+                if (result.removed.isNotEmpty()) {
+                    cache = result.retained.toMutableList()
+                    writeStoredLocked()
+                }
+            }
+        }
+        deletion.removed.forEach { removed ->
+            calls.remove(removed.downloadId)?.cancel()
+            jobs.remove(removed.downloadId)?.cancel()
+            deleteDownloadFiles(removed)
+        }
         return downloads()
     }
 
     private fun schedule() {
+        if (!initialized) return
+        val activeAccountId = activeAuthenticatedAccountId() ?: return
+        val activeProfileIds = profileStore.profiles().mapTo(mutableSetOf()) { it.id }
         val limit = settings().concurrentDownloads
         val availableSlots = (limit - jobs.values.count { it.isActive }).coerceAtLeast(0)
         if (availableSlots == 0) return
@@ -283,6 +510,8 @@ class DownloadRepository(context: Context) {
         val candidates = synchronized(lock) {
             cache.asSequence()
                 .filter { it.status in SCHEDULABLE_STATUSES }
+                .filter { it.accountId == activeAccountId && it.sourceCandidates.isNotEmpty() }
+                .filter { it.profileId in activeProfileIds }
                 .filter { jobs[it.downloadId]?.isActive != true }
                 .filter { item ->
                     decideDownloadAttempt(
@@ -324,6 +553,10 @@ class DownloadRepository(context: Context) {
         while (currentCoroutineContext().isActive) {
             val current = item(downloadId) ?: return
             if (current.status == OfflineStatus.PAUSED || current.status == OfflineStatus.COMPLETED) return
+            if (!hasActiveAuthenticatedOwner(current)) {
+                suspendForInactiveOwner(downloadId, current.owner())
+                return
+            }
 
             val networkBlock = networkConstraintMessage()
             if (networkBlock != null) {
@@ -365,11 +598,20 @@ class DownloadRepository(context: Context) {
             } catch (error: NetworkUnavailableException) {
                 waitingForNetwork(downloadId)
                 return
+            } catch (_: InactiveDownloadOwnerException) {
+                val owner = item(downloadId)?.owner() ?: return
+                suspendForInactiveOwner(downloadId, owner)
+                return
             } catch (error: PermanentDownloadException) {
                 fail(downloadId, error.message ?: "تعذر تحميل الملف من الخادم.")
                 return
             } catch (error: IOException) {
                 currentCoroutineContext().ensureActive()
+                val ownedItem = item(downloadId) ?: return
+                if (!hasActiveAuthenticatedOwner(ownedItem)) {
+                    suspendForInactiveOwner(downloadId, ownedItem.owner())
+                    return
+                }
                 if (finalizeCompletedFileAfterTransportError(downloadId)) return
                 if (networkConstraintMessage() != null) {
                     waitingForNetwork(downloadId)
@@ -401,6 +643,7 @@ class DownloadRepository(context: Context) {
     @Throws(IOException::class)
     private suspend fun performDownload(downloadId: Long) {
         val startItem = item(downloadId) ?: return
+        ensureActiveAuthenticatedOwner(startItem)
         mutate(downloadId) {
             it.copy(
                 status = OfflineStatus.CHECKING,
@@ -413,7 +656,12 @@ class DownloadRepository(context: Context) {
 
         val target = storageTarget(startItem) ?: throw StorageUnavailableException()
         if (!target.directory.exists() && !target.directory.mkdirs()) throw StorageUnavailableException()
-        val fileName = startItem.fileName ?: buildFileName(startItem.title, startItem.streamId, startItem.extension)
+        val fileName = startItem.fileName ?: buildFileName(
+            title = startItem.title,
+            streamId = startItem.streamId,
+            extension = startItem.extension,
+            historyKey = startItem.historyKey,
+        )
         val finalFile = File(target.directory, fileName)
         val partFile = File(target.directory, "$fileName.part")
 
@@ -460,6 +708,8 @@ class DownloadRepository(context: Context) {
         var smoothedSpeed = item(downloadId)?.bytesPerSecond?.toDouble()?.coerceAtLeast(0.0) ?: 0.0
 
         while (totalBytes <= 0L || downloaded < totalBytes) {
+            item(downloadId)?.let(::ensureActiveAuthenticatedOwner)
+                ?: throw InactiveDownloadOwnerException()
             var response = executeDownloadCall(
                 downloadId = downloadId,
                 url = probe.url,
@@ -541,6 +791,8 @@ class DownloadRepository(context: Context) {
                         val buffer = ByteArray(BUFFER_SIZE)
                         while (bytesReadFromResponse < maximumResponseBytes) {
                             ensureDownloadContextActive(currentCoroutineContext())
+                            item(downloadId)?.let(::ensureActiveAuthenticatedOwner)
+                                ?: throw InactiveDownloadOwnerException()
                             networkConstraintMessage()?.let { throw NetworkUnavailableException() }
                             if (!target.directory.exists()) throw StorageUnavailableException()
                             if (totalBytes > 0L && downloaded >= totalBytes) break
@@ -697,6 +949,8 @@ class DownloadRepository(context: Context) {
         var lastError: Throwable? = null
         candidates.forEach { candidate ->
             try {
+                item(downloadId)?.let(::ensureActiveAuthenticatedOwner)
+                    ?: throw InactiveDownloadOwnerException()
                 val request = Request.Builder()
                     .url(candidate)
                     .get()
@@ -729,6 +983,7 @@ class DownloadRepository(context: Context) {
                 }
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
+                if (error is InactiveDownloadOwnerException) throw error
                 lastError = error
             } finally {
                 calls.remove(downloadId)
@@ -774,10 +1029,12 @@ class DownloadRepository(context: Context) {
                 bytesPerSecond = 0L,
                 etaSeconds = 0L,
                 localUri = Uri.fromFile(file).toString(),
+                sourceCandidates = emptyList(),
                 supportsRange = supportsRange,
                 errorMessage = null,
                 retryCount = 0,
                 integrityVerified = true,
+                resumeOnOwnerAuthentication = false,
             )
         }
     }
@@ -854,7 +1111,7 @@ class DownloadRepository(context: Context) {
         if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
             return "لا يوجد اتصال بالانترنت."
         }
-        if (preferences.getBoolean(KEY_WIFI_ONLY, false) && connectivity.isActiveNetworkMetered) {
+        if (storedWifiOnly() && connectivity.isActiveNetworkMetered) {
             return "التحميل مضبوط على واي فاي فقط."
         }
         return null
@@ -862,21 +1119,41 @@ class DownloadRepository(context: Context) {
 
     private fun selectedStorageTarget(): StorageTarget? {
         val targets = storageTargets()
-        val preferred = preferences.getString(KEY_STORAGE_PATH, null)
+        val preferred = runCatching { preferences.getString(KEY_STORAGE_PATH, null) }.getOrNull()
         return targets.firstOrNull { it.directory.absolutePath == preferred }
             ?: targets.firstOrNull { !it.removable }
             ?: targets.firstOrNull()
     }
 
     private fun storageTarget(item: OfflineDownload): StorageTarget? {
-        val path = item.storagePath ?: return selectedStorageTarget()
-        val directory = File(path)
+        val directory = validatedOwnedStorageDirectory(item) ?: return null
         if (!directory.exists() || !directory.canWrite()) return null
         return StorageTarget(
             directory = directory,
             label = item.storageLabel,
             removable = runCatching { Environment.isExternalStorageRemovable(directory) }.getOrDefault(false),
         )
+    }
+
+    private fun ownedStorageTarget(base: StorageTarget, owner: DownloadOwner): StorageTarget = StorageTarget(
+        directory = File(
+            File(base.directory, OWNER_STORAGE_DIRECTORY),
+            downloadOwnerStorageKey(owner),
+        ),
+        label = base.label,
+        removable = base.removable,
+    )
+
+    private fun validatedOwnedStorageDirectory(item: OfflineDownload): File? {
+        val owner = item.owner().normalizedOrNull() ?: return null
+        val storedPath = item.storagePath ?: return null
+        val storedCanonical = runCatching { File(storedPath).canonicalFile }.getOrNull() ?: return null
+        return storageTargets()
+            .asSequence()
+            .map { ownedStorageTarget(it, owner).directory }
+            .firstOrNull { expected ->
+                runCatching { expected.canonicalFile == storedCanonical }.getOrDefault(false)
+            }
     }
 
     private fun storageTargets(): List<StorageTarget> = appContext
@@ -899,44 +1176,45 @@ class DownloadRepository(context: Context) {
         }
         .distinctBy { runCatching { it.directory.canonicalPath }.getOrDefault(it.directory.absolutePath) }
 
-    private fun recoverInterruptedState(item: OfflineDownload): OfflineDownload {
-        if (item.status == OfflineStatus.COMPLETED) return item
-        if (item.status in ACTIVE_STATUSES || item.status == OfflineStatus.CHECKING) {
-            return item.copy(
-                status = if (item.sourceCandidates.isEmpty()) OfflineStatus.FAILED else OfflineStatus.QUEUED,
-                bytesPerSecond = 0L,
-                etaSeconds = -1L,
-                errorMessage = if (item.sourceCandidates.isEmpty()) {
-                    "هذا التحميل قديم. اضغط اعادة المحاولة لانشاء رابط جديد."
-                } else {
-                    "سيتم استئناف التحميل من اخر نقطة."
-                },
-            )
-        }
-        return item
-    }
+    private fun recoverInterruptedState(item: OfflineDownload): OfflineDownload =
+        recoverDownloadAfterProcessDeath(item, System.currentTimeMillis())
 
-    private fun completedFileExists(item: OfflineDownload): Boolean = item.localUri?.let(::fileFromUri)?.exists() == true
+    private fun completedFileExists(item: OfflineDownload): Boolean = ownedFile(item)?.exists() == true
 
     private fun deleteDownloadFiles(item: OfflineDownload) {
-        item.localUri?.let(::fileFromUri)?.let { file ->
-            runCatching { file.delete() }
-            runCatching { File(file.parentFile, "${file.name}.part").delete() }
-        }
-        val storage = item.storagePath?.let(::File)
-        val name = item.fileName
-        if (storage != null && name != null) {
-            runCatching { File(storage, name).delete() }
-            runCatching { File(storage, "$name.part").delete() }
-        }
+        val file = ownedFile(item) ?: return
+        runCatching { file.delete() }
+        runCatching { File(file.parentFile, "${file.name}.part").delete() }
     }
 
-    private fun fileFromUri(uri: String): File? = runCatching {
-        if (uri.startsWith("file:")) Uri.parse(uri).path?.let(::File) else null
-    }.getOrNull()
+    private fun ownedFile(item: OfflineDownload): File? {
+        val directory = validatedOwnedStorageDirectory(item) ?: return null
+        return resolveOwnedDownloadFile(directory, item.fileName, item.localUri)
+    }
 
     private fun item(downloadId: Long): OfflineDownload? = synchronized(lock) {
         cache.firstOrNull { it.downloadId == downloadId }
+    }
+
+    private fun activeAuthenticatedAccountId(): String? {
+        val metadata = accountSessionStore.metadata() ?: return null
+        if (metadata.isExpired()) return null
+        val session = AuthenticatedSessionRegistry.current() ?: return null
+        if (metadata.username != session.credentials.username.trim()) return null
+        if (
+            metadata.portalBaseUrl.trim().trimEnd('/') !=
+            session.portal.baseUrl.trim().trimEnd('/')
+        ) {
+            return null
+        }
+        return normalizedDownloadAccountId(metadata.accountId)
+    }
+
+    private fun hasActiveAuthenticatedOwner(item: OfflineDownload): Boolean =
+        activeAuthenticatedAccountId() == item.accountId
+
+    private fun ensureActiveAuthenticatedOwner(item: OfflineDownload) {
+        if (!hasActiveAuthenticatedOwner(item)) throw InactiveDownloadOwnerException()
     }
 
     private fun update(downloadId: Long, replacement: OfflineDownload) {
@@ -963,12 +1241,24 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    private fun normalizeQueueLocked() {
-        cache = cache.sortedWith(
-            compareByDescending<OfflineDownload> { it.priority }
-                .thenBy { it.queuePosition }
-                .thenBy { it.createdAtEpochMs },
-        ).mapIndexed { index, item -> item.copy(queuePosition = index) }.toMutableList()
+    private inline fun mutateOwnedLocked(
+        downloadId: Long,
+        owner: DownloadOwner,
+        transform: (OfflineDownload) -> OfflineDownload,
+    ) {
+        val index = cache.indexOfFirst {
+            it.downloadId == downloadId && it.isOwnedBy(owner)
+        }
+        if (index < 0) return
+        val updated = transform(cache[index])
+        if (updated != cache[index]) {
+            cache[index] = updated
+            writeStoredLocked()
+        }
+    }
+
+    private fun normalizeQueueLocked(owners: Set<DownloadOwner>? = null) {
+        cache = normalizeOwnedDownloadQueues(cache, owners).toMutableList()
     }
 
     private fun sortedSnapshotLocked(): List<OfflineDownload> = cache.sortedWith(
@@ -993,95 +1283,18 @@ class DownloadRepository(context: Context) {
         return candidate
     }
 
-    private fun readStored(): List<OfflineDownload> {
-        val raw = preferences.getString(KEY_DOWNLOADS, null) ?: return emptyList()
-        return runCatching {
-            val array = JSONArray(raw)
-            buildList {
-                for (index in 0 until array.length()) {
-                    val data = array.getJSONObject(index)
-                    val sources = data.optJSONArray("sourceCandidates")?.let { sourceArray ->
-                        buildList {
-                            for (sourceIndex in 0 until sourceArray.length()) {
-                                sourceArray.optString(sourceIndex).takeIf(String::isNotBlank)?.let(::add)
-                            }
-                        }
-                    }.orEmpty()
-                    add(
-                        OfflineDownload(
-                            downloadId = data.getLong("downloadId"),
-                            historyKey = data.getString("historyKey"),
-                            title = data.getString("title"),
-                            posterUrl = data.optNullableString("posterUrl"),
-                            streamKind = data.getString("streamKind"),
-                            streamId = data.getInt("streamId"),
-                            extension = data.optString("extension", "mp4"),
-                            seriesTitle = data.optNullableString("seriesTitle"),
-                            season = data.optNullableInt("season"),
-                            episodeNumber = data.optNullableInt("episodeNumber"),
-                            sourceCandidates = sources,
-                            fileName = data.optNullableString("fileName"),
-                            storagePath = data.optNullableString("storagePath"),
-                            storageLabel = data.optString("storageLabel", "التخزين الداخلي"),
-                            supportsRange = data.optNullableBoolean("supportsRange"),
-                            status = runCatching {
-                                OfflineStatus.valueOf(data.optString("status", OfflineStatus.QUEUED.name))
-                            }.getOrDefault(OfflineStatus.QUEUED),
-                            bytesDownloaded = data.optLong("bytesDownloaded", 0L).coerceAtLeast(0L),
-                            totalBytes = data.optLong("totalBytes", -1L),
-                            bytesPerSecond = data.optLong("bytesPerSecond", 0L).coerceAtLeast(0L),
-                            etaSeconds = data.optLong("etaSeconds", -1L),
-                            localUri = data.optNullableString("localUri"),
-                            errorMessage = data.optNullableString("errorMessage"),
-                            retryCount = data.optInt("retryCount", 0).coerceAtLeast(0),
-                            integrityVerified = data.optBoolean("integrityVerified", false),
-                            priority = data.optInt("priority", 0),
-                            queuePosition = data.optInt("queuePosition", index),
-                            scheduledAtEpochMs = data.optLong("scheduledAtEpochMs", 0L),
-                            createdAtEpochMs = data.optLong("createdAtEpochMs", System.currentTimeMillis()),
-                        ),
-                    )
-                }
-            }
-        }.getOrDefault(emptyList())
-    }
+    private fun storedWifiOnly(): Boolean =
+        runCatching { preferences.getBoolean(KEY_WIFI_ONLY, false) }.getOrDefault(false)
 
-    private fun writeStoredLocked() {
-        val array = JSONArray()
-        cache.forEach { item ->
-            array.put(
-                JSONObject()
-                    .put("downloadId", item.downloadId)
-                    .put("historyKey", item.historyKey)
-                    .put("title", item.title)
-                    .put("posterUrl", item.posterUrl ?: JSONObject.NULL)
-                    .put("streamKind", item.streamKind)
-                    .put("streamId", item.streamId)
-                    .put("extension", item.extension)
-                    .put("seriesTitle", item.seriesTitle ?: JSONObject.NULL)
-                    .put("season", item.season ?: JSONObject.NULL)
-                    .put("episodeNumber", item.episodeNumber ?: JSONObject.NULL)
-                    .put("sourceCandidates", JSONArray(item.sourceCandidates))
-                    .put("fileName", item.fileName ?: JSONObject.NULL)
-                    .put("storagePath", item.storagePath ?: JSONObject.NULL)
-                    .put("storageLabel", item.storageLabel)
-                    .put("supportsRange", item.supportsRange ?: JSONObject.NULL)
-                    .put("status", item.status.name)
-                    .put("bytesDownloaded", item.bytesDownloaded)
-                    .put("totalBytes", item.totalBytes)
-                    .put("bytesPerSecond", item.bytesPerSecond)
-                    .put("etaSeconds", item.etaSeconds)
-                    .put("localUri", item.localUri ?: JSONObject.NULL)
-                    .put("errorMessage", item.errorMessage ?: JSONObject.NULL)
-                    .put("retryCount", item.retryCount)
-                    .put("integrityVerified", item.integrityVerified)
-                    .put("priority", item.priority)
-                    .put("queuePosition", item.queuePosition)
-                    .put("scheduledAtEpochMs", item.scheduledAtEpochMs)
-                    .put("createdAtEpochMs", item.createdAtEpochMs),
-            )
+    private fun writeStoredLocked(commit: Boolean = false): Boolean {
+        val encoded = DownloadSchemaCodec.encode(cache, quarantine)
+        val editor = preferences.edit().putString(KEY_DOWNLOADS, encoded)
+        return if (commit) {
+            editor.commit()
+        } else {
+            editor.apply()
+            true
         }
-        preferences.edit().putString(KEY_DOWNLOADS, array.toString()).apply()
     }
 
     private fun parseTotalFromContentRange(value: String?): Long {
@@ -1105,14 +1318,19 @@ class DownloadRepository(context: Context) {
         .take(8)
         .ifBlank { "mp4" }
 
-    private fun buildFileName(title: String, streamId: Int, extension: String): String {
+    private fun buildFileName(
+        title: String,
+        streamId: Int,
+        extension: String,
+        historyKey: String,
+    ): String {
         val safeTitle = title
             .replace(Regex("[^\\p{L}\\p{N}._ -]+"), "")
             .trim()
             .replace(Regex("\\s+"), "_")
             .take(96)
             .ifBlank { "hulk_content" }
-        return "${safeTitle}_$streamId.$extension"
+        return "${safeTitle}_${streamId}_${downloadHistoryFileKey(historyKey)}.$extension"
     }
 
     private fun formatBytes(bytes: Long): String {
@@ -1141,6 +1359,7 @@ class DownloadRepository(context: Context) {
     private class InsufficientSpaceException(message: String) : IOException(message)
     private class StorageUnavailableException : IOException()
     private class NetworkUnavailableException : IOException()
+    private class InactiveDownloadOwnerException : IOException()
     private class PermanentDownloadException(message: String) : IOException(message)
 
     private companion object {
@@ -1150,6 +1369,7 @@ class DownloadRepository(context: Context) {
         const val KEY_SCHEDULE_MODE = "schedule_mode"
         const val KEY_CONCURRENT_DOWNLOADS = "concurrent_downloads"
         const val KEY_STORAGE_PATH = "storage_path"
+        const val OWNER_STORAGE_DIRECTORY = ".hulk-owned-downloads-v2"
         const val DEFAULT_CONCURRENT_DOWNLOADS = 1
         const val MAX_CONCURRENT_DOWNLOADS = 3
         const val MAX_RETRIES = 4
@@ -1231,9 +1451,3 @@ internal fun buildDownloadRequest(
         downloadRangeHeader(offset, supportsRange, totalBytes)?.let { header("Range", it) }
     }
     .build()
-
-private fun JSONObject.optNullableString(name: String): String? = if (isNull(name)) null else optString(name).takeIf(String::isNotBlank)
-
-private fun JSONObject.optNullableInt(name: String): Int? = if (isNull(name)) null else optInt(name)
-
-private fun JSONObject.optNullableBoolean(name: String): Boolean? = if (isNull(name)) null else optBoolean(name)

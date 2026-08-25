@@ -93,10 +93,18 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         val snapshot = currentStore.snapshot()
         val recordsById = snapshot.records.associateBy { it.downloadId }
         val currentStates = recordsById.mapValues { (_, record) ->
-            durableDownloadSchedulingState(record, snapshot.wifiOnly)
+            durableDownloadSchedulingState(
+                record = record,
+                wifiOnly = snapshot.wifiOnly,
+                activeAccountId = snapshot.activeAccountId,
+            )
         }
 
-        (knownSchedulingStates.keys - currentStates.keys).forEach(currentBridge::cancel)
+        (knownSchedulingStates.keys - currentStates.keys).forEach { downloadId ->
+            knownSchedulingStates[downloadId]?.let { previous ->
+                currentBridge.cancel(downloadId, previous.owner)
+            }
+        }
         recordsById.forEach { (downloadId, record) ->
             val currentState = currentStates.getValue(downloadId)
             val previousState = knownSchedulingStates[downloadId]
@@ -117,11 +125,11 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
             when (currentState.action) {
                 DurableDownloadLifecycleAction.ENQUEUE -> currentBridge.enqueue(
                     downloadId = downloadId,
-                    title = record.title,
+                    owner = currentState.owner,
                     wifiOnly = currentState.wifiOnly,
                     scheduledAtEpochMs = currentState.scheduledAtEpochMs,
                 )
-                DurableDownloadLifecycleAction.CANCEL -> currentBridge.cancel(downloadId)
+                DurableDownloadLifecycleAction.CANCEL -> currentBridge.cancel(downloadId, currentState.owner)
             }
         }
         knownSchedulingStates = currentStates

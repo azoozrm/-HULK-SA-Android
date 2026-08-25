@@ -18,18 +18,24 @@ internal fun durableDownloadNotificationId(downloadId: Long): Int {
     return folded.coerceAtLeast(1)
 }
 
-internal fun durableDownloadNotificationRequestCode(downloadId: Long, action: String): Int {
+internal fun durableDownloadNotificationRequestCode(
+    downloadId: Long,
+    owner: DownloadOwner,
+    action: String,
+): Int {
     validateDurableDownloadId(downloadId)
-    return durableDownloadNotificationId(downloadId) xor action.hashCode()
+    val normalizedOwner = requireNotNull(owner.normalizedOrNull()) { "A valid download owner is required" }
+    return durableDownloadNotificationId(downloadId) xor
+        action.hashCode() xor
+        downloadOwnerStorageKey(normalizedOwner).hashCode()
 }
 
 internal class DurableDownloadForeground(
     private val context: Context,
 ) {
-    fun createInfo(downloadId: Long, title: String?): ForegroundInfo {
+    fun createInfo(downloadId: Long, owner: DownloadOwner): ForegroundInfo {
         ensureNotificationChannel()
-        val notificationTitle = title?.trim()?.takeIf { it.isNotEmpty() }
-            ?: "تحميل محتوى HULK SA"
+        val notificationTitle = "تحميل محتوى HULK SA"
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(context, CHANNEL_ID)
         } else {
@@ -40,14 +46,14 @@ internal class DurableDownloadForeground(
             .setSmallIcon(R.drawable.ic_stat_hulk)
             .setContentTitle(notificationTitle)
             .setContentText("جار التحميل وسيستمر في الخلفية.")
-            .setContentIntent(openAppIntent(downloadId))
+            .setContentIntent(openAppIntent(downloadId, owner))
             .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_PROGRESS)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setProgress(0, 0, true)
-            .addAction(downloadAction(downloadId, ACTION_PAUSE_DOWNLOAD, "ايقاف مؤقت", android.R.drawable.ic_media_pause))
-            .addAction(downloadAction(downloadId, ACTION_RESUME_DOWNLOAD, "استئناف", android.R.drawable.ic_media_play))
+            .addAction(downloadAction(downloadId, owner, ACTION_PAUSE_DOWNLOAD, "ايقاف مؤقت", android.R.drawable.ic_media_pause))
+            .addAction(downloadAction(downloadId, owner, ACTION_RESUME_DOWNLOAD, "استئناف", android.R.drawable.ic_media_play))
             .build()
         val notificationId = durableDownloadNotificationId(downloadId)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -61,13 +67,15 @@ internal class DurableDownloadForeground(
         }
     }
 
-    private fun openAppIntent(downloadId: Long): PendingIntent {
+    private fun openAppIntent(downloadId: Long, owner: DownloadOwner): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
+            .putExtra(EXTRA_DOWNLOAD_ACCOUNT_ID, owner.accountId)
+            .putExtra(EXTRA_DOWNLOAD_PROFILE_ID, owner.profileId)
         return PendingIntent.getActivity(
             context,
-            durableDownloadNotificationRequestCode(downloadId, ACTION_OPEN_DOWNLOADS),
+            durableDownloadNotificationRequestCode(downloadId, owner, ACTION_OPEN_DOWNLOADS),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -75,6 +83,7 @@ internal class DurableDownloadForeground(
 
     private fun downloadAction(
         downloadId: Long,
+        owner: DownloadOwner,
         action: String,
         label: String,
         icon: Int,
@@ -82,9 +91,11 @@ internal class DurableDownloadForeground(
         val intent = Intent(context, DurableDownloadActionReceiver::class.java)
             .setAction(action)
             .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
+            .putExtra(EXTRA_DOWNLOAD_ACCOUNT_ID, owner.accountId)
+            .putExtra(EXTRA_DOWNLOAD_PROFILE_ID, owner.profileId)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            durableDownloadNotificationRequestCode(downloadId, action),
+            durableDownloadNotificationRequestCode(downloadId, owner, action),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

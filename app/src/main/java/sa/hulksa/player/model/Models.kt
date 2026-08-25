@@ -122,6 +122,8 @@ data class DownloadSettings(
 
 data class OfflineDownload(
     val downloadId: Long,
+    val accountId: String,
+    val profileId: String,
     val historyKey: String,
     val title: String,
     val posterUrl: String?,
@@ -148,6 +150,7 @@ data class OfflineDownload(
     val priority: Int = 0,
     val queuePosition: Int = 0,
     val scheduledAtEpochMs: Long = 0L,
+    val resumeOnOwnerAuthentication: Boolean = false,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
 ) {
     val progress: Float

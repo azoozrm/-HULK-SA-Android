@@ -43,15 +43,17 @@ class DurableDownloadPreferenceStoreTest {
     fun `progress-only status changes keep the same scheduling state`() {
         val queued = DurableDownloadPersistedRecord(
             downloadId = 42L,
-            title = "Movie",
+            accountId = "account-a",
+            profileId = "primary",
+            historyKey = "movie:42",
             status = OfflineStatus.QUEUED,
             scheduledAtEpochMs = 0L,
         )
         val downloading = queued.copy(status = OfflineStatus.DOWNLOADING)
 
         assertEquals(
-            durableDownloadSchedulingState(queued, wifiOnly = false),
-            durableDownloadSchedulingState(downloading, wifiOnly = false),
+            durableDownloadSchedulingState(queued, wifiOnly = false, activeAccountId = "account-a"),
+            durableDownloadSchedulingState(downloading, wifiOnly = false, activeAccountId = "account-a"),
         )
     }
 
@@ -59,14 +61,37 @@ class DurableDownloadPreferenceStoreTest {
     fun `network constraint changes require rescheduling`() {
         val record = DurableDownloadPersistedRecord(
             downloadId = 42L,
-            title = "Movie",
+            accountId = "account-a",
+            profileId = "primary",
+            historyKey = "movie:42",
             status = OfflineStatus.QUEUED,
             scheduledAtEpochMs = 0L,
         )
 
         assertNotEquals(
-            durableDownloadSchedulingState(record, wifiOnly = false),
-            durableDownloadSchedulingState(record, wifiOnly = true),
+            durableDownloadSchedulingState(record, wifiOnly = false, activeAccountId = "account-a"),
+            durableDownloadSchedulingState(record, wifiOnly = true, activeAccountId = "account-a"),
+        )
+    }
+
+    @Test
+    fun `inactive account records always cancel durable work`() {
+        val record = DurableDownloadPersistedRecord(
+            downloadId = 42L,
+            accountId = "account-a",
+            profileId = "primary",
+            historyKey = "movie:42",
+            status = OfflineStatus.QUEUED,
+            scheduledAtEpochMs = 0L,
+        )
+
+        assertEquals(
+            DurableDownloadLifecycleAction.CANCEL,
+            durableDownloadSchedulingState(
+                record = record,
+                wifiOnly = false,
+                activeAccountId = "account-b",
+            ).action,
         )
     }
 
@@ -74,7 +99,7 @@ class DurableDownloadPreferenceStoreTest {
     fun `active transport is not replaced when scheduled metadata is cleared`() {
         val previous = DurableDownloadSchedulingState(
             action = DurableDownloadLifecycleAction.ENQUEUE,
-            title = "Movie",
+            owner = DownloadOwner("account-a", "primary"),
             wifiOnly = false,
             scheduledAtEpochMs = 25_000L,
         )
@@ -93,7 +118,7 @@ class DurableDownloadPreferenceStoreTest {
     fun `queued constraint changes still replace durable work`() {
         val previous = DurableDownloadSchedulingState(
             action = DurableDownloadLifecycleAction.ENQUEUE,
-            title = "Movie",
+            owner = DownloadOwner("account-a", "primary"),
             wifiOnly = false,
             scheduledAtEpochMs = 0L,
         )

@@ -59,6 +59,8 @@ class PlaybackAndDownloadTest {
     fun offlineProgressIsCalculatedAndClamped() {
         val item = OfflineDownload(
             downloadId = 1L,
+            accountId = "account-a",
+            profileId = "primary",
             historyKey = "MOVIE:1",
             title = "Demo",
             posterUrl = null,

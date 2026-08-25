@@ -10,7 +10,7 @@ internal class DurableDownloadLifecycleBridge(
     fun enqueue(item: OfflineDownload, wifiOnly: Boolean) {
         enqueue(
             downloadId = item.downloadId,
-            title = item.title,
+            owner = item.owner(),
             wifiOnly = wifiOnly,
             scheduledAtEpochMs = item.scheduledAtEpochMs,
         )
@@ -18,21 +18,21 @@ internal class DurableDownloadLifecycleBridge(
 
     fun enqueue(
         downloadId: Long,
-        title: String?,
+        owner: DownloadOwner,
         wifiOnly: Boolean,
         scheduledAtEpochMs: Long,
     ) {
         validateDurableDownloadId(downloadId)
         scheduler.enqueue(
             downloadId = downloadId,
+            owner = owner,
             wifiOnly = wifiOnly,
             scheduledAtEpochMs = scheduledAtEpochMs,
-            title = title,
         )
     }
 
-    fun cancel(downloadId: Long) {
+    fun cancel(downloadId: Long, owner: DownloadOwner) {
         validateDurableDownloadId(downloadId)
-        scheduler.cancel(downloadId)
+        scheduler.cancel(downloadId, owner)
     }
 }

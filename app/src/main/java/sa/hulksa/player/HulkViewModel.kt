@@ -291,10 +291,25 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshOperations(force = true)
+        viewModelScope.launch {
+            val (ownerToken, downloads) = withContext(Dispatchers.IO) {
+                downloadRepository.initialize()
+                downloadRepository.activeOwnerToken() to downloadRepository.downloads()
+            }
+            if (ownerToken == downloadRepository.activeOwnerToken()) {
+                mutableState.update { it.copy(downloads = downloads) }
+            }
+        }
         restoreSession()
         viewModelScope.launch {
             while (isActive) {
-                val downloads = downloadRepository.downloads()
+                val (ownerToken, downloads) = withContext(Dispatchers.IO) {
+                    downloadRepository.activeOwnerToken() to downloadRepository.downloads()
+                }
+                if (ownerToken != downloadRepository.activeOwnerToken()) {
+                    delay(50L)
+                    continue
+                }
                 if (downloads != mutableState.value.downloads) {
                     mutableState.update { it.copy(downloads = downloads) }
                 }
@@ -838,7 +853,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playDownload(item: OfflineDownload) {
-        val localUri = item.localUri?.takeIf(String::isNotBlank) ?: return
+        val localUri = downloadRepository.playableLocalUri(item.downloadId) ?: return
         if (item.status != OfflineStatus.COMPLETED) return
         playerReturnScreen = HulkScreen.MAIN
         startPlayback(
@@ -911,6 +926,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun retryDownload(item: OfflineDownload): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             return "التنزيلات متوقفة مؤقتًا."
+        }
+        if (!downloadRepository.canAccess(item.downloadId)) {
+            return "هذا التحميل غير متاح للحساب والملف الشخصي الحاليين."
         }
         return when (item.status) {
             OfflineStatus.COMPLETED -> "التحميل مكتمل وجاهز للتشغيل."
@@ -1334,16 +1352,36 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onProfileChanged() {
         notificationScanJob?.cancel()
-        mutableState.update { it.copy(notificationPopup = null) }
+        mutableState.update { it.copy(notificationPopup = null, downloads = emptyList()) }
         refreshNotificationState(clearPopup = true)
         scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
         scheduleTvPlatformSync(immediate = true)
+        viewModelScope.launch {
+            val (ownerToken, downloads) = withContext(Dispatchers.IO) {
+                downloadRepository.activeOwnerToken() to downloadRepository.downloads()
+            }
+            if (ownerToken == downloadRepository.activeOwnerToken()) {
+                mutableState.update { it.copy(downloads = downloads) }
+            }
+        }
     }
 
     fun removeNotificationProfileData(profileId: String) {
         val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
         viewModelScope.launch(Dispatchers.IO) {
             localEpisodeNotificationStore.removeProfile(profileId, accountId)
+        }
+    }
+
+    fun removeDownloadProfileData(profileId: String) {
+        val owner = downloadRepository.ownerForProfileCleanup(profileId) ?: return
+        viewModelScope.launch {
+            val (ownerToken, downloads) = withContext(Dispatchers.IO) {
+                downloadRepository.activeOwnerToken() to downloadRepository.removeProfile(owner)
+            }
+            if (ownerToken == downloadRepository.activeOwnerToken()) {
+                mutableState.update { it.copy(downloads = downloads) }
+            }
         }
     }
 
@@ -1932,10 +1970,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { repository.reauthenticate(activeSession) }
                 .onSuccess { refreshed ->
                     session = refreshed
+                    val downloads = withContext(Dispatchers.IO) {
+                        downloadRepository.onAccountAuthenticated()
+                    }
                     mutableState.update {
                         it.copy(
                             account = refreshed.account,
                             isAccountRefreshing = false,
+                            downloads = downloads,
                             errorMessage = null,
                         )
                     }
@@ -2068,6 +2110,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val operationsState = mutableState.value.operations
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
+        mutableState.update { it.copy(downloads = emptyList()) }
+        downloadRepository.suspendActiveAccountForLogout()
         repository.logout()
         session = null
         sessionRestorationComplete = true
@@ -2084,7 +2128,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             isStarting = false,
             favorites = userLibrary.favorites(),
             history = userLibrary.history(),
-            downloads = downloadRepository.downloads(),
+            downloads = emptyList(),
             downloadSettings = downloadRepository.settings(),
             notificationSubscribedSeriesIds = emptySet(),
             localNotifications = emptyList(),
@@ -2124,6 +2168,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 .onSuccess { authenticated ->
                     session = authenticated
                     sessionRestorationComplete = true
+                    val downloads = withContext(Dispatchers.IO) {
+                        downloadRepository.onAccountAuthenticated()
+                    }
                     clearCatalogMemory()
                     mutableState.update {
                         it.copy(
@@ -2135,6 +2182,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             catalogs = emptyMap(),
                             selectedCategoryId = null,
                             searchQuery = "",
+                            downloads = downloads,
                             errorMessage = null,
                         )
                     }
@@ -2500,6 +2548,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (invalidSession) {
             sessionRestorationComplete = true
             beginTvPlatformProfileTransition(resetPublishedScope = true)
+            mutableState.update { it.copy(downloads = emptyList()) }
+            downloadRepository.suspendActiveAccountForLogout()
             repository.logout()
             session = null
             notificationScanJob?.cancel()

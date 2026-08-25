@@ -533,6 +533,7 @@ fun ProfileAwareHulkApp(
                     destinationMemoryByProfile.remove(profileId)
                     catalogNavigationMemoryByProfile.remove(profileId)
                     viewModel.removeNotificationProfileData(profileId)
+                    viewModel.removeDownloadProfileData(profileId)
                     if (pinSecurityProfileId == profileId) pinSecurityProfileId = null
                     profileRevision++
                     pinRevision++

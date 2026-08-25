@@ -2,18 +2,20 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import org.json.JSONArray
 import sa.hulksa.player.model.OfflineStatus
 
 internal data class DurableDownloadPersistedRecord(
     val downloadId: Long,
-    val title: String?,
+    val accountId: String,
+    val profileId: String,
+    val historyKey: String,
     val status: OfflineStatus,
     val scheduledAtEpochMs: Long,
 )
 
 internal data class DurableDownloadPreferenceSnapshot(
     val wifiOnly: Boolean,
+    val activeAccountId: String?,
     val records: List<DurableDownloadPersistedRecord>,
 )
 
@@ -24,7 +26,7 @@ internal enum class DurableDownloadLifecycleAction {
 
 internal data class DurableDownloadSchedulingState(
     val action: DurableDownloadLifecycleAction,
-    val title: String?,
+    val owner: DownloadOwner,
     val wifiOnly: Boolean,
     val scheduledAtEpochMs: Long,
 )
@@ -49,9 +51,14 @@ internal fun durableDownloadLifecycleAction(
 internal fun durableDownloadSchedulingState(
     record: DurableDownloadPersistedRecord,
     wifiOnly: Boolean,
+    activeAccountId: String?,
 ): DurableDownloadSchedulingState = DurableDownloadSchedulingState(
-    action = durableDownloadLifecycleAction(record.status),
-    title = record.title,
+    action = if (record.accountId == activeAccountId) {
+        durableDownloadLifecycleAction(record.status)
+    } else {
+        DurableDownloadLifecycleAction.CANCEL
+    },
+    owner = DownloadOwner(record.accountId, record.profileId),
     wifiOnly = wifiOnly,
     scheduledAtEpochMs = record.scheduledAtEpochMs,
 )
@@ -75,14 +82,16 @@ internal fun shouldApplyDurableDownloadSchedulingState(
 }
 
 internal class DurableDownloadPreferenceStore(context: Context) {
+    private val accountScope = AccountScopeStore(context.applicationContext)
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES_NAME,
         Context.MODE_PRIVATE,
     )
 
     fun snapshot(): DurableDownloadPreferenceSnapshot = DurableDownloadPreferenceSnapshot(
-        wifiOnly = preferences.getBoolean(KEY_WIFI_ONLY, false),
-        records = parseRecords(preferences.getString(KEY_DOWNLOADS, null)),
+        wifiOnly = runCatching { preferences.getBoolean(KEY_WIFI_ONLY, false) }.getOrDefault(false),
+        activeAccountId = accountScope.activeAccountId(),
+        records = parseRecords(runCatching { preferences.getString(KEY_DOWNLOADS, null) }.getOrNull()),
     )
 
     fun register(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
@@ -94,35 +103,29 @@ internal class DurableDownloadPreferenceStore(context: Context) {
     }
 
     private fun parseRecords(raw: String?): List<DurableDownloadPersistedRecord> {
-        if (raw.isNullOrBlank()) return emptyList()
-        return runCatching {
-            val array = JSONArray(raw)
-            buildList {
-                for (index in 0 until array.length()) {
-                    val data = array.optJSONObject(index) ?: continue
-                    val downloadId = data.optLong("downloadId", -1L)
-                    if (downloadId <= 0L) continue
-                    val status = runCatching {
-                        OfflineStatus.valueOf(
-                            data.optString("status", OfflineStatus.QUEUED.name),
-                        )
-                    }.getOrDefault(OfflineStatus.QUEUED)
-                    add(
-                        DurableDownloadPersistedRecord(
-                            downloadId = downloadId,
-                            title = data.optString("title").trim().takeIf(String::isNotEmpty),
-                            status = status,
-                            scheduledAtEpochMs = data.optLong("scheduledAtEpochMs", 0L),
-                        ),
-                    )
-                }
-            }
-        }.getOrDefault(emptyList())
+        return parseDurableDownloadRecords(raw)
     }
 
     companion object {
         const val PREFERENCES_NAME = "hulk_downloads"
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_WIFI_ONLY = "wifi_only"
+    }
+}
+
+internal fun parseDurableDownloadRecords(raw: String?): List<DurableDownloadPersistedRecord> {
+    // Legacy arrays can be large and are never runnable because they have no
+    // provable account owner. Avoid parsing them in this startup ContentProvider;
+    // DownloadRepository performs the quarantine migration on Dispatchers.IO.
+    if (raw.isNullOrBlank() || raw.trimStart().firstOrNull() != '{') return emptyList()
+    return DownloadSchemaCodec.decode(raw).records.map { item ->
+        DurableDownloadPersistedRecord(
+            downloadId = item.downloadId,
+            accountId = item.accountId,
+            profileId = item.profileId,
+            historyKey = item.historyKey,
+            status = item.status,
+            scheduledAtEpochMs = item.scheduledAtEpochMs,
+        )
     }
 }
