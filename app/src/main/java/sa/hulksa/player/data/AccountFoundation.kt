@@ -62,6 +62,32 @@ internal fun isAccountSessionExpired(
 ): Boolean = expiresAtEpochSeconds != null && expiresAtEpochSeconds > 0L &&
     nowEpochSeconds >= expiresAtEpochSeconds
 
+internal const val SUBSCRIPTION_RESUME_REVALIDATION_INTERVAL_MS = 10 * 60_000L
+
+/**
+ * Foreground entitlement checks intentionally share the app's existing
+ * ten-minute resume network cadence. A recent failed attempt is also throttled,
+ * while clock rollback or missing authentication metadata forces revalidation.
+ */
+internal fun shouldRevalidateAccountOnResume(
+    authenticatedAtEpochMs: Long,
+    lastAttemptElapsedMs: Long,
+    nowEpochMs: Long,
+    nowElapsedMs: Long,
+    minimumAgeMs: Long = SUBSCRIPTION_RESUME_REVALIDATION_INTERVAL_MS,
+): Boolean {
+    if (minimumAgeMs <= 0L) return true
+
+    if (lastAttemptElapsedMs > 0L) {
+        if (nowElapsedMs < lastAttemptElapsedMs) return true
+        if (nowElapsedMs - lastAttemptElapsedMs < minimumAgeMs) return false
+    }
+
+    if (authenticatedAtEpochMs <= 0L) return true
+    if (nowEpochMs < authenticatedAtEpochMs) return true
+    return nowEpochMs - authenticatedAtEpochMs >= minimumAgeMs
+}
+
 data class AccountSessionMetadata(
     val accountId: String,
     val username: String,

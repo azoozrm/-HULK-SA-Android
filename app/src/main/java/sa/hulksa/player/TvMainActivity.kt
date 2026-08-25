@@ -23,10 +23,12 @@ class TvMainActivity : ComponentActivity() {
     private val viewModel: HulkViewModel by viewModels()
     private var initialImePolicyApplied = false
     private lateinit var voiceSearchDelegate: VoiceSearchDelegate
+    private lateinit var subscriptionResumeEnforcer: SubscriptionResumeEnforcer
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         dispatchDeepLink(intent)
+        subscriptionResumeEnforcer = SubscriptionResumeEnforcer(this, viewModel)
         voiceSearchDelegate = VoiceSearchDelegate(
             activity = this,
             onTranscript = viewModel::updateSearch,
@@ -65,7 +67,9 @@ class TvMainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.onAppResumed()
+        if (!subscriptionResumeEnforcer.onResume()) {
+            viewModel.onAppResumed()
+        }
         window.decorView.post { enterImmersiveModeSafely() }
     }
 
