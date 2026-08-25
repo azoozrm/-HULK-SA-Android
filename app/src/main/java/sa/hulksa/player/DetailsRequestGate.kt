@@ -11,6 +11,7 @@ internal class DetailsRequestGate {
     data class Key(
         val type: ContentType,
         val contentId: Int,
+        val accountId: String,
         val profileId: String,
     )
 
@@ -30,6 +31,17 @@ internal class DetailsRequestGate {
 
     @Synchronized
     fun isCurrent(token: Token): Boolean = active == token
+
+    @Synchronized
+    fun isCurrentForContext(
+        token: Token,
+        accountId: String?,
+        profileId: String,
+    ): Boolean =
+        active == token &&
+            !accountId.isNullOrBlank() &&
+            token.key.accountId == accountId &&
+            token.key.profileId == profileId
 
     @Synchronized
     fun invalidate() {

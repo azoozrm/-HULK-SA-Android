@@ -6,15 +6,23 @@ import org.junit.Test
 import sa.hulksa.player.model.ContentType
 
 class DetailsRequestGateTest {
+    private fun key(
+        type: ContentType,
+        contentId: Int,
+        accountId: String = "account-a",
+        profileId: String = "profile-a",
+    ) = DetailsRequestGate.Key(
+        type = type,
+        contentId = contentId,
+        accountId = accountId,
+        profileId = profileId,
+    )
+
     @Test
     fun `opening a new item makes the previous request stale`() {
         val gate = DetailsRequestGate()
-        val first = gate.begin(
-            DetailsRequestGate.Key(ContentType.MOVIE, contentId = 10, profileId = "profile-a"),
-        )
-        val second = gate.begin(
-            DetailsRequestGate.Key(ContentType.MOVIE, contentId = 11, profileId = "profile-a"),
-        )
+        val first = gate.begin(key(ContentType.MOVIE, contentId = 10))
+        val second = gate.begin(key(ContentType.MOVIE, contentId = 11))
 
         assertFalse(gate.isCurrent(first))
         assertTrue(gate.isCurrent(second))
@@ -23,9 +31,7 @@ class DetailsRequestGateTest {
     @Test
     fun `explicit navigation invalidation rejects a late completion`() {
         val gate = DetailsRequestGate()
-        val request = gate.begin(
-            DetailsRequestGate.Key(ContentType.SERIES, contentId = 22, profileId = "profile-a"),
-        )
+        val request = gate.begin(key(ContentType.SERIES, contentId = 22))
 
         gate.invalidate()
 
@@ -35,9 +41,9 @@ class DetailsRequestGateTest {
     @Test
     fun `same content restarted still owns a new generation`() {
         val gate = DetailsRequestGate()
-        val key = DetailsRequestGate.Key(ContentType.SERIES, contentId = 22, profileId = "profile-a")
-        val first = gate.begin(key)
-        val restarted = gate.begin(key)
+        val requestKey = key(ContentType.SERIES, contentId = 22)
+        val first = gate.begin(requestKey)
+        val restarted = gate.begin(requestKey)
 
         assertFalse(gate.isCurrent(first))
         assertTrue(gate.isCurrent(restarted))
@@ -46,14 +52,73 @@ class DetailsRequestGateTest {
     @Test
     fun `profile identity is part of request ownership`() {
         val gate = DetailsRequestGate()
-        val oldProfile = gate.begin(
-            DetailsRequestGate.Key(ContentType.MOVIE, contentId = 10, profileId = "profile-a"),
+        val request = gate.begin(key(ContentType.MOVIE, contentId = 10))
+
+        assertFalse(
+            gate.isCurrentForContext(
+                token = request,
+                accountId = "account-a",
+                profileId = "profile-b",
+            ),
         )
-        val newProfile = gate.begin(
-            DetailsRequestGate.Key(ContentType.MOVIE, contentId = 10, profileId = "profile-b"),
+        assertTrue(
+            gate.isCurrentForContext(
+                token = request,
+                accountId = "account-a",
+                profileId = "profile-a",
+            ),
+        )
+    }
+
+    @Test
+    fun `reauthenticated session for same logical account keeps request current`() {
+        val gate = DetailsRequestGate()
+        val logicalAccountFromSessionA = "account-a"
+        val request = gate.begin(
+            key(
+                type = ContentType.MOVIE,
+                contentId = 10,
+                accountId = logicalAccountFromSessionA,
+            ),
+        )
+        val logicalAccountFromSessionB = "account-a"
+
+        assertTrue(
+            gate.isCurrentForContext(
+                token = request,
+                accountId = logicalAccountFromSessionB,
+                profileId = "profile-a",
+            ),
+        )
+    }
+
+    @Test
+    fun `actual account replacement makes request stale`() {
+        val gate = DetailsRequestGate()
+        val request = gate.begin(
+            key(ContentType.SERIES, contentId = 22, accountId = "account-a"),
         )
 
-        assertFalse(gate.isCurrent(oldProfile))
-        assertTrue(gate.isCurrent(newProfile))
+        assertFalse(
+            gate.isCurrentForContext(
+                token = request,
+                accountId = "account-b",
+                profileId = "profile-a",
+            ),
+        )
+    }
+
+    @Test
+    fun `logout makes request context stale even before late completion`() {
+        val gate = DetailsRequestGate()
+        val request = gate.begin(key(ContentType.MOVIE, contentId = 10))
+
+        assertFalse(
+            gate.isCurrentForContext(
+                token = request,
+                accountId = null,
+                profileId = "profile-a",
+            ),
+        )
     }
 }

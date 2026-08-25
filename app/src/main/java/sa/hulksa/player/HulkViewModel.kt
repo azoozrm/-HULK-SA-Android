@@ -681,11 +681,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             }
     }
 
-    private fun beginDetailsRequest(item: ContentItem): DetailsRequestGate.Token {
+    private fun beginDetailsRequest(item: ContentItem): DetailsRequestGate.Token? {
+        val accountId = repository.activeAccountSession()?.accountId ?: return null
         val request = detailsRequestGate.begin(
             DetailsRequestGate.Key(
                 type = item.type,
                 contentId = item.id,
+                accountId = accountId,
                 profileId = profileStore.activeProfileId(),
             ),
         )
@@ -702,11 +704,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun isCurrentDetailsRequest(
         request: DetailsRequestGate.Token,
-        activeSession: AuthenticatedSession,
     ): Boolean {
-        if (!detailsRequestGate.isCurrent(request)) return false
-        if (session !== activeSession) return false
-        if (profileStore.activeProfileId() != request.key.profileId) return false
+        if (
+            !detailsRequestGate.isCurrentForContext(
+                token = request,
+                accountId = repository.activeAccountSession()?.accountId,
+                profileId = profileStore.activeProfileId(),
+            )
+        ) return false
         val current = mutableState.value
         return when (request.key.type) {
             ContentType.MOVIE -> current.selectedItem?.let {
@@ -727,7 +732,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 startPlayback(repository.playback(activeSession, item))
             }
             ContentType.MOVIE -> {
-                val detailsRequest = beginDetailsRequest(item)
+                val detailsRequest = beginDetailsRequest(item) ?: return
                 mutableState.update {
                     it.copy(
                         screen = HulkScreen.MOVIE_DETAILS,
@@ -748,12 +753,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (error: Throwable) {
-                            if (isCurrentDetailsRequest(detailsRequest, activeSession)) {
+                            if (isCurrentDetailsRequest(detailsRequest)) {
                                 showFailure(error)
                             }
                             return@launch
                         }
-                        if (!isCurrentDetailsRequest(detailsRequest, activeSession)) return@launch
+                        if (!isCurrentDetailsRequest(detailsRequest)) return@launch
                         mutableState.update {
                             it.copy(selectedDetails = details, isLoading = false)
                         }
@@ -775,7 +780,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val notificationAccountId = localEpisodeNotificationStore.activeAccountId()
         val notificationProfile = profileStore.activeProfile()
-        val detailsRequest = beginDetailsRequest(item)
+        val detailsRequest = beginDetailsRequest(item) ?: return
         mutableState.update {
             it.copy(
                 screen = HulkScreen.SERIES,
@@ -798,7 +803,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Throwable) {
-                    if (!isCurrentDetailsRequest(detailsRequest, activeSession)) return@launch
+                    if (!isCurrentDetailsRequest(detailsRequest)) return@launch
                     if (target != null) {
                         mutableState.update {
                             it.copy(
@@ -811,7 +816,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     return@launch
                 }
-                if (!isCurrentDetailsRequest(detailsRequest, activeSession)) return@launch
+                if (!isCurrentDetailsRequest(detailsRequest)) return@launch
                 val targetAvailable = target == null || if (target.episodeId != null) {
                     bundle.episodes.any { it.id == target.episodeId }
                 } else {
