@@ -1,6 +1,9 @@
 package sa.hulksa.player.ui.screens
 
 import android.content.Context
+import sa.hulksa.player.data.AccountProfileStateScope
+import sa.hulksa.player.data.AccountProfileStateStore
+import sa.hulksa.player.data.LegacyProfileStatePolicy
 
 internal const val LIVE_TV_PRO_MAIN_FAVORITES_CATEGORY = "__hulk_favorites__"
 internal const val LIVE_TV_PRO_MAIN_CONTINUE_CATEGORY = "__hulk_continue__"
@@ -51,34 +54,82 @@ internal fun liveTvProInitialBrowserCategory(
     else -> if (launchContext == currentCategoryId) launchContext else currentCategoryId
 }
 
-internal fun Context.liveTvProRecentChannelIds(): List<Int> =
-    applicationContext
-        .getSharedPreferences(LIVE_TV_PRO_HISTORY_PREFS, Context.MODE_PRIVATE)
-        .getString(LIVE_TV_PRO_HISTORY_IDS_KEY, "")
-        .orEmpty()
-        .split(',')
-        .mapNotNull(String::toIntOrNull)
-        .distinct()
+internal fun decodeLiveTvProRecentChannelIds(raw: String?): List<Int> = raw
+    .orEmpty()
+    .split(',')
+    .mapNotNull(String::toIntOrNull)
+    .distinct()
 
-internal fun Context.saveLiveTvProRecentChannelIds(ids: List<Int>) {
-    applicationContext
-        .getSharedPreferences(LIVE_TV_PRO_HISTORY_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(LIVE_TV_PRO_HISTORY_IDS_KEY, ids.distinct().joinToString(","))
-        .apply()
-}
+internal fun encodeLiveTvProRecentChannelIds(ids: List<Int>): String =
+    ids.distinct().joinToString(",")
 
-internal fun Context.liveTvProLaunchContext(): String =
-    applicationContext
-        .getSharedPreferences(LIVE_TV_PRO_CONTEXT_PREFS, Context.MODE_PRIVATE)
-        .getString(LIVE_TV_PRO_CONTEXT_CATEGORY_KEY, LIVE_TV_PRO_CONTEXT_ALL)
+private class LiveTvProfileStateStore(context: Context) {
+    private val recentState = AccountProfileStateStore(
+        context = context,
+        basePreferencesName = LIVE_TV_PRO_HISTORY_PREFS,
+        legacyPolicy = LegacyProfileStatePolicy.CLEAR,
+    )
+    private val contextState = AccountProfileStateStore(
+        context = context,
+        basePreferencesName = LIVE_TV_PRO_CONTEXT_PREFS,
+        legacyPolicy = LegacyProfileStatePolicy.CLEAR,
+    )
+
+    fun recentChannelIds(): List<Int> =
+        decodeLiveTvProRecentChannelIds(recentState.read(LIVE_TV_PRO_HISTORY_IDS_KEY))
+
+    fun activeScope(): AccountProfileStateScope? = recentState.activeScope()
+
+    fun saveRecentChannelIds(ids: List<Int>) {
+        recentState.write(
+            key = LIVE_TV_PRO_HISTORY_IDS_KEY,
+            value = encodeLiveTvProRecentChannelIds(ids),
+        )
+    }
+
+    fun launchContext(): String = contextState.read(LIVE_TV_PRO_CONTEXT_CATEGORY_KEY)
         .orEmpty()
         .ifBlank { LIVE_TV_PRO_CONTEXT_ALL }
 
+    fun saveLaunchContext(contextValue: String) {
+        contextState.write(
+            key = LIVE_TV_PRO_CONTEXT_CATEGORY_KEY,
+            value = contextValue,
+        )
+    }
+
+    fun removeProfile(accountId: String, profileId: String) {
+        recentState.remove(accountId, profileId, LIVE_TV_PRO_HISTORY_IDS_KEY)
+        contextState.remove(accountId, profileId, LIVE_TV_PRO_CONTEXT_CATEGORY_KEY)
+    }
+
+    companion object {
+        @Volatile
+        private var instance: LiveTvProfileStateStore? = null
+
+        fun get(context: Context): LiveTvProfileStateStore = instance ?: synchronized(this) {
+            instance ?: LiveTvProfileStateStore(context.applicationContext).also { instance = it }
+        }
+    }
+}
+
+internal fun Context.liveTvProRecentChannelIds(): List<Int> =
+    LiveTvProfileStateStore.get(this).recentChannelIds()
+
+internal fun Context.liveTvProStateScope(): AccountProfileStateScope? =
+    LiveTvProfileStateStore.get(this).activeScope()
+
+internal fun Context.saveLiveTvProRecentChannelIds(ids: List<Int>) {
+    LiveTvProfileStateStore.get(this).saveRecentChannelIds(ids)
+}
+
+internal fun Context.liveTvProLaunchContext(): String =
+    LiveTvProfileStateStore.get(this).launchContext()
+
 internal fun Context.saveLiveTvProLaunchContext(contextValue: String) {
-    applicationContext
-        .getSharedPreferences(LIVE_TV_PRO_CONTEXT_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(LIVE_TV_PRO_CONTEXT_CATEGORY_KEY, contextValue)
-        .apply()
+    LiveTvProfileStateStore.get(this).saveLaunchContext(contextValue)
+}
+
+internal fun Context.removeLiveTvProProfileState(accountId: String, profileId: String) {
+    LiveTvProfileStateStore.get(this).removeProfile(accountId, profileId)
 }

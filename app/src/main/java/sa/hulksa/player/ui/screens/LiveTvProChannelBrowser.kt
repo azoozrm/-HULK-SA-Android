@@ -129,10 +129,11 @@ fun LiveTvProChannelBrowser(
         categoryOrderPrefs.edit().putString("ids", values.joinToString(",")).apply()
     }
 
-    var recentChannelIds by remember(catalog, currentStreamId) {
+    val liveProfileScope = context.liveTvProStateScope()
+    var recentChannelIds by remember(catalog, currentStreamId, liveProfileScope) {
         mutableStateOf(context.liveTvProRecentChannelIds())
     }
-    LaunchedEffect(currentStreamId, catalog) {
+    LaunchedEffect(currentStreamId, catalog, liveProfileScope) {
         if (catalog?.items?.any { it.id == currentStreamId } == true) {
             val updated = liveTvProUpdateRecentChannelIds(
                 existingIds = recentChannelIds,
@@ -153,7 +154,9 @@ fun LiveTvProChannelBrowser(
     var favoriteIds by remember(catalog) {
         mutableStateOf(catalog?.items.orEmpty().filter(isFavorite).map(ContentItem::id).toSet())
     }
-    val launchContext = remember(currentStreamId) { context.liveTvProLaunchContext() }
+    val launchContext = remember(currentStreamId, liveProfileScope) {
+        context.liveTvProLaunchContext()
+    }
     val initialCategory = remember(
         launchContext,
         current?.categoryId,

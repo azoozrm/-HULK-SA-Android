@@ -26,18 +26,27 @@ data class ProfileContentSearchHistoryEntry(
  */
 class ProfileContentSearchHistoryStore(context: Context) {
     private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences(
-        PREFERENCES_NAME,
-        Context.MODE_PRIVATE,
+    private val stateStore = AccountProfileStateStore(
+        context = appContext,
+        basePreferencesName = PREFERENCES_NAME,
+        legacyPolicy = LegacyProfileStatePolicy.MIGRATE_TO_PROVEN_ACCOUNT,
     )
-    private val profileStore = ProfileStore(appContext)
 
-    fun recent(limit: Int = MAX_ENTRIES): List<ProfileContentSearchHistoryEntry> =
-        recentForProfile(profileStore.activeProfileId(), limit)
+    init {
+        AccountProfileStateStore.clearLegacyOnce(
+            context = appContext,
+            basePreferencesName = LEGACY_RAW_QUERY_PREFERENCES_NAME,
+        )
+    }
+
+    fun recent(limit: Int = MAX_ENTRIES): List<ProfileContentSearchHistoryEntry> {
+        val scope = stateStore.activeScope() ?: return emptyList()
+        return recentForScope(scope, limit)
+    }
 
     fun record(item: ContentItem): List<ProfileContentSearchHistoryEntry> {
         val title = normalizeTitle(item.name) ?: return recent()
-        val activeProfileId = profileStore.activeProfileId()
+        val scope = stateStore.activeScope() ?: return emptyList()
         val entry = ProfileContentSearchHistoryEntry(
             contentId = item.id,
             contentType = item.type,
@@ -46,43 +55,38 @@ class ProfileContentSearchHistoryStore(context: Context) {
             year = item.year?.trim()?.takeIf(String::isNotBlank),
             updatedAtEpochMs = System.currentTimeMillis(),
         )
-        val updated = listOf(entry) + recentForProfile(activeProfileId, MAX_ENTRIES)
+        val updated = listOf(entry) + recentForScope(scope, MAX_ENTRIES)
             .filterNot { it.stableKey == entry.stableKey }
-        return saveForProfile(activeProfileId, updated)
+        return saveForScope(scope, updated)
     }
 
     fun remove(contentType: ContentType, contentId: Int): List<ProfileContentSearchHistoryEntry> {
-        val activeProfileId = profileStore.activeProfileId()
+        val scope = stateStore.activeScope() ?: return emptyList()
         val key = "${contentType.name}:$contentId"
-        return saveForProfile(
-            profileId = activeProfileId,
-            entries = recentForProfile(activeProfileId, MAX_ENTRIES)
+        return saveForScope(
+            scope = scope,
+            entries = recentForScope(scope, MAX_ENTRIES)
                 .filterNot { it.stableKey == key },
         )
     }
 
     fun clear(): List<ProfileContentSearchHistoryEntry> {
-        preferences.edit()
-            .remove(profileKey(profileStore.activeProfileId()))
-            .apply()
+        stateStore.remove(KEY_ENTRIES)
         return emptyList()
     }
 
-    fun removeProfileHistory(profileId: String) {
-        if (profileId.isBlank()) return
-        preferences.edit().remove(profileKey(profileId)).apply()
-    }
+    fun removeProfileHistory(accountId: String, profileId: String) =
+        stateStore.remove(accountId, profileId, KEY_ENTRIES)
 
-    private fun recentForProfile(
-        profileId: String,
+    private fun recentForScope(
+        scope: AccountProfileStateScope,
         limit: Int,
     ): List<ProfileContentSearchHistoryEntry> {
         val safeLimit = limit.coerceIn(0, MAX_ENTRIES)
         if (safeLimit == 0) return emptyList()
 
         return runCatching {
-            val raw = preferences.getString(profileKey(profileId), null)
-                ?: return emptyList()
+            val raw = stateStore.read(scope, KEY_ENTRIES) ?: return emptyList()
             val array = JSONArray(raw)
             buildList {
                 for (index in 0 until array.length()) {
@@ -115,8 +119,8 @@ class ProfileContentSearchHistoryStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    private fun saveForProfile(
-        profileId: String,
+    private fun saveForScope(
+        scope: AccountProfileStateScope,
         entries: List<ProfileContentSearchHistoryEntry>,
     ): List<ProfileContentSearchHistoryEntry> {
         val normalized = entries
@@ -129,7 +133,7 @@ class ProfileContentSearchHistoryStore(context: Context) {
             .take(MAX_ENTRIES)
 
         if (normalized.isEmpty()) {
-            preferences.edit().remove(profileKey(profileId)).apply()
+            stateStore.remove(scope.accountId, scope.profileId, KEY_ENTRIES)
             return emptyList()
         }
 
@@ -145,7 +149,7 @@ class ProfileContentSearchHistoryStore(context: Context) {
                     .put(KEY_UPDATED_AT, entry.updatedAtEpochMs),
             )
         }
-        preferences.edit().putString(profileKey(profileId), array.toString()).apply()
+        stateStore.write(scope, KEY_ENTRIES, array.toString())
         return normalized
     }
 
@@ -158,11 +162,9 @@ class ProfileContentSearchHistoryStore(context: Context) {
         return normalized.takeIf(String::isNotBlank)
     }
 
-    private fun profileKey(profileId: String): String =
-        "profile:$profileId:$KEY_ENTRIES"
-
     private companion object {
         const val PREFERENCES_NAME = "hulk_profile_content_search_history_v2"
+        const val LEGACY_RAW_QUERY_PREFERENCES_NAME = "hulk_profile_search_history_v1"
         const val KEY_ENTRIES = "entries"
         const val KEY_CONTENT_ID = "content_id"
         const val KEY_CONTENT_TYPE = "content_type"

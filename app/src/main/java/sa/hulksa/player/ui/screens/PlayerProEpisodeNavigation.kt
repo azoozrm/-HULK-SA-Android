@@ -1,6 +1,5 @@
 package sa.hulksa.player.ui.screens
 
-import android.content.Context
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,8 +47,6 @@ import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.roundToInt
 
-private const val LIVE_TV_PRO_HISTORY_PREFS = "live_player_history"
-private const val LIVE_TV_PRO_HISTORY_IDS = "ids"
 private const val ANDROID_KEYCODE_LAST_CHANNEL = 229
 private const val LIVE_TV_PRO_CONTROLS_HINT_TIMEOUT_MS = 5_200L
 private const val LIVE_TV_PRO_ZAP_COMMIT_DELAY_MS = 220L
@@ -189,16 +186,9 @@ fun PlayerProScreen(
         playerTvPremiumOverlayMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     }
     val liveChannels = liveCatalog?.items.orEmpty()
-    val liveHistoryPrefs = remember(context) {
-        context.getSharedPreferences(LIVE_TV_PRO_HISTORY_PREFS, Context.MODE_PRIVATE)
-    }
-    var recentChannelIds by remember(liveCatalog) {
-        mutableStateOf(
-            liveHistoryPrefs.getString(LIVE_TV_PRO_HISTORY_IDS, "")
-                .orEmpty()
-                .split(',')
-                .mapNotNull(String::toIntOrNull),
-        )
+    val liveProfileScope = context.liveTvProStateScope()
+    var recentChannelIds by remember(liveCatalog, liveProfileScope) {
+        mutableStateOf(context.liveTvProRecentChannelIds())
     }
     var liveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
     var liveControlsLikelyVisible by remember(request.historyKey) { mutableStateOf(false) }
@@ -217,7 +207,7 @@ fun PlayerProScreen(
         }
     }
 
-    LaunchedEffect(request.isLive, request.streamId, liveCatalog) {
+    LaunchedEffect(request.isLive, request.streamId, liveCatalog, liveProfileScope) {
         if (request.isLive && liveChannels.any { it.id == request.streamId }) {
             val updated = liveTvProUpdateRecentChannelIds(
                 existingIds = recentChannelIds,
@@ -225,9 +215,7 @@ fun PlayerProScreen(
             )
             if (updated != recentChannelIds) {
                 recentChannelIds = updated
-                liveHistoryPrefs.edit()
-                    .putString(LIVE_TV_PRO_HISTORY_IDS, updated.joinToString(","))
-                    .apply()
+                context.saveLiveTvProRecentChannelIds(updated)
             }
         }
     }
