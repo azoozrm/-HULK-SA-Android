@@ -244,6 +244,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private var session: AuthenticatedSession? = null
     private var sessionRestorationComplete: Boolean = false
+    private val authenticationAttemptGate = AuthenticationAttemptGate()
+    private var loginJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
@@ -321,6 +323,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun login(accessCode: String, username: String, password: String, remember: Boolean = true) {
+        if (authenticationAttemptGate.isActive()) return
         val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
         if (normalizedAccessCode == null) {
             mutableState.update { it.copy(errorMessage = "ادخل كود دخول صحيح.") }
@@ -2072,6 +2075,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
+        authenticationAttemptGate.invalidate()
+        loginJob?.cancel()
+        loginJob = null
         val operationsState = mutableState.value.operations
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
@@ -2124,43 +2130,52 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         remember: Boolean,
         restoringSession: Boolean = false,
     ) {
+        val attemptGeneration = authenticationAttemptGate.tryStart() ?: return
         if (restoringSession) sessionRestorationComplete = false
         mutableState.update {
             it.copy(isStarting = false, isLoading = true, errorMessage = null)
         }
-        viewModelScope.launch {
-            runCatching { repository.login(credentials, remember) }
-                .onSuccess { authenticated ->
-                    session = authenticated
-                    sessionRestorationComplete = true
-                    clearCatalogMemory()
-                    mutableState.update {
-                        it.copy(
-                            screen = HulkScreen.MAIN,
-                            destination = MainDestination.HOME,
-                            isLoading = false,
-                            account = authenticated.account,
-                            isAccountRefreshing = false,
-                            catalogs = emptyMap(),
-                            selectedCategoryId = null,
-                            searchQuery = "",
-                            downloads = downloadRepository.downloads(),
-                            downloadSettings = downloadRepository.settings(),
-                            errorMessage = null,
-                        )
-                    }
-                    ensureCatalog(ContentType.MOVIE)
-                    ensureCatalog(ContentType.SERIES)
-                    refreshOperations(force = false)
-                    refreshNotificationState(clearPopup = true)
-                    scanSubscribedSeries(NotificationScanTrigger.APP_START)
-                    resolvePendingTvDeepLink()
+        loginJob = viewModelScope.launch {
+            try {
+                val authenticated = repository.login(credentials, remember)
+                if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return@launch
+
+                session = authenticated
+                sessionRestorationComplete = true
+                clearCatalogMemory()
+                mutableState.update {
+                    it.copy(
+                        screen = HulkScreen.MAIN,
+                        destination = MainDestination.HOME,
+                        isLoading = false,
+                        account = authenticated.account,
+                        isAccountRefreshing = false,
+                        catalogs = emptyMap(),
+                        selectedCategoryId = null,
+                        searchQuery = "",
+                        downloads = downloadRepository.downloads(),
+                        downloadSettings = downloadRepository.settings(),
+                        errorMessage = null,
+                    )
                 }
-                .onFailure { error ->
-                    sessionRestorationComplete = true
-                    showFailure(error)
-                    resolvePendingTvDeepLink()
+                ensureCatalog(ContentType.MOVIE)
+                ensureCatalog(ContentType.SERIES)
+                refreshOperations(force = false)
+                refreshNotificationState(clearPopup = true)
+                scanSubscribedSeries(NotificationScanTrigger.APP_START)
+                resolvePendingTvDeepLink()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return@launch
+                sessionRestorationComplete = true
+                showFailure(error)
+                resolvePendingTvDeepLink()
+            } finally {
+                if (authenticationAttemptGate.complete(attemptGeneration)) {
+                    loginJob = null
                 }
+            }
         }
     }
 
