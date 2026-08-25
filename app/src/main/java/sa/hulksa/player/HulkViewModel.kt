@@ -245,6 +245,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var session: AuthenticatedSession? = null
     private var sessionRestorationComplete: Boolean = false
     private val authenticationAttemptGate = AuthenticationAttemptGate()
+    private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
@@ -680,15 +681,53 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             }
     }
 
+    private fun beginDetailsRequest(item: ContentItem): DetailsRequestGate.Token {
+        val request = detailsRequestGate.begin(
+            DetailsRequestGate.Key(
+                type = item.type,
+                contentId = item.id,
+                profileId = profileStore.activeProfileId(),
+            ),
+        )
+        detailsJob?.cancel()
+        detailsJob = null
+        return request
+    }
+
+    private fun invalidateDetailsRequest() {
+        detailsRequestGate.invalidate()
+        detailsJob?.cancel()
+        detailsJob = null
+    }
+
+    private fun isCurrentDetailsRequest(
+        request: DetailsRequestGate.Token,
+        activeSession: AuthenticatedSession,
+    ): Boolean {
+        if (!detailsRequestGate.isCurrent(request)) return false
+        if (session !== activeSession) return false
+        if (profileStore.activeProfileId() != request.key.profileId) return false
+        val current = mutableState.value
+        return when (request.key.type) {
+            ContentType.MOVIE -> current.selectedItem?.let {
+                it.type == ContentType.MOVIE && it.id == request.key.contentId
+            } == true
+            ContentType.SERIES -> current.selectedSeries?.let {
+                it.type == ContentType.SERIES && it.id == request.key.contentId
+            } == true
+            ContentType.LIVE -> false
+        }
+    }
+
     fun open(item: ContentItem) {
         val activeSession = session ?: return
-        detailsJob?.cancel()
         when (item.type) {
             ContentType.LIVE -> {
                 playerReturnScreen = HulkScreen.MAIN
                 startPlayback(repository.playback(activeSession, item))
             }
             ContentType.MOVIE -> {
+                val detailsRequest = beginDetailsRequest(item)
                 mutableState.update {
                     it.copy(
                         screen = HulkScreen.MOVIE_DETAILS,
@@ -703,11 +742,26 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 detailsJob = viewModelScope.launch {
-                    runCatching { repository.contentDetails(activeSession, item.id) }
-                        .onSuccess { details ->
-                            mutableState.update { it.copy(selectedDetails = details, isLoading = false) }
+                    try {
+                        val details = try {
+                            repository.contentDetails(activeSession, item.id)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Throwable) {
+                            if (isCurrentDetailsRequest(detailsRequest, activeSession)) {
+                                showFailure(error)
+                            }
+                            return@launch
                         }
-                        .onFailure(::showFailure)
+                        if (!isCurrentDetailsRequest(detailsRequest, activeSession)) return@launch
+                        mutableState.update {
+                            it.copy(selectedDetails = details, isLoading = false)
+                        }
+                    } finally {
+                        if (detailsRequestGate.isCurrent(detailsRequest)) {
+                            detailsJob = null
+                        }
+                    }
                 }
             }
             ContentType.SERIES -> openSeries(item = item, target = null, activeSession = activeSession)
@@ -721,7 +775,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val notificationAccountId = localEpisodeNotificationStore.activeAccountId()
         val notificationProfile = profileStore.activeProfile()
-        detailsJob?.cancel()
+        val detailsRequest = beginDetailsRequest(item)
         mutableState.update {
             it.copy(
                 screen = HulkScreen.SERIES,
@@ -738,37 +792,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         detailsJob = viewModelScope.launch {
-            runCatching { repository.seriesBundle(activeSession, item.id) }
-                .onSuccess { bundle ->
-                    val targetAvailable = target == null || if (target.episodeId != null) {
-                        bundle.episodes.any { it.id == target.episodeId }
-                    } else {
-                        bundle.episodes.any {
-                            it.season == target.seasonNumber &&
-                                it.episodeNumber == target.episodeNumber
-                        }
-                    }
-                    mutableState.update {
-                        it.copy(
-                            selectedDetails = bundle.details,
-                            episodes = bundle.episodes,
-                            isLoading = false,
-                            errorMessage = when {
-                                bundle.episodes.isEmpty() -> "لم نجد حلقات لهذا المسلسل."
-                                !targetAvailable -> "هذه الحلقة لم تعد متاحة، وتم فتح المسلسل بدلًا منها."
-                                else -> null
-                            },
-                        )
-                    }
-                    processOpenedSeriesForNotifications(
-                        series = item,
-                        episodes = bundle.episodes,
-                        expectedAccountId = notificationAccountId,
-                        expectedProfileId = notificationProfile.id,
-                        expectedProfileKind = notificationProfile.kind,
-                    )
-                }
-                .onFailure { error ->
+            try {
+                val bundle = try {
+                    repository.seriesBundle(activeSession, item.id)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    if (!isCurrentDetailsRequest(detailsRequest, activeSession)) return@launch
                     if (target != null) {
                         mutableState.update {
                             it.copy(
@@ -779,7 +809,41 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         showFailure(error)
                     }
+                    return@launch
                 }
+                if (!isCurrentDetailsRequest(detailsRequest, activeSession)) return@launch
+                val targetAvailable = target == null || if (target.episodeId != null) {
+                    bundle.episodes.any { it.id == target.episodeId }
+                } else {
+                    bundle.episodes.any {
+                        it.season == target.seasonNumber &&
+                            it.episodeNumber == target.episodeNumber
+                    }
+                }
+                mutableState.update {
+                    it.copy(
+                        selectedDetails = bundle.details,
+                        episodes = bundle.episodes,
+                        isLoading = false,
+                        errorMessage = when {
+                            bundle.episodes.isEmpty() -> "لم نجد حلقات لهذا المسلسل."
+                            !targetAvailable -> "هذه الحلقة لم تعد متاحة، وتم فتح المسلسل بدلًا منها."
+                            else -> null
+                        },
+                    )
+                }
+                processOpenedSeriesForNotifications(
+                    series = item,
+                    episodes = bundle.episodes,
+                    expectedAccountId = notificationAccountId,
+                    expectedProfileId = notificationProfile.id,
+                    expectedProfileKind = notificationProfile.kind,
+                )
+            } finally {
+                if (detailsRequestGate.isCurrent(detailsRequest)) {
+                    detailsJob = null
+                }
+            }
         }
     }
 
@@ -1337,7 +1401,24 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onProfileChanged() {
         notificationScanJob?.cancel()
-        mutableState.update { it.copy(notificationPopup = null) }
+        invalidateDetailsRequest()
+        mutableState.update { state ->
+            if (state.screen == HulkScreen.MOVIE_DETAILS || state.screen == HulkScreen.SERIES) {
+                state.copy(
+                    screen = HulkScreen.MAIN,
+                    selectedItem = null,
+                    selectedSeries = null,
+                    selectedDetails = null,
+                    episodes = emptyList(),
+                    seriesEpisodeTarget = null,
+                    isLoading = false,
+                    notificationPopup = null,
+                    errorMessage = null,
+                )
+            } else {
+                state.copy(notificationPopup = null)
+            }
+        }
         refreshNotificationState(clearPopup = true)
         scanSubscribedSeries(NotificationScanTrigger.PROFILE_SWITCH)
         scheduleTvPlatformSync(immediate = true)
@@ -2027,7 +2108,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun back() {
-        when (mutableState.value.screen) {
+        val currentScreen = mutableState.value.screen
+        if (currentScreen == HulkScreen.MOVIE_DETAILS || currentScreen == HulkScreen.SERIES) {
+            invalidateDetailsRequest()
+        }
+        when (currentScreen) {
             HulkScreen.PLAYER -> {
                 mutableState.update {
                     it.copy(screen = playerReturnScreen, playback = null, errorMessage = null)
@@ -2040,6 +2125,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     screen = HulkScreen.MAIN,
                     selectedItem = null,
                     selectedDetails = null,
+                    isLoading = false,
                     errorMessage = null,
                 )
             }
@@ -2050,6 +2136,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDetails = null,
                     episodes = emptyList(),
                     seriesEpisodeTarget = null,
+                    isLoading = false,
                     errorMessage = null,
                 )
             }
@@ -2078,6 +2165,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         authenticationAttemptGate.invalidate()
         loginJob?.cancel()
         loginJob = null
+        invalidateDetailsRequest()
         val operationsState = mutableState.value.operations
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
@@ -2090,7 +2178,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         notificationScanJob = null
         notificationUiReady = false
         clearCatalogMemory()
-        detailsJob?.cancel()
         accountRefreshJob?.cancel()
         diagnosticsJob?.cancel()
         catalogJobs.values.forEach(Job::cancel)
@@ -2385,8 +2472,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun openSafeTvHome(message: String?) {
-        detailsJob?.cancel()
-        detailsJob = null
+        invalidateDetailsRequest()
         playerReturnScreen = HulkScreen.MAIN
         mutableState.update {
             it.copy(
@@ -2477,6 +2563,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startPlayback(request: PlaybackRequest) {
+        if (playerReturnScreen == HulkScreen.MAIN) {
+            invalidateDetailsRequest()
+        }
         if (operationsDeviceIsTv && !request.isLive) {
             tvLastSyncedPositions.remove(request.historyKey)
         }
@@ -2524,6 +2613,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
         if (invalidSession) {
+            invalidateDetailsRequest()
             sessionRestorationComplete = true
             beginTvPlatformProfileTransition(resetPublishedScope = true)
             mutableState.update { it.copy(downloads = emptyList()) }
