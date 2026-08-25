@@ -55,6 +55,9 @@ import sa.hulksa.player.ui.screens.removeLiveTvProProfileState
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
 
+private const val MISSING_PARENT_AUTHORIZATION_MESSAGE =
+    "يلزم رمز الوالدين للانتقال من ملف الأطفال. لا يوجد رمز والدين صالح."
+
 @Composable
 fun ProfileAwareHulkApp(
     viewModel: HulkViewModel,
@@ -80,6 +83,8 @@ fun ProfileAwareHulkApp(
     var createProfileRequested by rememberSaveable { mutableStateOf(false) }
     var pickerRequestedFromApp by rememberSaveable { mutableStateOf(false) }
     var pinUnlockTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pinUnlockCredentialProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var profileManagementUnlockRequested by rememberSaveable { mutableStateOf(false) }
     var pinSecurityProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     var profileRevision by rememberSaveable { mutableIntStateOf(0) }
     var pinRevision by rememberSaveable { mutableIntStateOf(0) }
@@ -103,6 +108,13 @@ fun ProfileAwareHulkApp(
             .filter { profilePinCredentialStore.hasPin(it.id) }
             .mapTo(linkedSetOf(), UserProfile::id)
     }
+    val primaryParentCredentialProfile = remember(profiles, protectedProfileIds) {
+        profiles.firstOrNull { profile ->
+            profile.isPrimary &&
+                profile.kind == ProfileKind.STANDARD &&
+                profile.id in protectedProfileIds
+        }
+    }
     val activeNavigationMemory = remember(activeProfileId) {
         navigationMemoryByProfile.getOrPut(activeProfileId) { NavigationMemoryStore() }
     }
@@ -112,11 +124,11 @@ fun ProfileAwareHulkApp(
         }
     }
     val routingPreferences = profilePreferencesStore.routing()
-    val directEntryTarget = if (
+    val directEntryCandidate = if (
         authenticated &&
         !resolvedForSession &&
         !switching &&
-        pinUnlockTargetId == null &&
+        pinUnlockCredentialProfileId == null &&
         pinSecurityProfileId == null &&
         !pickerRequestedFromApp &&
         !managingProfiles &&
@@ -127,6 +139,20 @@ fun ProfileAwareHulkApp(
             ?: profiles.firstOrNull { it.id == activeProfileId }
     } else {
         null
+    }
+    val directEntryTarget = directEntryCandidate?.let { candidate ->
+        if (
+            shouldRetainKidsProfileForDirectEntry(
+                currentProfileId = activeProfileId,
+                currentProfileKind = activeProfile?.kind,
+                targetProfileId = candidate.id,
+                targetProfileKind = candidate.kind,
+            )
+        ) {
+            activeProfile ?: candidate
+        } else {
+            candidate
+        }
     }
     val singleProfileNeedsResolution =
         profiles.size == 1 && authenticated && !resolvedForSession && directEntryTarget == null
@@ -270,22 +296,79 @@ fun ProfileAwareHulkApp(
         pickerRequestedFromApp = false
     }
 
-    fun requestProfileSwitch(profile: UserProfile) {
-        if (switching || pinUnlockTargetId != null) return
-        val currentProfileId = profileStore.activeProfileId()
-        val needsPin =
-            profile.id in protectedProfileIds &&
-                (profile.id != currentProfileId || !resolvedForSession)
+    fun beginPinAuthorization(
+        credentialProfile: UserProfile,
+        targetProfileId: String? = null,
+        forProfileManagement: Boolean = false,
+        startCreating: Boolean = false,
+    ) {
+        switchError = null
+        managingProfiles = false
+        createProfileRequested = startCreating
+        profileManagementUnlockRequested = forProfileManagement
+        pinUnlockTargetId = targetProfileId
+        pinUnlockCredentialProfileId = credentialProfile.id
+    }
 
-        if (needsPin) {
-            switchError = null
-            managingProfiles = false
-            createProfileRequested = false
-            pinUnlockTargetId = profile.id
+    fun requestProfileSwitch(profile: UserProfile) {
+        if (switching || pinUnlockCredentialProfileId != null) return
+        val currentProfileId = profileStore.activeProfileId()
+        val currentProfile = profiles.firstOrNull { it.id == currentProfileId }
+        val authorization = profileSwitchAuthorization(
+            currentProfileId = currentProfileId,
+            currentProfileKind = currentProfile?.kind,
+            targetProfileId = profile.id,
+            targetProfileKind = profile.kind,
+            targetProtected = profile.id in protectedProfileIds,
+            resolvedForSession = resolvedForSession,
+            primaryParentPinAvailable = primaryParentCredentialProfile != null,
+        )
+
+        when (authorization) {
+            ProfileSwitchAuthorization.ALLOW -> switchProfileUnlocked(profile)
+            ProfileSwitchAuthorization.REQUIRE_TARGET_PIN -> beginPinAuthorization(
+                credentialProfile = profile,
+                targetProfileId = profile.id,
+            )
+            ProfileSwitchAuthorization.REQUIRE_PRIMARY_PARENT_PIN -> {
+                val parentProfile = primaryParentCredentialProfile
+                if (parentProfile == null) {
+                    switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+                    return
+                }
+                beginPinAuthorization(
+                    credentialProfile = parentProfile,
+                    targetProfileId = profile.id,
+                )
+            }
+            ProfileSwitchAuthorization.DENY_NO_PARENT_CREDENTIAL -> {
+                switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+            }
+        }
+    }
+
+    fun requestProfileManagement(startCreating: Boolean) {
+        if (switching || pinUnlockCredentialProfileId != null) return
+        pinSecurityProfileId = null
+
+        if (requiresParentAuthorizationForProfileManagement(activeProfile?.kind)) {
+            val parentProfile = primaryParentCredentialProfile
+            if (parentProfile == null) {
+                switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+                createProfileRequested = false
+                return
+            }
+            beginPinAuthorization(
+                credentialProfile = parentProfile,
+                forProfileManagement = true,
+                startCreating = startCreating,
+            )
             return
         }
 
-        switchProfileUnlocked(profile)
+        switchError = null
+        createProfileRequested = startCreating
+        managingProfiles = true
     }
 
     LaunchedEffect(
@@ -318,7 +401,7 @@ fun ProfileAwareHulkApp(
         profiles,
         pickerRequestedFromApp,
         managingProfiles,
-        pinUnlockTargetId,
+        pinUnlockCredentialProfileId,
     ) {
         val target = directEntryTarget ?: return@LaunchedEffect
         requestProfileSwitch(target)
@@ -341,6 +424,8 @@ fun ProfileAwareHulkApp(
             switchError = null
             pickerRequestedFromApp = false
             pinUnlockTargetId = null
+            pinUnlockCredentialProfileId = null
+            profileManagementUnlockRequested = false
             pinSecurityProfileId = null
             kidsSnapshot = null
             kidsSourceLoading = false
@@ -362,13 +447,15 @@ fun ProfileAwareHulkApp(
             showPicker &&
             !managingProfiles &&
             !switching &&
-            pinUnlockTargetId == null,
+            pinUnlockCredentialProfileId == null,
     ) {
         pickerRequestedFromApp = false
         switchError = null
     }
 
-    val unlockProfile = pinUnlockTargetId
+    val unlockCredentialProfile = pinUnlockCredentialProfileId
+        ?.let { profileId -> profiles.firstOrNull { it.id == profileId } }
+    val unlockTargetProfile = pinUnlockTargetId
         ?.let { targetId -> profiles.firstOrNull { it.id == targetId } }
     val securityProfile = pinSecurityProfileId
         ?.let { profileId -> profiles.firstOrNull { it.id == profileId } }
@@ -378,7 +465,7 @@ fun ProfileAwareHulkApp(
         resolvedForSession,
         showPicker,
         managingProfiles,
-        unlockProfile?.id,
+        unlockCredentialProfile?.id,
         securityProfile?.id,
         activeProfile?.id,
         activeProfile?.kind,
@@ -388,7 +475,7 @@ fun ProfileAwareHulkApp(
             resolvedForSession &&
             !showPicker &&
             !managingProfiles &&
-            unlockProfile == null &&
+            unlockCredentialProfile == null &&
             securityProfile == null &&
             (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true)
         viewModel.setNotificationUiReady(ready = profileReady)
@@ -445,16 +532,37 @@ fun ProfileAwareHulkApp(
                 onClearAll = viewModel::clearNotifications,
             )
 
-            unlockProfile != null -> ProfilePinUnlockScreen(
-            profile = unlockProfile,
+            unlockCredentialProfile != null -> ProfilePinUnlockScreen(
+            profile = unlockCredentialProfile,
             isTv = isTelevisionDevice,
-            onVerify = { pin -> profilePinCredentialStore.verifyPin(unlockProfile.id, pin) },
+            onVerify = { pin ->
+                profilePinCredentialStore.verifyPin(unlockCredentialProfile.id, pin)
+            },
             onUnlocked = {
+                val targetProfile = unlockTargetProfile
+                val openManagement = profileManagementUnlockRequested
                 pinUnlockTargetId = null
-                switchProfileUnlocked(unlockProfile)
+                pinUnlockCredentialProfileId = null
+                profileManagementUnlockRequested = false
+
+                when {
+                    targetProfile != null -> {
+                        createProfileRequested = false
+                        switchProfileUnlocked(targetProfile)
+                    }
+                    openManagement -> {
+                        managingProfiles = true
+                    }
+                    else -> {
+                        createProfileRequested = false
+                    }
+                }
             },
             onCancel = {
                 pinUnlockTargetId = null
+                pinUnlockCredentialProfileId = null
+                profileManagementUnlockRequested = false
+                createProfileRequested = false
                 switchError = null
             },
         )
@@ -559,14 +667,11 @@ fun ProfileAwareHulkApp(
             onSelectProfile = ::requestProfileSwitch,
             onCreateProfile = {
                 if (!switching && profiles.size < ProfileStore.MAX_PROFILES) {
-                    createProfileRequested = true
-                    managingProfiles = true
+                    requestProfileManagement(startCreating = true)
                 }
             },
             onManageProfiles = {
-                createProfileRequested = false
-                pinSecurityProfileId = null
-                managingProfiles = true
+                requestProfileManagement(startCreating = false)
             },
         )
 
