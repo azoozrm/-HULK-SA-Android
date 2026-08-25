@@ -397,6 +397,7 @@ fun ProfileAwareHulkApp(
 
     val appContentFocusRequester = remember { FocusRequester() }
     val notificationFocusScope = rememberCoroutineScope()
+    val profilePinCleanupScope = rememberCoroutineScope()
     val operationsBlocked =
         state.operations.updateDecision == OperationsUpdateDecision.REQUIRED ||
             state.operations.service.status == OperationsServiceStatus.MAINTENANCE
@@ -465,33 +466,13 @@ fun ProfileAwareHulkApp(
             onVerify = { pin -> profilePinCredentialStore.verifyPin(securityProfile.id, pin) },
             onSetPin = { pin ->
                 val stored = profilePinCredentialStore.setPin(securityProfile.id, pin)
-                if (!stored) {
-                    false
-                } else {
-                    val metadata = profilePreferencesStore.setPinFoundation(
-                        profileId = securityProfile.id,
-                        enabled = true,
-                        credentialVersion = ProfilePinCredentialStore.CURRENT_CREDENTIAL_VERSION,
-                    )
-                    if (metadata == null) {
-                        profilePinCredentialStore.clearPin(securityProfile.id)
-                        false
-                    } else {
-                        pinRevision++
-                        true
-                    }
-                }
+                if (stored) pinRevision++
+                stored
             },
             onClearPin = {
                 val cleared = profilePinCredentialStore.clearPin(securityProfile.id)
-                val metadata = profilePreferencesStore.setPinFoundation(
-                    profileId = securityProfile.id,
-                    enabled = false,
-                    credentialVersion = 0,
-                )
-                val success = cleared && metadata != null
-                if (success) pinRevision++
-                success
+                if (cleared) pinRevision++
+                cleared
             },
             onClose = {
                 pinSecurityProfileId = null
@@ -536,8 +517,14 @@ fun ProfileAwareHulkApp(
                         ProfileContentSearchHistoryStore(context)
                             .removeProfileHistory(accountId, profileId)
                         context.removeLiveTvProProfileState(accountId, profileId)
+                        profilePinCleanupScope.launch {
+                            profilePinCredentialStore.clearCredential(accountId, profileId)
+                        }
+                    } else {
+                        profilePinCleanupScope.launch {
+                            profilePinCredentialStore.clearCredential(profileId)
+                        }
                     }
-                    profilePinCredentialStore.clearPin(profileId)
                     profilePreferencesStore.removeProfilePreferences(profileId)
                     navigationMemoryByProfile.remove(profileId)
                     destinationMemoryByProfile.remove(profileId)

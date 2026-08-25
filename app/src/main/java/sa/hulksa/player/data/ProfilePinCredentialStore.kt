@@ -7,6 +7,10 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 internal const val PROFILE_PIN_LENGTH = 4
 
@@ -43,53 +47,188 @@ internal fun deriveProfilePinVerifier(
  * Raw PIN values are never persisted. Each profile receives an independent random salt and a
  * PBKDF2-HMAC-SHA256 verifier. AccountScopeStore additionally isolates credentials belonging to
  * profiles that share the same local profile id across different accounts.
+ *
+ * PBKDF2 work is dispatched to [cpuDispatcher]. Blocking SharedPreferences commits, including the
+ * matching PIN foundation metadata update, are dispatched to [ioDispatcher].
  */
-class ProfilePinCredentialStore(context: Context) {
+class ProfilePinCredentialStore(
+    context: Context,
+    private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) {
     private val appContext = context.applicationContext
     private val accountScope = AccountScopeStore(appContext)
+    private val profilePreferencesStore = ProfilePreferencesStore(appContext)
     private val preferences: SharedPreferences
         get() = accountScope.preferences(PREFERENCES_NAME)
     private val secureRandom = SecureRandom()
 
     fun hasPin(profileId: String): Boolean = load(profileId) != null
 
-    @Synchronized
-    fun setPin(profileId: String, pin: String): Boolean {
+    suspend fun setPin(profileId: String, pin: String): Boolean {
         val id = normalizeProfileId(profileId) ?: return false
         if (!isValidProfilePin(pin)) return false
 
-        val salt = ByteArray(SALT_BYTES).also(secureRandom::nextBytes)
-        val verifier = runCatching {
-            deriveProfilePinVerifier(pin, salt, DEFAULT_ITERATIONS)
-        }.getOrNull() ?: return false
+        val credential = try {
+            withContext(cpuDispatcher) {
+                val salt = ByteArray(SALT_BYTES).also(secureRandom::nextBytes)
+                StoredPinCredential(
+                    salt = salt,
+                    verifier = deriveProfilePinVerifier(pin, salt, DEFAULT_ITERATIONS),
+                    iterations = DEFAULT_ITERATIONS,
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return false
+        }
 
-        return preferences.edit()
-            .putInt(key(id, KEY_VERSION), CURRENT_CREDENTIAL_VERSION)
-            .putInt(key(id, KEY_ITERATIONS), DEFAULT_ITERATIONS)
-            .putString(key(id, KEY_SALT), Base64.encodeToString(salt, Base64.NO_WRAP))
-            .putString(key(id, KEY_VERIFIER), Base64.encodeToString(verifier, Base64.NO_WRAP))
-            .commit()
+        return try {
+            withContext(ioDispatcher) {
+                var stored = false
+                try {
+                    stored = persistCredential(id, credential)
+                    if (!stored) {
+                        false
+                    } else {
+                        val metadata = profilePreferencesStore.setPinFoundation(
+                            profileId = id,
+                            enabled = true,
+                            credentialVersion = CURRENT_CREDENTIAL_VERSION,
+                        )
+                        if (metadata == null) {
+                            removeCredential(id)
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                } catch (_: Exception) {
+                    if (stored) runCatching { removeCredential(id) }
+                    false
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        }
     }
 
-    fun verifyPin(profileId: String, pin: String): Boolean {
+    suspend fun verifyPin(profileId: String, pin: String): Boolean {
         if (!isValidProfilePin(pin)) return false
-        val credential = load(profileId) ?: return false
-        val candidate = runCatching {
-            deriveProfilePinVerifier(pin, credential.salt, credential.iterations)
-        }.getOrNull() ?: return false
-        return MessageDigest.isEqual(credential.verifier, candidate)
+
+        val credential = try {
+            withContext(ioDispatcher) { load(profileId) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return false
+        } ?: return false
+
+        return try {
+            withContext(cpuDispatcher) {
+                val candidate = deriveProfilePinVerifier(
+                    pin = pin,
+                    salt = credential.salt,
+                    iterations = credential.iterations,
+                )
+                MessageDigest.isEqual(credential.verifier, candidate)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun clearPin(profileId: String): Boolean {
+        val id = normalizeProfileId(profileId) ?: return false
+        return try {
+            withContext(ioDispatcher) {
+                try {
+                    val cleared = removeCredential(id)
+                    val metadata = profilePreferencesStore.setPinFoundation(
+                        profileId = id,
+                        enabled = false,
+                        credentialVersion = 0,
+                    )
+                    cleared && metadata != null
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        }
+    }
+
+    /**
+     * Removes only the credential after the owning profile has already been deleted.
+     * ProfilePreferencesStore cleanup is handled by the profile deletion path.
+     */
+    suspend fun clearCredential(profileId: String): Boolean {
+        val id = normalizeProfileId(profileId) ?: return false
+        return try {
+            withContext(ioDispatcher) {
+                try {
+                    removeCredential(id)
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        }
+    }
+
+    /**
+     * Account-pinned variant used by asynchronous profile deletion cleanup so a later account
+     * switch cannot redirect the credential removal into another subscriber scope.
+     */
+    suspend fun clearCredential(accountId: String, profileId: String): Boolean {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank) ?: return false
+        val id = normalizeProfileId(profileId) ?: return false
+        val scopedPreferences = appContext.getSharedPreferences(
+            accountScopedPreferencesName(PREFERENCES_NAME, normalizedAccountId),
+            Context.MODE_PRIVATE,
+        )
+        return try {
+            withContext(ioDispatcher) {
+                try {
+                    removeCredential(id, scopedPreferences)
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        }
     }
 
     @Synchronized
-    fun clearPin(profileId: String): Boolean {
-        val id = normalizeProfileId(profileId) ?: return false
-        return preferences.edit()
-            .remove(key(id, KEY_VERSION))
-            .remove(key(id, KEY_ITERATIONS))
-            .remove(key(id, KEY_SALT))
-            .remove(key(id, KEY_VERIFIER))
-            .commit()
-    }
+    private fun persistCredential(
+        profileId: String,
+        credential: StoredPinCredential,
+    ): Boolean = preferences.edit()
+        .putInt(key(profileId, KEY_VERSION), CURRENT_CREDENTIAL_VERSION)
+        .putInt(key(profileId, KEY_ITERATIONS), credential.iterations)
+        .putString(key(profileId, KEY_SALT), Base64.encodeToString(credential.salt, Base64.NO_WRAP))
+        .putString(
+            key(profileId, KEY_VERIFIER),
+            Base64.encodeToString(credential.verifier, Base64.NO_WRAP),
+        )
+        .commit()
+
+    @Synchronized
+    private fun removeCredential(
+        profileId: String,
+        targetPreferences: SharedPreferences = preferences,
+    ): Boolean = targetPreferences.edit()
+        .remove(key(profileId, KEY_VERSION))
+        .remove(key(profileId, KEY_ITERATIONS))
+        .remove(key(profileId, KEY_SALT))
+        .remove(key(profileId, KEY_VERIFIER))
+        .commit()
 
     private fun load(profileId: String): StoredPinCredential? {
         val id = normalizeProfileId(profileId) ?: return null
