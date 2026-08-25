@@ -17,6 +17,8 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var store: DurableDownloadPreferenceStore? = null
     private var bridge: DurableDownloadLifecycleBridge? = null
+    private var accountScopeStore: AccountScopeStore? = null
+    private var boundAccountId: String? = null
     private var connectivityManager: ConnectivityManager? = null
     private var knownSchedulingStates: Map<Long, DurableDownloadSchedulingState> = emptyMap()
     private var forceWaitingNetworkReenqueue = false
@@ -29,6 +31,9 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         ) {
             requestReconciliation()
         }
+    }
+    private val accountScopeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        requestReconciliation()
     }
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -44,8 +49,10 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
 
     override fun onCreate(): Boolean {
         val appContext = context?.applicationContext ?: return false
-        store = DurableDownloadPreferenceStore(appContext)
-        store?.register(preferenceListener)
+        DownloadRepositoryProcessOwner.captureLegacyOwner(appContext)
+        accountScopeStore = AccountScopeStore(appContext).also { accountScope ->
+            accountScope.registerActiveAccountListener(accountScopeListener)
+        }
         connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
         runCatching {
             connectivityManager?.registerNetworkCallback(
@@ -86,8 +93,10 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
     }
 
     private fun reconcile() {
+        rebindAccountStore()
         val currentStore = store ?: return
         val currentBridge = bridge ?: return
+        val accountId = boundAccountId ?: return
         val forceNetworkRecovery = forceWaitingNetworkReenqueue
         forceWaitingNetworkReenqueue = false
         val snapshot = currentStore.snapshot()
@@ -96,7 +105,9 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
             durableDownloadSchedulingState(record, snapshot.wifiOnly)
         }
 
-        (knownSchedulingStates.keys - currentStates.keys).forEach(currentBridge::cancel)
+        (knownSchedulingStates.keys - currentStates.keys).forEach { downloadId ->
+            currentBridge.cancel(accountId, downloadId)
+        }
         recordsById.forEach { (downloadId, record) ->
             val currentState = currentStates.getValue(downloadId)
             val previousState = knownSchedulingStates[downloadId]
@@ -116,15 +127,37 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
             }
             when (currentState.action) {
                 DurableDownloadLifecycleAction.ENQUEUE -> currentBridge.enqueue(
+                    accountId = accountId,
                     downloadId = downloadId,
                     title = record.title,
                     wifiOnly = currentState.wifiOnly,
                     scheduledAtEpochMs = currentState.scheduledAtEpochMs,
                 )
-                DurableDownloadLifecycleAction.CANCEL -> currentBridge.cancel(downloadId)
+                DurableDownloadLifecycleAction.CANCEL -> currentBridge.cancel(accountId, downloadId)
             }
         }
         knownSchedulingStates = currentStates
+    }
+
+    private fun rebindAccountStore() {
+        val nextAccountId = accountScopeStore?.activeAccountId()
+        if (nextAccountId == boundAccountId) return
+
+        store?.unregister(preferenceListener)
+        val previousAccountId = boundAccountId
+        val currentBridge = bridge
+        if (previousAccountId != null && currentBridge != null) {
+            knownSchedulingStates.keys.forEach { downloadId ->
+                currentBridge.cancel(previousAccountId, downloadId)
+            }
+            currentBridge.cancelAccount(previousAccountId)
+        }
+        knownSchedulingStates = emptyMap()
+        boundAccountId = nextAccountId
+        store = nextAccountId?.let { accountId ->
+            DurableDownloadPreferenceStore(requireNotNull(context).applicationContext, accountId)
+                .also { it.register(preferenceListener) }
+        }
     }
 
     override fun query(

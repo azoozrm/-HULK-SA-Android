@@ -838,7 +838,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playDownload(item: OfflineDownload) {
-        val localUri = item.localUri?.takeIf(String::isNotBlank) ?: return
+        val localUri = downloadRepository.playableLocalUri(item.downloadId, item.historyKey) ?: return
         if (item.status != OfflineStatus.COMPLETED) return
         playerReturnScreen = HulkScreen.MAIN
         startPlayback(
@@ -1344,6 +1344,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
         viewModelScope.launch(Dispatchers.IO) {
             localEpisodeNotificationStore.removeProfile(profileId, accountId)
+        }
+    }
+
+    fun removeDownloadProfileData(profileId: String) {
+        val accountId = downloadRepository.activeAccountIdForCleanup() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            downloadRepository.removeProfile(accountId, profileId)
         }
     }
 
@@ -2068,6 +2075,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val operationsState = mutableState.value.operations
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
+        mutableState.update { it.copy(downloads = emptyList()) }
+        downloadRepository.suspendActiveAccountForLogout()
         repository.logout()
         session = null
         sessionRestorationComplete = true
@@ -2084,7 +2093,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             isStarting = false,
             favorites = userLibrary.favorites(),
             history = userLibrary.history(),
-            downloads = downloadRepository.downloads(),
+            downloads = emptyList(),
             downloadSettings = downloadRepository.settings(),
             notificationSubscribedSeriesIds = emptySet(),
             localNotifications = emptyList(),
@@ -2135,6 +2144,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             catalogs = emptyMap(),
                             selectedCategoryId = null,
                             searchQuery = "",
+                            downloads = downloadRepository.downloads(),
+                            downloadSettings = downloadRepository.settings(),
                             errorMessage = null,
                         )
                     }
@@ -2500,6 +2511,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (invalidSession) {
             sessionRestorationComplete = true
             beginTvPlatformProfileTransition(resetPublishedScope = true)
+            mutableState.update { it.copy(downloads = emptyList()) }
+            downloadRepository.suspendActiveAccountForLogout()
             repository.logout()
             session = null
             notificationScanJob?.cancel()
