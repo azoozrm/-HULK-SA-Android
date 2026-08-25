@@ -319,7 +319,7 @@ fun LoginScreen(
     }
     var accessCode by rememberSaveable(persistedAccessCode) { mutableStateOf(persistedAccessCode) }
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
     var rememberAccount by rememberSaveable { mutableStateOf(true) }
 
