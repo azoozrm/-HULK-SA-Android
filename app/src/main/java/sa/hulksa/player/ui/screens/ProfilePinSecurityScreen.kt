@@ -21,11 +21,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,7 +49,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import sa.hulksa.player.data.PROFILE_PIN_LENGTH
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -56,14 +62,35 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 fun ProfilePinUnlockScreen(
     profile: UserProfile,
     isTv: Boolean,
-    onVerify: (String) -> Boolean,
+    onVerify: suspend (String) -> Boolean,
     onUnlocked: () -> Unit,
     onCancel: () -> Unit,
 ) {
     var error by rememberSaveable(profile.id) { mutableStateOf<String?>(null) }
     var resetToken by rememberSaveable(profile.id) { mutableIntStateOf(0) }
+    var operationInProgress by remember(profile.id) { mutableStateOf(false) }
+    var operationJob by remember(profile.id) { mutableStateOf<Job?>(null) }
+    val operationGuard = remember(profile.id) { ProfilePinOperationGuard() }
+    val operationScope = rememberCoroutineScope()
 
-    BackHandler(onBack = onCancel)
+    fun cancelPinOperation() {
+        operationGuard.cancel()
+        operationJob?.cancel()
+        operationJob = null
+        operationInProgress = false
+    }
+
+    DisposableEffect(profile.id) {
+        onDispose {
+            operationGuard.cancel()
+            operationJob?.cancel()
+        }
+    }
+
+    BackHandler {
+        cancelPinOperation()
+        onCancel()
+    }
 
     ProfilePinEntryScaffold(
         profile = profile,
@@ -72,16 +99,46 @@ fun ProfilePinUnlockScreen(
         subtitle = "أدخل رمز PIN المكوّن من 4 أرقام للمتابعة",
         errorMessage = error,
         resetToken = resetToken,
+        inputEnabled = !operationInProgress,
         onComplete = { pin ->
-            if (onVerify(pin)) {
+            val token = operationGuard.begin()
+            if (token != null) {
+                operationInProgress = true
                 error = null
-                onUnlocked()
-            } else {
-                error = "رمز PIN غير صحيح"
-                resetToken++
+                operationJob = operationScope.launch {
+                    try {
+                        val verified = onVerify(pin)
+                        ensureActive()
+                        if (operationGuard.isCurrent(token)) {
+                            if (verified) {
+                                error = null
+                                onUnlocked()
+                            } else {
+                                error = "رمز PIN غير صحيح"
+                                resetToken++
+                            }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (operationGuard.isCurrent(token)) {
+                            error = "رمز PIN غير صحيح"
+                            resetToken++
+                        }
+                    } finally {
+                        if (operationGuard.isCurrent(token)) {
+                            operationGuard.finish(token)
+                            operationInProgress = false
+                            operationJob = null
+                        }
+                    }
+                }
             }
         },
-        onCancel = onCancel,
+        onCancel = {
+            cancelPinOperation()
+            onCancel()
+        },
     )
 }
 
@@ -90,9 +147,9 @@ fun ProfilePinProtectionScreen(
     profile: UserProfile,
     isTv: Boolean,
     isProtected: Boolean,
-    onVerify: (String) -> Boolean,
-    onSetPin: (String) -> Boolean,
-    onClearPin: () -> Boolean,
+    onVerify: suspend (String) -> Boolean,
+    onSetPin: suspend (String) -> Boolean,
+    onClearPin: suspend () -> Boolean,
     onClose: () -> Unit,
 ) {
     var step by rememberSaveable(profile.id, isProtected) {
@@ -101,8 +158,44 @@ fun ProfilePinProtectionScreen(
     var firstPin by rememberSaveable(profile.id) { mutableStateOf<String?>(null) }
     var error by rememberSaveable(profile.id) { mutableStateOf<String?>(null) }
     var resetToken by rememberSaveable(profile.id) { mutableIntStateOf(0) }
+    var operationInProgress by remember(profile.id) { mutableStateOf(false) }
+    var operationJob by remember(profile.id) { mutableStateOf<Job?>(null) }
+    val operationGuard = remember(profile.id) { ProfilePinOperationGuard() }
+    val operationScope = rememberCoroutineScope()
+
+    fun cancelPinOperation() {
+        operationGuard.cancel()
+        operationJob?.cancel()
+        operationJob = null
+        operationInProgress = false
+    }
+
+    fun launchPinOperation(block: suspend (Long) -> Unit) {
+        val token = operationGuard.begin() ?: return
+        operationInProgress = true
+        error = null
+        operationJob = operationScope.launch {
+            try {
+                block(token)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (operationGuard.isCurrent(token)) {
+                    error = "تعذر إتمام العملية. حاول مرة أخرى."
+                    resetToken++
+                }
+            } finally {
+                if (operationGuard.isCurrent(token)) {
+                    operationGuard.finish(token)
+                    operationInProgress = false
+                    operationJob = null
+                }
+            }
+        }
+    }
 
     fun returnToOverviewOrClose() {
+        cancelPinOperation()
         error = null
         firstPin = null
         if (isProtected) {
@@ -112,8 +205,20 @@ fun ProfilePinProtectionScreen(
         }
     }
 
+    DisposableEffect(profile.id) {
+        onDispose {
+            operationGuard.cancel()
+            operationJob?.cancel()
+        }
+    }
+
     BackHandler {
-        if (step == PinProtectionStep.OVERVIEW) onClose() else returnToOverviewOrClose()
+        if (step == PinProtectionStep.OVERVIEW) {
+            cancelPinOperation()
+            onClose()
+        } else {
+            returnToOverviewOrClose()
+        }
     }
 
     if (step == PinProtectionStep.OVERVIEW) {
@@ -132,7 +237,10 @@ fun ProfilePinProtectionScreen(
                 resetToken++
                 step = PinProtectionStep.VERIFY_REMOVE
             },
-            onClose = onClose,
+            onClose = {
+                cancelPinOperation()
+                onClose()
+            },
         )
         return
     }
@@ -163,38 +271,59 @@ fun ProfilePinProtectionScreen(
         subtitle = subtitle,
         errorMessage = error,
         resetToken = resetToken,
+        inputEnabled = !operationInProgress,
         onComplete = { pin ->
             when (step) {
                 PinProtectionStep.VERIFY_CHANGE -> {
-                    if (onVerify(pin)) {
-                        error = null
-                        firstPin = null
-                        resetToken++
-                        step = PinProtectionStep.NEW_PIN
-                    } else {
-                        error = "رمز PIN الحالي غير صحيح"
-                        resetToken++
+                    launchPinOperation { token ->
+                        val verified = onVerify(pin)
+                        ensureActive()
+                        if (operationGuard.isCurrent(token)) {
+                            if (verified) {
+                                error = null
+                                firstPin = null
+                                resetToken++
+                                step = PinProtectionStep.NEW_PIN
+                            } else {
+                                error = "رمز PIN الحالي غير صحيح"
+                                resetToken++
+                            }
+                        }
                     }
                 }
 
                 PinProtectionStep.VERIFY_REMOVE -> {
-                    if (!onVerify(pin)) {
-                        error = "رمز PIN الحالي غير صحيح"
-                        resetToken++
-                    } else if (onClearPin()) {
-                        error = null
-                        onClose()
-                    } else {
-                        error = "تعذر إلغاء الحماية. حاول مرة أخرى."
-                        resetToken++
+                    launchPinOperation { token ->
+                        val verified = onVerify(pin)
+                        ensureActive()
+                        if (operationGuard.isCurrent(token)) {
+                            if (!verified) {
+                                error = "رمز PIN الحالي غير صحيح"
+                                resetToken++
+                            } else {
+                                val cleared = onClearPin()
+                                ensureActive()
+                                if (operationGuard.isCurrent(token)) {
+                                    if (cleared) {
+                                        error = null
+                                        onClose()
+                                    } else {
+                                        error = "تعذر إلغاء الحماية. حاول مرة أخرى."
+                                        resetToken++
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 PinProtectionStep.NEW_PIN -> {
-                    firstPin = pin
-                    error = null
-                    resetToken++
-                    step = PinProtectionStep.CONFIRM_PIN
+                    if (!operationInProgress) {
+                        firstPin = pin
+                        error = null
+                        resetToken++
+                        step = PinProtectionStep.CONFIRM_PIN
+                    }
                 }
 
                 PinProtectionStep.CONFIRM_PIN -> {
@@ -202,12 +331,20 @@ fun ProfilePinProtectionScreen(
                     if (expected == null || pin != expected) {
                         error = "الرمزان غير متطابقين. أعد التأكيد."
                         resetToken++
-                    } else if (onSetPin(pin)) {
-                        error = null
-                        onClose()
                     } else {
-                        error = "تعذر حفظ رمز PIN. حاول مرة أخرى."
-                        resetToken++
+                        launchPinOperation { token ->
+                            val stored = onSetPin(pin)
+                            ensureActive()
+                            if (operationGuard.isCurrent(token)) {
+                                if (stored) {
+                                    error = null
+                                    onClose()
+                                } else {
+                                    error = "تعذر حفظ رمز PIN. حاول مرة أخرى."
+                                    resetToken++
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -399,6 +536,7 @@ private fun ProfilePinEntryScaffold(
     subtitle: String,
     errorMessage: String?,
     resetToken: Int,
+    inputEnabled: Boolean,
     onComplete: (String) -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -441,6 +579,7 @@ private fun ProfilePinEntryScaffold(
                         subtitle = subtitle,
                         errorMessage = errorMessage,
                         resetToken = resetToken,
+                        inputEnabled = inputEnabled,
                         onComplete = onComplete,
                         onCancel = onCancel,
                         modifier = Modifier
@@ -485,6 +624,7 @@ private fun ProfilePinEntryScaffold(
                             subtitle = subtitle,
                             errorMessage = errorMessage,
                             resetToken = resetToken,
+                            inputEnabled = inputEnabled,
                             onComplete = onComplete,
                             onCancel = onCancel,
                             modifier = Modifier.widthIn(min = 300.dp, max = 380.dp),
@@ -516,6 +656,7 @@ private fun ProfilePinEntryScaffold(
                         subtitle = subtitle,
                         errorMessage = errorMessage,
                         resetToken = resetToken,
+                        inputEnabled = inputEnabled,
                         onComplete = onComplete,
                         onCancel = onCancel,
                         modifier = Modifier.fillMaxWidth(if (compactHeight) .96f else .94f),
@@ -624,6 +765,7 @@ private fun PinPanel(
     subtitle: String,
     errorMessage: String?,
     resetToken: Int,
+    inputEnabled: Boolean,
     onComplete: (String) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
@@ -654,7 +796,7 @@ private fun PinPanel(
     }
 
     fun appendDigit(value: String) {
-        if (pin.length >= PROFILE_PIN_LENGTH) return
+        if (!inputEnabled || pin.length >= PROFILE_PIN_LENGTH) return
         val next = pin + value
         pin = next
         if (next.length == PROFILE_PIN_LENGTH) {
@@ -761,7 +903,9 @@ private fun PinPanel(
             cancelFocusRequester = cancelFocusRequester,
             backspaceEnabled = true,
             onDigit = ::appendDigit,
-            onBackspace = { if (pin.isNotEmpty()) pin = pin.dropLast(1) },
+            onBackspace = {
+                if (inputEnabled && pin.isNotEmpty()) pin = pin.dropLast(1)
+            },
         )
 
         Spacer(Modifier.height(if (shortLandscape || compactHeight || tvCompact) 4.dp else 6.dp))
