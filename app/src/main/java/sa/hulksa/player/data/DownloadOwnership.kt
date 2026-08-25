@@ -11,7 +11,7 @@ import java.security.MessageDigest
 internal const val DOWNLOAD_SCHEMA_VERSION = 2
 internal const val DOWNLOAD_MIGRATION_STATE_COMPLETE = "complete"
 
-internal data class DownloadOwner(
+data class DownloadOwner(
     val accountId: String,
     val profileId: String,
 ) {
