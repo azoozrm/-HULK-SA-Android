@@ -7,21 +7,40 @@ import java.util.Locale
 private val XTREAM_QUERY_CREDENTIAL = Regex(
     """(?i)(?:^|[?&])(?:username|password)\s*=""",
 )
-private val XTREAM_PATH_CREDENTIALS = Regex(
+
+/**
+ * Strict URL-shape detector used for persistence/publication decisions.
+ *
+ * Xtream media paths carry three segments after the media kind:
+ * username / password / numeric stream-or-episode resource. Merely using
+ * "movie", "series" or "live" as a normal CDN route must not classify an
+ * artwork URL as credential-bearing.
+ */
+private val XTREAM_MEDIA_URL_PATH_CREDENTIALS = Regex(
+    """(?i)/(?:live|movie|series)/[^/?#]+/[^/?#]+/\d+(?:\.[^/?#]+)?(?:[?#]|$)""",
+)
+
+/**
+ * Broader text pattern retained for defensive error/diagnostic redaction. Text
+ * may be incomplete or embedded in a larger message, so this intentionally
+ * remains more conservative than the external-URL persistence classifier.
+ */
+private val XTREAM_TEXT_PATH_CREDENTIALS = Regex(
     """(?i)/(?:live|movie|series)/[^/?#]+/[^/?#]+(?:/|$)""",
 )
 
 /**
- * Detects Xtream URLs that carry account credentials in query parameters or
- * the standard live/movie/series path. The inspection also decodes percent
+ * Detects credential-bearing Xtream URLs for persistence/publication guards.
+ * Query credentials remain sensitive immediately; media-path detection requires
+ * the full kind/username/password/resource shape. Inspection decodes percent
  * encoding once so encoded credential names and path separators cannot bypass
- * persistence/logging guards.
+ * the guard.
  */
 internal fun isCredentialBearingIptvUrl(raw: String?): Boolean {
     val value = raw?.trim()?.takeIf(String::isNotEmpty) ?: return false
     return credentialInspectionVariants(value).any { candidate ->
         XTREAM_QUERY_CREDENTIAL.containsMatchIn(candidate) ||
-            XTREAM_PATH_CREDENTIALS.containsMatchIn(candidate)
+            XTREAM_MEDIA_URL_PATH_CREDENTIALS.containsMatchIn(candidate)
     }
 }
 
@@ -30,7 +49,7 @@ internal fun containsCredentialBearingIptvMaterial(raw: String?): Boolean {
     val value = raw?.trim()?.takeIf(String::isNotEmpty) ?: return false
     return credentialInspectionVariants(value).any { candidate ->
         XTREAM_QUERY_CREDENTIAL.containsMatchIn(candidate) ||
-            XTREAM_PATH_CREDENTIALS.containsMatchIn(candidate) ||
+            XTREAM_TEXT_PATH_CREDENTIALS.containsMatchIn(candidate) ||
             candidate.lowercase(Locale.ROOT).let { lower ->
                 "username=" in lower && "password=" in lower
             }
@@ -44,8 +63,8 @@ internal fun redactCredentialBearingUrl(raw: String?): String? {
 
 /**
  * External artwork/metadata URLs may be persisted, but never when they use the
- * Xtream credential-bearing URL forms. Relative/non-network strings are left
- * to their existing callers to validate.
+ * strict Xtream credential-bearing URL forms. Relative/non-network strings are
+ * left to their existing callers to validate.
  */
 internal fun persistableExternalUrlOrNull(raw: String?): String? = raw
     ?.trim()

@@ -12,6 +12,7 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.PortalConfig
 import sa.hulksa.player.security.REDACTED_IPTV_URL
 import sa.hulksa.player.security.isCredentialBearingIptvUrl
+import sa.hulksa.player.security.persistableExternalUrlOrNull
 import sa.hulksa.player.security.redactCredentialBearingUrl
 import sa.hulksa.player.tv.TvDeepLinkRouter
 import sa.hulksa.player.tv.TvDeepLinkTarget
@@ -35,6 +36,32 @@ class P1001CredentialUrlHardeningTest {
         ).forEach { raw ->
             assertTrue(raw, isCredentialBearingIptvUrl(raw))
             assertEquals(REDACTED_IPTV_URL, redactCredentialBearingUrl(raw))
+        }
+    }
+
+    @Test
+    fun `strict URL classification allows normal CDN media routes`() {
+        listOf(
+            "https://cdn.example.test/movie/123/poster.jpg",
+            "https://cdn.example.test/series/show/cover.jpg",
+            "https://cdn.example.test/live/channel/logo.png",
+            "https://cdn.example.test/posters/movie/123.jpg",
+        ).forEach { raw ->
+            assertFalse(raw, isCredentialBearingIptvUrl(raw))
+            assertEquals(raw, persistableExternalUrlOrNull(raw))
+        }
+    }
+
+    @Test
+    fun `strict URL classification still blocks Xtream media credentials`() {
+        listOf(
+            "http://provider.test/movie/alpha/secret/55.mp4",
+            "http://provider.test/series/alpha/secret/77.mkv",
+            "http://provider.test/live/alpha/secret/99.ts",
+            "http://provider.test/player_api.php?username=alpha&password=secret",
+        ).forEach { raw ->
+            assertTrue(raw, isCredentialBearingIptvUrl(raw))
+            assertEquals(null, persistableExternalUrlOrNull(raw))
         }
     }
 
@@ -172,11 +199,12 @@ class P1001CredentialUrlHardeningTest {
     }
 
     @Test
-    fun `tv internal deep link contains identity only and artwork rejects credential path`() {
+    fun `tv internal deep link contains identity only and artwork uses strict credential classification`() {
         val deepLink = TvDeepLinkRouter.uri(TvDeepLinkTarget.Movie(movieId = 55))
 
         assertEquals("hulksa://movie/55", deepLink)
         assertFalse(isCredentialBearingIptvUrl(deepLink))
+        assertTrue(isSafeTvProgramArtworkUrl("https://cdn.example.test/movie/123/poster.jpg"))
         assertFalse(isSafeTvProgramArtworkUrl("http://provider.test/movie/alpha/secret/55.jpg"))
         assertTrue(isSafeTvProgramArtworkUrl("https://cdn.example.test/posters/55.jpg"))
     }
