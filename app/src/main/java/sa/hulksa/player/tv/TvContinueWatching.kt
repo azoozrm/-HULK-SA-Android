@@ -7,6 +7,7 @@ import java.util.Locale
 import kotlin.math.abs
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.ProfileKind
+import sa.hulksa.player.security.isCredentialBearingIptvUrl
 
 internal const val TV_PROGRAM_PROVIDER_PREFIX = "hulk:v230:"
 private const val COMPLETED_RATIO = 0.92
@@ -337,9 +338,13 @@ internal fun isSafeTvProgramArtworkUrl(rawUrl: String): Boolean = runCatching {
     val schemeAllowed =
         uri.scheme.equals("http", true) || uri.scheme.equals("https", true)
     val sensitiveQuery = uri.rawQuery.orEmpty().lowercase(Locale.ROOT).let { query ->
-        listOf("username=", "password=", "access_code=", "token=").any(query::contains)
+        listOf("access_code=", "token=").any(query::contains)
     }
-    schemeAllowed && !uri.host.isNullOrBlank() && uri.userInfo == null && !sensitiveQuery
+    schemeAllowed &&
+        !uri.host.isNullOrBlank() &&
+        uri.userInfo == null &&
+        !sensitiveQuery &&
+        !isCredentialBearingIptvUrl(rawUrl)
 }.getOrDefault(false)
 
 data class ExistingTvProgram(

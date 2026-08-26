@@ -49,6 +49,7 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
 
     override fun onCreate(): Boolean {
         val appContext = context?.applicationContext ?: return false
+        scrubPersistedDownloadCredentialUrls(appContext)
         DownloadRepositoryProcessOwner.captureLegacyOwner(appContext)
         accountScopeStore = AccountScopeStore(appContext).also { accountScope ->
             accountScope.registerActiveAccountListener(accountScopeListener)

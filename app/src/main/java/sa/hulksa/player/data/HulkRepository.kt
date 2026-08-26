@@ -24,21 +24,23 @@ private data class AccountSessionOwner(
 )
 
 class HulkRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val portalResolver = PortalResolver()
     private val client = XtreamClient()
     private val kidsCatalogClient = KidsServerCatalogClient()
-    private val kidsContentFilterStore = KidsContentFilterStore(context)
+    private val kidsContentFilterStore = KidsContentFilterStore(appContext)
     private val movieCardMetadataClient = MovieCardMetadataClient()
     private val seriesCardMetadataClient = SeriesCardMetadataClient()
-    private val vault = CredentialVault(context)
-    private val accountSessionStore = AccountSessionStore(context)
-    private val diagnostics = ServerDiagnosticsEngine(context)
+    private val vault = CredentialVault(appContext)
+    private val accountSessionStore = AccountSessionStore(appContext)
+    private val diagnostics = ServerDiagnosticsEngine(appContext)
 
     suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession {
         val portal = portalResolver.resolve(credentials.accessCode)
         val session = client.authenticate(portal, credentials)
         try {
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                suspendExistingDownloadOwner()
                 accountSessionStore.recordAuthenticated(session)
                 AuthenticatedSessionRegistry.update(session)
                 if (remember) vault.save(credentials) else vault.clear()
@@ -78,6 +80,7 @@ class HulkRepository(context: Context) {
         val credentials = vault.load()
         if (credentials == null) {
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                suspendExistingDownloadOwner()
                 accountSessionStore.clearActiveSession()
                 AuthenticatedSessionRegistry.clear()
             }
@@ -116,6 +119,7 @@ class HulkRepository(context: Context) {
 
     fun logout() {
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            suspendExistingDownloadOwner()
             vault.clear()
             accountSessionStore.clearActiveSession()
             AuthenticatedSessionRegistry.clear()
@@ -197,6 +201,13 @@ class HulkRepository(context: Context) {
             capabilities = capabilities,
             recommendations = recommendations,
         )
+    }
+
+    private fun suspendExistingDownloadOwner() {
+        accountSessionStore.metadata()?.accountId
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?.let { DownloadRepositoryProcessOwner.suspendAccount(appContext, it) }
     }
 
     private fun currentSessionOwner(): AccountSessionOwner? =

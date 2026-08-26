@@ -5,6 +5,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
+import sa.hulksa.player.security.containsCredentialBearingIptvMaterial
+import sa.hulksa.player.security.persistableExternalUrlOrNull
 
 data class ProfileContentSearchHistoryEntry(
     val contentId: Int,
@@ -51,7 +53,7 @@ class ProfileContentSearchHistoryStore(context: Context) {
             contentId = item.id,
             contentType = item.type,
             title = title,
-            posterUrl = item.posterUrl?.trim()?.takeIf(String::isNotBlank),
+            posterUrl = persistableExternalUrlOrNull(item.posterUrl),
             year = item.year?.trim()?.takeIf(String::isNotBlank),
             updatedAtEpochMs = System.currentTimeMillis(),
         )
@@ -87,7 +89,9 @@ class ProfileContentSearchHistoryStore(context: Context) {
 
         return runCatching {
             val raw = stateStore.read(scope, KEY_ENTRIES) ?: return emptyList()
-            val array = JSONArray(raw)
+            val safeRaw = sanitizeEntriesJson(raw)
+            if (safeRaw != raw) stateStore.write(scope, KEY_ENTRIES, safeRaw)
+            val array = JSONArray(safeRaw)
             buildList {
                 for (index in 0 until array.length()) {
                     val item = array.optJSONObject(index) ?: continue
@@ -102,9 +106,11 @@ class ProfileContentSearchHistoryStore(context: Context) {
                             contentId = contentId,
                             contentType = contentType,
                             title = title,
-                            posterUrl = item.optString(KEY_POSTER_URL)
-                                .trim()
-                                .takeIf(String::isNotBlank),
+                            posterUrl = persistableExternalUrlOrNull(
+                                item.optString(KEY_POSTER_URL)
+                                    .trim()
+                                    .takeIf(String::isNotBlank),
+                            ),
                             year = item.optString(KEY_YEAR)
                                 .trim()
                                 .takeIf(String::isNotBlank),
@@ -126,7 +132,10 @@ class ProfileContentSearchHistoryStore(context: Context) {
         val normalized = entries
             .mapNotNull { entry ->
                 val title = normalizeTitle(entry.title) ?: return@mapNotNull null
-                entry.copy(title = title)
+                entry.copy(
+                    title = title,
+                    posterUrl = persistableExternalUrlOrNull(entry.posterUrl),
+                )
             }
             .distinctBy(ProfileContentSearchHistoryEntry::stableKey)
             .sortedByDescending(ProfileContentSearchHistoryEntry::updatedAtEpochMs)
@@ -137,20 +146,40 @@ class ProfileContentSearchHistoryStore(context: Context) {
             return emptyList()
         }
 
+        stateStore.write(scope, KEY_ENTRIES, encodeEntries(normalized))
+        return normalized
+    }
+
+    private fun encodeEntries(entries: List<ProfileContentSearchHistoryEntry>): String {
         val array = JSONArray()
-        normalized.forEach { entry ->
+        entries.forEach { entry ->
             array.put(
                 JSONObject()
                     .put(KEY_CONTENT_ID, entry.contentId)
                     .put(KEY_CONTENT_TYPE, entry.contentType.name)
                     .put(KEY_TITLE, entry.title)
-                    .put(KEY_POSTER_URL, entry.posterUrl.orEmpty())
+                    .put(KEY_POSTER_URL, persistableExternalUrlOrNull(entry.posterUrl).orEmpty())
                     .put(KEY_YEAR, entry.year.orEmpty())
                     .put(KEY_UPDATED_AT, entry.updatedAtEpochMs),
             )
         }
-        stateStore.write(scope, KEY_ENTRIES, array.toString())
-        return normalized
+        return array.toString()
+    }
+
+    private fun sanitizeEntriesJson(raw: String): String = runCatching {
+        val array = JSONArray(raw)
+        var changed = false
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val poster = item.optString(KEY_POSTER_URL).takeIf(String::isNotBlank) ?: continue
+            if (persistableExternalUrlOrNull(poster) == null) {
+                item.put(KEY_POSTER_URL, "")
+                changed = true
+            }
+        }
+        if (changed) array.toString() else raw
+    }.getOrElse {
+        if (containsCredentialBearingIptvMaterial(raw)) "[]" else raw
     }
 
     private fun normalizeTitle(raw: String): String? {
