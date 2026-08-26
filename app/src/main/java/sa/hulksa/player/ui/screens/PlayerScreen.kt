@@ -94,6 +94,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -296,6 +297,12 @@ fun PlayerScreen(
         }
     }
     val latestSwitchRelative by rememberUpdatedState(switchRelative)
+    val audioRecoveryGeneration = remember(request) {
+        "${request.streamKind}:${request.streamId}:${request.historyKey}"
+    }
+    val audioRecovery = remember(request) {
+        AudioRecoveryStateMachine().apply { beginGeneration(audioRecoveryGeneration) }
+    }
 
     val player = remember(request) {
         val httpDataSource = DefaultHttpDataSource.Factory()
@@ -308,7 +315,10 @@ fun PlayerScreen(
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(15_000, 60_000, 2_500, 5_000)
             .build()
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
         ExoPlayer.Builder(context)
+            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setLoadControl(loadControl)
             .build()
@@ -451,6 +461,7 @@ fun PlayerScreen(
                 if (playbackState == Player.STATE_READY) {
                     finalError = null
                     offlineFailure = false
+                    audioRecovery.markPlaybackReady(audioRecoveryGeneration)
                 }
                 if (
                     playbackState == Player.STATE_ENDED &&
@@ -511,7 +522,38 @@ fun PlayerScreen(
                     controlsVisible = true
                     offlineFailure = true
                     finalError = PLAYER_OFFLINE_MESSAGE
-                } else if (candidateIndex < request.candidates.lastIndex) {
+                    return
+                }
+
+                val expectedSource = request.candidates.getOrNull(candidateIndex)
+                if (
+                    expectedSource != null &&
+                    player.isCurrentAudioRecoverySource(expectedSource) &&
+                    player.hasAudioTrackForRecovery()
+                ) {
+                    val recoveryAction = audioRecovery.requestRecovery(
+                        key = audioRecoveryGeneration,
+                        classification = classifyAudioFailure(error),
+                        hasAudioTrack = true,
+                    )
+                    if (
+                        recoveryAction == AudioRecoveryAction.REPREPARE_CURRENT ||
+                        recoveryAction == AudioRecoveryAction.RESET_CURRENT_PIPELINE
+                    ) {
+                        finalError = null
+                        offlineFailure = false
+                        buffering = true
+                        player.executeAudioRecovery(
+                            action = recoveryAction,
+                            isLive = request.isLive,
+                            expectedSource = expectedSource,
+                        )
+                        audioRecovery.markRecoveryCommandIssued(audioRecoveryGeneration)
+                        return
+                    }
+                }
+
+                if (candidateIndex < request.candidates.lastIndex) {
                     offlineFailure = false
                     pendingSeekMs = player.currentPosition.coerceAtLeast(0L)
                     candidateIndex += 1
@@ -529,6 +571,7 @@ fun PlayerScreen(
         }
         player.addListener(listener)
         onDispose {
+            audioRecovery.invalidate()
             if (!request.isLive) {
                 onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
             }
