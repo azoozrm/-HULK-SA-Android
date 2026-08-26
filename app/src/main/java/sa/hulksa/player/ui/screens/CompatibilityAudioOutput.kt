@@ -5,6 +5,7 @@ package sa.hulksa.player.ui.screens
 import android.content.Context
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 
@@ -73,10 +74,11 @@ internal class HulkAudioRenderersFactory(
             return super.buildAudioSink(context, enableFloatOutput, enableAudioOutputPlaybackParams)
         }
 
-        // Media3 1.10.1: the no-context builder uses DEFAULT_AUDIO_CAPABILITIES, which advertises
-        // no encoded passthrough support. Offload is also explicitly disabled in track parameters.
+        // Media3 1.10.1: pin the recovery-only sink to minimum PCM capabilities so route-reported
+        // encoded passthrough support cannot select the same silent direct-output path again.
         @Suppress("DEPRECATION")
         return DefaultAudioSink.Builder()
+            .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
             .setEnableFloatOutput(false)
             .setEnableAudioOutputPlaybackParameters(false)
             .build()
