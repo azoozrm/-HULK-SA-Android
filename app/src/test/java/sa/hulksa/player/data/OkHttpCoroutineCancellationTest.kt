@@ -42,7 +42,7 @@ class OkHttpCoroutineCancellationTest {
     }
 
     @Test
-    fun successfulRequestReturnsNormallyAndResponseIsClosed() = runBlocking {
+    fun successfulRequestReturnsNormallyAndResponseIsClosed(): Unit = runBlocking {
         server.enqueue(MockResponse().setResponseCode(200).setBody("payload"))
         val client = OkHttpClient()
         lateinit var capturedResponse: Response
