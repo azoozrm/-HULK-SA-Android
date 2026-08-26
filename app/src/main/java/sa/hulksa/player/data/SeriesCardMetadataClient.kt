@@ -1,5 +1,6 @@
 package sa.hulksa.player.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -60,23 +61,24 @@ class SeriesCardMetadataClient {
             .build()
 
         val root = try {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.SERIES_INFO)
                 } catch (_: XtreamJsonGuardException) {
-                    return@withContext SeriesCardTechnicalMetadata()
+                    return@executeCancellable null
                 }
                 if (!response.isSuccessful || body.isBlank() || body.looksLikeChallenge()) {
-                    return@withContext SeriesCardTechnicalMetadata()
+                    return@executeCancellable null
                 }
                 runCatching { XtreamJsonParser.parseObject(body) }.getOrNull()
-                    ?: return@withContext SeriesCardTechnicalMetadata()
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: IOException) {
-            return@withContext SeriesCardTechnicalMetadata()
+            null
         } catch (_: Exception) {
-            return@withContext SeriesCardTechnicalMetadata()
-        }
+            null
+        } ?: return@withContext SeriesCardTechnicalMetadata()
 
         val episodeObjects = try {
             root.boundedSeriesEpisodeObjects()

@@ -1,8 +1,11 @@
 package sa.hulksa.player.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -271,7 +274,11 @@ class XtreamClient {
         extra: Map<String, String> = emptyMap(),
     ): JSONObject = withContext(Dispatchers.IO) {
         try {
-            XtreamJsonParser.parseObject(request(portal, credentials, action, extra))
+            val body = request(portal, credentials, action, extra)
+            currentCoroutineContext().ensureActive()
+            val parsed = XtreamJsonParser.parseObject(body)
+            currentCoroutineContext().ensureActive()
+            parsed
         } catch (error: XtreamJsonGuardException) {
             throw error.asXtreamException()
         }
@@ -283,7 +290,11 @@ class XtreamClient {
         action: String,
     ): JSONArray = withContext(Dispatchers.IO) {
         try {
-            XtreamJsonParser.parseArray(request(portal, credentials, action))
+            val body = request(portal, credentials, action)
+            currentCoroutineContext().ensureActive()
+            val parsed = XtreamJsonParser.parseArray(body)
+            currentCoroutineContext().ensureActive()
+            parsed
         } catch (error: XtreamJsonGuardException) {
             throw error.asXtreamException()
         }
@@ -313,7 +324,7 @@ class XtreamClient {
         val limit = XtreamJsonLimits.forAction(action)
 
         try {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, limit)
                 } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
@@ -330,6 +341,8 @@ class XtreamClient {
                 if (body.looksLikeChallenge()) throw XtreamException.ServiceBlocked
                 body
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: XtreamException) {
             throw error
         } catch (error: IOException) {
