@@ -54,7 +54,10 @@ class MainActivity : ComponentActivity() {
             activity = this,
             onTranscript = viewModel::updateSearch,
         )
-        audioPlaybackHealthCoordinator = AudioPlaybackHealthCoordinator(this) { viewModel.state.value }
+        audioPlaybackHealthCoordinator = AudioPlaybackHealthCoordinator(
+            activity = this,
+            stateProvider = { viewModel.state.value },
+        )
 
         configurePhoneWindow()
         applyPhoneOrientationPolicy(HulkScreen.LOGIN)

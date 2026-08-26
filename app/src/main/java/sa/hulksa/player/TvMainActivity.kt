@@ -35,7 +35,10 @@ class TvMainActivity : ComponentActivity() {
             activity = this,
             onTranscript = viewModel::updateSearch,
         )
-        audioPlaybackHealthCoordinator = AudioPlaybackHealthCoordinator(this) { viewModel.state.value }
+        audioPlaybackHealthCoordinator = AudioPlaybackHealthCoordinator(
+            activity = this,
+            stateProvider = { viewModel.state.value },
+        )
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContent {
             HulkTheme {
