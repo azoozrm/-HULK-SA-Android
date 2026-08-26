@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import sa.hulksa.player.ManualParentAuthProofRegistry
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -46,7 +47,12 @@ fun ParentPinBootstrapScreen(
             onVerify = { false },
             onSetPin = { pin ->
                 val stored = onSetPin(pin)
-                if (stored) storedForThisFlow = true
+                if (stored) {
+                    storedForThisFlow = true
+                    // Legacy Kids recovery proof is single-use. Adult bootstrap normally has no proof,
+                    // so consuming here is a safe no-op for the standard Adult -> Kids flow.
+                    ManualParentAuthProofRegistry.consumeValidProof()
+                }
                 stored
             },
             onClearPin = { false },
