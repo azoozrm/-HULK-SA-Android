@@ -8,6 +8,8 @@ import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.ProfileKind
+import sa.hulksa.player.security.containsCredentialBearingIptvMaterial
+import sa.hulksa.player.security.persistableExternalUrlOrNull
 
 class UserLibrary(context: Context) {
     private val appContext = context.applicationContext
@@ -57,7 +59,11 @@ class UserLibrary(context: Context) {
 
     fun history(): List<HistoryEntry> = runCatching {
         val raw = preferences.getString(activeKey(KEY_HISTORY), null) ?: return emptyList()
-        val array = JSONArray(raw)
+        val safeRaw = sanitizeHistoryJson(raw)
+        if (safeRaw != raw) {
+            preferences.edit().putString(activeKey(KEY_HISTORY), safeRaw).commit()
+        }
+        val array = JSONArray(safeRaw)
         val decoded = buildList {
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
@@ -65,7 +71,9 @@ class UserLibrary(context: Context) {
                     HistoryEntry(
                         key = item.getString("key"),
                         title = item.getString("title"),
-                        posterUrl = item.optString("poster").takeUnless { it.isBlank() },
+                        posterUrl = persistableExternalUrlOrNull(
+                            item.optString("poster").takeUnless(String::isBlank),
+                        ),
                         streamKind = item.getString("kind"),
                         streamId = item.getInt("id"),
                         extension = item.optString("extension", "mp4"),
@@ -97,7 +105,7 @@ class UserLibrary(context: Context) {
         val entry = HistoryEntry(
             key = request.historyKey,
             title = request.title,
-            posterUrl = request.posterUrl,
+            posterUrl = persistableExternalUrlOrNull(request.posterUrl),
             streamKind = request.streamKind,
             streamId = request.streamId,
             extension = request.extension,
@@ -120,7 +128,7 @@ class UserLibrary(context: Context) {
         val entry = HistoryEntry(
             key = request.historyKey,
             title = request.title,
-            posterUrl = request.posterUrl,
+            posterUrl = persistableExternalUrlOrNull(request.posterUrl),
             streamKind = request.streamKind,
             streamId = request.streamId,
             extension = request.extension,
@@ -162,16 +170,22 @@ class UserLibrary(context: Context) {
             entries
         }
         val normalized = scopedEntries
+            .map { entry -> entry.copy(posterUrl = persistableExternalUrlOrNull(entry.posterUrl)) }
             .distinctBy(HistoryEntry::key)
             .sortedByDescending(HistoryEntry::updatedAtEpochMs)
             .take(MAX_HISTORY)
+        preferences.edit().putString(activeKey(KEY_HISTORY), encodeHistory(normalized)).apply()
+        return normalized
+    }
+
+    private fun encodeHistory(entries: List<HistoryEntry>): String {
         val array = JSONArray()
-        normalized.forEach { entry ->
+        entries.forEach { entry ->
             array.put(
                 JSONObject()
                     .put("key", entry.key)
                     .put("title", entry.title)
-                    .put("poster", entry.posterUrl.orEmpty())
+                    .put("poster", persistableExternalUrlOrNull(entry.posterUrl).orEmpty())
                     .put("kind", entry.streamKind)
                     .put("id", entry.streamId)
                     .put("extension", entry.extension)
@@ -188,8 +202,23 @@ class UserLibrary(context: Context) {
                     },
             )
         }
-        preferences.edit().putString(activeKey(KEY_HISTORY), array.toString()).apply()
-        return normalized
+        return array.toString()
+    }
+
+    private fun sanitizeHistoryJson(raw: String): String = runCatching {
+        val array = JSONArray(raw)
+        var changed = false
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val poster = item.optString("poster").takeIf(String::isNotBlank) ?: continue
+            if (persistableExternalUrlOrNull(poster) == null) {
+                item.put("poster", "")
+                changed = true
+            }
+        }
+        if (changed) array.toString() else raw
+    }.getOrElse {
+        if (containsCredentialBearingIptvMaterial(raw)) "[]" else raw
     }
 
     private fun isActiveKidsProfile(): Boolean =
@@ -221,11 +250,15 @@ class UserLibrary(context: Context) {
                 preferences.getStringSet(KEY_FAVORITES, emptySet()).orEmpty().toSet(),
             )
         }
-        if (plan.copyLegacyHistory) {
-            preferences.getString(KEY_HISTORY, null)?.let { editor.putString(scopedHistoryKey, it) }
+        if (preferences.contains(KEY_HISTORY)) {
+            preferences.getString(KEY_HISTORY, null)?.let { rawHistory ->
+                val safeHistory = sanitizeHistoryJson(rawHistory)
+                if (plan.copyLegacyHistory) editor.putString(scopedHistoryKey, safeHistory)
+                if (safeHistory != rawHistory) editor.putString(KEY_HISTORY, safeHistory)
+            }
         }
 
-        // Keep the legacy keys intact in v1.1 foundation as rollback safety.
+        // Keep non-sensitive legacy keys intact as rollback safety.
         editor.putBoolean(KEY_PROFILE_SCOPE_MIGRATION_V1, true).commit()
     }
 

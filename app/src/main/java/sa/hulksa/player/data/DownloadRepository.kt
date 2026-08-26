@@ -28,6 +28,8 @@ import sa.hulksa.player.model.DownloadSettings
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
+import sa.hulksa.player.security.persistableExternalUrlOrNull
+import sa.hulksa.player.security.redactCredentialBearingUrl
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -189,8 +191,8 @@ class DownloadRepository internal constructor(
         episodeNumber: Int? = null,
     ): EnqueueResult {
         require(!request.isLive) { "لا يمكن تحميل البث المباشر." }
-        val sources = request.candidates.map(String::trim).filter(String::isNotBlank).distinct()
-        if (sources.isEmpty()) return EnqueueResult.Failed("لا يوجد رابط صالح للتحميل.")
+        val hasRuntimeSource = request.candidates.any { it.isNotBlank() }
+        if (!hasRuntimeSource) return EnqueueResult.Failed("لا يوجد رابط صالح للتحميل.")
 
         val target = selectedStorageTarget()
             ?: return EnqueueResult.Failed("مساحة التخزين غير متاحة على هذا الجهاز.")
@@ -216,14 +218,14 @@ class DownloadRepository internal constructor(
                 downloadId = id,
                 historyKey = request.historyKey,
                 title = request.title,
-                posterUrl = request.posterUrl,
+                posterUrl = persistableExternalUrlOrNull(request.posterUrl),
                 streamKind = request.streamKind,
                 streamId = request.streamId,
                 extension = extension,
                 seriesTitle = seriesTitle,
                 season = season,
                 episodeNumber = episodeNumber,
-                sourceCandidates = sources,
+                sourceCandidates = emptyList(),
                 fileName = fileName,
                 storagePath = target.directory.absolutePath,
                 storageLabel = target.label,
@@ -264,7 +266,7 @@ class DownloadRepository internal constructor(
     fun resume(downloadId: Long): Boolean {
         val resumable = synchronized(lock) {
             val item = cache.firstOrNull { it.downloadId == downloadId } ?: return@synchronized false
-            if (item.status == OfflineStatus.COMPLETED || item.sourceCandidates.isEmpty()) {
+            if (item.status == OfflineStatus.COMPLETED) {
                 return@synchronized false
             }
             mutateLocked(downloadId) {
@@ -437,6 +439,15 @@ class DownloadRepository internal constructor(
     @Throws(IOException::class)
     private suspend fun performDownload(downloadId: Long) {
         val startItem = item(downloadId) ?: return
+        val runtimeSources = downloadRuntimeSourceCandidates(
+            record = startItem,
+            expectedAccountId = accountId,
+            session = AuthenticatedSessionRegistry.current(),
+            metadata = accountSessionStore.metadata(),
+        )
+        if (runtimeSources.isEmpty()) {
+            throw CancellationException("Authenticated download session changed")
+        }
         mutate(downloadId) {
             it.copy(
                 status = OfflineStatus.CHECKING,
@@ -457,7 +468,7 @@ class DownloadRepository internal constructor(
             runCatching { finalFile.renameTo(partFile) }
         }
 
-        val probe = probe(downloadId, startItem.sourceCandidates)
+        val probe = probe(downloadId, runtimeSources)
         var totalBytes = probe.totalBytes
         var existingBytes = partFile.takeIf(File::exists)?.length() ?: 0L
 
@@ -477,7 +488,7 @@ class DownloadRepository internal constructor(
         checkAvailableSpace(target.directory, totalBytes, existingBytes)
         mutate(downloadId) {
             it.copy(
-                sourceCandidates = listOf(probe.url) + it.sourceCandidates.filterNot { source -> source == probe.url },
+                sourceCandidates = emptyList(),
                 fileName = fileName,
                 storagePath = target.directory.absolutePath,
                 storageLabel = target.label,
@@ -860,7 +871,7 @@ class DownloadRepository internal constructor(
                 status = OfflineStatus.FAILED,
                 bytesPerSecond = 0L,
                 etaSeconds = -1L,
-                errorMessage = message,
+                errorMessage = redactCredentialBearingUrl(message),
                 integrityVerified = false,
             )
         }
@@ -945,17 +956,14 @@ class DownloadRepository internal constructor(
         if (item.status == OfflineStatus.COMPLETED) return item
         if (item.status in ACTIVE_STATUSES || item.status == OfflineStatus.CHECKING) {
             return item.copy(
-                status = if (item.sourceCandidates.isEmpty()) OfflineStatus.FAILED else OfflineStatus.QUEUED,
+                status = OfflineStatus.QUEUED,
+                sourceCandidates = emptyList(),
                 bytesPerSecond = 0L,
                 etaSeconds = -1L,
-                errorMessage = if (item.sourceCandidates.isEmpty()) {
-                    "هذا التحميل قديم. اضغط اعادة المحاولة لانشاء رابط جديد."
-                } else {
-                    "سيتم استئناف التحميل من اخر نقطة."
-                },
+                errorMessage = "سيتم استئناف التحميل من اخر نقطة بعد إعادة إنشاء رابط آمن.",
             )
         }
-        return item
+        return item.copy(sourceCandidates = emptyList())
     }
 
     private fun completedFileExists(item: OfflineDownload): Boolean = item.localUri?.let(::fileFromUri)?.exists() == true
@@ -986,7 +994,7 @@ class DownloadRepository internal constructor(
             if (accountBoundarySuspended) return
             val index = cache.indexOfFirst { it.downloadId == downloadId }
             if (index >= 0) {
-                cache[index] = replacement
+                cache[index] = replacement.copy(sourceCandidates = emptyList())
                 writeStoredLocked()
             }
         }
@@ -1002,7 +1010,7 @@ class DownloadRepository internal constructor(
     private inline fun mutateLocked(downloadId: Long, transform: (OfflineDownload) -> OfflineDownload) {
         val index = cache.indexOfFirst { it.downloadId == downloadId }
         if (index < 0) return
-        val updated = transform(cache[index])
+        val updated = transform(cache[index]).copy(sourceCandidates = emptyList())
         if (updated != cache[index]) {
             cache[index] = updated
             writeStoredLocked()
@@ -1014,7 +1022,9 @@ class DownloadRepository internal constructor(
             compareByDescending<OfflineDownload> { it.priority }
                 .thenBy { it.queuePosition }
                 .thenBy { it.createdAtEpochMs },
-        ).mapIndexed { index, item -> item.copy(queuePosition = index) }.toMutableList()
+        ).mapIndexed { index, item ->
+            item.copy(queuePosition = index, sourceCandidates = emptyList())
+        }.toMutableList()
     }
 
     private fun sortedSnapshotLocked(): List<OfflineDownload> = cache.sortedWith(
@@ -1041,31 +1051,25 @@ class DownloadRepository internal constructor(
 
     private fun readStored(): List<OfflineDownload> {
         val raw = preferences.getString(KEY_DOWNLOADS, null) ?: return emptyList()
+        val sanitized = sanitizePersistedDownloadJson(raw) ?: return emptyList()
         return runCatching {
-            val array = JSONArray(raw)
+            val array = JSONArray(sanitized)
             buildList {
                 for (index in 0 until array.length()) {
                     val data = array.getJSONObject(index)
-                    val sources = data.optJSONArray("sourceCandidates")?.let { sourceArray ->
-                        buildList {
-                            for (sourceIndex in 0 until sourceArray.length()) {
-                                sourceArray.optString(sourceIndex).takeIf(String::isNotBlank)?.let(::add)
-                            }
-                        }
-                    }.orEmpty()
                     add(
                         OfflineDownload(
                             downloadId = data.getLong("downloadId"),
                             historyKey = data.getString("historyKey"),
                             title = data.getString("title"),
-                            posterUrl = data.optNullableString("posterUrl"),
+                            posterUrl = persistableExternalUrlOrNull(data.optNullableString("posterUrl")),
                             streamKind = data.getString("streamKind"),
                             streamId = data.getInt("streamId"),
                             extension = data.optString("extension", "mp4"),
                             seriesTitle = data.optNullableString("seriesTitle"),
                             season = data.optNullableInt("season"),
                             episodeNumber = data.optNullableInt("episodeNumber"),
-                            sourceCandidates = sources,
+                            sourceCandidates = emptyList(),
                             fileName = data.optNullableString("fileName"),
                             storagePath = data.optNullableString("storagePath"),
                             storageLabel = data.optString("storageLabel", "التخزين الداخلي"),
@@ -1078,7 +1082,7 @@ class DownloadRepository internal constructor(
                             bytesPerSecond = data.optLong("bytesPerSecond", 0L).coerceAtLeast(0L),
                             etaSeconds = data.optLong("etaSeconds", -1L),
                             localUri = data.optNullableString("localUri"),
-                            errorMessage = data.optNullableString("errorMessage"),
+                            errorMessage = redactCredentialBearingUrl(data.optNullableString("errorMessage")),
                             retryCount = data.optInt("retryCount", 0).coerceAtLeast(0),
                             integrityVerified = data.optBoolean("integrityVerified", false),
                             priority = data.optInt("priority", 0),
@@ -1100,14 +1104,13 @@ class DownloadRepository internal constructor(
                     .put("downloadId", item.downloadId)
                     .put("historyKey", item.historyKey)
                     .put("title", item.title)
-                    .put("posterUrl", item.posterUrl ?: JSONObject.NULL)
+                    .put("posterUrl", persistableExternalUrlOrNull(item.posterUrl) ?: JSONObject.NULL)
                     .put("streamKind", item.streamKind)
                     .put("streamId", item.streamId)
                     .put("extension", item.extension)
                     .put("seriesTitle", item.seriesTitle ?: JSONObject.NULL)
                     .put("season", item.season ?: JSONObject.NULL)
                     .put("episodeNumber", item.episodeNumber ?: JSONObject.NULL)
-                    .put("sourceCandidates", JSONArray(item.sourceCandidates))
                     .put("fileName", item.fileName ?: JSONObject.NULL)
                     .put("storagePath", item.storagePath ?: JSONObject.NULL)
                     .put("storageLabel", item.storageLabel)
@@ -1118,7 +1121,7 @@ class DownloadRepository internal constructor(
                     .put("bytesPerSecond", item.bytesPerSecond)
                     .put("etaSeconds", item.etaSeconds)
                     .put("localUri", item.localUri ?: JSONObject.NULL)
-                    .put("errorMessage", item.errorMessage ?: JSONObject.NULL)
+                    .put("errorMessage", redactCredentialBearingUrl(item.errorMessage) ?: JSONObject.NULL)
                     .put("retryCount", item.retryCount)
                     .put("integrityVerified", item.integrityVerified)
                     .put("priority", item.priority)
@@ -1242,11 +1245,12 @@ internal fun suspendDownloadsForAccountBoundary(
     ) {
         item.copy(
             status = OfflineStatus.PAUSED,
+            sourceCandidates = emptyList(),
             bytesPerSecond = 0L,
             etaSeconds = -1L,
         )
     } else {
-        item
+        item.copy(sourceCandidates = emptyList())
     }
 }
 
