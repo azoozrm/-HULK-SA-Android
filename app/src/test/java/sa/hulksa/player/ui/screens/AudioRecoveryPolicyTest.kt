@@ -3,7 +3,6 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.media3.common.PlaybackException
-import androidx.media3.common.TrackSelectionParameters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -285,20 +284,25 @@ class AudioRecoveryPolicyTest {
     }
 
     @Test
-    fun `compatibility track parameters preserve selections and disable offload`() {
-        val original = TrackSelectionParameters.DEFAULT.buildUpon()
-            .setPreferredAudioLanguage("ar")
-            .setPreferredTextLanguage("en")
-            .build()
-
-        val compatibility = original.withCompatibilityAudioOutput()
-
-        assertEquals(original.preferredAudioLanguages, compatibility.preferredAudioLanguages)
-        assertEquals(original.preferredTextLanguages, compatibility.preferredTextLanguages)
-        assertEquals(
-            TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED,
-            compatibility.audioOffloadPreferences.audioOffloadMode,
+    fun `compatibility track policy preserves full selection intent and disables offload`() {
+        data class SelectionIntent(
+            val preferredAudioLanguages: List<String>,
+            val preferredTextLanguages: List<String>,
+            val audioOverrides: Set<String>,
+            val subtitleOverrides: Set<String>,
         )
+
+        val original = SelectionIntent(
+            preferredAudioLanguages = listOf("ar"),
+            preferredTextLanguages = listOf("en"),
+            audioOverrides = setOf("audio-override"),
+            subtitleOverrides = setOf("subtitle-override"),
+        )
+
+        val compatibility = compatibilityAudioTrackPolicy(original)
+
+        assertEquals(original, compatibility.preservedSelectionIntent)
+        assertEquals(CompatibilityAudioOffloadMode.DISABLED, compatibility.offloadMode)
     }
 
     @Test

@@ -24,6 +24,28 @@ internal data class AudioRecoveryExecutionPlan(
     val outputMode: AudioOutputCompatibilityMode,
 )
 
+internal enum class CompatibilityAudioOffloadMode {
+    DISABLED,
+}
+
+/**
+ * Pure compatibility policy: selection intent is carried through unchanged, while the
+ * compatibility player must disable audio offload. Keeping the selection value generic makes the
+ * contract deterministic in local JVM tests without constructing Android-backed Media3 language
+ * normalization objects.
+ */
+internal data class CompatibilityAudioTrackPolicy<T>(
+    val preservedSelectionIntent: T,
+    val offloadMode: CompatibilityAudioOffloadMode,
+)
+
+internal fun <T> compatibilityAudioTrackPolicy(
+    selectionIntent: T,
+): CompatibilityAudioTrackPolicy<T> = CompatibilityAudioTrackPolicy(
+    preservedSelectionIntent = selectionIntent,
+    offloadMode = CompatibilityAudioOffloadMode.DISABLED,
+)
+
 internal fun audioRecoveryExecutionPlan(action: AudioRecoveryAction): AudioRecoveryExecutionPlan = when (action) {
     AudioRecoveryAction.REPREPARE_CURRENT -> AudioRecoveryExecutionPlan(
         kind = AudioRecoveryExecutionKind.SAME_PLAYER_REPREPARE,
@@ -39,16 +61,25 @@ internal fun audioRecoveryExecutionPlan(action: AudioRecoveryAction): AudioRecov
 internal fun initialAudioOutputCompatibilityMode(): AudioOutputCompatibilityMode =
     AudioOutputCompatibilityMode.NORMAL
 
-internal fun TrackSelectionParameters.withCompatibilityAudioOutput(): TrackSelectionParameters =
-    buildUpon()
-        .setAudioOffloadPreferences(
+/**
+ * Media3 adapter for the pure policy above. buildUpon() preserves the complete existing selection
+ * parameters (languages, overrides, subtitle choices and other selection intent); only offload is
+ * changed for the bounded compatibility recreation.
+ */
+internal fun TrackSelectionParameters.withCompatibilityAudioOutput(): TrackSelectionParameters {
+    val policy = compatibilityAudioTrackPolicy(this)
+    val builder = policy.preservedSelectionIntent.buildUpon()
+    when (policy.offloadMode) {
+        CompatibilityAudioOffloadMode.DISABLED -> builder.setAudioOffloadPreferences(
             TrackSelectionParameters.AudioOffloadPreferences.Builder()
                 .setAudioOffloadMode(
                     TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED,
                 )
                 .build(),
         )
-        .build()
+    }
+    return builder.build()
+}
 
 /**
  * Normal playback keeps Media3's route-aware audio capabilities. The compatibility instance is
