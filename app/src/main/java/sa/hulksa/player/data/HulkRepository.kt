@@ -3,6 +3,7 @@ package sa.hulksa.player.data
 import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import sa.hulksa.player.ManualParentAuthProofRegistry
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
@@ -36,16 +37,31 @@ class HulkRepository(context: Context) {
     private val diagnostics = ServerDiagnosticsEngine(appContext)
 
     suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession {
-        val portal = portalResolver.resolve(credentials.accessCode)
-        val session = client.authenticate(portal, credentials)
+        val session = try {
+            val portal = portalResolver.resolve(credentials.accessCode)
+            client.authenticate(portal, credentials)
+        } catch (error: Throwable) {
+            ManualParentAuthProofRegistry.completeAuthenticationFailure()
+            throw error
+        }
+
         try {
-            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            val metadata = synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                 suspendExistingDownloadOwner()
-                accountSessionStore.recordAuthenticated(session)
+                val recorded = accountSessionStore.recordAuthenticated(session)
                 AuthenticatedSessionRegistry.update(session)
                 if (remember) vault.save(credentials) else vault.clear()
+                recorded
             }
+            // The gate marks an attempt as manual only when it originated from HulkViewModel.login().
+            // Startup restore reaches authenticate() directly, so this call records current ownership
+            // but intentionally creates no parent-bootstrap proof for restored credentials.
+            ManualParentAuthProofRegistry.completeAuthenticationSuccess(
+                accountId = metadata.accountId,
+                sessionId = metadata.sessionId,
+            )
         } catch (error: Throwable) {
+            ManualParentAuthProofRegistry.completeAuthenticationFailure()
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                 vault.clear()
                 accountSessionStore.clearActiveSession()
@@ -64,21 +80,28 @@ class HulkRepository(context: Context) {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+            ManualParentAuthProofRegistry.completeAuthenticationFailure()
             if (!isCurrentSessionOwner(owner)) throw staleReauthentication()
             throw error
         }
 
-        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+        val metadata = synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
             if (!matchesCurrentSessionOwner(owner)) throw staleReauthentication()
-            accountSessionStore.recordAuthenticated(refreshed)
+            val recorded = accountSessionStore.recordAuthenticated(refreshed)
             AuthenticatedSessionRegistry.update(refreshed)
+            recorded
         }
+        ManualParentAuthProofRegistry.onSessionReplacement(
+            accountId = metadata.accountId,
+            sessionId = metadata.sessionId,
+        )
         return refreshed
     }
 
     fun savedCredentials(): Credentials? {
         val credentials = vault.load()
         if (credentials == null) {
+            ManualParentAuthProofRegistry.invalidateAll()
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                 suspendExistingDownloadOwner()
                 accountSessionStore.clearActiveSession()
@@ -101,16 +124,23 @@ class HulkRepository(context: Context) {
                 client.authenticate(portal, credentials)
             }.getOrNull()
             if (restored != null) {
-                val committed = synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                val metadata = synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                     if (!matchesCurrentSessionOwner(owner)) {
-                        false
+                        null
                     } else {
-                        accountSessionStore.recordAuthenticated(restored)
+                        val recorded = accountSessionStore.recordAuthenticated(restored)
                         AuthenticatedSessionRegistry.update(restored)
-                        true
+                        recorded
                     }
                 }
-                return if (committed) restored else null
+                if (metadata != null) {
+                    ManualParentAuthProofRegistry.onSessionReplacement(
+                        accountId = metadata.accountId,
+                        sessionId = metadata.sessionId,
+                    )
+                    return restored
+                }
+                return null
             }
             if (attempt == 0) delay(350L)
         }
@@ -118,6 +148,7 @@ class HulkRepository(context: Context) {
     }
 
     fun logout() {
+        ManualParentAuthProofRegistry.invalidateAll()
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
             suspendExistingDownloadOwner()
             vault.clear()
