@@ -205,15 +205,34 @@ internal fun JSONObject.boundedSeriesEpisodeObjects(): List<XtreamSeriesEpisodeJ
 }
 
 private fun JSONObject.requireRootSeasonsLimit() {
-    val seasons = when (val rawSeasons = opt("seasons")) {
-        is JSONArray -> rawSeasons
-        is String -> rawSeasons.trim()
-            .takeIf { it.startsWith("[") }
-            ?.let(XtreamJsonParser::parseArray)
-        else -> null
-    } ?: return
+    when (val rawSeasons = opt("seasons")) {
+        is JSONArray -> requireSeasonCount(rawSeasons.length())
+        is JSONObject -> requireSeasonCount(rawSeasons.keyCountUpToLimit())
+        is String -> {
+            val clean = rawSeasons.trim()
+            when {
+                clean.startsWith("[") -> requireSeasonCount(XtreamJsonParser.parseArray(clean).length())
+                clean.startsWith("{") -> requireSeasonCount(
+                    XtreamJsonParser.parseObject(clean).keyCountUpToLimit(),
+                )
+            }
+        }
+    }
+}
 
-    if (seasons.length() > XtreamJsonLimits.MAX_SERIES_SEASONS) {
+private fun JSONObject.keyCountUpToLimit(): Int {
+    val keys = keys()
+    var count = 0
+    while (keys.hasNext()) {
+        keys.next()
+        count += 1
+        if (count > XtreamJsonLimits.MAX_SERIES_SEASONS) return count
+    }
+    return count
+}
+
+private fun requireSeasonCount(count: Int) {
+    if (count > XtreamJsonLimits.MAX_SERIES_SEASONS) {
         throw XtreamJsonGuardException.TooManyItems(
             scope = "series seasons",
             maxItems = XtreamJsonLimits.MAX_SERIES_SEASONS,
