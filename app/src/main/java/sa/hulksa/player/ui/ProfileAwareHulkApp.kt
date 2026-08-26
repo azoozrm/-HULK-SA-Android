@@ -47,6 +47,7 @@ import sa.hulksa.player.ui.screens.NewEpisodeAlertOverlay
 import sa.hulksa.player.ui.screens.OperationsAnnouncementOverlay
 import sa.hulksa.player.ui.screens.OperationsStatusBanner
 import sa.hulksa.player.ui.screens.OptionalUpdateOverlay
+import sa.hulksa.player.ui.screens.ParentPinBootstrapScreen
 import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
@@ -57,6 +58,14 @@ internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> 
 
 private const val MISSING_PARENT_AUTHORIZATION_MESSAGE =
     "يلزم رمز الوالدين للانتقال من ملف الأطفال. لا يوجد رمز والدين صالح."
+private const val PARENT_PIN_SETUP_REQUIRED_MESSAGE =
+    "يجب إنشاء رمز الوالدين في الملف الرئيسي قبل استخدام ملفات الأطفال."
+
+private sealed interface ParentPinBootstrapAction {
+    data class SwitchProfile(val targetProfileId: String) : ParentPinBootstrapAction
+    data class CreateKids(val name: String, val avatarKey: String) : ParentPinBootstrapAction
+    data class OpenManagement(val startCreating: Boolean) : ParentPinBootstrapAction
+}
 
 @Composable
 fun ProfileAwareHulkApp(
@@ -86,6 +95,7 @@ fun ProfileAwareHulkApp(
     var pinUnlockCredentialProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     var profileManagementUnlockRequested by rememberSaveable { mutableStateOf(false) }
     var pinSecurityProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var postBootstrapTargetProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     var profileRevision by rememberSaveable { mutableIntStateOf(0) }
     var pinRevision by rememberSaveable { mutableIntStateOf(0) }
     var kidsSourceRequest by rememberSaveable { mutableIntStateOf(0) }
@@ -93,6 +103,7 @@ fun ProfileAwareHulkApp(
     var kidsSourceLoading by remember { mutableStateOf(false) }
     var kidsSourceError by remember { mutableStateOf<String?>(null) }
     var kidsSnapshotAccount by remember { mutableStateOf<String?>(null) }
+    var parentPinBootstrapAction by remember { mutableStateOf<ParentPinBootstrapAction?>(null) }
 
     val authenticated = state.account != null && state.screen != HulkScreen.LOGIN
     val profiles = remember(profileRevision, authenticated) { profileStore.profiles() }
@@ -108,13 +119,15 @@ fun ProfileAwareHulkApp(
             .filter { profilePinCredentialStore.hasPin(it.id) }
             .mapTo(linkedSetOf(), UserProfile::id)
     }
-    val primaryParentCredentialProfile = remember(profiles, protectedProfileIds) {
+    val primaryAdultProfile = remember(profiles) {
         profiles.firstOrNull { profile ->
-            profile.isPrimary &&
-                profile.kind == ProfileKind.STANDARD &&
-                profile.id in protectedProfileIds
+            profile.isPrimary && profile.kind == ProfileKind.STANDARD
         }
     }
+    val primaryParentCredentialProfile = remember(primaryAdultProfile, protectedProfileIds) {
+        primaryAdultProfile?.takeIf { it.id in protectedProfileIds }
+    }
+    val hasKidsProfiles = remember(profiles) { profiles.any { it.kind == ProfileKind.KIDS } }
     val activeNavigationMemory = remember(activeProfileId) {
         navigationMemoryByProfile.getOrPut(activeProfileId) { NavigationMemoryStore() }
     }
@@ -128,6 +141,7 @@ fun ProfileAwareHulkApp(
         authenticated &&
         !resolvedForSession &&
         !switching &&
+        parentPinBootstrapAction == null &&
         pinUnlockCredentialProfileId == null &&
         pinSecurityProfileId == null &&
         !pickerRequestedFromApp &&
@@ -169,6 +183,7 @@ fun ProfileAwareHulkApp(
         activeProfile?.kind == ProfileKind.KIDS ||
             managingProfiles ||
             createProfileRequested ||
+            parentPinBootstrapAction is ParentPinBootstrapAction.CreateKids ||
             profiles.any { it.kind == ProfileKind.KIDS }
         )
     val kidsSourcePending =
@@ -310,10 +325,46 @@ fun ProfileAwareHulkApp(
         pinUnlockCredentialProfileId = credentialProfile.id
     }
 
+    fun beginParentPinBootstrap(action: ParentPinBootstrapAction): Boolean {
+        val parentProfile = primaryAdultProfile
+        if (parentProfile == null) {
+            switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+            return false
+        }
+        parentPinBootstrapAction = action
+        switchError = null
+        managingProfiles = false
+        createProfileRequested = false
+        pinSecurityProfileId = null
+        return true
+    }
+
     fun requestProfileSwitch(profile: UserProfile) {
-        if (switching || pinUnlockCredentialProfileId != null) return
+        if (switching || pinUnlockCredentialProfileId != null || parentPinBootstrapAction != null) return
         val currentProfileId = profileStore.activeProfileId()
         val currentProfile = profiles.firstOrNull { it.id == currentProfileId }
+
+        when (
+            parentPinBootstrapDecision(
+                currentProfileKind = currentProfile?.kind,
+                targetProfileKind = profile.kind,
+                primaryParentPinAvailable = primaryParentCredentialProfile != null,
+                resolvedForSession = resolvedForSession,
+            )
+        ) {
+            ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP -> {
+                if (!beginParentPinBootstrap(ParentPinBootstrapAction.SwitchProfile(profile.id))) {
+                    switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+                }
+                return
+            }
+            ParentPinBootstrapDecision.DENY_FAIL_CLOSED -> {
+                switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+                return
+            }
+            ParentPinBootstrapDecision.ALLOW -> Unit
+        }
+
         val authorization = profileSwitchAuthorization(
             currentProfileId = currentProfileId,
             currentProfileKind = currentProfile?.kind,
@@ -348,8 +399,29 @@ fun ProfileAwareHulkApp(
     }
 
     fun requestProfileManagement(startCreating: Boolean) {
-        if (switching || pinUnlockCredentialProfileId != null) return
+        if (switching || pinUnlockCredentialProfileId != null || parentPinBootstrapAction != null) return
         pinSecurityProfileId = null
+
+        if (activeProfile?.kind == ProfileKind.KIDS && primaryParentCredentialProfile == null) {
+            when (
+                parentPinBootstrapDecision(
+                    currentProfileKind = activeProfile.kind,
+                    targetProfileKind = ProfileKind.STANDARD,
+                    primaryParentPinAvailable = false,
+                    resolvedForSession = resolvedForSession,
+                )
+            ) {
+                ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP -> {
+                    beginParentPinBootstrap(ParentPinBootstrapAction.OpenManagement(startCreating))
+                }
+                ParentPinBootstrapDecision.DENY_FAIL_CLOSED -> {
+                    switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+                    createProfileRequested = false
+                }
+                ParentPinBootstrapDecision.ALLOW -> Unit
+            }
+            return
+        }
 
         if (requiresParentAuthorizationForProfileManagement(activeProfile?.kind)) {
             val parentProfile = primaryParentCredentialProfile
@@ -369,6 +441,71 @@ fun ProfileAwareHulkApp(
         switchError = null
         createProfileRequested = startCreating
         managingProfiles = true
+    }
+
+    fun completeParentPinBootstrap() {
+        val action = parentPinBootstrapAction ?: return
+        parentPinBootstrapAction = null
+        switchError = null
+        when (action) {
+            is ParentPinBootstrapAction.SwitchProfile -> {
+                postBootstrapTargetProfileId = action.targetProfileId
+            }
+            is ParentPinBootstrapAction.CreateKids -> {
+                val created = if (kidsSnapshot?.isAvailable == true) {
+                    profileStore.createProfile(
+                        displayName = action.name,
+                        avatarKey = action.avatarKey,
+                        kind = ProfileKind.KIDS,
+                    )
+                } else {
+                    null
+                }
+                if (created != null) {
+                    profileRevision++
+                    createProfileRequested = false
+                } else {
+                    switchError = "تعذر إنشاء ملف الأطفال. تحقق من مصدر الأطفال ثم حاول مرة أخرى."
+                }
+                managingProfiles = true
+            }
+            is ParentPinBootstrapAction.OpenManagement -> {
+                createProfileRequested = action.startCreating
+                managingProfiles = true
+            }
+        }
+    }
+
+    fun cancelParentPinBootstrap() {
+        val action = parentPinBootstrapAction ?: return
+        parentPinBootstrapAction = null
+        postBootstrapTargetProfileId = null
+        when {
+            activeProfile?.kind == ProfileKind.KIDS && !resolvedForSession -> {
+                pickerRequestedFromApp = true
+                switchError = PARENT_PIN_SETUP_REQUIRED_MESSAGE
+            }
+            action is ParentPinBootstrapAction.CreateKids || action is ParentPinBootstrapAction.OpenManagement -> {
+                managingProfiles = true
+                createProfileRequested = false
+                switchError = null
+            }
+            else -> {
+                // Cancelling Adult -> Kids bootstrap must not immediately re-trigger direct entry.
+                resolvedForSession = true
+                switchError = null
+            }
+        }
+    }
+
+    LaunchedEffect(postBootstrapTargetProfileId, pinRevision, profiles) {
+        val targetId = postBootstrapTargetProfileId ?: return@LaunchedEffect
+        val target = profiles.firstOrNull { it.id == targetId } ?: run {
+            postBootstrapTargetProfileId = null
+            return@LaunchedEffect
+        }
+        postBootstrapTargetProfileId = null
+        requestProfileSwitch(target)
     }
 
     LaunchedEffect(
@@ -401,6 +538,7 @@ fun ProfileAwareHulkApp(
         profiles,
         pickerRequestedFromApp,
         managingProfiles,
+        parentPinBootstrapAction,
         pinUnlockCredentialProfileId,
     ) {
         val target = directEntryTarget ?: return@LaunchedEffect
@@ -427,6 +565,8 @@ fun ProfileAwareHulkApp(
             pinUnlockCredentialProfileId = null
             profileManagementUnlockRequested = false
             pinSecurityProfileId = null
+            parentPinBootstrapAction = null
+            postBootstrapTargetProfileId = null
             kidsSnapshot = null
             kidsSourceLoading = false
             kidsSourceError = null
@@ -447,6 +587,7 @@ fun ProfileAwareHulkApp(
             showPicker &&
             !managingProfiles &&
             !switching &&
+            parentPinBootstrapAction == null &&
             pinUnlockCredentialProfileId == null,
     ) {
         pickerRequestedFromApp = false
@@ -465,6 +606,7 @@ fun ProfileAwareHulkApp(
         resolvedForSession,
         showPicker,
         managingProfiles,
+        parentPinBootstrapAction,
         unlockCredentialProfile?.id,
         securityProfile?.id,
         activeProfile?.id,
@@ -475,6 +617,7 @@ fun ProfileAwareHulkApp(
             resolvedForSession &&
             !showPicker &&
             !managingProfiles &&
+            parentPinBootstrapAction == null &&
             unlockCredentialProfile == null &&
             securityProfile == null &&
             (activeProfile?.kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true)
@@ -532,6 +675,18 @@ fun ProfileAwareHulkApp(
                 onClearAll = viewModel::clearNotifications,
             )
 
+            parentPinBootstrapAction != null && primaryAdultProfile != null -> ParentPinBootstrapScreen(
+            primaryAdultProfile = primaryAdultProfile,
+            isTv = isTelevisionDevice,
+            onSetPin = { pin ->
+                val stored = profilePinCredentialStore.setPin(primaryAdultProfile.id, pin)
+                if (stored) pinRevision++
+                stored
+            },
+            onCompleted = ::completeParentPinBootstrap,
+            onCancel = ::cancelParentPinBootstrap,
+        )
+
             unlockCredentialProfile != null -> ProfilePinUnlockScreen(
             profile = unlockCredentialProfile,
             isTv = isTelevisionDevice,
@@ -578,9 +733,19 @@ fun ProfileAwareHulkApp(
                 stored
             },
             onClearPin = {
-                val cleared = profilePinCredentialStore.clearPin(securityProfile.id)
-                if (cleared) pinRevision++
-                cleared
+                val isParentCredential = securityProfile.isPrimary && securityProfile.kind == ProfileKind.STANDARD
+                if (isParentCredential && !canClearPrimaryParentPin(hasKidsProfiles)) {
+                    Toast.makeText(
+                        context,
+                        "لا يمكن إزالة رمز الوالدين ما دامت هناك ملفات أطفال. احذف ملفات الأطفال أولًا.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    false
+                } else {
+                    val cleared = profilePinCredentialStore.clearPin(securityProfile.id)
+                    if (cleared) pinRevision++
+                    cleared
+                }
             },
             onClose = {
                 pinSecurityProfileId = null
@@ -599,17 +764,41 @@ fun ProfileAwareHulkApp(
             onRetryKidsSource = ::requestKidsSourceReload,
             onCreate = { name, avatarKey, kind ->
                 val kidsAllowed = kind != ProfileKind.KIDS || kidsSnapshot?.isAvailable == true
-                val created = if (kidsAllowed) {
-                    profileStore.createProfile(name, avatarKey = avatarKey, kind = kind)
+                if (!kidsAllowed) {
+                    false
+                } else if (kind == ProfileKind.KIDS && primaryParentCredentialProfile == null) {
+                    when (
+                        parentPinBootstrapDecision(
+                            currentProfileKind = activeProfile?.kind,
+                            targetProfileKind = ProfileKind.KIDS,
+                            primaryParentPinAvailable = false,
+                            resolvedForSession = resolvedForSession,
+                        )
+                    ) {
+                        ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP -> {
+                            beginParentPinBootstrap(
+                                ParentPinBootstrapAction.CreateKids(
+                                    name = name,
+                                    avatarKey = avatarKey,
+                                ),
+                            )
+                            false
+                        }
+                        ParentPinBootstrapDecision.DENY_FAIL_CLOSED -> {
+                            switchError = MISSING_PARENT_AUTHORIZATION_MESSAGE
+                            false
+                        }
+                        ParentPinBootstrapDecision.ALLOW -> false
+                    }
                 } else {
-                    null
+                    val created = profileStore.createProfile(name, avatarKey = avatarKey, kind = kind)
+                    val success = created != null
+                    if (success) {
+                        createProfileRequested = false
+                        profileRevision++
+                    }
+                    success
                 }
-                val success = created != null
-                if (success) {
-                    createProfileRequested = false
-                    profileRevision++
-                }
-                success
             },
             onUpdate = { profileId, name, avatarKey ->
                 val updated = profileStore.updateProfile(profileId, name, avatarKey)
@@ -648,7 +837,16 @@ fun ProfileAwareHulkApp(
             onSelect = ::requestProfileSwitch,
             onManagePin = { profile ->
                 createProfileRequested = false
-                pinSecurityProfileId = profile.id
+                if (
+                    profile.isPrimary &&
+                    profile.kind == ProfileKind.STANDARD &&
+                    profile.id !in protectedProfileIds &&
+                    hasKidsProfiles
+                ) {
+                    beginParentPinBootstrap(ParentPinBootstrapAction.OpenManagement(startCreating = false))
+                } else {
+                    pinSecurityProfileId = profile.id
+                }
             },
             onClose = {
                 managingProfiles = false
