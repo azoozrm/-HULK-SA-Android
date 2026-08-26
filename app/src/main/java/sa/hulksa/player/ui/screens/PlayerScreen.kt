@@ -89,12 +89,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -303,8 +303,13 @@ fun PlayerScreen(
     val audioRecovery = remember(request) {
         AudioRecoveryStateMachine().apply { beginGeneration(audioRecoveryGeneration) }
     }
+    var audioOutputMode by remember(request) { mutableStateOf(initialAudioOutputCompatibilityMode()) }
+    var playerInstanceGeneration by remember(request) { mutableIntStateOf(0) }
+    var pendingAudioPlayerRecreation by remember(request) {
+        mutableStateOf<AudioPlayerRecreationRequest<TrackSelectionParameters>?>(null)
+    }
 
-    val player = remember(request) {
+    val player = remember(request, playerInstanceGeneration, audioOutputMode) {
         val httpDataSource = DefaultHttpDataSource.Factory()
             .setUserAgent("HULK-SA-Player/0.7.2")
             .setConnectTimeoutMs(10_000)
@@ -315,8 +320,7 @@ fun PlayerScreen(
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(15_000, 60_000, 2_500, 5_000)
             .build()
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setEnableDecoderFallback(true)
+        val renderersFactory = HulkAudioRenderersFactory(context, audioOutputMode)
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
@@ -454,7 +458,55 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(player, request) {
+    DisposableEffect(request, audioRecovery) {
+        onDispose { audioRecovery.invalidate() }
+    }
+
+    DisposableEffect(player, request, audioOutputMode, candidateIndex) {
+        AudioRecoveryExecutorRegistry.register(
+            key = audioRecoveryGeneration,
+            stateMachine = audioRecovery,
+            player = player,
+            outputMode = audioOutputMode,
+        ) { command ->
+            val currentExpectedSource = request.candidates.getOrNull(candidateIndex)
+            if (
+                command.player !== player ||
+                currentExpectedSource == null ||
+                currentExpectedSource != command.expectedSource ||
+                !player.isCurrentAudioRecoverySource(command.expectedSource)
+            ) {
+                false
+            } else {
+                finalError = null
+                offlineFailure = false
+                buffering = true
+                when (command.action) {
+                    AudioRecoveryAction.REPREPARE_CURRENT -> {
+                        player.executeLightweightAudioRecovery(
+                            isLive = request.isLive,
+                            expectedSource = command.expectedSource,
+                        )
+                        true
+                    }
+                    AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY -> {
+                        val plan = audioRecoveryExecutionPlan(command.action)
+                        pendingAudioPlayerRecreation = AudioPlayerRecreationRequest(
+                            generationKey = audioRecoveryGeneration,
+                            expectedSource = command.expectedSource,
+                            candidateIndex = candidateIndex,
+                            preservedState = player.captureAudioRecoveryState(request.isLive),
+                            outputMode = plan.outputMode,
+                        )
+                        audioOutputMode = plan.outputMode
+                        playerInstanceGeneration += 1
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
@@ -526,30 +578,36 @@ fun PlayerScreen(
                 }
 
                 val expectedSource = request.candidates.getOrNull(candidateIndex)
+                val classification = classifyAudioFailure(error)
+                val hasAudioTrack = player.currentTracks.groups.any { it.type == C.TRACK_TYPE_AUDIO }
+                val explicitAudioEvidence = classification == AudioFailureClassification.RECOVERABLE_AUDIO
                 if (
                     expectedSource != null &&
                     player.isCurrentAudioRecoverySource(expectedSource) &&
-                    player.hasAudioTrackForRecovery()
+                    explicitAudioRecoveryGate(classification, hasAudioTrack)
                 ) {
                     val recoveryAction = audioRecovery.requestRecovery(
                         key = audioRecoveryGeneration,
-                        classification = classifyAudioFailure(error),
-                        hasAudioTrack = true,
+                        classification = classification,
+                        hasAudioTrack = hasAudioTrack,
+                        explicitAudioEvidence = explicitAudioEvidence,
                     )
                     if (
                         recoveryAction == AudioRecoveryAction.REPREPARE_CURRENT ||
-                        recoveryAction == AudioRecoveryAction.RESET_CURRENT_PIPELINE
+                        recoveryAction == AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY
                     ) {
-                        finalError = null
-                        offlineFailure = false
-                        buffering = true
-                        player.executeAudioRecovery(
+                        val executed = AudioRecoveryExecutorRegistry.execute(
+                            key = audioRecoveryGeneration,
+                            stateMachine = audioRecovery,
+                            player = player,
                             action = recoveryAction,
-                            isLive = request.isLive,
                             expectedSource = expectedSource,
                         )
-                        audioRecovery.markRecoveryCommandIssued(audioRecoveryGeneration)
-                        return
+                        if (executed) {
+                            audioRecovery.markRecoveryCommandIssued(audioRecoveryGeneration)
+                            return
+                        }
+                        audioRecovery.markRecoveryCommandAborted(audioRecoveryGeneration)
                     }
                 }
 
@@ -571,7 +629,11 @@ fun PlayerScreen(
         }
         player.addListener(listener)
         onDispose {
-            audioRecovery.invalidate()
+            AudioRecoveryExecutorRegistry.unregister(
+                key = audioRecoveryGeneration,
+                stateMachine = audioRecovery,
+                player = player,
+            )
             if (!request.isLive) {
                 onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
             }
@@ -580,7 +642,7 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(request, candidateIndex, retryNonce) {
+    LaunchedEffect(request, candidateIndex, retryNonce, player) {
         val url = request.candidates.getOrNull(candidateIndex)
         if (url == null) {
             finalError = "لا يوجد رابط تشغيل صالح لهذا المحتوى."
@@ -596,6 +658,37 @@ fun PlayerScreen(
         audioLanguageLabel = ""
         subtitleLanguageLabel = ""
         player.setMediaItem(MediaItem.fromUri(url))
+
+        val recreation = pendingAudioPlayerRecreation?.takeIf { pending ->
+            pending.generationKey == audioRecoveryGeneration &&
+                pending.expectedSource == url &&
+                pending.candidateIndex == candidateIndex &&
+                pending.outputMode == audioOutputMode
+        }
+        if (recreation != null) {
+            val preserved = recreation.preservedState
+            player.trackSelectionParameters = if (
+                recreation.outputMode == AudioOutputCompatibilityMode.PCM_COMPATIBILITY
+            ) {
+                preserved.trackSelectionParameters.withCompatibilityAudioOutput()
+            } else {
+                preserved.trackSelectionParameters
+            }
+            if (preserved.positionMs != null) {
+                player.seekTo(preserved.positionMs)
+            } else if (request.isLive) {
+                player.seekToDefaultPosition()
+            }
+            player.setPlaybackSpeed(preserved.speed)
+            player.volume = preserved.volume
+            player.prepare()
+            player.playWhenReady = preserved.playWhenReady
+            pendingAudioPlayerRecreation = null
+            pendingSeekMs = 0L
+            manualSeekTargetMs = null
+            return@LaunchedEffect
+        }
+
         val seekTarget = when {
             pendingSeekMs > 0L -> pendingSeekMs
             !resumePromptVisible && playbackSettings.resumePlayback -> request.resumePositionMs

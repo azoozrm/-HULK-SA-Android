@@ -146,11 +146,17 @@ internal data class SafeAudioDiagnostics(
     val selectedAudioTrack: Boolean,
     val renderedOutputBuffers: Int,
     val skippedInputBuffers: Int,
+    val audioTrackEncoding: Int?,
+    val audioTrackChannelConfig: Int?,
+    val audioTrackOffload: Boolean?,
+    val audioTrackTunneling: Boolean?,
+    val outputMode: AudioOutputCompatibilityMode,
 )
 
 /**
- * Activity-owned discovery coordinator. It does not own playback and never changes sources.
- * It only attaches the Media3 health listener while the current PLAYER screen is foreground.
+ * Activity-owned discovery coordinator. It does not own playback or source selection. Recovery
+ * execution is delegated back to PlayerScreen through AudioRecoveryExecutorRegistry so a stronger
+ * attempt can safely replace the ExoPlayer instance while retaining Compose ownership.
  */
 internal class AudioPlaybackHealthCoordinator(
     private val activity: ComponentActivity,
@@ -251,6 +257,7 @@ private class LiveAudioPlaybackHealthMonitor(
     private var audioSessionId = C.AUDIO_SESSION_ID_UNSET
     private var decoderName: String? = null
     private var observedAudioFormat: Format? = null
+    private var audioTrackConfig: AudioSink.AudioTrackConfig? = null
     private var transitionUntilMs = 0L
     private var seekInProgressUntilMs = 0L
     private var lastObservedPositionMs: Long? = null
@@ -345,6 +352,8 @@ private class LiveAudioPlaybackHealthMonitor(
         ) {
             armedByObservedAudioPipeline = true
             audioTrackInitialized = true
+            this@LiveAudioPlaybackHealthMonitor.audioTrackConfig = audioTrackConfig
+            logEvent("audio_track_initialized", AudioRecoveryAction.NONE, null)
         }
 
         override fun onAudioTrackReleased(
@@ -352,6 +361,9 @@ private class LiveAudioPlaybackHealthMonitor(
             audioTrackConfig: AudioSink.AudioTrackConfig,
         ) {
             audioTrackInitialized = false
+            if (this@LiveAudioPlaybackHealthMonitor.audioTrackConfig == audioTrackConfig) {
+                this@LiveAudioPlaybackHealthMonitor.audioTrackConfig = null
+            }
             resetObservation("audio_track_released")
         }
 
@@ -386,12 +398,6 @@ private class LiveAudioPlaybackHealthMonitor(
         samplePlaybackProgress()
         logExplicitRecoveryIfNeeded()
 
-        // Conservative late-attachment guard: if the coordinator attached after all startup callbacks,
-        // it does not infer silence from missing historical events. This prefers a false-negative over
-        // restarting a healthy Live channel.
-        if (!armedByObservedAudioPipeline) return
-
-        val nowMs = clockMs()
         val tracks = player.currentTracks
         val audioTrackPresent = tracks.groups.any { it.type == C.TRACK_TYPE_AUDIO }
         val audioTrackSelected = tracks.groups.any { group ->
@@ -400,6 +406,18 @@ private class LiveAudioPlaybackHealthMonitor(
         }
         val resolvedFormat = player.audioFormat ?: observedAudioFormat
 
+        // If the observer attached after initial renderer callbacks, current selected tracks and
+        // format are sufficient to arm observation. Missing historical callbacks alone never cause
+        // a recovery and no timer is started until all normal health guards are satisfied.
+        if (!armedByObservedAudioPipeline) {
+            if (audioTrackPresent && audioTrackSelected && resolvedFormat != null) {
+                armedByObservedAudioPipeline = true
+            } else {
+                return
+            }
+        }
+
+        val nowMs = clockMs()
         val decision = healthPolicy.evaluate(
             key = generationKey,
             nowMs = nowMs,
@@ -430,19 +448,26 @@ private class LiveAudioPlaybackHealthMonitor(
         )
         when (action) {
             AudioRecoveryAction.REPREPARE_CURRENT,
-            AudioRecoveryAction.RESET_CURRENT_PIPELINE,
+            AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY,
             -> {
                 lastLoggedRecoveryAttempt = audioRecovery.attemptsUsed
                 logEvent("silent_audio", action, null)
-                armedByObservedAudioPipeline = false
-                player.executeAudioRecovery(
+                val executed = AudioRecoveryExecutorRegistry.execute(
+                    key = generationKey,
+                    stateMachine = audioRecovery,
+                    player = player,
                     action = action,
-                    isLive = request.isLive,
                     expectedSource = expectedSource,
                 )
-                audioRecovery.markRecoveryCommandIssued(generationKey)
-                transitionUntilMs = clockMs() + AUDIO_TRANSITION_GUARD_MS
-                resetObservation("silent_audio_recovery")
+                if (executed) {
+                    armedByObservedAudioPipeline = false
+                    audioRecovery.markRecoveryCommandIssued(generationKey)
+                    transitionUntilMs = clockMs() + AUDIO_TRANSITION_GUARD_MS
+                    resetObservation("silent_audio_recovery")
+                } else {
+                    audioRecovery.markRecoveryCommandAborted(generationKey)
+                    logEvent("recovery_executor_stale", AudioRecoveryAction.NONE, null)
+                }
             }
             AudioRecoveryAction.EXHAUSTED -> {
                 logEvent("silent_audio_exhausted", action, null)
@@ -503,7 +528,7 @@ private class LiveAudioPlaybackHealthMonitor(
         val action = if (audioRecovery.attemptsUsed == 1) {
             AudioRecoveryAction.REPREPARE_CURRENT
         } else {
-            AudioRecoveryAction.RESET_CURRENT_PIPELINE
+            AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY
         }
         lastLoggedRecoveryAttempt = audioRecovery.attemptsUsed
         logEvent("explicit_audio_error", action, error.errorCode)
@@ -516,6 +541,7 @@ private class LiveAudioPlaybackHealthMonitor(
             group.type == C.TRACK_TYPE_AUDIO &&
                 (0 until group.length).any { index -> group.isTrackSelected(index) }
         }
+        val trackConfig = audioTrackConfig
         return SafeAudioDiagnostics(
             streamKind = request.streamKind,
             streamId = request.streamId,
@@ -533,6 +559,11 @@ private class LiveAudioPlaybackHealthMonitor(
             selectedAudioTrack = selected,
             renderedOutputBuffers = counters?.renderedOutputBufferCount ?: 0,
             skippedInputBuffers = counters?.skippedInputBufferCount ?: 0,
+            audioTrackEncoding = trackConfig?.encoding,
+            audioTrackChannelConfig = trackConfig?.channelConfig,
+            audioTrackOffload = trackConfig?.offload,
+            audioTrackTunneling = trackConfig?.tunneling,
+            outputMode = AudioRecoveryExecutorRegistry.outputMode(generationKey, audioRecovery, player),
         )
     }
 
@@ -557,6 +588,11 @@ private class LiveAudioPlaybackHealthMonitor(
                 append(" selectedAudio=").append(d.selectedAudioTrack)
                 append(" renderedBuffers=").append(d.renderedOutputBuffers)
                 append(" skippedInput=").append(d.skippedInputBuffers)
+                append(" trackEncoding=").append(d.audioTrackEncoding ?: "unknown")
+                append(" trackChannelConfig=").append(d.audioTrackChannelConfig ?: "unknown")
+                append(" offload=").append(d.audioTrackOffload ?: "unknown")
+                append(" tunneling=").append(d.audioTrackTunneling ?: "unknown")
+                append(" outputMode=").append(d.outputMode.name)
                 append(" reason=").append(reason)
                 append(" attempt=").append(audioRecovery.attemptsUsed)
                 append(" action=").append(action.name)

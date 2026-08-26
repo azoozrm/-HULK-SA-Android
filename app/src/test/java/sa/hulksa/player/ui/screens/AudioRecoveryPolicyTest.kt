@@ -1,6 +1,9 @@
+@file:androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+
 package sa.hulksa.player.ui.screens
 
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.TrackSelectionParameters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,7 +32,8 @@ class AudioRecoveryPolicyTest {
             policy.requestRecovery(
                 key = "live:1",
                 classification = classification,
-                hasAudioTrack = effectiveTrackEvidence,
+                hasAudioTrack = false,
+                explicitAudioEvidence = true,
             ),
         )
         assertEquals(1, policy.attemptsUsed)
@@ -78,6 +82,22 @@ class AudioRecoveryPolicyTest {
     }
 
     @Test
+    fun `attempt one remains lightweight same player reprepare`() {
+        val plan = audioRecoveryExecutionPlan(AudioRecoveryAction.REPREPARE_CURRENT)
+
+        assertEquals(AudioRecoveryExecutionKind.SAME_PLAYER_REPREPARE, plan.kind)
+        assertEquals(AudioOutputCompatibilityMode.NORMAL, plan.outputMode)
+    }
+
+    @Test
+    fun `attempt two requires full player recreation in pcm compatibility mode`() {
+        val plan = audioRecoveryExecutionPlan(AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY)
+
+        assertEquals(AudioRecoveryExecutionKind.RECREATE_PLAYER_PCM_COMPATIBILITY, plan.kind)
+        assertEquals(AudioOutputCompatibilityMode.PCM_COMPATIBILITY, plan.outputMode)
+    }
+
+    @Test
     fun `first confirmed silent failure starts only attempt one`() {
         val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
 
@@ -107,13 +127,28 @@ class AudioRecoveryPolicyTest {
     }
 
     @Test
+    fun `aborted execution releases single flight without restoring attempt budget`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+
+        policy.markRecoveryCommandAborted("live:1")
+
+        assertFalse(policy.recoveryPending)
+        assertEquals(1, policy.attemptsUsed)
+        assertEquals(
+            AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY,
+            policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+        )
+    }
+
+    @Test
     fun `second confirmed silent failure starts attempt two`() {
         val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
         policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
         policy.markRecoveryCommandIssued("live:1")
 
         assertEquals(
-            AudioRecoveryAction.RESET_CURRENT_PIPELINE,
+            AudioRecoveryAction.RECREATE_PLAYER_COMPATIBILITY,
             policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
         )
         assertEquals(2, policy.attemptsUsed)
@@ -217,18 +252,21 @@ class AudioRecoveryPolicyTest {
     }
 
     @Test
-    fun `live recovery has no vod seek restoration`() {
-        assertNull(audioRecoveryPositionMs(isLive = true, currentPositionMs = 98_765L))
+    fun `live recreation has no vod seek restoration`() {
+        val state = preservedAudioRecoveryState(
+            isLive = true,
+            currentPositionMs = 98_765L,
+            playWhenReady = true,
+            speed = 1f,
+            volume = .8f,
+            trackSelectionParameters = "tracks",
+        )
+
+        assertNull(state.positionMs)
     }
 
     @Test
-    fun `vod recovery preserves position`() {
-        assertEquals(98_765L, audioRecoveryPositionMs(isLive = false, currentPositionMs = 98_765L))
-        assertEquals(0L, audioRecoveryPositionMs(isLive = false, currentPositionMs = -1L))
-    }
-
-    @Test
-    fun `preserved state keeps volume and track selection parameters`() {
+    fun `vod recreation preserves position speed volume and track parameters`() {
         val trackSelection = "selected-audio-and-subtitle-overrides"
         val state = preservedAudioRecoveryState(
             isLive = false,
@@ -244,6 +282,52 @@ class AudioRecoveryPolicyTest {
         assertEquals(1.25f, state.speed)
         assertEquals(.65f, state.volume)
         assertEquals(trackSelection, state.trackSelectionParameters)
+    }
+
+    @Test
+    fun `compatibility track parameters preserve selections and disable offload`() {
+        val original = TrackSelectionParameters.DEFAULT.buildUpon()
+            .setPreferredAudioLanguage("ar")
+            .setPreferredTextLanguage("en")
+            .build()
+
+        val compatibility = original.withCompatibilityAudioOutput()
+
+        assertEquals(original.preferredAudioLanguages, compatibility.preferredAudioLanguages)
+        assertEquals(original.preferredTextLanguages, compatibility.preferredTextLanguages)
+        assertEquals(
+            TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED,
+            compatibility.audioOffloadPreferences.audioOffloadMode,
+        )
+    }
+
+    @Test
+    fun `recreation request retains same source and candidate`() {
+        val request = AudioPlayerRecreationRequest(
+            generationKey = "live:99:history",
+            expectedSource = "https://redacted.example/stream",
+            candidateIndex = 0,
+            preservedState = preservedAudioRecoveryState(
+                isLive = true,
+                currentPositionMs = 123L,
+                playWhenReady = true,
+                speed = 1f,
+                volume = 1f,
+                trackSelectionParameters = "tracks",
+            ),
+            outputMode = AudioOutputCompatibilityMode.PCM_COMPATIBILITY,
+        )
+
+        assertEquals("https://redacted.example/stream", request.expectedSource)
+        assertEquals(0, request.candidateIndex)
+        assertEquals(AudioOutputCompatibilityMode.PCM_COMPATIBILITY, request.outputMode)
+        assertNull(request.preservedState.positionMs)
+    }
+
+    @Test
+    fun `next content always starts in normal output mode`() {
+        assertEquals(AudioOutputCompatibilityMode.NORMAL, initialAudioOutputCompatibilityMode())
+        assertEquals(AudioOutputCompatibilityMode.NORMAL, initialAudioOutputCompatibilityMode())
     }
 }
 
