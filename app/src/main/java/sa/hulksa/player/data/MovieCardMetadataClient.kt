@@ -47,12 +47,19 @@ class MovieCardMetadataClient {
 
         val root = try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful || body.isBlank() || body.looksLikeChallenge()) {
+                val body = try {
+                    BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.VOD_INFO)
+                } catch (_: XtreamJsonGuardException) {
                     return@withContext MovieCardTechnicalMetadata()
                 }
-                runCatching { JSONObject(body) }.getOrNull()
-                    ?: return@withContext MovieCardTechnicalMetadata()
+                if (!response.isSuccessful || body.looksLikeChallenge()) {
+                    return@withContext MovieCardTechnicalMetadata()
+                }
+                try {
+                    XtreamJsonParser.parseObject(body)
+                } catch (_: XtreamJsonGuardException) {
+                    return@withContext MovieCardTechnicalMetadata()
+                }
             }
         } catch (_: IOException) {
             return@withContext MovieCardTechnicalMetadata()
@@ -217,7 +224,7 @@ class MovieCardMetadataClient {
             is String -> value
                 .trim()
                 .takeIf { it.startsWith("{") }
-                ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                ?.let { runCatching { XtreamJsonParser.parseObject(it) }.getOrNull() }
             else -> null
         }
     }

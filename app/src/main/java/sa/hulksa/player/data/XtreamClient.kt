@@ -104,37 +104,41 @@ class XtreamClient {
 
     suspend fun seriesBundle(session: AuthenticatedSession, seriesId: Int): SeriesBundle =
         withContext(Dispatchers.IO) {
-        val root = requestObject(
-            portal = session.portal,
-            credentials = session.credentials,
-            action = "get_series_info",
-            extra = mapOf("series_id" to seriesId.toString()),
-        )
-            val seasons = root.optJSONObject("episodes")
+            val root = requestObject(
+                portal = session.portal,
+                credentials = session.credentials,
+                action = "get_series_info",
+                extra = mapOf("series_id" to seriesId.toString()),
+            )
+            val episodeObjects = try {
+                root.boundedSeriesEpisodeObjects()
+            } catch (error: XtreamJsonGuardException) {
+                throw error.asXtreamException()
+            }
             val episodes = buildList {
-                seasons?.keys()?.forEach { seasonKey ->
-                    val seasonNumber = seasonKey.toIntOrNull() ?: 0
-                    val entries = seasons.optJSONArray(seasonKey) ?: return@forEach
-                    entries.objects().forEachIndexed { index, episode ->
-                        val info = episode.optJSONObject("info")
-                        val id = episode.optString("id").toIntOrNull() ?: return@forEachIndexed
-                        add(
-                            Episode(
-                                id = id,
-                                title = episode.optString("title", "الحلقة ${index + 1}"),
-                                season = episode.optString("season", seasonNumber.toString()).toIntOrNull()
-                                    ?: seasonNumber,
-                                episodeNumber = episode.optString("episode_num", (index + 1).toString())
-                                    .toIntOrNull() ?: index + 1,
-                                containerExtension = episode.optString("container_extension", "mp4"),
-                                posterUrl = normalizeArtworkUrl(
-                                    info?.optNullableString("movie_image"),
-                                    session.portal.baseUrl,
-                                ),
-                                duration = info?.optNullableString("duration"),
+                episodeObjects.forEach { entry ->
+                    val episode = entry.episode
+                    val info = episode.optJSONObject("info")
+                    val id = episode.optString("id").toIntOrNull() ?: return@forEach
+                    val seasonNumber = entry.seasonKey.toIntOrNull() ?: 0
+                    add(
+                        Episode(
+                            id = id,
+                            title = episode.optString("title", "الحلقة ${entry.indexInSeason + 1}"),
+                            season = episode.optString("season", seasonNumber.toString()).toIntOrNull()
+                                ?: seasonNumber,
+                            episodeNumber = episode.optString(
+                                "episode_num",
+                                (entry.indexInSeason + 1).toString(),
+                            ).toIntOrNull() ?: entry.indexInSeason + 1,
+                            containerExtension = episode.optString("container_extension", "mp4"),
+                            posterUrl = normalizeArtworkUrl(
+                                info?.optNullableString("movie_image"),
+                                session.portal.baseUrl,
                             ),
-                        )
-                    }
+                            duration = info?.optNullableString("duration"),
+                        ),
+                    )
                 }
             }.sortedWith(compareBy(Episode::season, Episode::episodeNumber))
 
@@ -265,13 +269,25 @@ class XtreamClient {
         credentials: Credentials,
         action: String? = null,
         extra: Map<String, String> = emptyMap(),
-    ): JSONObject = JSONObject(request(portal, credentials, action, extra))
+    ): JSONObject = withContext(Dispatchers.IO) {
+        try {
+            XtreamJsonParser.parseObject(request(portal, credentials, action, extra))
+        } catch (error: XtreamJsonGuardException) {
+            throw error.asXtreamException()
+        }
+    }
 
     private suspend fun requestArray(
         portal: PortalConfig,
         credentials: Credentials,
         action: String,
-    ): JSONArray = JSONArray(request(portal, credentials, action))
+    ): JSONArray = withContext(Dispatchers.IO) {
+        try {
+            XtreamJsonParser.parseArray(request(portal, credentials, action))
+        } catch (error: XtreamJsonGuardException) {
+            throw error.asXtreamException()
+        }
+    }
 
     private suspend fun request(
         portal: PortalConfig,
@@ -294,16 +310,24 @@ class XtreamClient {
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Android")
             .build()
+        val limit = XtreamJsonLimits.forAction(action)
 
         try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val body = try {
+                    BoundedJsonResponseReader.readResponse(response, limit)
+                } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
+                    if (!response.isSuccessful) throw XtreamException.Http(response.code)
+                    throw XtreamException.PayloadLimitExceeded
+                } catch (error: XtreamJsonGuardException.EmptyBody) {
+                    if (!response.isSuccessful) throw XtreamException.Http(response.code)
+                    throw XtreamException.InvalidResponse
+                }
                 if (!response.isSuccessful) {
                     if (body.looksLikeChallenge()) throw XtreamException.ServiceBlocked
                     throw XtreamException.Http(response.code)
                 }
                 if (body.looksLikeChallenge()) throw XtreamException.ServiceBlocked
-                if (body.isBlank()) throw XtreamException.InvalidResponse
                 body
             }
         } catch (error: XtreamException) {
@@ -315,43 +339,63 @@ class XtreamClient {
         }
     }
 
-    private fun parseCategories(array: JSONArray, type: ContentType): List<Category> =
-        array.objects().mapNotNull { item ->
-            val id = item.optNullableString("category_id") ?: return@mapNotNull null
-            Category(id, item.optString("category_name", "بدون اسم"), type)
-        }.toList()
+    private fun parseCategories(array: JSONArray, type: ContentType): List<Category> = try {
+        buildList {
+            array.forEachUniqueObject(
+                maxUniqueItems = XtreamJsonLimits.CATEGORIES.maxUniqueItems!!,
+                scope = "categories",
+                keyOf = { item -> item.optNullableString("category_id") },
+            ) { item ->
+                val id = item.optNullableString("category_id") ?: return@forEachUniqueObject
+                add(Category(id, item.optString("category_name", "بدون اسم"), type))
+            }
+        }
+    } catch (error: XtreamJsonGuardException) {
+        throw error.asXtreamException()
+    }
 
     private fun parseItems(
         array: JSONArray,
         type: ContentType,
         portalBaseUrl: String,
-    ): List<ContentItem> =
-        array.objects().mapNotNull { item ->
-            val idKey = if (type == ContentType.SERIES) "series_id" else "stream_id"
-            val id = item.optString(idKey).toIntOrNull() ?: return@mapNotNull null
-            ContentItem(
-                id = id,
-                name = item.optString("name", "بدون اسم"),
-                categoryId = item.optString("category_id", "0"),
-                type = type,
-                posterUrl = normalizeArtworkUrl(
-                    item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
-                    portalBaseUrl,
-                ),
-                rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
-                year = item.optNullableString("year"),
-                containerExtension = item.optNullableString("container_extension"),
-                nowPlaying = item.optNullableString("epg_channel_id"),
-                addedAtEpochSeconds = when (type) {
-                    ContentType.SERIES -> item.optNullableString("last_modified")
-                        ?: item.optNullableString("added")
-                    else -> item.optNullableString("added")
-                }?.toLongOrNull(),
-                plot = item.optNullableString("plot"),
-                genre = item.optNullableString("genre"),
-                backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), portalBaseUrl),
-            )
-        }.toList()
+    ): List<ContentItem> = try {
+        val idKey = if (type == ContentType.SERIES) "series_id" else "stream_id"
+        buildList {
+            array.forEachUniqueObject(
+                maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
+                scope = "${type.name.lowercase()} catalog",
+                keyOf = { item -> item.optString(idKey).toIntOrNull()?.toString() },
+            ) { item ->
+                val id = item.optString(idKey).toIntOrNull() ?: return@forEachUniqueObject
+                add(
+                    ContentItem(
+                        id = id,
+                        name = item.optString("name", "بدون اسم"),
+                        categoryId = item.optString("category_id", "0"),
+                        type = type,
+                        posterUrl = normalizeArtworkUrl(
+                            item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
+                            portalBaseUrl,
+                        ),
+                        rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
+                        year = item.optNullableString("year"),
+                        containerExtension = item.optNullableString("container_extension"),
+                        nowPlaying = item.optNullableString("epg_channel_id"),
+                        addedAtEpochSeconds = when (type) {
+                            ContentType.SERIES -> item.optNullableString("last_modified")
+                                ?: item.optNullableString("added")
+                            else -> item.optNullableString("added")
+                        }?.toLongOrNull(),
+                        plot = item.optNullableString("plot"),
+                        genre = item.optNullableString("genre"),
+                        backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), portalBaseUrl),
+                    ),
+                )
+            }
+        }
+    } catch (error: XtreamJsonGuardException) {
+        throw error.asXtreamException()
+    }
 
     private fun parseDetails(info: JSONObject, portalBaseUrl: String): ContentDetails = ContentDetails(
         plot = info.optNullableString("plot") ?: info.optNullableString("description"),
@@ -366,12 +410,6 @@ class XtreamClient {
             portalBaseUrl,
         ),
     )
-
-    private fun JSONArray.objects(): Sequence<JSONObject> = sequence {
-        for (index in 0 until length()) {
-            optJSONObject(index)?.let { yield(it) }
-        }
-    }
 
     private fun JSONObject.optNullableString(key: String): String? {
         if (!has(key) || isNull(key)) return null
@@ -389,7 +427,9 @@ class XtreamClient {
             is String -> {
                 val clean = value.trim()
                 if (clean.startsWith("[")) {
-                    runCatching { JSONArray(clean).optString(0).trim().takeUnless(String::isBlank) }.getOrNull()
+                    runCatching {
+                        XtreamJsonParser.parseArray(clean).optString(0).trim().takeUnless(String::isBlank)
+                    }.getOrNull()
                 } else {
                     clean.takeUnless { it.isBlank() || it.equals("null", true) }
                 }
@@ -428,7 +468,15 @@ sealed class XtreamException(message: String, cause: Throwable? = null) : Except
     data object InvalidCredentials : XtreamException("بيانات الاشتراك غير صحيحة او غير فعالة.")
     data object SubscriptionInactive : XtreamException("الاشتراك منتهي او غير فعال. تواصل مع الدعم للتجديد.")
     data object InvalidResponse : XtreamException("وصل رد غير صالح من الخدمة.")
+    data object PayloadLimitExceeded : XtreamException("رد الخدمة تجاوز حدود الأمان المدعومة.")
     data object ServiceBlocked : XtreamException("الخدمة رفضت الاتصال مؤقتا. جرب من شبكة اخرى او تواصل مع الدعم.")
     data class Http(val statusCode: Int) : XtreamException("تعذر الاتصال بالخدمة (رمز $statusCode).")
     data class Network(val error: IOException) : XtreamException("تحقق من اتصال الانترنت ثم حاول مرة اخرى.", error)
+}
+
+private fun XtreamJsonGuardException.asXtreamException(): XtreamException = when (this) {
+    is XtreamJsonGuardException.PayloadTooLarge,
+    is XtreamJsonGuardException.TooManyItems -> XtreamException.PayloadLimitExceeded
+    is XtreamJsonGuardException.EmptyBody,
+    is XtreamJsonGuardException.InvalidJson -> XtreamException.InvalidResponse
 }
