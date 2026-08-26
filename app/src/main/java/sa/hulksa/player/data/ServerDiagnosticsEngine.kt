@@ -422,24 +422,75 @@ class ServerDiagnosticsEngine(context: Context) {
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Diagnostics")
             .build()
+        val limit = XtreamJsonLimits.forAction(action)
         return try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val body = try {
+                    BoundedJsonResponseReader.readResponse(response, limit)
+                } catch (error: XtreamJsonGuardException) {
+                    val latency = SystemClock.elapsedRealtime() - started
+                    val message = when {
+                        !response.isSuccessful -> "HTTP ${response.code}"
+                        error is XtreamJsonGuardException.PayloadTooLarge -> "استجابة تتجاوز حدود الأمان"
+                        error is XtreamJsonGuardException.EmptyBody -> "استجابة فارغة"
+                        else -> "استجابة غير صالحة"
+                    }
+                    return@use JsonProbe(false, latency, response.code, null, null, message)
+                }
                 val latency = SystemClock.elapsedRealtime() - started
-                if (!response.isSuccessful || body.isBlank()) {
+                if (!response.isSuccessful) {
                     JsonProbe(false, latency, response.code, null, null, "HTTP ${response.code}")
                 } else if (expectedArray) {
-                    val array = JSONArray(body)
+                    val array = XtreamJsonParser.parseArray(body)
+                    validateProbeArrayLimit(action, array)
                     JsonProbe(true, latency, response.code, null, array, null)
                 } else {
-                    val obj = JSONObject(body)
+                    val obj = XtreamJsonParser.parseObject(body)
+                    validateProbeObjectLimit(action, obj)
                     JsonProbe(true, latency, response.code, obj, null, null)
                 }
             }
         } catch (error: IOException) {
             JsonProbe(false, SystemClock.elapsedRealtime() - started, null, null, null, "خطا شبكة: ${error.javaClass.simpleName}")
+        } catch (error: XtreamJsonGuardException) {
+            JsonProbe(false, SystemClock.elapsedRealtime() - started, null, null, null, "استجابة غير صالحة: ${error.javaClass.simpleName}")
         } catch (error: Exception) {
             JsonProbe(false, SystemClock.elapsedRealtime() - started, null, null, null, "استجابة غير صالحة: ${error.javaClass.simpleName}")
+        }
+    }
+
+    private fun validateProbeArrayLimit(action: String?, array: JSONArray) {
+        when (action) {
+            "get_live_categories", "get_vod_categories", "get_series_categories" ->
+                array.requireUniqueObjectLimit(
+                    maxUniqueItems = XtreamJsonLimits.CATEGORIES.maxUniqueItems!!,
+                    scope = "diagnostic categories",
+                ) { item -> item.optString("category_id").trim().takeIf(String::isNotEmpty) }
+            "get_live_streams", "get_vod_streams" ->
+                array.requireUniqueObjectLimit(
+                    maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
+                    scope = "diagnostic catalog",
+                ) { item -> item.optString("stream_id").toIntOrNull()?.toString() }
+            "get_series" ->
+                array.requireUniqueObjectLimit(
+                    maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
+                    scope = "diagnostic series catalog",
+                ) { item -> item.optString("series_id").toIntOrNull()?.toString() }
+        }
+    }
+
+    private fun validateProbeObjectLimit(action: String?, obj: JSONObject) {
+        when (action) {
+            "get_short_epg" -> {
+                val epg = obj.optJSONArray("epg_list")
+                if (epg != null && epg.length() > XtreamJsonLimits.MAX_SHORT_EPG_ITEMS) {
+                    throw XtreamJsonGuardException.TooManyItems(
+                        scope = "short EPG items",
+                        maxItems = XtreamJsonLimits.MAX_SHORT_EPG_ITEMS,
+                    )
+                }
+            }
+            "get_series_info" -> obj.boundedSeriesEpisodeObjects()
         }
     }
 

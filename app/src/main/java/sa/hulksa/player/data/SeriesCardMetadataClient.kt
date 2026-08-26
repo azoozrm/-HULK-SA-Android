@@ -61,11 +61,15 @@ class SeriesCardMetadataClient {
 
         val root = try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val body = try {
+                    BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.SERIES_INFO)
+                } catch (_: XtreamJsonGuardException) {
+                    return@withContext SeriesCardTechnicalMetadata()
+                }
                 if (!response.isSuccessful || body.isBlank() || body.looksLikeChallenge()) {
                     return@withContext SeriesCardTechnicalMetadata()
                 }
-                runCatching { JSONObject(body) }.getOrNull()
+                runCatching { XtreamJsonParser.parseObject(body) }.getOrNull()
                     ?: return@withContext SeriesCardTechnicalMetadata()
             }
         } catch (_: IOException) {
@@ -74,38 +78,27 @@ class SeriesCardMetadataClient {
             return@withContext SeriesCardTechnicalMetadata()
         }
 
-        val episodesObject = root.optJSONObject("episodes") ?: root.nestedObject("episodes")
-        val episodesArray = root.optJSONArray("episodes") ?: root.nestedArray("episodes")
-        val episodeObjects = buildList {
-            episodesObject?.keys()?.forEach { seasonKey ->
-                val entries = episodesObject.optJSONArray(seasonKey) ?: return@forEach
-                for (index in 0 until entries.length()) {
-                    entries.optJSONObject(index)?.let { add(seasonKey to it) }
-                }
-            }
-            if (isEmpty() && episodesArray != null) {
-                for (index in 0 until episodesArray.length()) {
-                    val episode = episodesArray.optJSONObject(index) ?: continue
-                    val seasonKey = episode.positiveInt("season")
-                        ?.toString()
-                        ?: episode.positiveInt("season_number")?.toString()
-                        ?: "1"
-                    add(seasonKey to episode)
-                }
-            }
+        val episodeObjects = try {
+            root.boundedSeriesEpisodeObjects()
+        } catch (_: XtreamJsonGuardException) {
+            return@withContext SeriesCardTechnicalMetadata()
         }
 
         val positiveSeasons = episodeObjects
             .asSequence()
-            .mapNotNull { (seasonKey, episode) ->
+            .mapNotNull { entry ->
+                val episode = entry.episode
                 episode.positiveInt("season")
                     ?: episode.positiveInt("season_number")
-                    ?: seasonKey.toIntOrNull()?.takeIf { it > 0 }
+                    ?: entry.seasonKey.toIntOrNull()?.takeIf { it > 0 }
             }
             .filter { it > 0 }
             .toSet()
 
         val seasonsArray = root.optJSONArray("seasons") ?: root.nestedArray("seasons")
+        if (seasonsArray != null && seasonsArray.length() > XtreamJsonLimits.MAX_SERIES_SEASONS) {
+            return@withContext SeriesCardTechnicalMetadata()
+        }
         val seasonNumbersFromArray = buildSet {
             if (seasonsArray != null) {
                 for (index in 0 until seasonsArray.length()) {
@@ -134,7 +127,7 @@ class SeriesCardMetadataClient {
         val qualityLabels = episodeObjects
             .asSequence()
             .take(MAX_EPISODES_TO_INSPECT)
-            .mapNotNull { (_, episode) -> episodeVideoHeight(episode) }
+            .mapNotNull { episodeVideoHeight(it.episode) }
             .mapNotNull(::qualityLabel)
             .toList()
 
@@ -255,7 +248,7 @@ class SeriesCardMetadataClient {
             is String -> value
                 .trim()
                 .takeIf { it.startsWith("{") }
-                ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                ?.let { runCatching { XtreamJsonParser.parseObject(it) }.getOrNull() }
             else -> null
         }
     }
@@ -267,7 +260,7 @@ class SeriesCardMetadataClient {
             is String -> value
                 .trim()
                 .takeIf { it.startsWith("[") }
-                ?.let { runCatching { JSONArray(it) }.getOrNull() }
+                ?.let { runCatching { XtreamJsonParser.parseArray(it) }.getOrNull() }
             else -> null
         }
     }

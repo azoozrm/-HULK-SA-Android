@@ -205,12 +205,12 @@ class KidsServerCatalogClient {
             ),
             type,
         ).filter { isExplicitKidsCategoryName(it.name) }
-            .distinctBy(Category::id)
 
         if (categories.isEmpty()) return@coroutineScope Catalog(emptyList(), emptyList())
 
-        val scopedItems = categories.map { category ->
-            async {
+        val scopedItems = buildList {
+            val seenIds = HashSet<String>()
+            for (category in categories) {
                 val items = parseItems(
                     requestArray(
                         session = session,
@@ -223,10 +223,16 @@ class KidsServerCatalogClient {
                 if (!isServerCategoryScopeVerified(items.map(ContentItem::categoryId), category.id)) {
                     throw KidsCatalogException.ServerFilterNotEnforced(type, category.id)
                 }
-                items
+                for (item in items) {
+                    val key = "${item.type.name}:${item.id}"
+                    if (!seenIds.add(key)) continue
+                    if (seenIds.size > XtreamJsonLimits.CATALOG.maxUniqueItems!!) {
+                        throw KidsCatalogException.PayloadLimit
+                    }
+                    add(item)
+                }
             }
-        }.awaitAll().flatten()
-            .distinctBy { "${it.type.name}:${it.id}" }
+        }
 
         val allowedIds = categories.mapTo(linkedSetOf(), Category::id)
         val guardedItems = scopedItems.filter { it.categoryId in allowedIds }
@@ -254,15 +260,25 @@ class KidsServerCatalogClient {
             .header("Accept", JSON.toString())
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} KidsCatalog")
             .build()
+        val limit = XtreamJsonLimits.forAction(action)
 
         try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) throw KidsCatalogException.Http(response.code)
-                if (body.isBlank() || body.trimStart().startsWith('<')) {
+                val body = try {
+                    BoundedJsonResponseReader.readResponse(response, limit)
+                } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
+                    if (!response.isSuccessful) throw KidsCatalogException.Http(response.code)
+                    throw KidsCatalogException.PayloadLimit
+                } catch (error: XtreamJsonGuardException.EmptyBody) {
+                    if (!response.isSuccessful) throw KidsCatalogException.Http(response.code)
                     throw KidsCatalogException.InvalidResponse
                 }
-                return JSONArray(body)
+                if (!response.isSuccessful) throw KidsCatalogException.Http(response.code)
+                return try {
+                    XtreamJsonParser.parseArray(body)
+                } catch (_: XtreamJsonGuardException) {
+                    throw KidsCatalogException.InvalidResponse
+                }
             }
         } catch (error: KidsCatalogException) {
             throw error
@@ -273,50 +289,66 @@ class KidsServerCatalogClient {
         }
     }
 
-    private fun parseCategories(array: JSONArray, type: ContentType): List<Category> = buildList {
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-            val id = item.optString("category_id").trim().takeIf(String::isNotBlank) ?: continue
-            val name = item.optString("category_name").trim().takeIf(String::isNotBlank) ?: continue
-            add(Category(id = id, name = name, type = type))
+    private fun parseCategories(array: JSONArray, type: ContentType): List<Category> = try {
+        buildList {
+            array.forEachUniqueObject(
+                maxUniqueItems = XtreamJsonLimits.CATEGORIES.maxUniqueItems!!,
+                scope = "kids categories",
+                keyOf = { item -> item.optString("category_id").trim().takeIf(String::isNotBlank) },
+            ) { item ->
+                val id = item.optString("category_id").trim().takeIf(String::isNotBlank)
+                    ?: return@forEachUniqueObject
+                val name = item.optString("category_name").trim().takeIf(String::isNotBlank)
+                    ?: return@forEachUniqueObject
+                add(Category(id = id, name = name, type = type))
+            }
         }
+    } catch (_: XtreamJsonGuardException) {
+        throw KidsCatalogException.PayloadLimit
     }
 
     private fun parseItems(
         array: JSONArray,
         type: ContentType,
         portalBaseUrl: String,
-    ): List<ContentItem> = buildList {
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-            val idKey = if (type == ContentType.SERIES) "series_id" else "stream_id"
-            val id = item.optString(idKey).toIntOrNull() ?: continue
-            val categoryId = item.optString("category_id").trim()
-            add(
-                ContentItem(
-                    id = id,
-                    name = item.optString("name", "بدون اسم"),
-                    categoryId = categoryId,
-                    type = type,
-                    posterUrl = normalizeArtworkUrl(
-                        item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
-                        portalBaseUrl,
+    ): List<ContentItem> = try {
+        val idKey = if (type == ContentType.SERIES) "series_id" else "stream_id"
+        buildList {
+            array.forEachUniqueObject(
+                maxUniqueItems = XtreamJsonLimits.CATALOG.maxUniqueItems!!,
+                scope = "kids ${type.name.lowercase()} catalog",
+                keyOf = { item -> item.optString(idKey).toIntOrNull()?.toString() },
+            ) { item ->
+                val id = item.optString(idKey).toIntOrNull() ?: return@forEachUniqueObject
+                val categoryId = item.optString("category_id").trim()
+                add(
+                    ContentItem(
+                        id = id,
+                        name = item.optString("name", "بدون اسم"),
+                        categoryId = categoryId,
+                        type = type,
+                        posterUrl = normalizeArtworkUrl(
+                            item.optNullableString(if (type == ContentType.SERIES) "cover" else "stream_icon"),
+                            portalBaseUrl,
+                        ),
+                        rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
+                        year = item.optNullableString("year"),
+                        containerExtension = item.optNullableString("container_extension"),
+                        nowPlaying = item.optNullableString("epg_channel_id"),
+                        addedAtEpochSeconds = when (type) {
+                            ContentType.SERIES -> item.optNullableString("last_modified")
+                                ?: item.optNullableString("added")
+                            else -> item.optNullableString("added")
+                        }?.toLongOrNull(),
+                        plot = item.optNullableString("plot"),
+                        genre = item.optNullableString("genre"),
+                        backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), portalBaseUrl),
                     ),
-                    rating = item.optNullableString("rating") ?: item.optNullableString("rating_5based"),
-                    year = item.optNullableString("year"),
-                    containerExtension = item.optNullableString("container_extension"),
-                    nowPlaying = item.optNullableString("epg_channel_id"),
-                    addedAtEpochSeconds = when (type) {
-                        ContentType.SERIES -> item.optNullableString("last_modified")
-                            ?: item.optNullableString("added")
-                        else -> item.optNullableString("added")
-                    }?.toLongOrNull(),
-                    plot = item.optNullableString("plot"),
-                    genre = item.optNullableString("genre"),
-                    backdropUrl = normalizeArtworkUrl(item.firstImageUrl("backdrop_path"), portalBaseUrl),
-                ),
-            )
+                )
+            }
         }
+    } catch (_: XtreamJsonGuardException) {
+        throw KidsCatalogException.PayloadLimit
     }
 
     private fun JSONObject.optNullableString(key: String): String? {
@@ -334,8 +366,9 @@ class KidsServerCatalogClient {
             is String -> {
                 val clean = value.trim()
                 if (clean.startsWith("[")) {
-                    runCatching { JSONArray(clean).optString(0).trim().takeUnless(String::isBlank) }
-                        .getOrNull()
+                    runCatching {
+                        XtreamJsonParser.parseArray(clean).optString(0).trim().takeUnless(String::isBlank)
+                    }.getOrNull()
                 } else {
                     clean.takeUnless { it.isBlank() || it.equals("null", true) }
                 }
@@ -368,6 +401,7 @@ class KidsServerCatalogClient {
 
 private sealed class KidsCatalogException(message: String, cause: Throwable? = null) : Exception(message, cause) {
     data object InvalidResponse : KidsCatalogException("invalid response")
+    data object PayloadLimit : KidsCatalogException("payload limit exceeded")
     data class Http(val statusCode: Int) : KidsCatalogException("HTTP $statusCode")
     data class Network(val error: IOException) : KidsCatalogException("network", error)
     data class ServerFilterNotEnforced(
@@ -381,6 +415,7 @@ private fun Throwable.safeKidsFailureReason(): String = when (this) {
         "السيرفر لم يلتزم بفلترة category_id للفئة ${categoryId.take(12)}"
     is KidsCatalogException.Http -> "فشل API بكود $statusCode"
     is KidsCatalogException.Network -> "تعذر الاتصال بالسيرفر"
+    is KidsCatalogException.PayloadLimit -> "استجابة السيرفر تجاوزت حدود الأمان"
     is KidsCatalogException.InvalidResponse -> "استجابة الفئات غير صالحة"
     else -> "تعذر التحقق من فلترة السيرفر"
 }
