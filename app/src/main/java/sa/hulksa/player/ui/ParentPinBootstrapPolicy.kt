@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui
 
+import sa.hulksa.player.ManualParentAuthProofRegistry
 import sa.hulksa.player.model.ProfileKind
 
 internal enum class ParentPinBootstrapDecision {
@@ -11,24 +12,25 @@ internal enum class ParentPinBootstrapDecision {
 /**
  * Parent PIN ownership remains the Primary Adult profile.
  *
- * A resolved Kids session without that credential must stay fail-closed: a child already inside
- * Kids cannot bootstrap the credential. An unresolved session is immediately after account
- * authentication, so it is the recovery proof used for legacy installs that were already left on
- * a Kids profile before a Parent PIN existed.
+ * resolvedForSession is deliberately not an authorization signal. A legacy active-Kids session
+ * without a Parent PIN may bootstrap only when the current account/session owns an ephemeral proof
+ * produced by a successful explicit Login submit. Auto-restored sessions therefore stay fail-closed.
  */
+@Suppress("UNUSED_PARAMETER")
 internal fun parentPinBootstrapDecision(
     currentProfileKind: ProfileKind?,
     targetProfileKind: ProfileKind,
     primaryParentPinAvailable: Boolean,
     resolvedForSession: Boolean,
+    manualAuthProofValid: Boolean = ManualParentAuthProofRegistry.hasValidProof(),
 ): ParentPinBootstrapDecision {
     if (primaryParentPinAvailable) return ParentPinBootstrapDecision.ALLOW
 
     if (currentProfileKind == ProfileKind.KIDS) {
-        return if (resolvedForSession) {
-            ParentPinBootstrapDecision.DENY_FAIL_CLOSED
-        } else {
+        return if (manualAuthProofValid) {
             ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP
+        } else {
+            ParentPinBootstrapDecision.DENY_FAIL_CLOSED
         }
     }
 
