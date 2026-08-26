@@ -35,7 +35,7 @@ class PortalResolver internal constructor(
             .build()
 
         try {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     throw mapApiFailure(response.code, body)

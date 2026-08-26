@@ -64,18 +64,18 @@ class OperationsApkInstaller(
             .build()
 
         val downloadResult = runCatching {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 if (!response.isSuccessful) {
-                    return@use OperationsInstallResult.Failure("تعذر تنزيل التحديث من الخادم الرسمي.")
+                    return@executeCancellable OperationsInstallResult.Failure("تعذر تنزيل التحديث من الخادم الرسمي.")
                 }
                 if (!isTrustedApkUrl(response.request.url.toString())) {
-                    return@use OperationsInstallResult.Failure("تم رفض إعادة توجيه غير موثوقة للتحديث.")
+                    return@executeCancellable OperationsInstallResult.Failure("تم رفض إعادة توجيه غير موثوقة للتحديث.")
                 }
                 val body = response.body
-                    ?: return@use OperationsInstallResult.Failure("ملف التحديث فارغ.")
+                    ?: return@executeCancellable OperationsInstallResult.Failure("ملف التحديث فارغ.")
                 val totalBytes = body.contentLength()
                 if (totalBytes > MAX_APK_BYTES) {
-                    return@use OperationsInstallResult.Failure("حجم ملف التحديث غير مسموح.")
+                    return@executeCancellable OperationsInstallResult.Failure("حجم ملف التحديث غير مسموح.")
                 }
 
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -105,7 +105,7 @@ class OperationsApkInstaller(
                 }
                 if (writtenBytes <= 0L || (totalBytes >= 0L && writtenBytes != totalBytes)) {
                     partialFile.delete()
-                    return@use OperationsInstallResult.Failure("لم يكتمل تنزيل ملف التحديث.")
+                    return@executeCancellable OperationsInstallResult.Failure("لم يكتمل تنزيل ملف التحديث.")
                 }
 
                 val actualSha = digest.digest().joinToString("") { byte ->
@@ -117,11 +117,11 @@ class OperationsApkInstaller(
                 )
                 if (!matches) {
                     partialFile.delete()
-                    return@use OperationsInstallResult.Failure("تعذر التحقق من سلامة التحديث")
+                    return@executeCancellable OperationsInstallResult.Failure("تعذر التحقق من سلامة التحديث")
                 }
                 if (!partialFile.renameTo(finalFile)) {
                     partialFile.delete()
-                    return@use OperationsInstallResult.Failure("تعذر تجهيز ملف التحديث للتثبيت.")
+                    return@executeCancellable OperationsInstallResult.Failure("تعذر تجهيز ملف التحديث للتثبيت.")
                 }
                 currentCoroutineContext().ensureActive()
                 onProgress(100)

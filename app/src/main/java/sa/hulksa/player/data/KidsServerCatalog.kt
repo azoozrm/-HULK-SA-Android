@@ -263,7 +263,7 @@ class KidsServerCatalogClient {
         val limit = XtreamJsonLimits.forAction(action)
 
         try {
-            client.newCall(request).execute().use { response ->
+            return client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, limit)
                 } catch (error: XtreamJsonGuardException.PayloadTooLarge) {
@@ -274,12 +274,14 @@ class KidsServerCatalogClient {
                     throw KidsCatalogException.InvalidResponse
                 }
                 if (!response.isSuccessful) throw KidsCatalogException.Http(response.code)
-                return try {
+                try {
                     XtreamJsonParser.parseArray(body)
                 } catch (_: XtreamJsonGuardException) {
                     throw KidsCatalogException.InvalidResponse
                 }
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: KidsCatalogException) {
             throw error
         } catch (error: IOException) {

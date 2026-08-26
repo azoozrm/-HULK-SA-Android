@@ -43,13 +43,13 @@ class OperationsClient(
                 .header("Accept", "application/json")
                 .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Operations")
                 .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use OperationsFetchResult.Failure
-                val body = response.body ?: return@use OperationsFetchResult.Failure
+            client.executeCancellable(request) { response ->
+                if (!response.isSuccessful) return@executeCancellable OperationsFetchResult.Failure
+                val body = response.body ?: return@executeCancellable OperationsFetchResult.Failure
                 val contentLength = body.contentLength()
-                if (contentLength > MAX_CONFIG_BYTES) return@use OperationsFetchResult.Failure
-                val rawJson = readBoundedConfig(body) ?: return@use OperationsFetchResult.Failure
-                val config = parseOperationsConfig(rawJson) ?: return@use OperationsFetchResult.Failure
+                if (contentLength > MAX_CONFIG_BYTES) return@executeCancellable OperationsFetchResult.Failure
+                val rawJson = readBoundedConfig(body) ?: return@executeCancellable OperationsFetchResult.Failure
+                val config = parseOperationsConfig(rawJson) ?: return@executeCancellable OperationsFetchResult.Failure
                 OperationsFetchResult.Success(
                     config = config,
                     rawJson = rawJson,

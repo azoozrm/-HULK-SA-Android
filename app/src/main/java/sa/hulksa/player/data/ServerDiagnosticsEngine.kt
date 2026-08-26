@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.StatFs
 import android.os.SystemClock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
@@ -408,7 +409,7 @@ class ServerDiagnosticsEngine(context: Context) {
         )
     }
 
-    private fun jsonProbe(
+    private suspend fun jsonProbe(
         session: AuthenticatedSession,
         action: String?,
         expectedArray: Boolean,
@@ -424,7 +425,7 @@ class ServerDiagnosticsEngine(context: Context) {
             .build()
         val limit = XtreamJsonLimits.forAction(action)
         return try {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, limit)
                 } catch (error: XtreamJsonGuardException) {
@@ -435,7 +436,7 @@ class ServerDiagnosticsEngine(context: Context) {
                         error is XtreamJsonGuardException.EmptyBody -> "استجابة فارغة"
                         else -> "استجابة غير صالحة"
                     }
-                    return@use JsonProbe(false, latency, response.code, null, null, message)
+                    return@executeCancellable JsonProbe(false, latency, response.code, null, null, message)
                 }
                 val latency = SystemClock.elapsedRealtime() - started
                 if (!response.isSuccessful) {
@@ -450,6 +451,8 @@ class ServerDiagnosticsEngine(context: Context) {
                     JsonProbe(true, latency, response.code, obj, null, null)
                 }
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: IOException) {
             JsonProbe(false, SystemClock.elapsedRealtime() - started, null, null, null, "خطا شبكة: ${error.javaClass.simpleName}")
         } catch (error: XtreamJsonGuardException) {
@@ -494,7 +497,7 @@ class ServerDiagnosticsEngine(context: Context) {
         }
     }
 
-    private fun streamProbe(label: String, url: String): StreamProbe {
+    private suspend fun streamProbe(label: String, url: String): StreamProbe {
         val started = SystemClock.elapsedRealtime()
         val request = Request.Builder()
             .url(url)
@@ -504,7 +507,7 @@ class ServerDiagnosticsEngine(context: Context) {
             .header("User-Agent", "HULK-SA/${BuildConfig.VERSION_NAME} Diagnostics")
             .build()
         return try {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 val buffer = Buffer()
                 val source = response.body?.source()
                 var total = 0L
@@ -537,6 +540,8 @@ class ServerDiagnosticsEngine(context: Context) {
                     errorMessage = if (success) null else "لم تصل بيانات بث صالحة",
                 )
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             StreamProbe(
                 label = label,

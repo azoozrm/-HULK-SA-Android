@@ -1,5 +1,6 @@
 package sa.hulksa.player.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -46,26 +47,28 @@ class MovieCardMetadataClient {
             .build()
 
         val root = try {
-            client.newCall(request).execute().use { response ->
+            client.executeCancellable(request) { response ->
                 val body = try {
                     BoundedJsonResponseReader.readResponse(response, XtreamJsonLimits.VOD_INFO)
                 } catch (_: XtreamJsonGuardException) {
-                    return@withContext MovieCardTechnicalMetadata()
+                    return@executeCancellable null
                 }
                 if (!response.isSuccessful || body.looksLikeChallenge()) {
-                    return@withContext MovieCardTechnicalMetadata()
+                    return@executeCancellable null
                 }
                 try {
                     XtreamJsonParser.parseObject(body)
                 } catch (_: XtreamJsonGuardException) {
-                    return@withContext MovieCardTechnicalMetadata()
+                    null
                 }
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: IOException) {
-            return@withContext MovieCardTechnicalMetadata()
+            null
         } catch (_: Exception) {
-            return@withContext MovieCardTechnicalMetadata()
-        }
+            null
+        } ?: return@withContext MovieCardTechnicalMetadata()
 
         val info = root.optJSONObject("info")
         val movieData = root.optJSONObject("movie_data")
