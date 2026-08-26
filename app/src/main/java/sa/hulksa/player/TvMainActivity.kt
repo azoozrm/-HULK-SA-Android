@@ -17,6 +17,7 @@ import sa.hulksa.player.ui.VoiceSearchAppLayer
 import sa.hulksa.player.ui.VoiceSearchDelegate
 import sa.hulksa.player.ui.isVoiceSearchDestination
 import sa.hulksa.player.ui.isVoiceSearchHardwareKey
+import sa.hulksa.player.ui.screens.AudioPlaybackHealthCoordinator
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class TvMainActivity : ComponentActivity() {
@@ -24,6 +25,7 @@ class TvMainActivity : ComponentActivity() {
     private var initialImePolicyApplied = false
     private lateinit var voiceSearchDelegate: VoiceSearchDelegate
     private lateinit var subscriptionResumeEnforcer: SubscriptionResumeEnforcer
+    private lateinit var audioPlaybackHealthCoordinator: AudioPlaybackHealthCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,6 +35,7 @@ class TvMainActivity : ComponentActivity() {
             activity = this,
             onTranscript = viewModel::updateSearch,
         )
+        audioPlaybackHealthCoordinator = AudioPlaybackHealthCoordinator(this) { viewModel.state.value }
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContent {
             HulkTheme {
@@ -45,6 +48,7 @@ class TvMainActivity : ComponentActivity() {
                 }
             }
         }
+        audioPlaybackHealthCoordinator.start()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -71,6 +75,11 @@ class TvMainActivity : ComponentActivity() {
             viewModel.onAppResumed()
         }
         window.decorView.post { enterImmersiveModeSafely() }
+    }
+
+    override fun onDestroy() {
+        if (::audioPlaybackHealthCoordinator.isInitialized) audioPlaybackHealthCoordinator.stop()
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

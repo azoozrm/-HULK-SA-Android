@@ -10,15 +10,51 @@ import org.junit.Test
 class AudioRecoveryPolicyTest {
 
     @Test
-    fun `audio decoder init failure is recoverable`() {
+    fun `explicit audio decoder failure recovers before tracks populate`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        val classification = classifyAudioFailure(
+            errorCode = PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            rendererError = true,
+            rendererMimeType = "audio/mp4a-latm",
+        )
+        val effectiveTrackEvidence = explicitAudioRecoveryGate(
+            classification = classification,
+            hasAudioTrack = false,
+        )
+
+        assertEquals(AudioFailureClassification.RECOVERABLE_AUDIO, classification)
+        assertTrue(effectiveTrackEvidence)
         assertEquals(
-            AudioFailureClassification.RECOVERABLE_AUDIO,
-            classifyAudioFailure(
-                errorCode = PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-                rendererError = true,
-                rendererMimeType = "audio/mp4a-latm",
+            AudioRecoveryAction.REPREPARE_CURRENT,
+            policy.requestRecovery(
+                key = "live:1",
+                classification = classification,
+                hasAudioTrack = effectiveTrackEvidence,
             ),
         )
+        assertEquals(1, policy.attemptsUsed)
+    }
+
+    @Test
+    fun `video decoder failure is not audio recovery`() {
+        val classification = classifyAudioFailure(
+            errorCode = PlaybackException.ERROR_CODE_DECODING_FAILED,
+            rendererError = true,
+            rendererMimeType = "video/avc",
+        )
+        assertEquals(AudioFailureClassification.NON_AUDIO, classification)
+        assertFalse(explicitAudioRecoveryGate(classification, hasAudioTrack = false))
+    }
+
+    @Test
+    fun `network failure is not audio recovery`() {
+        val classification = classifyAudioFailure(
+            errorCode = PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            rendererError = false,
+            rendererMimeType = null,
+        )
+        assertEquals(AudioFailureClassification.NON_AUDIO, classification)
+        assertFalse(explicitAudioRecoveryGate(classification, hasAudioTrack = false))
     }
 
     @Test
@@ -27,38 +63,14 @@ class AudioRecoveryPolicyTest {
             AudioFailureClassification.RECOVERABLE_AUDIO,
             classifyAudioFailure(
                 errorCode = PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
-                rendererError = true,
-                rendererMimeType = "audio/ac3",
+                rendererError = false,
+                rendererMimeType = null,
             ),
         )
         assertEquals(
             AudioFailureClassification.RECOVERABLE_AUDIO,
             classifyAudioFailure(
                 errorCode = PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
-                rendererError = true,
-                rendererMimeType = "audio/eac3",
-            ),
-        )
-    }
-
-    @Test
-    fun `video decoder failure is not audio recovery`() {
-        assertEquals(
-            AudioFailureClassification.NON_AUDIO,
-            classifyAudioFailure(
-                errorCode = PlaybackException.ERROR_CODE_DECODING_FAILED,
-                rendererError = true,
-                rendererMimeType = "video/avc",
-            ),
-        )
-    }
-
-    @Test
-    fun `network failure is not audio recovery`() {
-        assertEquals(
-            AudioFailureClassification.NON_AUDIO,
-            classifyAudioFailure(
-                errorCode = PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                 rendererError = false,
                 rendererMimeType = null,
             ),
@@ -66,142 +78,353 @@ class AudioRecoveryPolicyTest {
     }
 
     @Test
-    fun `first audio failure starts level one recovery`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
+    fun `first confirmed silent failure starts only attempt one`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
 
         assertEquals(
             AudioRecoveryAction.REPREPARE_CURRENT,
             policy.requestRecovery(
-                key = "movie:1",
-                classification = AudioFailureClassification.RECOVERABLE_AUDIO,
+                "live:1",
+                AudioFailureClassification.RECOVERABLE_AUDIO,
                 hasAudioTrack = true,
             ),
         )
         assertEquals(1, policy.attemptsUsed)
-        assertTrue(policy.recoveryPending)
     }
 
     @Test
-    fun `duplicate rapid audio error cannot start parallel recovery`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
-
+    fun `repeated callback cannot start parallel recovery`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
         assertEquals(
             AudioRecoveryAction.REPREPARE_CURRENT,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+            policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
         )
         assertEquals(
             AudioRecoveryAction.NONE,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+            policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
         )
         assertEquals(1, policy.attemptsUsed)
     }
 
     @Test
-    fun `playback ready finishes recovery without restoring consumed budget`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
-        policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
-        policy.markRecoveryCommandIssued("movie:1")
+    fun `second confirmed silent failure starts attempt two`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
 
-        policy.markPlaybackReady("movie:1")
+        assertEquals(
+            AudioRecoveryAction.RESET_CURRENT_PIPELINE,
+            policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+        )
+        assertEquals(2, policy.attemptsUsed)
+    }
+
+    @Test
+    fun `after two attempts recovery is exhausted`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
+
+        assertEquals(
+            AudioRecoveryAction.EXHAUSTED,
+            policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+        )
+        assertEquals(MAX_AUDIO_RECOVERY_ATTEMPTS, policy.attemptsUsed)
+    }
+
+    @Test
+    fun `ready alone does not complete pending recovery`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
+
+        policy.markPlaybackReady("live:1")
+
+        assertTrue(policy.recoveryPending)
+        assertEquals(1, policy.attemptsUsed)
+    }
+
+    @Test
+    fun `valid audio progression completes pending recovery`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
+
+        policy.markAudioHealthy("live:1")
 
         assertFalse(policy.recoveryPending)
         assertEquals(1, policy.attemptsUsed)
     }
 
     @Test
-    fun `same generation never exceeds recovery budget`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
+    fun `new generation gets fresh detector recovery budget`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+        policy.markRecoveryCommandIssued("live:1")
 
-        assertEquals(
-            AudioRecoveryAction.REPREPARE_CURRENT,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
-        )
-        policy.markRecoveryCommandIssued("movie:1")
-        assertEquals(
-            AudioRecoveryAction.RESET_CURRENT_PIPELINE,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
-        )
-        policy.markRecoveryCommandIssued("movie:1")
-        assertEquals(
-            AudioRecoveryAction.EXHAUSTED,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
-        )
-        assertEquals(MAX_AUDIO_RECOVERY_ATTEMPTS, policy.attemptsUsed)
-    }
-
-    @Test
-    fun `new content generation gets fresh recovery budget`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
-        policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
-        policy.markRecoveryCommandIssued("movie:1")
-        policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
-        policy.markRecoveryCommandIssued("movie:1")
-
-        policy.beginGeneration("movie:2")
+        policy.beginGeneration("live:2")
 
         assertEquals(0, policy.attemptsUsed)
         assertEquals(
             AudioRecoveryAction.REPREPARE_CURRENT,
-            policy.requestRecovery("movie:2", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+            policy.requestRecovery("live:2", AudioFailureClassification.RECOVERABLE_AUDIO, true),
         )
     }
 
     @Test
-    fun `stale generation recovery is ignored`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("channel:B") }
+    fun `stale generation is ignored`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:B") }
 
         assertEquals(
             AudioRecoveryAction.NONE,
-            policy.requestRecovery("channel:A", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+            policy.requestRecovery("live:A", AudioFailureClassification.RECOVERABLE_AUDIO, true),
         )
         assertEquals(0, policy.attemptsUsed)
     }
 
     @Test
-    fun `no audio track does not consume recovery budget`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
+    fun `silent heuristic still requires audio track evidence`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
 
         assertEquals(
             AudioRecoveryAction.NONE,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, false),
+            policy.requestRecovery(
+                "live:1",
+                AudioFailureClassification.RECOVERABLE_AUDIO,
+                hasAudioTrack = false,
+                explicitAudioEvidence = false,
+            ),
         )
         assertEquals(0, policy.attemptsUsed)
     }
 
     @Test
-    fun `vod recovery preserves current position`() {
-        assertEquals(98_765L, audioRecoveryPositionMs(isLive = false, currentPositionMs = 98_765L))
-        assertEquals(0L, audioRecoveryPositionMs(isLive = false, currentPositionMs = -1L))
-    }
-
-    @Test
-    fun `live recovery never applies vod resume position`() {
-        assertNull(audioRecoveryPositionMs(isLive = true, currentPositionMs = 98_765L))
-    }
-
-    @Test
-    fun `dispose invalidates pending and future recovery`() {
-        val policy = AudioRecoveryStateMachine().apply { beginGeneration("movie:1") }
-        policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
+    fun `dispose invalidates detector recovery budget`() {
+        val policy = AudioRecoveryStateMachine().apply { beginGeneration("live:1") }
+        policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
 
         policy.invalidate()
 
         assertFalse(policy.recoveryPending)
         assertEquals(
             AudioRecoveryAction.NONE,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+            policy.requestRecovery("live:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
         )
     }
 
     @Test
-    fun `exhausted recovery returns control to existing final error path`() {
-        val policy = AudioRecoveryStateMachine(maxAttempts = 1).apply { beginGeneration("movie:1") }
-        policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true)
-        policy.markRecoveryCommandIssued("movie:1")
+    fun `live recovery has no vod seek restoration`() {
+        assertNull(audioRecoveryPositionMs(isLive = true, currentPositionMs = 98_765L))
+    }
+
+    @Test
+    fun `vod recovery preserves position`() {
+        assertEquals(98_765L, audioRecoveryPositionMs(isLive = false, currentPositionMs = 98_765L))
+        assertEquals(0L, audioRecoveryPositionMs(isLive = false, currentPositionMs = -1L))
+    }
+
+    @Test
+    fun `preserved state keeps volume and track selection parameters`() {
+        val trackSelection = "selected-audio-and-subtitle-overrides"
+        val state = preservedAudioRecoveryState(
+            isLive = false,
+            currentPositionMs = 45_000L,
+            playWhenReady = true,
+            speed = 1.25f,
+            volume = .65f,
+            trackSelectionParameters = trackSelection,
+        )
+
+        assertEquals(45_000L, state.positionMs)
+        assertTrue(state.playWhenReady)
+        assertEquals(1.25f, state.speed)
+        assertEquals(.65f, state.volume)
+        assertEquals(trackSelection, state.trackSelectionParameters)
+    }
+}
+
+class AudioPlaybackHealthPolicyTest {
+    private val healthyBase = AudioPlaybackHealthSnapshot(
+        playbackReady = true,
+        isPlaying = true,
+        playbackProgressing = true,
+        audioTrackPresent = true,
+        audioTrackSelected = true,
+        audioFormatKnown = true,
+        audioPositionAdvanced = false,
+        volume = 1f,
+        muted = false,
+        buffering = false,
+        seekInProgress = false,
+        trackTransitionInProgress = false,
+        appForeground = true,
+    )
+
+    @Test
+    fun `healthy audio progression prevents silent recovery`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
 
         assertEquals(
-            AudioRecoveryAction.EXHAUSTED,
-            policy.requestRecovery("movie:1", AudioFailureClassification.RECOVERABLE_AUDIO, true),
+            AudioPlaybackHealthDecision.HEALTHY,
+            policy.evaluate("live:1", 20_000L, healthyBase.copy(audioPositionAdvanced = true)),
         )
+    }
+
+    @Test
+    fun `before four second grace is waiting`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        assertEquals(AudioPlaybackHealthDecision.WAITING, policy.evaluate("live:1", 1_000L, healthyBase))
+        assertEquals(AudioPlaybackHealthDecision.WAITING, policy.evaluate("live:1", 4_999L, healthyBase))
+    }
+
+    @Test
+    fun `after grace before confirmation is suspected`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.evaluate("live:1", 1_000L, healthyBase)
+
+        assertEquals(
+            AudioPlaybackHealthDecision.SUSPECTED_SILENT_AUDIO,
+            policy.evaluate("live:1", 5_000L, healthyBase),
+        )
+        assertEquals(
+            AudioPlaybackHealthDecision.SUSPECTED_SILENT_AUDIO,
+            policy.evaluate("live:1", 6_499L, healthyBase),
+        )
+    }
+
+    @Test
+    fun `after grace and confirmation recovers audio`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.evaluate("live:1", 1_000L, healthyBase)
+
+        assertEquals(
+            AudioPlaybackHealthDecision.RECOVER_AUDIO,
+            policy.evaluate("live:1", 6_500L, healthyBase),
+        )
+    }
+
+    @Test
+    fun `buffering is no action`() {
+        assertNoAction(healthyBase.copy(buffering = true))
+    }
+
+    @Test
+    fun `paused is no action`() {
+        assertNoAction(healthyBase.copy(isPlaying = false))
+    }
+
+    @Test
+    fun `volume zero is no action`() {
+        assertNoAction(healthyBase.copy(volume = 0f))
+    }
+
+    @Test
+    fun `muted is no action`() {
+        assertNoAction(healthyBase.copy(muted = true))
+    }
+
+    @Test
+    fun `no audio track is no action`() {
+        assertNoAction(healthyBase.copy(audioTrackPresent = false))
+    }
+
+    @Test
+    fun `unselected audio track is no action`() {
+        assertNoAction(healthyBase.copy(audioTrackSelected = false))
+    }
+
+    @Test
+    fun `unknown audio format is no action`() {
+        assertNoAction(healthyBase.copy(audioFormatKnown = false))
+    }
+
+    @Test
+    fun `seek is no action and resets grace`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.evaluate("live:1", 1_000L, healthyBase)
+        policy.evaluate("live:1", 4_000L, healthyBase.copy(seekInProgress = true))
+
+        assertEquals(AudioPlaybackHealthDecision.WAITING, policy.evaluate("live:1", 7_000L, healthyBase))
+    }
+
+    @Test
+    fun `track transition is no action and resets grace`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.evaluate("live:1", 1_000L, healthyBase)
+        policy.evaluate("live:1", 4_000L, healthyBase.copy(trackTransitionInProgress = true))
+
+        assertEquals(AudioPlaybackHealthDecision.WAITING, policy.evaluate("live:1", 7_000L, healthyBase))
+    }
+
+    @Test
+    fun `format change reset uses explicit reset observation`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.evaluate("live:1", 1_000L, healthyBase)
+        policy.resetObservation("live:1")
+
+        assertEquals(AudioPlaybackHealthDecision.WAITING, policy.evaluate("live:1", 8_000L, healthyBase))
+    }
+
+    @Test
+    fun `background is no action`() {
+        assertNoAction(healthyBase.copy(appForeground = false))
+    }
+
+    @Test
+    fun `playback must actually progress`() {
+        assertNoAction(healthyBase.copy(playbackProgressing = false))
+    }
+
+    @Test
+    fun `ready alone is not success`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        assertEquals(
+            AudioPlaybackHealthDecision.NO_ACTION,
+            policy.evaluate(
+                "live:1",
+                1_000L,
+                healthyBase.copy(isPlaying = false, playbackProgressing = false),
+            ),
+        )
+    }
+
+    @Test
+    fun `new generation has fresh detector`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.evaluate("live:1", 1_000L, healthyBase)
+        assertEquals(AudioPlaybackHealthDecision.RECOVER_AUDIO, policy.evaluate("live:1", 6_500L, healthyBase))
+
+        policy.beginGeneration("live:2")
+
+        assertEquals(AudioPlaybackHealthDecision.WAITING, policy.evaluate("live:2", 6_500L, healthyBase))
+    }
+
+    @Test
+    fun `stale generation detector is ignored`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:B") }
+        assertEquals(
+            AudioPlaybackHealthDecision.NO_ACTION,
+            policy.evaluate("live:A", 10_000L, healthyBase),
+        )
+    }
+
+    @Test
+    fun `dispose invalidates detector`() {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        policy.invalidate()
+
+        assertEquals(
+            AudioPlaybackHealthDecision.NO_ACTION,
+            policy.evaluate("live:1", 10_000L, healthyBase),
+        )
+    }
+
+    private fun assertNoAction(snapshot: AudioPlaybackHealthSnapshot) {
+        val policy = AudioPlaybackHealthPolicy().apply { beginGeneration("live:1") }
+        assertEquals(AudioPlaybackHealthDecision.NO_ACTION, policy.evaluate("live:1", 10_000L, snapshot))
     }
 }

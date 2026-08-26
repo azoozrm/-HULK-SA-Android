@@ -28,6 +28,7 @@ import sa.hulksa.player.ui.VoiceSearchAppLayer
 import sa.hulksa.player.ui.VoiceSearchDelegate
 import sa.hulksa.player.ui.isVoiceSearchDestination
 import sa.hulksa.player.ui.isVoiceSearchHardwareKey
+import sa.hulksa.player.ui.screens.AudioPlaybackHealthCoordinator
 import sa.hulksa.player.ui.theme.HulkTheme
 
 class MainActivity : ComponentActivity() {
@@ -35,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private var currentScreen: HulkScreen = HulkScreen.LOGIN
     private lateinit var voiceSearchDelegate: VoiceSearchDelegate
     private lateinit var subscriptionResumeEnforcer: SubscriptionResumeEnforcer
+    private lateinit var audioPlaybackHealthCoordinator: AudioPlaybackHealthCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +54,7 @@ class MainActivity : ComponentActivity() {
             activity = this,
             onTranscript = viewModel::updateSearch,
         )
+        audioPlaybackHealthCoordinator = AudioPlaybackHealthCoordinator(this) { viewModel.state.value }
 
         configurePhoneWindow()
         applyPhoneOrientationPolicy(HulkScreen.LOGIN)
@@ -73,6 +76,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        audioPlaybackHealthCoordinator.start()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -100,6 +104,11 @@ class MainActivity : ComponentActivity() {
         ) {
             viewModel.onAppResumed()
         }
+    }
+
+    override fun onDestroy() {
+        if (::audioPlaybackHealthCoordinator.isInitialized) audioPlaybackHealthCoordinator.stop()
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
