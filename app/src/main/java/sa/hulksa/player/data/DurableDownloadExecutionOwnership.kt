@@ -11,17 +11,17 @@ import sa.hulksa.player.model.OfflineStatus
  * same account/download record.
  */
 internal object DurableDownloadExecutionLeaseRegistry {
-    private val activeLeases = ConcurrentHashMap.newKeySet<String>()
+    private val activeLeases = ConcurrentHashMap<String, Unit>()
 
     fun claim(accountId: String, downloadId: Long): Boolean =
-        activeLeases.add(key(accountId, downloadId))
+        activeLeases.putIfAbsent(key(accountId, downloadId), Unit) == null
 
     fun release(accountId: String, downloadId: Long) {
         activeLeases.remove(key(accountId, downloadId))
     }
 
     fun owns(accountId: String, downloadId: Long): Boolean =
-        activeLeases.contains(key(accountId, downloadId))
+        activeLeases.containsKey(key(accountId, downloadId))
 
     private fun key(accountId: String, downloadId: Long): String {
         validateDownloadAccountId(accountId)
