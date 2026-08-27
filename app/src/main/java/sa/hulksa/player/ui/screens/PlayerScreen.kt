@@ -78,9 +78,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -106,6 +108,7 @@ import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.playback.HulkPlayerFactory
+import sa.hulksa.player.playback.PlayerAudioDiagnostics
 import sa.hulksa.player.playback.PlayerAudioOutputMode
 import sa.hulksa.player.playback.PlayerSessionCallbacks
 import sa.hulksa.player.playback.PlayerSessionController
@@ -155,6 +158,11 @@ private data class PlayerReplacementState(
     val speed: Float,
     val volume: Float,
     val trackSelectionParameters: TrackSelectionParameters,
+)
+
+private data class SuspendedPlayerError(
+    val message: String,
+    val failureClass: RecoveryFailureClass?,
 )
 
 private fun hasUsableNetwork(context: Context): Boolean {
@@ -235,6 +243,14 @@ fun PlayerScreen(
     val localPlayback = remember(request) { request.usesOnlyLocalMedia() }
     val playerSession = remember(request) { PlayerSessionController(request) }
     val playerFactory = remember(context) { HulkPlayerFactory(context) }
+    val playerDiagnostics = remember(context, playerSession) {
+        PlayerAudioDiagnostics(
+            context = context,
+            request = request,
+            generation = playerSession.generation,
+            sourcePlan = playerSession.sourcePlan,
+        )
+    }
     val playerDisplayTitle = remember(request) {
         val seriesTitle = request.seriesTitle?.trim().orEmpty()
         val episodeTitle = request.episodeTitle?.trim().orEmpty()
@@ -258,6 +274,8 @@ fun PlayerScreen(
     var recoveryDelayMs by remember(request) { mutableLongStateOf(0L) }
     var pendingSeekMs by remember(request) { mutableLongStateOf(0L) }
     var finalError by remember(request) { mutableStateOf<String?>(null) }
+    var finalFailureClass by remember(request) { mutableStateOf<RecoveryFailureClass?>(null) }
+    var suspendedFinalError by remember(request) { mutableStateOf<SuspendedPlayerError?>(null) }
     var offlineFailure by remember(request) { mutableStateOf(false) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
     var buffering by remember(request) { mutableStateOf(true) }
@@ -333,6 +351,39 @@ fun PlayerScreen(
         playerFactory.create(audioOutputMode)
     }
 
+    fun clearFinalErrorState() {
+        finalError = null
+        finalFailureClass = null
+        suspendedFinalError = null
+    }
+
+    fun suspendFinalErrorForModal() {
+        val message = finalError ?: return
+        suspendedFinalError = SuspendedPlayerError(message, finalFailureClass)
+        finalError = null
+        finalFailureClass = null
+    }
+
+    fun restoreSuspendedFinalError() {
+        val suspended = suspendedFinalError ?: return
+        if (finalError == null) {
+            finalError = suspended.message
+            finalFailureClass = suspended.failureClass
+        }
+        suspendedFinalError = null
+    }
+
+    fun closeBrowserAndRestoreError() {
+        browserVisible = false
+        restoreSuspendedFinalError()
+    }
+
+    fun closeActivePanelAndRestoreError() {
+        val restoreError = activePanel == PlayerPanel.SERVERS
+        activePanel = null
+        if (restoreError) restoreSuspendedFinalError()
+    }
+
     fun captureReplacementState(
         targetCandidateIndex: Int,
         targetOutputMode: PlayerAudioOutputMode,
@@ -359,7 +410,7 @@ fun PlayerScreen(
 
     fun applyRecoveryCommand(command: RecoveryCommand): Boolean {
         if (command.generationId != playerSession.generation.id) return false
-        finalError = null
+        clearFinalErrorState()
         offlineFailure = false
 
         return when (command.type) {
@@ -420,12 +471,14 @@ fun PlayerScreen(
 
     fun retryManually(targetCandidateIndex: Int = playerSession.firstCandidateIndex ?: 0) {
         if (!playerSession.resetForManualRetry(targetCandidateIndex)) {
+            suspendedFinalError = null
+            finalFailureClass = RecoveryFailureClass.SOURCE
             finalError = "لا يوجد رابط تشغيل صالح لهذا المحتوى."
             buffering = false
             return
         }
         offlineFailure = false
-        finalError = null
+        clearFinalErrorState()
         pendingSeekMs = if (request.isLive) 0L else player.currentPosition.coerceAtLeast(0L)
         recoveryDelayMs = 0L
         if (audioOutputMode != PlayerAudioOutputMode.NORMAL) {
@@ -508,9 +561,9 @@ fun PlayerScreen(
 
     fun handleBackAction() {
         when {
-            browserVisible -> browserVisible = false
+            browserVisible -> closeBrowserAndRestoreError()
             finalError != null -> saveAndBack()
-            activePanel != null -> activePanel = null
+            activePanel != null -> closeActivePanelAndRestoreError()
             resumePromptVisible -> {
                 resumePromptVisible = false
                 player.seekTo(0L)
@@ -532,7 +585,7 @@ fun PlayerScreen(
     }
 
     BackHandler(enabled = browserVisible) {
-        browserVisible = false
+        closeBrowserAndRestoreError()
     }
     BackHandler(enabled = !browserVisible) {
         handleBackAction()
@@ -601,7 +654,8 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(player, request, playerSession) {
+    DisposableEffect(player, request, playerSession, playerDiagnostics) {
+        playerDiagnostics.attach(player)
         playerSession.attach(
             player = player,
             candidateIndex = candidateIndex,
@@ -611,12 +665,17 @@ fun PlayerScreen(
                 onRecoveryCommand = { command -> latestRecoveryCommandHandler(command) },
                 onFinalError = { failureClass ->
                     player.stop()
+                    suspendedFinalError = null
+                    finalFailureClass = failureClass
                     offlineFailure = false
                     buffering = false
                     controlsVisible = true
                     finalError = when {
                         failureClass == RecoveryFailureClass.AUDIO && request.isLive -> {
-                            "تعذر تشغيل المحتوى. اعد المحاولة او افتح قناة اخرى."
+                            "تعذر تشغيل صوت هذه القناة. اعد المحاولة او افتح قناة اخرى."
+                        }
+                        failureClass == RecoveryFailureClass.AUDIO -> {
+                            "تعذر تشغيل الصوت لهذا المحتوى. اعد المحاولة."
                         }
                         request.isLive -> {
                             "السيرفر لا يرسل بث هذه القناة الان. اعد التحميل او افتح قناة اخرى."
@@ -628,6 +687,8 @@ fun PlayerScreen(
                 },
                 onOffline = { positionMs ->
                     pendingSeekMs = positionMs
+                    suspendedFinalError = null
+                    finalFailureClass = null
                     buffering = false
                     controlsVisible = true
                     offlineFailure = true
@@ -638,8 +699,9 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
-                if (playbackState == Player.STATE_READY) {
+                if (playbackState == Player.STATE_READY && suspendedFinalError == null) {
                     finalError = null
+                    finalFailureClass = null
                     offlineFailure = false
                 }
                 if (
@@ -701,6 +763,7 @@ fun PlayerScreen(
                 onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
             }
             player.removeListener(listener)
+            playerDiagnostics.detach(player)
             playerSession.detach(player)
             player.release()
         }
@@ -713,13 +776,17 @@ fun PlayerScreen(
         snapshotFlow { appForeground && (localPlayback || networkAvailable) }
             .first { readyToPrepare -> readyToPrepare }
 
+        playerDiagnostics.onPrepare(candidateIndex, audioOutputMode)
         val mediaItem = playerSession.prepareMediaItem(player, candidateIndex)
         if (mediaItem == null) {
+            suspendedFinalError = null
+            finalFailureClass = RecoveryFailureClass.SOURCE
             finalError = "لا يوجد رابط تشغيل صالح لهذا المحتوى."
             buffering = false
             return@LaunchedEffect
         }
         finalError = null
+        finalFailureClass = null
         buffering = true
         audioTracks = emptyList()
         subtitleTracks = emptyList()
@@ -778,6 +845,8 @@ fun PlayerScreen(
             }
             playerSession.onNetworkUnavailable()
             player.pause()
+            suspendedFinalError = null
+            finalFailureClass = null
             buffering = false
             controlsVisible = true
             offlineFailure = true
@@ -912,6 +981,7 @@ fun PlayerScreen(
         controlsVisible,
         activePanel,
         browserVisible,
+        finalError,
         resumePromptVisible,
         unlockVisible,
         controlsLocked,
@@ -920,6 +990,7 @@ fun PlayerScreen(
         request.historyKey,
     ) {
         val target = when {
+            finalError != null -> null
             browserVisible || activePanel != null -> null
             resumePromptVisible -> resumeFocus
             nextCountdown >= 0 -> nextEpisodePlayFocus
@@ -942,13 +1013,14 @@ fun PlayerScreen(
     }
 
     val interactionModifier = Modifier
-        .pointerInput(request) {
+        .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
+                if (finalError != null) return@detectTapGestures
                 if (controlsLocked) { unlockVisible = true; controlsVisible = true } else controlsVisible = !controlsVisible
             })
         }
-        .pointerInput(request.isLive) {
-            if (request.isLive) {
+        .pointerInput(request.isLive, finalError) {
+            if (request.isLive && finalError == null) {
                 var verticalDrag = 0f
                 detectVerticalDragGestures(
                     onVerticalDrag = { change, amount -> change.consume(); verticalDrag += amount },
@@ -972,13 +1044,27 @@ fun PlayerScreen(
             .onFocusChanged { surfaceFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val keyCode = event.nativeKeyEvent.keyCode
+                if (finalError != null) {
+                    return@onPreviewKeyEvent when (
+                        playerErrorModalInputDisposition(keyCode.toPlayerErrorModalInput())
+                    ) {
+                        PlayerErrorModalInputDisposition.HANDLE_BACK -> {
+                            handleBackAction()
+                            true
+                        }
+                        PlayerErrorModalInputDisposition.CONSUME -> true
+                        PlayerErrorModalInputDisposition.PASS_TO_MODAL_ACTION,
+                        PlayerErrorModalInputDisposition.PASS_TO_SYSTEM,
+                        -> false
+                    }
+                }
                 if (
-                    event.type != KeyEventType.KeyDown || browserVisible || activePanel != null ||
-                    resumePromptVisible || unlockVisible || nextCountdown >= 0
+                    browserVisible || activePanel != null || resumePromptVisible || unlockVisible || nextCountdown >= 0
                 ) {
                     return@onPreviewKeyEvent false
                 }
-                val keyCode = event.nativeKeyEvent.keyCode
                 if (keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
                     handleBackAction()
                     return@onPreviewKeyEvent true
@@ -1252,11 +1338,21 @@ fun PlayerScreen(
             PlayerErrorPanel(
                 message = finalError!!,
                 canChooseChannel = request.isLive && liveCatalog?.items?.isNotEmpty() == true,
-                canChooseServer = request.candidates.size > 1,
+                canChooseServer = canOfferPlayerErrorSourcePicker(
+                    failureClass = finalFailureClass,
+                    candidateCount = request.candidates.size,
+                ),
                 onRetry = { retryManually() },
-                onChooseChannel = { controlsVisible = false; browserVisible = true },
-                onChooseServer = { activePanel = PlayerPanel.SERVERS },
-                onBack = onBack,
+                onChooseChannel = {
+                    suspendFinalErrorForModal()
+                    controlsVisible = false
+                    browserVisible = true
+                },
+                onChooseServer = {
+                    suspendFinalErrorForModal()
+                    activePanel = PlayerPanel.SERVERS
+                },
+                onBack = ::saveAndBack,
                 retryFocusRequester = errorRetryFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -1276,8 +1372,12 @@ fun PlayerScreen(
                         Toast.LENGTH_SHORT,
                     ).show()
                 },
-                onSelectChannel = { channel -> browserVisible = false; onSelectLiveChannel(channel) },
-                onClose = { browserVisible = false },
+                onSelectChannel = { channel ->
+                    suspendedFinalError = null
+                    browserVisible = false
+                    onSelectLiveChannel(channel)
+                },
+                onClose = ::closeBrowserAndRestoreError,
                 modifier = if (tvRemoteInput) {
                     Modifier.align(Alignment.CenterEnd)
                 } else {
@@ -1343,14 +1443,13 @@ fun PlayerScreen(
                     title = "اختيار المصدر",
                     options = request.candidates.mapIndexed { index, _ ->
                         "المصدر ${index + 1}" to {
-                            if (index != candidateIndex) {
-                                retryManually(index)
-                            }
                             activePanel = null
+                            suspendedFinalError = null
+                            retryManually(index)
                         }
                     },
                     selectedLabel = "المصدر ${candidateIndex + 1}",
-                    onClose = { activePanel = null },
+                    onClose = ::closeActivePanelAndRestoreError,
                     modifier = Modifier.align(Alignment.CenterStart),
                 )
             }
@@ -1833,21 +1932,105 @@ private fun PlayerErrorPanel(
     retryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    val adaptiveUi = LocalAdaptiveUi.current
+    val layoutDirection = LocalLayoutDirection.current
+    val channelFocusRequester = remember { FocusRequester() }
+    val serverFocusRequester = remember { FocusRequester() }
+    val backFocusRequester = remember { FocusRequester() }
+    val actions = playerErrorModalActions(canChooseChannel, canChooseServer)
+    val requesters = actions.map { action ->
+        when (action) {
+            PlayerErrorModalAction.RETRY -> retryFocusRequester
+            PlayerErrorModalAction.CHOOSE_CHANNEL -> channelFocusRequester
+            PlayerErrorModalAction.CHOOSE_SOURCE -> serverFocusRequester
+            PlayerErrorModalAction.BACK -> backFocusRequester
+        }
+    }
+
+    fun actionModifier(index: Int, requester: FocusRequester): Modifier {
+        val leftIndex = if (layoutDirection == LayoutDirection.Rtl) index + 1 else index - 1
+        val rightIndex = if (layoutDirection == LayoutDirection.Rtl) index - 1 else index + 1
+        return Modifier
+            .focusRequester(requester)
+            .focusProperties {
+                left = requesters.getOrNull(leftIndex) ?: FocusRequester.Cancel
+                right = requesters.getOrNull(rightIndex) ?: FocusRequester.Cancel
+                up = FocusRequester.Cancel
+                down = FocusRequester.Cancel
+            }
+    }
+
+    Box(
         modifier = modifier
-            .fillMaxWidth(.78f)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.Black.copy(alpha = .93f))
-            .padding(22.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = .70f))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (playerErrorModalInputDisposition(event.nativeKeyEvent.keyCode.toPlayerErrorModalInput())) {
+                    PlayerErrorModalInputDisposition.HANDLE_BACK -> {
+                        onBack()
+                        true
+                    }
+                    PlayerErrorModalInputDisposition.CONSUME -> true
+                    PlayerErrorModalInputDisposition.PASS_TO_MODAL_ACTION,
+                    PlayerErrorModalInputDisposition.PASS_TO_SYSTEM,
+                    -> false
+                }
+            },
     ) {
-        ErrorNotice(message)
-        Spacer(Modifier.height(15.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            FocusButton("اعادة المحاولة", onRetry, modifier = Modifier.focusRequester(retryFocusRequester))
-            if (canChooseChannel) FocusButton("اختيار قناة", onChooseChannel, primary = false)
-            if (canChooseServer) FocusButton("اختيار مصدر", onChooseServer, primary = false)
-            FocusButton("رجوع", onBack, primary = false)
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(if (adaptiveUi.isTelevision) .82f else .92f)
+                .widthIn(max = if (adaptiveUi.isTelevision) 920.dp else 620.dp)
+                .focusGroup()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.Black.copy(alpha = .96f))
+                .border(1.dp, LocalHulkColors.current.gold.copy(alpha = .34f), RoundedCornerShape(20.dp))
+                .padding(if (adaptiveUi.isTelevision) 24.dp else 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            ErrorNotice(message)
+            Spacer(Modifier.height(15.dp))
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().focusGroup(),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(actions.size) { index ->
+                    when (val action = actions[index]) {
+                        PlayerErrorModalAction.RETRY -> FocusButton(
+                            "اعادة المحاولة",
+                            onRetry,
+                            modifier = actionModifier(index, retryFocusRequester),
+                            compact = true,
+                        )
+                        PlayerErrorModalAction.CHOOSE_CHANNEL -> FocusButton(
+                            "اختيار قناة",
+                            onChooseChannel,
+                            modifier = actionModifier(index, channelFocusRequester),
+                            primary = false,
+                            compact = true,
+                        )
+                        PlayerErrorModalAction.CHOOSE_SOURCE -> FocusButton(
+                            "اختيار مصدر",
+                            onChooseServer,
+                            modifier = actionModifier(index, serverFocusRequester),
+                            primary = false,
+                            compact = true,
+                        )
+                        PlayerErrorModalAction.BACK -> FocusButton(
+                            "رجوع",
+                            onBack,
+                            modifier = actionModifier(index, backFocusRequester),
+                            primary = false,
+                            compact = true,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -2753,6 +2936,29 @@ private fun formatTime(ms: Long): String {
     } else {
         String.format(Locale.US, "%02d:%02d", minutes, seconds)
     }
+}
+
+private fun Int.toPlayerErrorModalInput(): PlayerErrorModalInput = when (this) {
+    AndroidKeyEvent.KEYCODE_BACK,
+    AndroidKeyEvent.KEYCODE_ESCAPE,
+    -> PlayerErrorModalInput.BACK
+    AndroidKeyEvent.KEYCODE_DPAD_LEFT -> PlayerErrorModalInput.LEFT
+    AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> PlayerErrorModalInput.RIGHT
+    AndroidKeyEvent.KEYCODE_DPAD_UP -> PlayerErrorModalInput.UP
+    AndroidKeyEvent.KEYCODE_DPAD_DOWN -> PlayerErrorModalInput.DOWN
+    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+    AndroidKeyEvent.KEYCODE_ENTER,
+    AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+    -> PlayerErrorModalInput.SELECT
+    AndroidKeyEvent.KEYCODE_CHANNEL_UP -> PlayerErrorModalInput.CHANNEL_UP
+    AndroidKeyEvent.KEYCODE_CHANNEL_DOWN -> PlayerErrorModalInput.CHANNEL_DOWN
+    AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
+    AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
+    AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+    AndroidKeyEvent.KEYCODE_MEDIA_REWIND,
+    AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+    -> PlayerErrorModalInput.PLAYER_COMMAND
+    else -> PlayerErrorModalInput.OTHER
 }
 
 internal fun relativeChannelIndex(currentIndex: Int, delta: Int, size: Int): Int {
