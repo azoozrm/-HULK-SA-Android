@@ -177,6 +177,7 @@ data class AuthenticatedSession(
     val portal: PortalConfig,
     val credentials: Credentials,
     val account: AccountInfo,
+    val allowedLiveOutputFormats: Set<String> = emptySet(),
 )
 
 data class Catalog(

@@ -60,7 +60,12 @@ class XtreamClient {
             maxConnections = user.optString("max_connections", "1").toIntOrNull() ?: 1,
             isTrial = user.optString("is_trial", "0") == "1",
         )
-        return AuthenticatedSession(portal, credentials, account)
+        return AuthenticatedSession(
+            portal = portal,
+            credentials = credentials,
+            account = account,
+            allowedLiveOutputFormats = parseAllowedLiveOutputFormats(user.opt("allowed_output_formats")),
+        )
     }
 
     suspend fun catalog(session: AuthenticatedSession, type: ContentType): Catalog =
@@ -160,6 +165,7 @@ class XtreamClient {
                 credentials = credentials,
                 streamId = item.id,
                 preferredExtension = item.containerExtension,
+                allowedOutputFormats = session.allowedLiveOutputFormats,
             )
             ContentType.MOVIE -> listOf(
                 streamUrl(base, "movie", credentials, item.id, item.containerExtension ?: "mp4"),
@@ -216,6 +222,7 @@ class XtreamClient {
                 credentials = session.credentials,
                 streamId = entry.streamId,
                 preferredExtension = extension,
+                allowedOutputFormats = session.allowedLiveOutputFormats,
             )
         } else {
             listOf(streamUrl(base, entry.streamKind, session.credentials, entry.streamId, extension))
@@ -256,15 +263,12 @@ class XtreamClient {
         credentials: Credentials,
         streamId: Int,
         preferredExtension: String?,
+        allowedOutputFormats: Set<String>,
     ): List<String> {
-        val preferred = preferredExtension
-            ?.trim()
-            ?.trimStart('.')
-            ?.lowercase()
-            ?.takeIf { it == "ts" || it == "m3u8" || it == "mpegts" }
-        return listOf(
-            streamUrl(base, "live", credentials, streamId, preferred ?: "ts"),
-        )
+        return orderedLiveOutputFormats(preferredExtension, allowedOutputFormats)
+            .map { outputFormat ->
+                streamUrl(base, "live", credentials, streamId, outputFormat)
+            }
     }
 
     private suspend fun requestObject(
@@ -461,6 +465,51 @@ class XtreamClient {
         val JSON = "application/json".toMediaType()
     }
 }
+
+internal fun parseAllowedLiveOutputFormats(rawValue: Any?): Set<String> {
+    val rawFormats = when (rawValue) {
+        is JSONArray -> buildList {
+            for (index in 0 until rawValue.length()) add(rawValue.optString(index))
+        }
+        is String -> {
+            val value = rawValue.trim()
+            if (value.startsWith("[") && value.endsWith("]")) {
+                runCatching {
+                    val array = JSONArray(value)
+                    buildList {
+                        for (index in 0 until array.length()) add(array.optString(index))
+                    }
+                }.getOrDefault(emptyList())
+            } else {
+                value.split(',', ';', '|')
+            }
+        }
+        else -> emptyList()
+    }
+    return rawFormats
+        .mapNotNull(::normalizeLiveOutputFormat)
+        .toCollection(linkedSetOf())
+}
+
+internal fun orderedLiveOutputFormats(
+    preferredExtension: String?,
+    allowedOutputFormats: Set<String>,
+): List<String> {
+    val preferred = normalizeLiveOutputFormat(preferredExtension)
+    val allowed = allowedOutputFormats.mapNotNull(::normalizeLiveOutputFormat).distinct()
+    val primary = preferred ?: allowed.firstOrNull() ?: "ts"
+    return buildList {
+        add(primary)
+        allowed.forEach { format -> if (format != primary) add(format) }
+    }
+}
+
+private fun normalizeLiveOutputFormat(rawValue: String?): String? = rawValue
+    ?.trim()
+    ?.trimStart('.')
+    ?.lowercase()
+    ?.let { value -> if (value == "mpegts") "ts" else value }
+    ?.takeIf { it == "ts" || it == "m3u8" }
 
 internal fun normalizeArtworkUrl(raw: String?, portalBaseUrl: String): String? {
     val clean = raw
