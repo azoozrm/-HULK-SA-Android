@@ -30,6 +30,7 @@ private data class DeferredRecovery(
 
 internal data class PlayerSessionCallbacks(
     val isNetworkAvailable: () -> Boolean,
+    val isRecoveryCommandCurrent: (RecoveryCommand) -> Boolean,
     val onRecoveryCommand: (RecoveryCommand) -> Boolean,
     val onFinalError: (RecoveryFailureClass) -> Unit,
     val onOffline: (positionMs: Long) -> Unit,
@@ -479,6 +480,26 @@ internal class PlayerSessionController(
 
     private fun dispatch(command: RecoveryCommand, player: ExoPlayer) {
         logRecoveryCommand(command, player)
+        val currentCallbacks = callbacks
+        if (
+            !accepts(player) ||
+            currentCallbacks == null ||
+            !currentCallbacks.isRecoveryCommandCurrent(command)
+        ) {
+            val budgetRestored = if (command.type == RecoveryCommandType.SHOW_FINAL_ERROR) {
+                false
+            } else {
+                recovery.markCommandStale(generation.id, command.id)
+            }
+            Log.i(
+                HULK_PLAYER_LOG_TAG,
+                "recovery result=stale commandGeneration=${command.generationId} " +
+                    "sessionGeneration=${generation.id} candidate=${command.candidateIndex} " +
+                    "attempt=${command.id} strategy=${command.type} budgetRestored=$budgetRestored",
+            )
+            return
+        }
+
         if (command.type == RecoveryCommandType.SHOW_FINAL_ERROR) {
             monitorSuppressed = true
             deferredRecovery = null
@@ -489,13 +510,13 @@ internal class PlayerSessionController(
             )
             if (!finalErrorReported) {
                 finalErrorReported = true
-                callbacks?.onFinalError(command.failureClass)
+                currentCallbacks.onFinalError(command.failureClass)
             }
             return
         }
 
         monitorSuppressed = true
-        val accepted = callbacks?.onRecoveryCommand(command) == true
+        val accepted = currentCallbacks.onRecoveryCommand(command)
         if (accepted) {
             if (!recovery.markCommandApplied(generation.id, command.id)) return
             Log.i(

@@ -114,8 +114,10 @@ import sa.hulksa.player.playback.PlayerSessionCallbacks
 import sa.hulksa.player.playback.PlayerSessionController
 import sa.hulksa.player.playback.RecoveryCommand
 import sa.hulksa.player.playback.RecoveryCommandType
+import sa.hulksa.player.playback.RecoveryDispatchOwner
 import sa.hulksa.player.playback.RecoveryFailureClass
 import sa.hulksa.player.playback.forPlayerReplacement
+import sa.hulksa.player.playback.ownsRecoveryCommand
 import sa.hulksa.player.playback.playerReplacementPolicy
 import sa.hulksa.player.playback.shouldReprepareAfterAudioTrackOverride
 import sa.hulksa.player.ui.adaptive.HulkInputMode
@@ -350,6 +352,11 @@ fun PlayerScreen(
     val player = remember(request, playerInstanceGeneration, audioOutputMode) {
         playerFactory.create(audioOutputMode)
     }
+    val recoveryDispatchOwner = RecoveryDispatchOwner(
+        generationId = playerSession.generation.id,
+        playerInstanceId = playerInstanceGeneration,
+    )
+    val latestRecoveryDispatchOwner by rememberUpdatedState(recoveryDispatchOwner)
 
     fun clearFinalErrorState() {
         finalError = null
@@ -497,8 +504,6 @@ fun PlayerScreen(
         candidateIndex = targetCandidateIndex
         retryNonce += 1
     }
-
-    val latestRecoveryCommandHandler by rememberUpdatedState(::applyRecoveryCommand)
 
     fun revealControls() {
         focusTimelineOnReveal = false
@@ -656,6 +661,8 @@ fun PlayerScreen(
     }
 
     DisposableEffect(player, request, playerSession, playerDiagnostics) {
+        val attachedRecoveryDispatchOwner = recoveryDispatchOwner
+        val attachedRecoveryCommandHandler = ::applyRecoveryCommand
         playerDiagnostics.attach(player)
         playerSession.attach(
             player = player,
@@ -663,7 +670,14 @@ fun PlayerScreen(
             outputMode = audioOutputMode,
             callbacks = PlayerSessionCallbacks(
                 isNetworkAvailable = { localPlayback || hasUsableNetwork(context) },
-                onRecoveryCommand = { command -> latestRecoveryCommandHandler(command) },
+                isRecoveryCommandCurrent = { command ->
+                    ownsRecoveryCommand(
+                        command = command,
+                        attachedOwner = attachedRecoveryDispatchOwner,
+                        currentOwner = latestRecoveryDispatchOwner,
+                    )
+                },
+                onRecoveryCommand = attachedRecoveryCommandHandler,
                 onFinalError = { failureClass ->
                     player.stop()
                     suspendedFinalError = null
@@ -756,7 +770,6 @@ fun PlayerScreen(
                     ).orEmpty()
                 }
             }
-
         }
         player.addListener(listener)
         onDispose {

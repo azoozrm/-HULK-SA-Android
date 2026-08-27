@@ -105,6 +105,18 @@ internal data class RecoveryCommand(
     val delayMs: Long = 0L,
 )
 
+internal data class RecoveryDispatchOwner(
+    val generationId: Long,
+    val playerInstanceId: Int,
+)
+
+internal fun ownsRecoveryCommand(
+    command: RecoveryCommand,
+    attachedOwner: RecoveryDispatchOwner,
+    currentOwner: RecoveryDispatchOwner,
+): Boolean =
+    command.generationId == attachedOwner.generationId && attachedOwner == currentOwner
+
 internal enum class AudioFormatSupport {
     SUPPORTED,
     EXCEEDS_CAPABILITIES,
@@ -190,6 +202,7 @@ internal class PlayerRecoveryCoordinator(
     private var alternateTrackAttempted = false
     private var softwareAudioAttempted = false
     private var commandInFlight = false
+    private var inFlightCommand: RecoveryCommand? = null
     private var nextCommandId = 0L
     private var invalidated = false
     private var activeFailureClass: RecoveryFailureClass? = null
@@ -214,6 +227,7 @@ internal class PlayerRecoveryCoordinator(
         if (!owns(generationId) || sourcePlan.candidate(candidateIndex) == null) return false
         currentCandidateIndex = candidateIndex
         commandInFlight = false
+        inFlightCommand = null
         phase = RecoveryPhase.STABILIZING
         if (sourceChanged) {
             alternateTrackAttempted = false
@@ -262,6 +276,7 @@ internal class PlayerRecoveryCoordinator(
             RecoveryPhase.AUDIO_RECOVERY
         }
         commandInFlight = command.type != RecoveryCommandType.SHOW_FINAL_ERROR
+        inFlightCommand = command.takeIf { commandInFlight }
         return command
     }
 
@@ -308,19 +323,45 @@ internal class PlayerRecoveryCoordinator(
             RecoveryPhase.SOURCE_RECOVERY
         }
         commandInFlight = command.type != RecoveryCommandType.SHOW_FINAL_ERROR
+        inFlightCommand = command.takeIf { commandInFlight }
         return command
     }
 
     fun markCommandApplied(generationId: Long, commandId: Long): Boolean {
-        if (!owns(generationId) || !commandInFlight || commandId != nextCommandId) return false
+        if (!ownsInFlight(generationId, commandId)) return false
         commandInFlight = false
+        inFlightCommand = null
         phase = RecoveryPhase.STABILIZING
         return true
     }
 
     fun markCommandRejected(generationId: Long, commandId: Long): Boolean {
-        if (!owns(generationId) || !commandInFlight || commandId != nextCommandId) return false
+        if (!ownsInFlight(generationId, commandId)) return false
         commandInFlight = false
+        inFlightCommand = null
+        phase = RecoveryPhase.STABILIZING
+        return true
+    }
+
+    fun markCommandStale(generationId: Long, commandId: Long): Boolean {
+        if (!ownsInFlight(generationId, commandId)) return false
+        val command = checkNotNull(inFlightCommand)
+        when (command.type) {
+            RecoveryCommandType.SELECT_ALTERNATE_AUDIO_TRACK -> alternateTrackAttempted = false
+            RecoveryCommandType.RECREATE_WITH_SOFTWARE_AUDIO -> softwareAudioAttempted = false
+            RecoveryCommandType.RETRY_CURRENT_SOURCE -> {
+                val retriesUsed = sourceRetries[command.candidateIndex] ?: 0
+                when {
+                    retriesUsed <= 1 -> sourceRetries.remove(command.candidateIndex)
+                    else -> sourceRetries[command.candidateIndex] = retriesUsed - 1
+                }
+            }
+            RecoveryCommandType.MOVE_TO_NEXT_SOURCE -> Unit
+            RecoveryCommandType.SHOW_FINAL_ERROR -> return false
+        }
+        commandInFlight = false
+        inFlightCommand = null
+        activeFailureClass = null
         phase = RecoveryPhase.STABILIZING
         return true
     }
@@ -339,6 +380,7 @@ internal class PlayerRecoveryCoordinator(
         if (activeFailureClass != RecoveryFailureClass.SOURCE) {
             activeFailureClass = null
             commandInFlight = false
+            inFlightCommand = null
             phase = RecoveryPhase.HEALTHY
         }
         return true
@@ -351,6 +393,7 @@ internal class PlayerRecoveryCoordinator(
         alternateTrackAttempted = false
         softwareAudioAttempted = false
         commandInFlight = false
+        inFlightCommand = null
         activeFailureClass = null
         phase = RecoveryPhase.NORMAL
         return true
@@ -359,6 +402,7 @@ internal class PlayerRecoveryCoordinator(
     fun invalidate() {
         invalidated = true
         commandInFlight = false
+        inFlightCommand = null
         activeFailureClass = null
         phase = RecoveryPhase.INVALIDATED
     }
@@ -368,6 +412,9 @@ internal class PlayerRecoveryCoordinator(
 
     private fun owns(generationId: Long): Boolean =
         !invalidated && generation.id == generationId
+
+    private fun ownsInFlight(generationId: Long, commandId: Long): Boolean =
+        owns(generationId) && commandInFlight && inFlightCommand?.id == commandId
 
     private fun command(
         type: RecoveryCommandType,
