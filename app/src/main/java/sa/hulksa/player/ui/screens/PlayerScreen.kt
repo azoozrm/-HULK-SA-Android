@@ -561,9 +561,9 @@ fun PlayerScreen(
 
     fun handleBackAction() {
         when {
-            browserVisible -> closeBrowserAndRestoreError()
+            browserVisible -> browserVisible = false
             finalError != null -> saveAndBack()
-            activePanel != null -> closeActivePanelAndRestoreError()
+            activePanel != null -> activePanel = null
             resumePromptVisible -> {
                 resumePromptVisible = false
                 player.seekTo(0L)
@@ -582,6 +582,7 @@ fun PlayerScreen(
             }
             else -> saveAndBack()
         }
+        restoreSuspendedFinalError()
     }
 
     BackHandler(enabled = browserVisible) {
@@ -1044,9 +1045,9 @@ fun PlayerScreen(
             .onFocusChanged { surfaceFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
                 if (finalError != null) {
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     return@onPreviewKeyEvent when (
                         playerErrorModalInputDisposition(keyCode.toPlayerErrorModalInput())
                     ) {
@@ -1061,7 +1062,8 @@ fun PlayerScreen(
                     }
                 }
                 if (
-                    browserVisible || activePanel != null || resumePromptVisible || unlockVisible || nextCountdown >= 0
+                    event.type != KeyEventType.KeyDown || browserVisible || activePanel != null ||
+                    resumePromptVisible || unlockVisible || nextCountdown >= 0
                 ) {
                     return@onPreviewKeyEvent false
                 }
