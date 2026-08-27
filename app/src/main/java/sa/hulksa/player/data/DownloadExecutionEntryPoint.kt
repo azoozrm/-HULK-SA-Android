@@ -91,6 +91,9 @@ internal class DownloadExecutionEntryPoint(
                 repository.executeScheduledDownload(accountId, downloadId)
             }
         } catch (cancelled: CancellationException) {
+            // Drop the execution lease before cancelling the repository job. Its finally block
+            // re-runs scheduling, and must not be able to restart transport after worker stop.
+            DurableDownloadExecutionLeaseRegistry.release(accountId, downloadId)
             repository?.interruptForDurableWorkerStop(downloadId)
             throw cancelled
         } finally {
