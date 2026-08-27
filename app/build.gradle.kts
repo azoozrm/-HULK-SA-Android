@@ -233,6 +233,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
+    // LGPL-2.1, pure-Java decode-only fallback; exposed by HULK only for audio/mpeg-L2.
+    implementation("com.badlogicgames.jlayer:jlayer:1.0.2-gdx")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

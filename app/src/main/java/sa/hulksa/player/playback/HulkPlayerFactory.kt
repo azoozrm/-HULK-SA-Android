@@ -3,9 +3,12 @@
 package sa.hulksa.player.playback
 
 import android.content.Context
+import android.os.Handler
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Renderer
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -13,12 +16,14 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import java.util.ArrayList
 
 internal class HulkPlayerFactory(context: Context) {
     private val appContext = context.applicationContext
@@ -99,6 +104,39 @@ private class HulkPlayerRenderersFactory(
         setEnableDecoderFallback(true)
         if (outputMode == PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM) {
             setMediaCodecSelector(AudioOnlySoftwareFirstCodecSelector)
+        }
+    }
+
+    override fun buildAudioRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        audioSink: AudioSink,
+        eventHandler: Handler,
+        eventListener: AudioRendererEventListener,
+        out: ArrayList<Renderer>,
+    ) {
+        super.buildAudioRenderers(
+            context,
+            extensionRendererMode,
+            mediaCodecSelector,
+            enableDecoderFallback,
+            audioSink,
+            eventHandler,
+            eventListener,
+            out,
+        )
+
+        val bundledMp2Available = BundledMp2AudioRenderer.isAvailable()
+        if (shouldInstallBundledMp2Renderer(outputMode, bundledMp2Available)) {
+            // Keep MediaCodec first. Media3 selects this renderer only when the platform renderer
+            // cannot handle audio/mpeg-L2. No other audio MIME is accepted by the bundled renderer.
+            out += BundledMp2AudioRenderer(eventHandler, eventListener, audioSink)
+            Log.i(
+                "HulkPlayerFactory",
+                "bundledMp2Available=true decoderPath=PLATFORM>BUNDLED_MP2 recoveryStage=PLATFORM_SOFTWARE_PCM",
+            )
         }
     }
 
