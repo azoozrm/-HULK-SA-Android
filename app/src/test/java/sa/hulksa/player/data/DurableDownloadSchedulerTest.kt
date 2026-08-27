@@ -1,6 +1,8 @@
 package sa.hulksa.player.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DurableDownloadSchedulerTest {
@@ -72,4 +74,60 @@ class DurableDownloadSchedulerTest {
             nowEpochMs = 0L,
         )
     }
+
+    @Test
+    fun missingProcessSessionIsRestoredOnlyForCurrentValidAccount() {
+        val metadata = metadata(accountId = "account-a", expiresAtEpochSeconds = null)
+
+        assertTrue(
+            shouldRestoreDownloadWorkerSession(
+                workerAccountId = "account-a",
+                activeAccountId = "account-a",
+                metadata = metadata,
+                hasAuthenticatedSession = false,
+            ),
+        )
+        assertFalse(
+            shouldRestoreDownloadWorkerSession(
+                workerAccountId = "account-a",
+                activeAccountId = "account-b",
+                metadata = metadata,
+                hasAuthenticatedSession = false,
+            ),
+        )
+        assertFalse(
+            shouldRestoreDownloadWorkerSession(
+                workerAccountId = "account-a",
+                activeAccountId = "account-a",
+                metadata = metadata,
+                hasAuthenticatedSession = true,
+            ),
+        )
+    }
+
+    @Test
+    fun expiredSessionMetadataIsNeverRestoredForBackgroundDownload() {
+        assertFalse(
+            shouldRestoreDownloadWorkerSession(
+                workerAccountId = "account-a",
+                activeAccountId = "account-a",
+                metadata = metadata(accountId = "account-a", expiresAtEpochSeconds = 1L),
+                hasAuthenticatedSession = false,
+            ),
+        )
+    }
+
+    private fun metadata(
+        accountId: String,
+        expiresAtEpochSeconds: Long?,
+    ) = AccountSessionMetadata(
+        accountId = accountId,
+        username = "demo",
+        portalBaseUrl = "http://example.test:8080",
+        authenticatedAtEpochMs = 1L,
+        expiresAtEpochSeconds = expiresAtEpochSeconds,
+        status = "Active",
+        installationId = "install",
+        sessionId = "session",
+    )
 }

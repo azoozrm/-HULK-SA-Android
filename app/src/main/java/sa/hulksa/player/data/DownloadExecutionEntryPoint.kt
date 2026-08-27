@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import sa.hulksa.player.model.OfflineStatus
 
@@ -67,14 +68,33 @@ internal class DownloadExecutionEntryPoint(
         ) {
             DownloadWorkerSessionGate.TERMINAL -> DurableDownloadExecutionResult.TERMINAL
             DownloadWorkerSessionGate.RETRY -> DurableDownloadExecutionResult.RETRY
-            DownloadWorkerSessionGate.ALLOW -> {
-                val repository = repositoryProvider(accountId)
-                if (!downloadWorkerOwnsRecord(accountId, repository, downloadId)) {
-                    DurableDownloadExecutionResult.TERMINAL
-                } else {
-                    repository.executeScheduledDownload(accountId, downloadId)
-                }
+            DownloadWorkerSessionGate.ALLOW -> executeOwned(accountId, downloadId)
+        }
+    }
+
+    private suspend fun executeOwned(
+        accountId: String,
+        downloadId: Long,
+    ): DurableDownloadExecutionResult {
+        if (!DurableDownloadExecutionLeaseRegistry.claim(accountId, downloadId)) {
+            return DurableDownloadExecutionResult.RETRY
+        }
+        var repository: DownloadRepository? = null
+        return try {
+            repository = repositoryProvider(accountId)
+            if (!downloadWorkerOwnsRecord(accountId, repository, downloadId)) {
+                DurableDownloadExecutionResult.TERMINAL
+            } else {
+                // The repository may already exist from UI access. Re-reading the durable snapshot
+                // is the deterministic kick that allows schedule() to see this worker lease.
+                repository.downloads()
+                repository.executeScheduledDownload(accountId, downloadId)
             }
+        } catch (cancelled: CancellationException) {
+            repository?.interruptForDurableWorkerStop(downloadId)
+            throw cancelled
+        } finally {
+            DurableDownloadExecutionLeaseRegistry.release(accountId, downloadId)
         }
     }
 }

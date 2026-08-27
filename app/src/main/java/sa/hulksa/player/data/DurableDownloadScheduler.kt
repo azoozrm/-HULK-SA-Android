@@ -99,6 +99,19 @@ internal fun downloadWorkerSessionGate(
     }
 }
 
+internal fun shouldRestoreDownloadWorkerSession(
+    workerAccountId: String,
+    activeAccountId: String?,
+    metadata: AccountSessionMetadata?,
+    hasAuthenticatedSession: Boolean,
+): Boolean {
+    if (hasAuthenticatedSession) return false
+    val normalizedWorkerAccountId = workerAccountId.trim().takeIf(String::isNotEmpty) ?: return false
+    if (activeAccountId?.trim() != normalizedWorkerAccountId) return false
+    if (metadata == null || metadata.isExpired()) return false
+    return metadata.accountId.trim() == normalizedWorkerAccountId
+}
+
 internal class DurableDownloadScheduler(
     context: Context,
     private val workManager: WorkManager = WorkManager.getInstance(context.applicationContext),
@@ -173,16 +186,34 @@ internal class DownloadCoordinatorWorker(
             ?: return Result.failure()
         val downloadId = inputData.getLong(KEY_DOWNLOAD_ID, -1L)
         if (downloadId <= 0L) return Result.failure()
-        val metadata = AccountSessionStore(applicationContext).metadata()
-        val session = AuthenticatedSessionRegistry.current()
+
+        val accountScopeStore = AccountScopeStore(applicationContext)
+        val accountSessionStore = AccountSessionStore(applicationContext)
+        val activeAccountId = accountScopeStore.activeAccountId()
+        val metadata = accountSessionStore.metadata()
+        var session = AuthenticatedSessionRegistry.current()
+        if (
+            shouldRestoreDownloadWorkerSession(
+                workerAccountId = accountId,
+                activeAccountId = activeAccountId,
+                metadata = metadata,
+                hasAuthenticatedSession = session != null,
+            )
+        ) {
+            // Reconstruct stale RUNNING state before authentication. If credentials were not
+            // persisted, the record remains safely queued instead of presenting phantom progress.
+            DownloadRepositoryProcessOwner.get(applicationContext, accountId).downloads()
+            session = HulkRepository(applicationContext).currentAuthenticatedSession()
+        }
+
         when (
             downloadWorkerSessionGate(
                 workerAccountId = accountId,
-                activeAccountId = AccountScopeStore(applicationContext).activeAccountId(),
-                metadata = metadata,
+                activeAccountId = activeAccountId,
+                metadata = accountSessionStore.metadata(),
                 hasAuthenticatedSession = session != null,
                 authenticatedSessionMatches =
-                    authenticatedDownloadAccountId(session, metadata) == accountId,
+                    authenticatedDownloadAccountId(session, accountSessionStore.metadata()) == accountId,
             )
         ) {
             DownloadWorkerSessionGate.TERMINAL -> return Result.success()
