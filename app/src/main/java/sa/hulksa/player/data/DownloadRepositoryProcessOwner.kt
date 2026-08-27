@@ -305,10 +305,14 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         val owners = binding.ownershipStore.ownersForExistingDownload(item.historyKey)
         if (profileId !in owners) return downloads()
 
-        val remainingOwners = binding.ownershipStore.removeExistingOwner(item.historyKey, profileId)
-        if (remainingOwners.isEmpty()) {
-            binding.ownershipStore.clearOwners(item.historyKey)
+        val removal = profileReferenceRemoval(owners, profileId)
+        if (removal.deletePhysicalDownload) {
             binding.delegate.remove(downloadId)
+            if (binding.delegate.record(downloadId) == null) {
+                binding.ownershipStore.clearOwners(item.historyKey)
+            }
+        } else {
+            binding.ownershipStore.removeExistingOwner(item.historyKey, profileId)
         }
         return downloads()
     }
@@ -332,13 +336,14 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         delegate.downloads().forEach { item ->
             val owners = ownershipStore.ownersForExistingDownload(item.historyKey)
             if (normalizedProfileId !in owners) return@forEach
-            val remainingOwners = ownershipStore.removeExistingOwner(
-                item.historyKey,
-                normalizedProfileId,
-            )
-            if (remainingOwners.isEmpty()) {
-                ownershipStore.clearOwners(item.historyKey)
+            val removal = profileReferenceRemoval(owners, normalizedProfileId)
+            if (removal.deletePhysicalDownload) {
                 delegate.remove(item.downloadId)
+                if (delegate.record(item.downloadId) == null) {
+                    ownershipStore.clearOwners(item.historyKey)
+                }
+            } else {
+                ownershipStore.removeExistingOwner(item.historyKey, normalizedProfileId)
             }
         }
     }

@@ -81,14 +81,14 @@ class DownloadRepository internal constructor(
         val snapshot = synchronized(lock) {
             var changed = false
             cache = cache.map { item ->
-                if (item.status == OfflineStatus.COMPLETED && !completedFileExists(item)) {
+                if (item.status == OfflineStatus.COMPLETED && !completedFileIsUsable(item)) {
                     changed = true
                     item.copy(
                         status = OfflineStatus.FAILED,
                         bytesPerSecond = 0L,
                         etaSeconds = -1L,
                         integrityVerified = false,
-                        errorMessage = "ملف التحميل غير موجود في وحدة التخزين.",
+                        errorMessage = "ملف التحميل غير مكتمل أو غير قابل للقراءة.",
                     )
                 } else {
                     item
@@ -102,6 +102,31 @@ class DownloadRepository internal constructor(
     }
 
     internal fun record(downloadId: Long): OfflineDownload? = item(downloadId)
+
+    internal fun interruptForDurableWorkerStop(downloadId: Long) {
+        val interrupted = synchronized(lock) {
+            if (accountBoundarySuspended) return@synchronized false
+            val index = cache.indexOfFirst { it.downloadId == downloadId }
+            if (index < 0) return@synchronized false
+            val current = cache[index]
+            val recoveredStatus = durableWorkerInterruptedStatus(current.status)
+                ?: return@synchronized false
+            cache[index] = current.copy(
+                status = recoveredStatus,
+                sourceCandidates = emptyList(),
+                bytesPerSecond = 0L,
+                etaSeconds = -1L,
+                errorMessage = "توقف التنفيذ الخلفي مؤقتا. سيستأنف التحميل تلقائيا.",
+                integrityVerified = false,
+            )
+            writeStoredLocked(synchronous = true)
+            true
+        }
+        if (interrupted) {
+            calls.remove(downloadId)?.cancel()
+            jobs.remove(downloadId)?.cancel()
+        }
+    }
 
     internal fun suspendForAccountBoundary() {
         accountBoundarySuspended = true
@@ -288,14 +313,30 @@ class DownloadRepository internal constructor(
     fun remove(downloadId: Long): List<OfflineDownload> {
         calls.remove(downloadId)?.cancel()
         jobs.remove(downloadId)?.cancel()
-        val removed = synchronized(lock) {
-            val item = cache.firstOrNull { it.downloadId == downloadId }
+        val candidate = synchronized(lock) {
+            cache.firstOrNull { it.downloadId == downloadId }
+        } ?: return downloads()
+
+        if (!deleteDownloadFiles(candidate)) {
+            synchronized(lock) {
+                mutateLocked(downloadId) { item ->
+                    item.copy(
+                        status = OfflineStatus.FAILED,
+                        bytesPerSecond = 0L,
+                        etaSeconds = -1L,
+                        integrityVerified = false,
+                        errorMessage = "تعذر حذف ملفات التحميل. أعد توصيل وحدة التخزين ثم حاول مرة أخرى.",
+                    )
+                }
+            }
+            return downloads()
+        }
+
+        synchronized(lock) {
             cache.removeAll { it.downloadId == downloadId }
             normalizeQueueLocked()
-            writeStoredLocked()
-            item
+            writeStoredLocked(synchronous = true)
         }
-        removed?.let(::deleteDownloadFiles)
         return downloads()
     }
 
@@ -320,6 +361,7 @@ class DownloadRepository internal constructor(
         val candidates = synchronized(lock) {
             cache.asSequence()
                 .filter { it.status in SCHEDULABLE_STATUSES }
+                .filter { DurableDownloadExecutionLeaseRegistry.owns(accountId, it.downloadId) }
                 .filter { jobs[it.downloadId]?.isActive != true }
                 .filter { item ->
                     decideDownloadAttempt(
@@ -813,6 +855,9 @@ class DownloadRepository internal constructor(
     }
 
     private fun markCompleted(downloadId: Long, file: File, bytes: Long, supportsRange: Boolean) {
+        if (!completedDownloadFileIsUsable(file, bytes)) {
+            throw IOException("فشل التحقق من قابلية قراءة الملف المكتمل.")
+        }
         mutate(downloadId) {
             it.copy(
                 status = OfflineStatus.COMPLETED,
@@ -966,19 +1011,31 @@ class DownloadRepository internal constructor(
         return item.copy(sourceCandidates = emptyList())
     }
 
-    private fun completedFileExists(item: OfflineDownload): Boolean = item.localUri?.let(::fileFromUri)?.exists() == true
+    private fun completedFileIsUsable(item: OfflineDownload): Boolean {
+        val expectedBytes = item.totalBytes.takeIf { it > 0L }
+            ?: item.bytesDownloaded.takeIf { it > 0L }
+            ?: -1L
+        return completedDownloadFileIsUsable(
+            file = item.localUri?.let(::fileFromUri),
+            expectedBytes = expectedBytes,
+        )
+    }
 
-    private fun deleteDownloadFiles(item: OfflineDownload) {
-        item.localUri?.let(::fileFromUri)?.let { file ->
-            runCatching { file.delete() }
-            runCatching { File(file.parentFile, "${file.name}.part").delete() }
-        }
+    private fun deleteDownloadFiles(item: OfflineDownload): Boolean {
         val storage = item.storagePath?.let(::File)
+        if (storage != null && !storage.exists()) return false
+
+        val files = linkedSetOf<File>()
+        item.localUri?.let(::fileFromUri)?.let { file ->
+            files += file
+            file.parentFile?.let { parent -> files += File(parent, "${file.name}.part") }
+        }
         val name = item.fileName
         if (storage != null && name != null) {
-            runCatching { File(storage, name).delete() }
-            runCatching { File(storage, "$name.part").delete() }
+            files += File(storage, name)
+            files += File(storage, "$name.part")
         }
+        return files.all(::deleteDownloadFileIfPresent)
     }
 
     private fun fileFromUri(uri: String): File? = runCatching {
