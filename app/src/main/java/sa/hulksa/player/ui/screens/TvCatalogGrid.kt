@@ -12,12 +12,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -89,6 +87,48 @@ internal fun tvCatalogMetrics(
 internal fun Modifier.padding(horizontal: Dp, top: Dp): Modifier =
     padding(start = horizontal, top = top, end = horizontal, bottom = 0.dp)
 
+internal enum class TvCatalogFocusPath {
+    DIRECT,
+    SCROLL_ASSISTED,
+    INVALID,
+}
+
+internal fun tvCatalogFocusPath(
+    targetIndex: Int,
+    itemCount: Int,
+    itemTop: Int?,
+    itemBottom: Int?,
+    viewportStart: Int,
+    viewportEnd: Int,
+): TvCatalogFocusPath {
+    if (targetIndex !in 0 until itemCount) return TvCatalogFocusPath.INVALID
+    if (itemTop == null || itemBottom == null || itemBottom <= itemTop) {
+        return TvCatalogFocusPath.SCROLL_ASSISTED
+    }
+    return if (itemTop >= viewportStart && itemBottom <= viewportEnd) {
+        TvCatalogFocusPath.DIRECT
+    } else {
+        TvCatalogFocusPath.SCROLL_ASSISTED
+    }
+}
+
+internal class TvCatalogFocusMoveState {
+    var job: Job? = null
+    private var pendingTargetIndex: Int? = null
+
+    fun baseIndex(currentIndex: Int): Int = pendingTargetIndex ?: currentIndex
+
+    fun begin(targetIndex: Int) {
+        pendingTargetIndex = targetIndex
+    }
+
+    fun complete(targetIndex: Int) {
+        if (pendingTargetIndex == targetIndex) pendingTargetIndex = null
+    }
+
+    fun pendingTargetIndex(): Int? = pendingTargetIndex
+}
+
 @Composable
 internal fun TvCatalogGrid(
     content: List<ContentItem>,
@@ -128,8 +168,10 @@ internal fun TvCatalogGrid(
     val focusScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val focusViewportInsetPx = with(density) { focusViewportInset.roundToPx() }
-    var focusMoveJob by remember { mutableStateOf<Job?>(null) }
-    var pendingTargetIndex by remember(contentKeys, destination) { mutableStateOf<Int?>(null) }
+    val focusMoveState = remember(contentKeys, destination) { TvCatalogFocusMoveState() }
+    DisposableEffect(focusMoveState) {
+        onDispose { focusMoveState.job?.cancel() }
+    }
 
     suspend fun ensureIndexFullyVisible(index: Int) {
         val layoutInfo = gridState.layoutInfo
@@ -229,7 +271,7 @@ internal fun TvCatalogGrid(
                             return@onPreviewKeyEvent false
                         }
 
-                        val baseIndex = pendingTargetIndex ?: index
+                        val baseIndex = focusMoveState.baseIndex(index)
                         val nextIndex = nextTvGridFocusIndex(
                             currentIndex = baseIndex,
                             itemCount = content.size,
@@ -246,25 +288,48 @@ internal fun TvCatalogGrid(
                             return@onPreviewKeyEvent move == TvGridFocusMove.LEFT
                         }
 
-                        pendingTargetIndex = nextIndex
+                        val requester = focusRequesters.getOrNull(nextIndex)
+                            ?: return@onPreviewKeyEvent false
+                        val layoutInfo = gridState.layoutInfo
+                        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == nextIndex }
+                        val focusPath = tvCatalogFocusPath(
+                            targetIndex = nextIndex,
+                            itemCount = content.size,
+                            itemTop = targetInfo?.offset?.y,
+                            itemBottom = targetInfo?.let { it.offset.y + it.size.height },
+                            viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
+                            viewportEnd = layoutInfo.viewportEndOffset - focusViewportInsetPx,
+                        )
+                        if (focusPath == TvCatalogFocusPath.INVALID) {
+                            return@onPreviewKeyEvent false
+                        }
+
+                        focusMoveState.begin(nextIndex)
                         navigationMemory.save(destination, contentKeys[nextIndex], nextIndex)
-                        focusMoveJob?.cancel()
-                        focusMoveJob = focusScope.launch {
-                            focusIndex(
-                                index = nextIndex,
-                                columnCount = columnCount,
-                                ensureFullyVisible = move == TvGridFocusMove.UP || move == TvGridFocusMove.DOWN,
-                            )
-                            if (pendingTargetIndex == nextIndex) {
-                                pendingTargetIndex = null
+
+                        focusMoveState.job?.cancel()
+                        focusMoveState.job = null
+                        val focusedDirectly = if (focusPath == TvCatalogFocusPath.DIRECT) {
+                            runCatching { requester.requestFocus() }.getOrDefault(false)
+                        } else {
+                            false
+                        }
+                        if (focusedDirectly) {
+                            focusMoveState.complete(nextIndex)
+                        } else {
+                            focusMoveState.job = focusScope.launch {
+                                focusIndex(
+                                    index = nextIndex,
+                                    columnCount = columnCount,
+                                    ensureFullyVisible = true,
+                                )
+                                focusMoveState.complete(nextIndex)
                             }
                         }
                         true
                     }
                 val onFocusedCard = {
-                    if (pendingTargetIndex == index) {
-                        pendingTargetIndex = null
-                    }
+                    focusMoveState.complete(index)
                     navigationMemory.save(destination, key, index)
                 }
 

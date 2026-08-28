@@ -67,6 +67,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -1785,6 +1787,23 @@ private fun PosterCatalogScreen(
     }
 }
 
+internal fun resolveLivePreview(
+    current: ContentItem?,
+    visible: List<ContentItem>,
+    rememberedItemKey: String,
+    rememberedIndex: Int,
+): ContentItem? {
+    if (current != null && current in visible) return current
+    return visible.firstOrNull { "${it.type}:${it.id}" == rememberedItemKey }
+        ?: visible.getOrNull(rememberedIndex)
+        ?: visible.firstOrNull()
+}
+
+internal fun isLivePreviewSelected(
+    preview: ContentItem?,
+    channel: ContentItem,
+): Boolean = preview?.id == channel.id
+
 @Composable
 private fun LiveCatalogScreen(
     state: HulkUiState,
@@ -1806,7 +1825,7 @@ private fun LiveCatalogScreen(
     }
     val remembered = navigationMemory.position(MainDestination.LIVE)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
-    var preview by remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
+    val previewState = remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
@@ -1824,9 +1843,12 @@ private fun LiveCatalogScreen(
         }
     }
     LaunchedEffect(visible) {
-        if (preview == null || preview !in visible) {
-            preview = visible.firstOrNull { "${it.type}:${it.id}" == remembered.itemKey } ?: visible.getOrNull(rememberedIndex) ?: visible.firstOrNull()
-        }
+        previewState.value = resolveLivePreview(
+            current = previewState.value,
+            visible = visible,
+            rememberedItemKey = remembered.itemKey,
+            rememberedIndex = rememberedIndex,
+        )
         if (state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty()) {
             listState.scrollToItem(rememberedIndex)
             delay(180)
@@ -1880,11 +1902,14 @@ private fun LiveCatalogScreen(
                         itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
                             val key = "${channel.type}:${channel.id}"
                             val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
+                            val selected by remember(previewState, channel.id) {
+                                derivedStateOf { isLivePreviewSelected(previewState.value, channel) }
+                            }
                             ChannelListItem(
                                 item = channel,
-                                selected = preview?.id == channel.id,
+                                selected = selected,
                                 onFocused = {
-                                    preview = channel
+                                    previewState.value = channel
                                     navigationMemory.save(MainDestination.LIVE, key, index)
                                 },
                                 onClick = { onOpen(channel) },
@@ -1897,14 +1922,14 @@ private fun LiveCatalogScreen(
                         }
                     }
                 }
-                LiveStage(
-                    item = preview,
-                    isFavorite = preview?.let(isFavorite) == true,
+                LivePreviewStage(
+                    previewState = previewState,
+                    isFavorite = isFavorite,
                     channelRequester = channelRequester,
                     playRequester = playRequester,
                     favoriteRequester = favoriteRequester,
-                    onWatch = { preview?.let(onOpen) },
-                    onToggleFavorite = { preview?.let(onToggleFavorite) },
+                    onOpen = onOpen,
+                    onToggleFavorite = onToggleFavorite,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
@@ -1923,6 +1948,30 @@ private fun LiveCatalogScreen(
             }
         }
     }
+}
+
+@Composable
+private fun LivePreviewStage(
+    previewState: State<ContentItem?>,
+    isFavorite: (ContentItem) -> Boolean,
+    channelRequester: FocusRequester,
+    playRequester: FocusRequester,
+    favoriteRequester: FocusRequester,
+    onOpen: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val preview = previewState.value
+    LiveStage(
+        item = preview,
+        isFavorite = preview?.let(isFavorite) == true,
+        channelRequester = channelRequester,
+        playRequester = playRequester,
+        favoriteRequester = favoriteRequester,
+        onWatch = { previewState.value?.let(onOpen) },
+        onToggleFavorite = { previewState.value?.let(onToggleFavorite) },
+        modifier = modifier,
+    )
 }
 
 @Composable
