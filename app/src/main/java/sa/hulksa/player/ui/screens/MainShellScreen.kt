@@ -71,6 +71,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -228,12 +229,7 @@ internal data class HomeContentSnapshot(
 
 class NavigationMemoryStore {
     private val positions = mutableMapOf<MainDestination, NavigationPosition>()
-    private var homeMoviesCatalog: Any? = null
-    private var homeSeriesCatalog: Any? = null
-    private var homeLiveCatalog: Any? = null
-    private var homeHistory: Any? = null
-    private var homeFavorites: Any? = null
-    private var cachedHome: HomeContentSnapshot? = null
+    private val screenEntryModels = CatalogScreenEntryModelStore()
     private var mobileNavigationFirstVisibleIndex: Int = 0
     private var mobileNavigationFirstVisibleOffset: Int = 0
 
@@ -258,53 +254,17 @@ class NavigationMemoryStore {
         mobileNavigationFirstVisibleOffset = firstVisibleOffset.coerceAtLeast(0)
     }
 
-    internal fun homeContent(state: HulkUiState): HomeContentSnapshot {
-        val movieCatalog = state.catalogs[ContentType.MOVIE]
-        val seriesCatalog = state.catalogs[ContentType.SERIES]
-        val liveCatalog = state.catalogs[ContentType.LIVE]
-        val cached = cachedHome
-        if (
-            cached != null &&
-            homeMoviesCatalog === movieCatalog &&
-            homeSeriesCatalog === seriesCatalog &&
-            homeLiveCatalog === liveCatalog &&
-            homeHistory === state.history &&
-            homeFavorites === state.favorites
-        ) {
-            return cached
-        }
+    internal fun cachedCatalogModel(input: CatalogScreenModelInput): KeyedCatalogScreenModel? =
+        screenEntryModels.cachedCatalog(input)
 
-        val movies = newest(movieCatalog?.items.orEmpty())
-        val series = newest(seriesCatalog?.items.orEmpty())
-        val live = liveCatalog?.items.orEmpty()
-        val smartHome = buildSmartHomeRecommendations(
-            movies = movies,
-            series = series,
-            live = live,
-            history = state.history,
-            favorites = state.favorites,
-        )
-        return HomeContentSnapshot(
-            movies = movies,
-            series = series,
-            live = live,
-            continueWatching = smartHome.continueWatching,
-            lastLive = smartHome.lastLive,
-            becauseYouWatched = smartHome.becauseYouWatched,
-            suggested = smartHome.suggested,
-            personalizedLive = smartHome.personalizedLive,
-            popularMovies = smartHome.popularMovies,
-            popularSeries = smartHome.popularSeries,
-            featuredCandidates = smartHome.featuredCandidates,
-        ).also { snapshot ->
-            homeMoviesCatalog = movieCatalog
-            homeSeriesCatalog = seriesCatalog
-            homeLiveCatalog = liveCatalog
-            homeHistory = state.history
-            homeFavorites = state.favorites
-            cachedHome = snapshot
-        }
-    }
+    internal suspend fun catalogModel(input: CatalogScreenModelInput): KeyedCatalogScreenModel =
+        screenEntryModels.catalog(input)
+
+    internal fun cachedHomeModel(input: HomeContentModelInput): KeyedHomeContentModel? =
+        screenEntryModels.cachedHome(input)
+
+    internal suspend fun homeModel(input: HomeContentModelInput): KeyedHomeContentModel =
+        screenEntryModels.home(input)
 }
 
 private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
@@ -379,6 +339,10 @@ fun MainShellScreen(
             if ((key in state.favorites) == optimisticValue) favoriteOverrides.remove(key)
         }
     }
+    val favoriteSnapshot = CatalogFavoriteSnapshot(
+        persisted = state.favorites,
+        optimistic = favoriteOverrides.toMap(),
+    )
     val resolvedIsFavorite: (ContentItem) -> Boolean = { item ->
         val key = "${item.type.name}:${item.id}"
         favoriteOverrides[key] ?: isFavorite(item)
@@ -442,6 +406,7 @@ fun MainShellScreen(
                         state = state,
                         isTv = isTv,
                         navigationMemory = navigationMemory,
+                        favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
                         onSearch = onSearch,
@@ -484,6 +449,7 @@ fun MainShellScreen(
                         state = state,
                         isTv = false,
                         navigationMemory = navigationMemory,
+                        favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
                         onSearch = onSearch,
@@ -959,6 +925,7 @@ private fun DestinationContent(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    favoriteSnapshot: CatalogFavoriteSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onSelectCategory: (String?) -> Unit,
     onSearch: (String) -> Unit,
@@ -997,8 +964,8 @@ private fun DestinationContent(
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
         )
         MainDestination.LIVE -> LiveCatalogScreen(state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onToggleFavorite, onRefresh)
-        MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
-        MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
+        MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
+        MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
         MainDestination.FAVORITES -> FavoritesScreen(state, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite)
         MainDestination.SEARCH -> UnifiedSearchScreen(state, isTv, navigationMemory, isFavorite, onSearch, onOpen, onToggleFavorite)
         MainDestination.DOWNLOADS -> DownloadsScreen(
@@ -1051,7 +1018,28 @@ private fun CinemaHomeScreen(
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
-    val homeContent = navigationMemory.homeContent(state)
+    val homeInput = HomeContentModelInput(
+        movieCatalog = state.catalogs[ContentType.MOVIE],
+        seriesCatalog = state.catalogs[ContentType.SERIES],
+        liveCatalog = state.catalogs[ContentType.LIVE],
+        history = state.history,
+        favorites = state.favorites,
+    )
+    val keyedHomeContent by produceState(
+        initialValue = navigationMemory.cachedHomeModel(homeInput),
+        key1 = homeInput,
+    ) {
+        value = navigationMemory.homeModel(homeInput)
+    }
+    val homeContent = keyedHomeContent
+        ?.takeIf { it.input == homeInput }
+        ?.model
+    if (homeContent == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            LoadingRing(label = "جاري تجهيز الرئيسية…")
+        }
+        return
+    }
     val movies = homeContent.movies
     val series = homeContent.series
     val live = homeContent.live
@@ -1065,8 +1053,10 @@ private fun CinemaHomeScreen(
         if (!smartRecommendationsEnabled) return@remember emptyList()
         val lastLiveId = lastLive?.streamId
         personalizedLive
+            .asSequence()
             .filterNot { lastLiveId != null && it.id == lastLiveId }
             .take(20)
+            .toList()
     }
     val popularMovies = homeContent.popularMovies
     val popularSeries = homeContent.popularSeries
@@ -1088,8 +1078,18 @@ private fun CinemaHomeScreen(
         }
     }
     val featured = featuredCandidates.getOrNull(featuredIndex) ?: movies.firstOrNull() ?: series.firstOrNull()
-    val homeMovies = remember(movies, featured) { movies.filterNot { it.type == featured?.type && it.id == featured.id } }
-    val homeSeries = remember(series, featured) { series.filterNot { it.type == featured?.type && it.id == featured.id } }
+    val homeMovies = remember(movies, featured) {
+        movies.asSequence()
+            .filterNot { it.type == featured?.type && it.id == featured.id }
+            .take(28)
+            .toList()
+    }
+    val homeSeries = remember(series, featured) {
+        series.asSequence()
+            .filterNot { it.type == featured?.type && it.id == featured.id }
+            .take(28)
+            .toList()
+    }
     val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
     val remembered = navigationMemory.position(MainDestination.HOME)
     val renewalBanner = evaluateRenewalBanner(
@@ -1192,10 +1192,10 @@ private fun CinemaHomeScreen(
             item { HomeSectionPadding(isTv) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularMovies.isNotEmpty()) {
             item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
@@ -1627,6 +1627,7 @@ private fun PosterCatalogScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    favoriteSnapshot: CatalogFavoriteSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onSelectCategory: (String?) -> Unit,
     onSearch: (String) -> Unit,
@@ -1636,20 +1637,26 @@ private fun PosterCatalogScreen(
     onRefresh: () -> Unit,
 ) {
     val catalog = state.catalogs[type]
-    val ordered = remember(catalog) { newest(catalog?.items.orEmpty()) }
-    val visible = remember(ordered, state.selectedCategoryId, state.searchQuery, state.favorites) {
-        ordered.filter { item ->
-            categoryMatches(item, state.selectedCategoryId, isFavorite) &&
-                item.matchesSearch(state.searchQuery)
-        }
+    val modelInput = CatalogScreenModelInput(
+        catalog = catalog,
+        history = state.history,
+        favorites = favoriteSnapshot,
+        type = type,
+        destination = destination,
+        categoryId = state.selectedCategoryId,
+        query = state.searchQuery,
+    )
+    val keyedModel by produceState(
+        initialValue = navigationMemory.cachedCatalogModel(modelInput),
+        key1 = modelInput,
+    ) {
+        value = navigationMemory.catalogModel(modelInput)
     }
-    val continueWatching = remember(state.history, state.searchQuery, type) {
-        val kind = if (type == ContentType.MOVIE) "movie" else "series"
-        state.history.filter { entry ->
-            entry.streamKind == kind && entry.isResumable() &&
-                (state.searchQuery.isBlank() || entry.title.contains(state.searchQuery.trim(), ignoreCase = true))
-        }
-    }
+    val model = keyedModel
+        ?.takeIf { it.input == modelInput }
+        ?.model
+    val visible = model?.visible.orEmpty()
+    val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1684,12 +1691,14 @@ private fun PosterCatalogScreen(
             CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
             if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(11.dp))
-            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory, isTv)
+            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), state.selectedCategoryId, onSelectCategory, isTv)
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (showingContinue && continueWatching.isNotEmpty()) {
+            if (model == null) {
+                LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
+            } else if (showingContinue && continueWatching.isNotEmpty()) {
                 HistoryGrid(continueWatching, isTv, destination, navigationMemory, onOpenHistory)
             } else if (showingContinue) {
                 EmptyState("لا توجد مشاهدة غير مكتملة في $title")
@@ -1700,6 +1709,8 @@ private fun PosterCatalogScreen(
             } else if (isTv) {
                 TvCatalogGrid(
                     content = visible,
+                    contentKeys = model.contentKeys,
+                    contentKeyIndex = model.contentKeyIndex,
                     destination = destination,
                     navigationMemory = navigationMemory,
                     isFavorite = isFavorite,
@@ -1711,6 +1722,8 @@ private fun PosterCatalogScreen(
                 ContentGrid(
                     visible, false, destination, navigationMemory, isFavorite, onOpen, onToggleFavorite,
                     restoreFocusedCard = state.searchQuery.isBlank(),
+                    preparedContentKeys = model.contentKeys,
+                    preparedContentKeyIndex = model.contentKeyIndex,
                 )
             }
         }
@@ -2679,27 +2692,37 @@ private fun ContentGrid(
     restoreFocusedCard: Boolean = true,
     firstItemFocusRequester: FocusRequester? = null,
     firstItemUpRequester: FocusRequester? = null,
+    preparedContentKeys: List<String>? = null,
+    preparedContentKeyIndex: Map<String, Int>? = null,
 ) {
+    val contentIdentity = preparedContentKeys ?: content
+    val contentKeys = remember(contentIdentity) {
+        preparedContentKeys ?: content.map { "${it.type}:${it.id}" }
+    }
+    require(contentKeys.size == content.size)
+    val contentKeyIndex = remember(contentKeys, preparedContentKeyIndex) {
+        preparedContentKeyIndex ?: indexContentKeys(contentKeys)
+    }
     val remembered = navigationMemory.position(destination)
-    val rememberedKeyIndex = content.indexOfFirst { "${it.type}:${it.id}" == remembered.itemKey }
+    val rememberedKeyIndex = contentKeyIndex[remembered.itemKey] ?: -1
     val targetIndex = if (destination == MainDestination.SEARCH) {
         0
     } else {
         (if (rememberedKeyIndex >= 0) rememberedKeyIndex else remembered.itemIndex)
             .coerceIn(0, content.lastIndex.coerceAtLeast(0))
     }
-    val targetKey = content.getOrNull(targetIndex)?.let { "${it.type}:${it.id}" }.orEmpty()
+    val targetKey = contentKeys.getOrNull(targetIndex).orEmpty()
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
     LaunchedEffect(gridState, content, destination) {
         snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
-            content.getOrNull(index)?.let { navigationMemory.save(destination, "${it.type}:${it.id}", index) }
+            contentKeys.getOrNull(index)?.let { navigationMemory.save(destination, it, index) }
         }
     }
     val targetRequester = remember { FocusRequester() }
-    LaunchedEffect(content.map { "${it.type}:${it.id}" }, remembered.itemKey, destination, restoreFocusedCard) {
+    LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard) {
         if (destination == MainDestination.SEARCH) {
             if (content.isNotEmpty()) gridState.scrollToItem(0)
-            navigationMemory.save(destination, content.firstOrNull()?.let { "${it.type}:${it.id}" }.orEmpty(), 0)
+            navigationMemory.save(destination, contentKeys.firstOrNull().orEmpty(), 0)
         } else if (restoreFocusedCard && content.isNotEmpty()) {
             if (destination == MainDestination.FAVORITES && targetKey.isNotBlank() && targetKey != remembered.itemKey) {
                 navigationMemory.save(destination, targetKey, targetIndex)
@@ -2725,8 +2748,8 @@ private fun ContentGrid(
         ),
         modifier = Modifier.fillMaxSize(),
     ) {
-        itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
-            val key = "${item.type}:${item.id}"
+        itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
+            val key = contentKeys[index]
             val restore = remembered.itemKey == key || index == targetIndex
             UniversalPosterCard(
                 item = item,
@@ -3189,7 +3212,6 @@ private fun CategoryBar(
 private fun ReorderableCatalogCategoryBar(
     type: ContentType,
     categories: List<Category>,
-    items: List<ContentItem>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
     isTv: Boolean,
@@ -3213,11 +3235,6 @@ private fun ReorderableCatalogCategoryBar(
     val ordered = remember(categories, ids) {
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
-    }
-    val artworkByCategory = remember(items) {
-        items.filter { !it.posterUrl.isNullOrBlank() }
-            .groupBy(ContentItem::categoryId)
-            .mapValues { (_, content) -> content.first() }
     }
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
 
@@ -3725,10 +3742,10 @@ private fun EmptyState(message: String) {
     }
 }
 
-private fun newest(content: List<ContentItem>): List<ContentItem> =
+internal fun newest(content: List<ContentItem>): List<ContentItem> =
     content.sortedByDescending { it.addedAtEpochSeconds ?: 0L }
 
-private fun ContentItem.matchesSearch(rawQuery: String): Boolean {
+internal fun ContentItem.matchesSearch(rawQuery: String): Boolean {
     val query = rawQuery.trim()
     if (query.isBlank()) return true
     return sequenceOf(name, year, genre, plot, nowPlaying)
@@ -3736,11 +3753,11 @@ private fun ContentItem.matchesSearch(rawQuery: String): Boolean {
         .any { value -> value.contains(query, ignoreCase = true) }
 }
 
-private fun HistoryEntry.isResumable(): Boolean =
+internal fun HistoryEntry.isResumable(): Boolean =
     !isLive && positionMs > 0L &&
         (durationMs <= 0L || positionMs.toDouble() / durationMs < .92)
 
-private fun categoryMatches(
+internal fun categoryMatches(
     item: ContentItem,
     selectedId: String?,
     isFavorite: (ContentItem) -> Boolean,
