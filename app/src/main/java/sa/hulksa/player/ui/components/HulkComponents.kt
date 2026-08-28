@@ -555,15 +555,24 @@ fun CompactPosterCard(
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.04f else 1f, label = "posterScale")
+    val scale = if (adaptiveUi.isTelevision) {
+        1f
+    } else {
+        animateFloatAsState(if (showFocused) 1.04f else 1f, label = "posterScale").value
+    }
+    val focusTransform = if (adaptiveUi.isTelevision) {
+        Modifier
+    } else {
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+        }
+    }
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                shadowElevation = if (showFocused) 14.dp.toPx() else 0f
-            }
+            .then(focusTransform)
             .aspectRatio(2f / 3f)
             .clip(shape)
             .background(Color(0xFF15160F))
@@ -756,7 +765,19 @@ fun HistoryCard(
     var artworkFailed by remember(entry.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember(entry.key) { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale")
+    val scale = if (adaptiveUi.isTelevision) {
+        1f
+    } else {
+        animateFloatAsState(if (showFocused) 1.035f else 1f, label = "historyScale").value
+    }
+    val focusTransform = if (adaptiveUi.isTelevision) {
+        Modifier
+    } else {
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+    }
     val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 14.dp else 12.dp)
     val progress = if (entry.durationMs > 0L) {
         (entry.positionMs.toFloat() / entry.durationMs).coerceIn(0f, 1f)
@@ -785,11 +806,7 @@ fun HistoryCard(
     }
     Box(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                shadowElevation = if (showFocused && adaptiveUi.isTelevision) 16.dp.toPx() else 0f
-            }
+            .then(focusTransform)
             .aspectRatio(16f / 9f)
             .clip(shape)
             .background(Color(0xFF15160F))
