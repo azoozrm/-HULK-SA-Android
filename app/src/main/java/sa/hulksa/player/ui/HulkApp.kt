@@ -17,9 +17,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
@@ -46,6 +49,28 @@ import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
 import sa.hulksa.player.ui.screens.saveLiveTvProLaunchContext
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
+internal class SidebarNavigationFocusHandoffTracker(initialDestination: MainDestination) {
+    private var previousDestination = initialDestination
+
+    fun takePrevious(currentDestination: MainDestination): MainDestination {
+        val previous = previousDestination
+        previousDestination = currentDestination
+        return previous
+    }
+}
+
+internal fun shouldAttemptTvSidebarFocusHandoff(
+    isTv: Boolean,
+    screen: HulkScreen,
+    previousDestination: MainDestination,
+    currentDestination: MainDestination,
+): Boolean =
+    isTv &&
+        screen == HulkScreen.MAIN &&
+        previousDestination != currentDestination &&
+        previousDestination != MainDestination.SEARCH &&
+        currentDestination != MainDestination.SEARCH
+
 @Composable
 fun HulkApp(
     viewModel: HulkViewModel,
@@ -57,8 +82,10 @@ fun HulkApp(
     val (adaptiveUi, adaptiveInputController) = rememberAdaptiveUiState(isTelevisionDevice)
     val isTv = adaptiveUi.isTelevision
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val colors = LocalHulkColors.current
     val requestProfileSwitch = LocalProfileSwitchRequester.current
+    val focusHandoffTracker = remember { SidebarNavigationFocusHandoffTracker(state.destination) }
     val windowBackground =
         if (state.screen == HulkScreen.LOGIN || state.screen == HulkScreen.PLAYER) {
             colors.background
@@ -73,6 +100,28 @@ fun HulkApp(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
     )
+    LaunchedEffect(isTv, state.screen, state.destination) {
+        val previousDestination = focusHandoffTracker.takePrevious(state.destination)
+        if (
+            shouldAttemptTvSidebarFocusHandoff(
+                isTv = isTv,
+                screen = state.screen,
+                previousDestination = previousDestination,
+                currentDestination = state.destination,
+            )
+        ) {
+            // PR #234 intentionally keeps the TV shell/rail alive across destination changes.
+            // Wait until the new destination subtree is attached, then move the surviving rail
+            // focus toward the RTL content side. A second frame is a bounded fallback for screens
+            // whose first focusable child attaches one frame later. LaunchedEffect cancellation
+            // prevents a stale request from an earlier rapid destination selection.
+            withFrameNanos { }
+            if (!focusManager.moveFocus(FocusDirection.Left)) {
+                withFrameNanos { }
+                focusManager.moveFocus(FocusDirection.Left)
+            }
+        }
+    }
     // Favorite state changes must update the star immediately, but they must not rebuild
     // Home recommendation membership/order while the user is focused on those rows.
     // Refresh recommendation inputs only when catalogs/history actually change.
