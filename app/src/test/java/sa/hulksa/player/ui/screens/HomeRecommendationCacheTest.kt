@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
@@ -12,27 +13,38 @@ import sa.hulksa.player.model.ContentType
 
 class HomeRecommendationCacheTest {
     @Test
-    fun unchangedInputsReuseTheCachedHomeSnapshot() {
+    fun unchangedInputsReuseTheCachedHomeSnapshot() = runBlocking {
         val state = testState()
         val store = NavigationMemoryStore()
-        val first = store.homeContent(state)
-        val second = store.homeContent(state)
+        val input = state.homeModelInput()
+        val first = store.homeModel(input).model
+        val second = store.homeModel(input).model
         assertSame(first, second)
     }
 
     @Test
-    fun changingFavoritesInvalidatesAndRebuildsRecommendations() {
+    fun changingFavoritesInvalidatesAndRebuildsRecommendations() = runBlocking {
         val state = testState()
         val store = NavigationMemoryStore()
-        val before = store.homeContent(state)
+        val before = store.homeModel(state.homeModelInput()).model
         assertTrue(before.becauseYouWatched.isEmpty())
 
         // Catalog and history identities stay unchanged; Favorites alone must invalidate the snapshot.
-        val after = store.homeContent(state.copy(favorites = setOf("MOVIE:1")))
+        val after = store.homeModel(
+            state.copy(favorites = setOf("MOVIE:1")).homeModelInput(),
+        ).model
 
         assertNotSame(before, after)
         assertEquals(setOf(1, 2), after.becauseYouWatched.map(ContentItem::id).toSet())
     }
+
+    private fun HulkUiState.homeModelInput(): HomeContentModelInput = HomeContentModelInput(
+        movieCatalog = catalogs[ContentType.MOVIE],
+        seriesCatalog = catalogs[ContentType.SERIES],
+        liveCatalog = catalogs[ContentType.LIVE],
+        history = history,
+        favorites = favorites,
+    )
 
     private fun testState(): HulkUiState {
         val catalog = Catalog(
