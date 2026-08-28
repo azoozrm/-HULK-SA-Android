@@ -13,6 +13,11 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
     def read(path: Path) -> str:
         return path.read_text(encoding="utf-8")
 
+    @staticmethod
+    def section(source: str, start: str, end: str) -> str:
+        start_index = source.index(start)
+        return source[start_index : source.index(end, start_index)]
+
     def test_destination_change_does_not_rekey_the_main_shell(self) -> None:
         app = self.read(HULK_APP)
 
@@ -35,6 +40,38 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertNotIn("rememberingSelectDestination", shell)
         self.assertGreaterEqual(shell.count("onSelect = onSelectDestination"), 2)
         self.assertIn("onSelectDestination = onSelectDestination", shell)
+
+    def test_shared_category_underlap_preserves_shell_geometry(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        rail = self.section(
+            source,
+            "private fun CinematicNavigationRail(",
+            "private fun NavigationItem(",
+        )
+        catalog = self.section(
+            source,
+            "private fun ReorderableCatalogCategoryBar(",
+            "private fun CatalogInteractionHints(",
+        )
+        live = source[source.index("private fun ReorderableLiveCategoryBar(") :]
+
+        self.assertIn("Row(Modifier.fillMaxSize())", shell)
+        self.assertIn("Modifier.weight(1f).fillMaxHeight()", shell)
+        self.assertIn(".zIndex(1f)", rail)
+        for category_bar in (catalog, live):
+            self.assertIn("rememberCategorySidebarUnderlap", category_bar)
+            self.assertIn(".extendCategoryViewportTowardStart", category_bar)
+            self.assertIn("start = sidebarUnderlap.startContentPaddingDp.dp", category_bar)
+        self.assertEqual(
+            2,
+            catalog.count(".extendCategoryViewportTowardStart")
+            + live.count(".extendCategoryViewportTowardStart"),
+        )
 
 
 if __name__ == "__main__":

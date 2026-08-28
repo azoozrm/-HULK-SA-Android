@@ -95,6 +95,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -105,6 +106,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -154,8 +156,85 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 
 private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
+private const val TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP = 14f
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
+
+/** Keeps the resting chip position unchanged while extending only the scroll viewport. */
+internal data class CategorySidebarUnderlapPolicy(
+    val viewportExtraDp: Float,
+    val startContentPaddingDp: Float,
+)
+
+internal fun categorySidebarUnderlapPolicy(
+    isTv: Boolean,
+    railExpandedWidthDp: Float,
+    baseContentPaddingDp: Float,
+    parentHorizontalInsetDp: Float = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP,
+): CategorySidebarUnderlapPolicy {
+    val safeBasePadding = baseContentPaddingDp.coerceAtLeast(0f)
+    val viewportExtra = if (isTv) {
+        railExpandedWidthDp.coerceAtLeast(0f) + parentHorizontalInsetDp.coerceAtLeast(0f)
+    } else {
+        0f
+    }
+    return CategorySidebarUnderlapPolicy(
+        viewportExtraDp = viewportExtra,
+        startContentPaddingDp = safeBasePadding + viewportExtra,
+    )
+}
+
+@Composable
+private fun rememberCategorySidebarUnderlap(
+    isTv: Boolean,
+    baseContentPadding: Dp,
+): CategorySidebarUnderlapPolicy {
+    val adaptiveUi = LocalAdaptiveUi.current
+    return remember(
+        isTv,
+        baseContentPadding,
+        adaptiveUi.screenWidthDp,
+        adaptiveUi.screenHeightDp,
+    ) {
+        categorySidebarUnderlapPolicy(
+            isTv = isTv,
+            railExpandedWidthDp = tvRailMetrics(
+                screenWidthDp = adaptiveUi.screenWidthDp,
+                screenHeightDp = adaptiveUi.screenHeightDp,
+            ).expandedWidthDp,
+            baseContentPaddingDp = baseContentPadding.value,
+        )
+    }
+}
+
+/**
+ * Measures the LazyRow through the sidebar-side inset while reporting its original width upstream.
+ * The rail remains responsible for visually occluding chips that scroll into this extra viewport.
+ */
+private fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier {
+    if (extraWidth <= 0.dp) return this
+    return layout { measurable, constraints ->
+        val extraWidthPx = extraWidth.roundToPx().coerceAtLeast(0)
+        if (extraWidthPx == 0 || !constraints.hasBoundedWidth) {
+            val placeable = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) {
+                placeable.placeRelative(0, 0)
+            }
+        } else {
+            val placeable = measurable.measure(
+                constraints.copy(
+                    minWidth = constraints.minWidth + extraWidthPx,
+                    maxWidth = constraints.maxWidth + extraWidthPx,
+                ),
+            )
+            val reportedWidth = (placeable.width - extraWidthPx)
+                .coerceIn(constraints.minWidth, constraints.maxWidth)
+            layout(reportedWidth, placeable.height) {
+                placeable.placeRelative(-extraWidthPx, 0)
+            }
+        }
+    }
+}
 
 private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
@@ -604,6 +683,8 @@ private fun CinematicNavigationRail(
 
     Column(
         modifier = Modifier
+            // Category rows may draw beneath the rail; the rail stays the top visual layer.
+            .zIndex(1f)
             .width(railWidth)
             .fillMaxHeight()
             .focusProperties {
@@ -1739,7 +1820,10 @@ private fun PosterCatalogScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(
+                            horizontal = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                        )
                     } else {
                         Modifier
                     },
@@ -1862,7 +1946,10 @@ private fun LiveCatalogScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(
+                            horizontal = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                        )
                     } else {
                         Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)
                     },
@@ -3341,6 +3428,8 @@ private fun ReorderableCatalogCategoryBar(
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
     }
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
+    val baseContentPadding = if (isTv) 8.dp else 24.dp
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
     fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
         val targetIndex = selectedCategoryFocusIndex(
@@ -3394,9 +3483,15 @@ private fun ReorderableCatalogCategoryBar(
                 }
             }
             .focusGroup()
-            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus },
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = baseContentPadding,
+            bottom = 8.dp,
+        ),
     ) {
         item {
             FocusButton(
@@ -3507,6 +3602,8 @@ private fun ReorderableLiveCategoryBar(
             .mapValues { (_, channels) -> channels.first() }
     }
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID) }
+    val baseContentPadding = 8.dp
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
     fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
         val targetIndex = selectedCategoryFocusIndex(
@@ -3559,9 +3656,15 @@ private fun ReorderableLiveCategoryBar(
                 }
             }
             .focusGroup()
-            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus },
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = baseContentPadding,
+            bottom = 8.dp,
+        ),
     ) {
         item {
             FocusButton(
