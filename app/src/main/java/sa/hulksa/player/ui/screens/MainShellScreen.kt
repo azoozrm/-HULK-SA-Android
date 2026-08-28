@@ -371,23 +371,6 @@ fun MainShellScreen(
             !downloadsEnabled && entry.destination == MainDestination.DOWNLOADS
         }
     }
-    val queryMemory = remember { mutableStateMapOf<MainDestination, String>() }
-    val categoryMemory = remember { mutableStateMapOf<MainDestination, String?>() }
-    var previousDestination by remember { mutableStateOf(state.destination) }
-    val rememberingSelectDestination: (MainDestination) -> Unit = { destination ->
-        queryMemory[state.destination] = state.searchQuery
-        categoryMemory[state.destination] = state.selectedCategoryId
-        onSelectDestination(destination)
-    }
-    LaunchedEffect(state.destination) {
-        if (previousDestination != state.destination) {
-            val restoredQuery = queryMemory[state.destination].orEmpty()
-            val restoredCategory = categoryMemory[state.destination]
-            if (state.searchQuery != restoredQuery) onSearch(restoredQuery)
-            if (state.selectedCategoryId != restoredCategory) onSelectCategory(restoredCategory)
-            previousDestination = state.destination
-        }
-    }
     val favoriteOverrides = remember { mutableStateMapOf<String, Boolean>() }
     var favoriteActionLocked by remember { mutableStateOf(false) }
     val favoriteScope = rememberCoroutineScope()
@@ -450,7 +433,7 @@ fun MainShellScreen(
                 CinematicNavigationRail(
                     entries = navigationEntries,
                     selected = state.destination,
-                    onSelect = rememberingSelectDestination,
+                    onSelect = onSelectDestination,
                     onSwitchProfile = requestProfileSwitch,
                     destinationFocusRequesters = tvRailFocusRequesters,
                 )
@@ -468,7 +451,7 @@ fun MainShellScreen(
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
-                        onSelectDestination = rememberingSelectDestination,
+                        onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
                         onDeleteDownload = onDeleteDownload,
@@ -527,7 +510,7 @@ fun MainShellScreen(
                 }
                 MobileNavigation(
                     selected = state.destination,
-                    onSelect = rememberingSelectDestination,
+                    onSelect = onSelectDestination,
                     navigationMemory = navigationMemory,
                     entries = navigationEntries,
                 )
