@@ -176,6 +176,10 @@ internal class CatalogScreenEntryModelStore(
         catalogModels[input.destination]?.takeIf { it.input == input }
     }
 
+    fun lastGoodCatalog(destination: MainDestination): KeyedCatalogScreenModel? = synchronized(lock) {
+        catalogModels[destination]
+    }
+
     suspend fun catalog(input: CatalogScreenModelInput): KeyedCatalogScreenModel {
         synchronized(lock) {
             latestCatalogInputs[input.destination] = input
@@ -196,6 +200,10 @@ internal class CatalogScreenEntryModelStore(
 
     fun cachedHome(input: HomeContentModelInput): KeyedHomeContentModel? = synchronized(lock) {
         homeModel?.takeIf { it.input == input }
+    }
+
+    fun lastGoodHome(): KeyedHomeContentModel? = synchronized(lock) {
+        homeModel
     }
 
     suspend fun home(input: HomeContentModelInput): KeyedHomeContentModel {

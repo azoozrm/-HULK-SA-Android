@@ -71,7 +71,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -257,14 +256,70 @@ class NavigationMemoryStore {
     internal fun cachedCatalogModel(input: CatalogScreenModelInput): KeyedCatalogScreenModel? =
         screenEntryModels.cachedCatalog(input)
 
+    internal fun lastGoodCatalogModel(destination: MainDestination): KeyedCatalogScreenModel? =
+        screenEntryModels.lastGoodCatalog(destination)
+
     internal suspend fun catalogModel(input: CatalogScreenModelInput): KeyedCatalogScreenModel =
         screenEntryModels.catalog(input)
 
     internal fun cachedHomeModel(input: HomeContentModelInput): KeyedHomeContentModel? =
         screenEntryModels.cachedHome(input)
 
+    internal fun lastGoodHomeModel(): KeyedHomeContentModel? =
+        screenEntryModels.lastGoodHome()
+
     internal suspend fun homeModel(input: HomeContentModelInput): KeyedHomeContentModel =
         screenEntryModels.home(input)
+}
+
+@Composable
+private fun rememberHomeModelForPresentation(
+    navigationMemory: NavigationMemoryStore,
+    input: HomeContentModelInput,
+): KeyedHomeContentModel? {
+    var presented by remember(navigationMemory) {
+        mutableStateOf(
+            navigationMemory.cachedHomeModel(input)
+                ?: navigationMemory.lastGoodHomeModel(),
+        )
+    }
+    LaunchedEffect(navigationMemory, input) {
+        navigationMemory.cachedHomeModel(input)?.let { exact ->
+            presented = exact
+            return@LaunchedEffect
+        }
+        navigationMemory.lastGoodHomeModel()?.let { lastGood ->
+            presented = lastGood
+        }
+        val exact = navigationMemory.homeModel(input)
+        if (exact.input == input) presented = exact
+    }
+    return presented
+}
+
+@Composable
+private fun rememberCatalogModelForPresentation(
+    navigationMemory: NavigationMemoryStore,
+    input: CatalogScreenModelInput,
+): KeyedCatalogScreenModel? {
+    var presented by remember(navigationMemory, input.destination) {
+        mutableStateOf(
+            navigationMemory.cachedCatalogModel(input)
+                ?: navigationMemory.lastGoodCatalogModel(input.destination),
+        )
+    }
+    LaunchedEffect(navigationMemory, input) {
+        navigationMemory.cachedCatalogModel(input)?.let { exact ->
+            presented = exact
+            return@LaunchedEffect
+        }
+        navigationMemory.lastGoodCatalogModel(input.destination)?.let { lastGood ->
+            presented = lastGood
+        }
+        val exact = navigationMemory.catalogModel(input)
+        if (exact.input == input) presented = exact
+    }
+    return presented
 }
 
 private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
@@ -325,6 +380,30 @@ fun MainShellScreen(
     val adaptiveUi = LocalAdaptiveUi.current
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
+    val homeModel = if (state.destination == MainDestination.HOME) {
+        rememberHomeModelForPresentation(
+            navigationMemory = navigationMemory,
+            input = HomeContentModelInput(
+                movieCatalog = state.catalogs[ContentType.MOVIE],
+                seriesCatalog = state.catalogs[ContentType.SERIES],
+                liveCatalog = state.catalogs[ContentType.LIVE],
+                history = state.history,
+                favorites = state.favorites,
+            ),
+        )
+    } else {
+        null
+    }
+    if (state.destination == MainDestination.HOME && homeModel == null) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(colors.background),
+            contentAlignment = Alignment.Center,
+        ) {
+            LoadingRing()
+        }
+        return
+    }
+    val homeContent = homeModel?.model
     val downloadsEnabled = state.operations.features.downloadsEnabled
     val navigationEntries = remember(downloadsEnabled) {
         destinations.filterNot { entry ->
@@ -406,6 +485,7 @@ fun MainShellScreen(
                         state = state,
                         isTv = isTv,
                         navigationMemory = navigationMemory,
+                        homeContent = homeContent,
                         favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
@@ -449,6 +529,7 @@ fun MainShellScreen(
                         state = state,
                         isTv = false,
                         navigationMemory = navigationMemory,
+                        homeContent = homeContent,
                         favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
@@ -925,6 +1006,7 @@ private fun DestinationContent(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    homeContent: HomeContentSnapshot?,
     favoriteSnapshot: CatalogFavoriteSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onSelectCategory: (String?) -> Unit,
@@ -954,6 +1036,7 @@ private fun DestinationContent(
             state = state,
             isTv = isTv,
             navigationMemory = navigationMemory,
+            homeContent = requireNotNull(homeContent),
             isFavorite = isFavorite,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
@@ -1009,6 +1092,7 @@ private fun CinemaHomeScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    homeContent: HomeContentSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
@@ -1018,28 +1102,6 @@ private fun CinemaHomeScreen(
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
-    val homeInput = HomeContentModelInput(
-        movieCatalog = state.catalogs[ContentType.MOVIE],
-        seriesCatalog = state.catalogs[ContentType.SERIES],
-        liveCatalog = state.catalogs[ContentType.LIVE],
-        history = state.history,
-        favorites = state.favorites,
-    )
-    val keyedHomeContent by produceState(
-        initialValue = navigationMemory.cachedHomeModel(homeInput),
-        key1 = homeInput,
-    ) {
-        value = navigationMemory.homeModel(homeInput)
-    }
-    val homeContent = keyedHomeContent
-        ?.takeIf { it.input == homeInput }
-        ?.model
-    if (homeContent == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            LoadingRing(label = "جاري تجهيز الرئيسية…")
-        }
-        return
-    }
     val movies = homeContent.movies
     val series = homeContent.series
     val live = homeContent.live
@@ -1646,15 +1708,8 @@ private fun PosterCatalogScreen(
         categoryId = state.selectedCategoryId,
         query = state.searchQuery,
     )
-    val keyedModel by produceState(
-        initialValue = navigationMemory.cachedCatalogModel(modelInput),
-        key1 = modelInput,
-    ) {
-        value = navigationMemory.catalogModel(modelInput)
-    }
-    val model = keyedModel
-        ?.takeIf { it.input == modelInput }
-        ?.model
+    val keyedModel = rememberCatalogModelForPresentation(navigationMemory, modelInput)
+    val model = keyedModel?.model
     val visible = model?.visible.orEmpty()
     val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID

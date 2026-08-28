@@ -28,10 +28,19 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         )
 
         self.assertIn("CatalogScreenModelInput(", poster)
-        self.assertIn("navigationMemory.catalogModel(modelInput)", poster)
-        self.assertIn("produceState(", poster)
+        self.assertIn("rememberCatalogModelForPresentation", poster)
+        self.assertNotIn("produceState(", poster)
         self.assertNotIn("remember(catalog) { newest(", poster)
         self.assertNotIn("ordered.filter", poster)
+
+        handoff = self.section(
+            source,
+            "private fun rememberCatalogModelForPresentation(",
+            "private fun Modifier.restoreFocus(",
+        )
+        self.assertIn("navigationMemory.lastGoodCatalogModel", handoff)
+        self.assertIn("navigationMemory.catalogModel(input)", handoff)
+        self.assertIn("remember(navigationMemory, input.destination)", handoff)
 
         content_grid = self.section(
             source,
@@ -44,17 +53,53 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
 
     def test_home_recommendations_are_not_built_in_composition(self) -> None:
         source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        handoff = self.section(
+            source,
+            "private fun rememberHomeModelForPresentation(",
+            "private fun rememberCatalogModelForPresentation(",
+        )
         home = self.section(
             source,
             "private fun CinemaHomeScreen(",
             "private fun RenewalBanner(",
         )
 
-        self.assertIn("HomeContentModelInput(", home)
-        self.assertIn("navigationMemory.homeModel(homeInput)", home)
-        self.assertIn("produceState(", home)
+        self.assertIn("HomeContentModelInput(", shell)
+        self.assertIn("rememberHomeModelForPresentation(", shell)
+        self.assertIn("navigationMemory.lastGoodHomeModel()", handoff)
+        self.assertIn("navigationMemory.homeModel(input)", handoff)
+        self.assertIn("remember(navigationMemory)", handoff)
+        self.assertNotIn("produceState(", source)
+        self.assertNotIn("HomeContentModelInput(", home)
+        self.assertNotIn("LoadingRing(", home)
         self.assertNotIn("buildSmartHomeRecommendations(", home)
         self.assertNotIn("navigationMemory.homeContent(state)", home)
+
+    def test_first_home_model_gates_shell_without_second_destination_loader(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        gate = "if (state.destination == MainDestination.HOME && homeModel == null)"
+
+        self.assertIn(gate, shell)
+        self.assertLess(shell.index(gate), shell.index("CinematicNavigationRail("))
+        self.assertNotIn("جاري تجهيز الرئيسية", source)
+
+    def test_last_good_models_remain_profile_store_owned(self) -> None:
+        source = self.read(DERIVED_MODELS)
+
+        self.assertIn("fun lastGoodHome()", source)
+        self.assertIn("fun lastGoodCatalog(destination: MainDestination)", source)
+        self.assertIn("private var homeModel: KeyedHomeContentModel?", source)
+        self.assertIn("private val catalogModels = EnumMap", source)
 
     def test_catalog_category_bar_does_not_build_unused_artwork_index(self) -> None:
         source = self.read(MAIN_SHELL)

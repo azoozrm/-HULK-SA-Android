@@ -1,12 +1,16 @@
 package sa.hulksa.player.ui.screens
 
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -215,6 +219,7 @@ class CatalogScreenEntryModelsTest {
         )
         val firstInput = HomeContentModelInput(originalCatalog, null, null, history, favorites)
 
+        assertNull(store.lastGoodHome())
         val first = store.home(firstInput)
         val same = store.home(HomeContentModelInput(originalCatalog, null, null, history, favorites))
         val refreshedCatalog = Catalog(emptyList(), listOf(movie(3, "Refreshed", "all", 300L)))
@@ -228,6 +233,8 @@ class CatalogScreenEntryModelsTest {
         )
 
         assertSame(first, same)
+        assertSame(refreshed, store.lastGoodHome())
+        assertSame(refreshed, store.cachedHome(HomeContentModelInput(refreshedCatalog, null, null, history, favorites)))
         assertEquals(listOf(2, 1), first.model.movies.map(ContentItem::id))
         assertEquals(legacyRecommendations.featuredCandidates, first.model.featuredCandidates)
         assertEquals(legacyRecommendations.suggested, first.model.suggested)
@@ -236,28 +243,195 @@ class CatalogScreenEntryModelsTest {
     }
 
     @Test
-    fun `derivation runs on configured worker dispatcher`() {
+    fun `last good home remains available until exact revalidation replaces it`() {
+        val refreshedCatalog = Catalog(emptyList(), listOf(movie(2, "Refreshed", "all", 200L)))
+        val refreshStarted = CountDownLatch(1)
+        val releaseRefresh = CountDownLatch(1)
+        Executors.newFixedThreadPool(2).asCoroutineDispatcher().use { dispatcher ->
+            val store = CatalogScreenEntryModelStore(
+                dispatcher = dispatcher,
+                homeBuilder = { input ->
+                    if (input.movieCatalog === refreshedCatalog) {
+                        refreshStarted.countDown()
+                        check(releaseRefresh.await(5, TimeUnit.SECONDS))
+                    }
+                    deriveHomeContentModel(input)
+                },
+            )
+            runBlocking {
+                val firstInput = homeInput(Catalog(emptyList(), listOf(movie(1, "Initial", "all", 100L))))
+                val refreshedInput = homeInput(refreshedCatalog)
+                val first = store.home(firstInput)
+                val refresh = async(dispatcher) { store.home(refreshedInput) }
+
+                val startedInTime = refreshStarted.await(5, TimeUnit.SECONDS)
+                try {
+                    assertTrue(startedInTime)
+                    assertSame(first, store.lastGoodHome())
+                    assertNull(store.cachedHome(refreshedInput))
+                } finally {
+                    releaseRefresh.countDown()
+                }
+
+                val exact = refresh.await()
+                assertSame(exact, store.lastGoodHome())
+                assertSame(exact, store.cachedHome(refreshedInput))
+                assertEquals(listOf(2), exact.model.movies.map(ContentItem::id))
+            }
+        }
+    }
+
+    @Test
+    fun `stale home result cannot replace a newer completed input`() {
+        val staleCatalog = Catalog(emptyList(), listOf(movie(1, "Stale", "all", 100L)))
+        val currentCatalog = Catalog(emptyList(), listOf(movie(2, "Current", "all", 200L)))
+        val staleStarted = CountDownLatch(1)
+        val releaseStale = CountDownLatch(1)
+        Executors.newFixedThreadPool(2).asCoroutineDispatcher().use { dispatcher ->
+            val store = CatalogScreenEntryModelStore(
+                dispatcher = dispatcher,
+                homeBuilder = { input ->
+                    if (input.movieCatalog === staleCatalog) {
+                        staleStarted.countDown()
+                        check(releaseStale.await(5, TimeUnit.SECONDS))
+                    }
+                    deriveHomeContentModel(input)
+                },
+            )
+            runBlocking {
+                val stale = async(dispatcher) { store.home(homeInput(staleCatalog)) }
+                val startedInTime = staleStarted.await(5, TimeUnit.SECONDS)
+                assertTrue(startedInTime)
+
+                val currentInput = homeInput(currentCatalog)
+                val current = store.home(currentInput)
+                releaseStale.countDown()
+                stale.await()
+
+                assertSame(current, store.lastGoodHome())
+                assertSame(current, store.cachedHome(currentInput))
+                assertEquals(listOf(2), store.lastGoodHome()?.model?.movies?.map(ContentItem::id))
+            }
+        }
+    }
+
+    @Test
+    fun `profile account and kids stores never share last good home`() = runBlocking {
+        val accountStore = CatalogScreenEntryModelStore()
+        val profileStore = CatalogScreenEntryModelStore()
+        val kidsStore = CatalogScreenEntryModelStore()
+        val adult = accountStore.home(
+            homeInput(Catalog(emptyList(), listOf(movie(9, "Adult", "adult", 900L)))),
+        )
+
+        assertSame(adult, accountStore.lastGoodHome())
+        assertNull(profileStore.lastGoodHome())
+        assertNull(kidsStore.lastGoodHome())
+
+        val kids = kidsStore.home(
+            homeInput(Catalog(emptyList(), listOf(movie(1, "Kids", "kids", 100L)))),
+        )
+        assertEquals(listOf(1), kids.model.movies.map(ContentItem::id))
+        assertEquals(listOf(9), adult.model.movies.map(ContentItem::id))
+        assertNotSame(adult, kidsStore.lastGoodHome())
+        assertNull(profileStore.lastGoodHome())
+    }
+
+    @Test
+    fun `movies and series keep independent last good models during revalidation`() {
+        val refreshedMovies = Catalog(emptyList(), listOf(movie(2, "New Movie", "all", 200L)))
+        val refreshStarted = CountDownLatch(1)
+        val releaseRefresh = CountDownLatch(1)
+        Executors.newFixedThreadPool(2).asCoroutineDispatcher().use { dispatcher ->
+            val store = CatalogScreenEntryModelStore(
+                dispatcher = dispatcher,
+                catalogBuilder = { input ->
+                    if (input.catalog === refreshedMovies) {
+                        refreshStarted.countDown()
+                        check(releaseRefresh.await(5, TimeUnit.SECONDS))
+                    }
+                    deriveCatalogScreenModel(input)
+                },
+            )
+            runBlocking {
+                val firstMovies = store.catalog(
+                    movieInput(Catalog(emptyList(), listOf(movie(1, "Old Movie", "all", 100L)))),
+                )
+                val seriesInput = seriesInput(
+                    Catalog(
+                        emptyList(),
+                        listOf(movie(7, "Series", "all", 700L).copy(type = ContentType.SERIES)),
+                    ),
+                )
+                val series = store.catalog(seriesInput)
+                val refreshedInput = movieInput(refreshedMovies)
+                val refresh = async(dispatcher) { store.catalog(refreshedInput) }
+
+                val startedInTime = refreshStarted.await(5, TimeUnit.SECONDS)
+                try {
+                    assertTrue(startedInTime)
+                    assertSame(firstMovies, store.lastGoodCatalog(MainDestination.MOVIES))
+                    assertSame(series, store.lastGoodCatalog(MainDestination.SERIES))
+                } finally {
+                    releaseRefresh.countDown()
+                }
+
+                val exact = refresh.await()
+                assertSame(exact, store.lastGoodCatalog(MainDestination.MOVIES))
+                assertSame(series, store.lastGoodCatalog(MainDestination.SERIES))
+                assertEquals(listOf(2), exact.model.visible.map(ContentItem::id))
+            }
+        }
+    }
+
+    @Test
+    fun `catalog and first home derivation run on configured worker dispatcher`() {
         val workerThread = AtomicReference<Thread>()
         val executor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "catalog-model-worker").also(workerThread::set)
         }
         executor.asCoroutineDispatcher().use { dispatcher ->
-            val calculationThread = AtomicReference<Thread>()
+            val catalogThread = AtomicReference<Thread>()
+            val homeThread = AtomicReference<Thread>()
             val store = CatalogScreenEntryModelStore(
                 dispatcher = dispatcher,
                 catalogBuilder = { input ->
-                    calculationThread.set(Thread.currentThread())
+                    catalogThread.set(Thread.currentThread())
                     deriveCatalogScreenModel(input)
+                },
+                homeBuilder = { input ->
+                    homeThread.set(Thread.currentThread())
+                    deriveHomeContentModel(input)
                 },
             )
 
             runBlocking {
                 store.catalog(movieInput(Catalog(emptyList(), listOf(movie(1, "One", "all", 1L)))))
+                store.home(homeInput(Catalog(emptyList(), listOf(movie(2, "Home", "all", 2L)))))
             }
 
-            assertSame(workerThread.get(), calculationThread.get())
+            assertSame(workerThread.get(), catalogThread.get())
+            assertSame(workerThread.get(), homeThread.get())
         }
     }
+
+    private fun homeInput(catalog: Catalog?): HomeContentModelInput = HomeContentModelInput(
+        movieCatalog = catalog,
+        seriesCatalog = null,
+        liveCatalog = null,
+        history = emptyList(),
+        favorites = emptySet(),
+    )
+
+    private fun seriesInput(catalog: Catalog?): CatalogScreenModelInput = CatalogScreenModelInput(
+        catalog = catalog,
+        history = emptyList(),
+        favorites = CatalogFavoriteSnapshot(emptySet()),
+        type = ContentType.SERIES,
+        destination = MainDestination.SERIES,
+        categoryId = null,
+        query = "",
+    )
 
     private fun movieInput(
         catalog: Catalog?,
