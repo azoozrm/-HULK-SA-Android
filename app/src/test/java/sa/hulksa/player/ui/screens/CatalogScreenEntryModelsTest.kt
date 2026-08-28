@@ -2,6 +2,7 @@ package sa.hulksa.player.ui.screens
 
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -236,15 +237,16 @@ class CatalogScreenEntryModelsTest {
 
     @Test
     fun `derivation runs on configured worker dispatcher`() {
+        val workerThread = AtomicReference<Thread>()
         val executor = Executors.newSingleThreadExecutor { runnable ->
-            Thread(runnable, "catalog-model-worker")
+            Thread(runnable, "catalog-model-worker").also(workerThread::set)
         }
         executor.asCoroutineDispatcher().use { dispatcher ->
-            var calculationThread = ""
+            val calculationThread = AtomicReference<Thread>()
             val store = CatalogScreenEntryModelStore(
                 dispatcher = dispatcher,
                 catalogBuilder = { input ->
-                    calculationThread = Thread.currentThread().name
+                    calculationThread.set(Thread.currentThread())
                     deriveCatalogScreenModel(input)
                 },
             )
@@ -253,7 +255,7 @@ class CatalogScreenEntryModelsTest {
                 store.catalog(movieInput(Catalog(emptyList(), listOf(movie(1, "One", "all", 1L)))))
             }
 
-            assertEquals("catalog-model-worker", calculationThread)
+            assertSame(workerThread.get(), calculationThread.get())
         }
     }
 
