@@ -11,19 +11,17 @@ import sa.hulksa.player.model.OfflineStatus
 
 class AccountSessionDownloadIsolationTest {
     @Test
-    fun `account A snapshot becomes empty for account B with the same primary profile`() {
-        var activeAccountId: String? = "account-a"
-        var activeProfileId = "primary"
+    fun `account mismatch is rejected when immutable profile snapshot is built`() {
         val item = download(downloadId = 1L, historyKey = "movie:1")
         val snapshot = ProfileDownloadSnapshotList(
             accountId = "account-a",
             allDownloads = listOf(item),
-            activeAccountId = { activeAccountId },
-            activeProfileId = { activeProfileId },
+            activeAccountId = { "account-b" },
+            activeProfileId = { "primary" },
             ownersForExistingDownload = { setOf("primary") },
         )
 
-        assertEquals(listOf(item), snapshot.toList())
+        assertTrue(snapshot.isEmpty())
         assertFalse(
             accountDownloadAccessAllowed(
                 recordAccountId = "account-a",
@@ -31,32 +29,92 @@ class AccountSessionDownloadIsolationTest {
                 profileOwnsRecord = true,
             ),
         )
-        activeAccountId = null
-        assertTrue(snapshot.isEmpty())
-        activeAccountId = "account-b"
-        assertTrue(snapshot.isEmpty())
-        activeAccountId = "account-a"
-        assertEquals(listOf(item), snapshot.toList())
     }
 
     @Test
-    fun `profile visibility stays isolated while a physical record can have two owners`() {
-        var activeProfileId = "profile-1"
-        val shared = download(downloadId = 2L, historyKey = "movie:shared")
-        val profileOwners = setOf("profile-1", "profile-2")
+    fun `profile filtering is resolved once and list accessors reuse the same snapshot`() {
+        val visible = download(downloadId = 2L, historyKey = "movie:visible")
+        val hidden = download(downloadId = 3L, historyKey = "movie:hidden")
+        var accountReads = 0
+        var profileReads = 0
+        var ownerReads = 0
         val snapshot = ProfileDownloadSnapshotList(
             accountId = "account-a",
-            allDownloads = listOf(shared),
-            activeAccountId = { "account-a" },
-            activeProfileId = { activeProfileId },
-            ownersForExistingDownload = { profileOwners },
+            allDownloads = listOf(visible, hidden),
+            activeAccountId = {
+                accountReads += 1
+                "account-a"
+            },
+            activeProfileId = {
+                profileReads += 1
+                "profile-1"
+            },
+            ownersForExistingDownload = { historyKey ->
+                ownerReads += 1
+                if (historyKey == visible.historyKey) setOf("profile-1") else setOf("profile-2")
+            },
         )
 
-        assertSame(shared, snapshot.single())
+        assertEquals(1, snapshot.size)
+        assertSame(visible, snapshot[0])
+        assertSame(visible, snapshot.iterator().next())
+        assertSame(visible, snapshot.listIterator().next())
+        assertEquals(1, accountReads)
+        assertEquals(1, profileReads)
+        assertEquals(2, ownerReads)
+    }
+
+    @Test
+    fun `new snapshot reflects profile switch without changing old immutable snapshot`() {
+        var activeProfileId = "profile-1"
+        val shared = download(downloadId = 4L, historyKey = "movie:shared")
+        val profileOneOnly = download(downloadId = 5L, historyKey = "movie:one")
+        val owners = mapOf(
+            shared.historyKey to setOf("profile-1", "profile-2"),
+            profileOneOnly.historyKey to setOf("profile-1"),
+        )
+        fun snapshot() = ProfileDownloadSnapshotList(
+            accountId = "account-a",
+            allDownloads = listOf(shared, profileOneOnly),
+            activeAccountId = { "account-a" },
+            activeProfileId = { activeProfileId },
+            ownersForExistingDownload = { owners.getValue(it) },
+        )
+
+        val profileOneSnapshot = snapshot()
+        assertEquals(listOf(shared, profileOneOnly), profileOneSnapshot.toList())
+
         activeProfileId = "profile-2"
-        assertSame(shared, snapshot.single())
-        activeProfileId = "profile-3"
-        assertTrue(snapshot.isEmpty())
+        val profileTwoSnapshot = snapshot()
+        assertEquals(listOf(shared), profileTwoSnapshot.toList())
+        assertEquals(listOf(shared, profileOneOnly), profileOneSnapshot.toList())
+    }
+
+    @Test
+    fun `profile snapshot preserves active progress and completed state`() {
+        val downloading = download(
+            downloadId = 6L,
+            historyKey = "movie:progress",
+            status = OfflineStatus.DOWNLOADING,
+        ).copy(bytesDownloaded = 3_000L, totalBytes = 10_000L, bytesPerSecond = 500L)
+        val completed = download(
+            downloadId = 7L,
+            historyKey = "movie:completed",
+            status = OfflineStatus.COMPLETED,
+        ).copy(bytesDownloaded = 10_000L, totalBytes = 10_000L, integrityVerified = true)
+        val snapshot = ProfileDownloadSnapshotList(
+            accountId = "account-a",
+            allDownloads = listOf(downloading, completed),
+            activeAccountId = { "account-a" },
+            activeProfileId = { "profile-1" },
+            ownersForExistingDownload = { setOf("profile-1") },
+        )
+
+        assertEquals(OfflineStatus.DOWNLOADING, snapshot[0].status)
+        assertEquals(3_000L, snapshot[0].bytesDownloaded)
+        assertEquals(500L, snapshot[0].bytesPerSecond)
+        assertEquals(OfflineStatus.COMPLETED, snapshot[1].status)
+        assertTrue(snapshot[1].integrityVerified)
     }
 
     @Test
