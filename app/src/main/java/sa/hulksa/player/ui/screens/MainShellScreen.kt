@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -474,15 +475,16 @@ fun MainShellScreen(
     }
     Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
-            Row(Modifier.fillMaxSize()) {
-                CinematicNavigationRail(
-                    entries = navigationEntries,
-                    selected = state.destination,
-                    onSelect = onSelectDestination,
-                    onSwitchProfile = requestProfileSwitch,
-                    destinationFocusRequesters = tvRailFocusRequesters,
-                )
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+            val railMetrics = tvRailMetrics(
+                screenWidthDp = adaptiveUi.screenWidthDp,
+                screenHeightDp = adaptiveUi.screenHeightDp,
+            )
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(start = railMetrics.collapsedWidthDp.dp),
+                ) {
                     DestinationContent(
                         state = state,
                         isTv = isTv,
@@ -513,6 +515,13 @@ fun MainShellScreen(
                         onLogout = onLogout,
                     )
                 }
+                CinematicNavigationRail(
+                    entries = navigationEntries,
+                    selected = state.destination,
+                    onSelect = onSelectDestination,
+                    onSwitchProfile = requestProfileSwitch,
+                    destinationFocusRequesters = tvRailFocusRequesters,
+                )
             }
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -597,14 +606,16 @@ private fun CinematicNavigationRail(
     val profileRequester = remember { FocusRequester() }
     val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
     val selectedRequester = destinationFocusRequesters.getValue(selected)
-    val railWidth by animateDpAsState(
+    val railVisualWidth by animateDpAsState(
         targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
-        label = "railWidth",
+        label = "railVisualWidth",
     )
 
     Column(
         modifier = Modifier
-            .width(railWidth)
+            .width(metrics.expandedWidthDp.dp)
+            .wrapContentWidth(Alignment.Start, unbounded = true)
+            .width(railVisualWidth)
             .fillMaxHeight()
             .focusProperties {
                 onEnter = {
