@@ -231,7 +231,7 @@ internal fun TvCatalogGrid(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val availableGridWidth = (maxWidth - (horizontalContentPadding * 2)).coerceAtLeast(minCellWidth)
+        val availableGridWidth = (maxWidth - horizontalContentPadding).coerceAtLeast(minCellWidth)
         val columnCount = (((availableGridWidth + horizontalSpacing).value) /
             (minCellWidth + horizontalSpacing).value)
             .toInt()
@@ -245,7 +245,7 @@ internal fun TvCatalogGrid(
             contentPadding = PaddingValues(
                 start = horizontalContentPadding,
                 top = horizontalContentPadding,
-                end = horizontalContentPadding,
+                end = 0.dp,
                 bottom = bottomContentPadding,
             ),
             modifier = Modifier.fillMaxSize(),

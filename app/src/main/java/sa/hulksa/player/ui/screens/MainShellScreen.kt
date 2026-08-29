@@ -1838,7 +1838,7 @@ private fun PosterCatalogScreen(
                 .then(
                     if (isTv) {
                         Modifier.padding(
-                            horizontal = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            start = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
                             top = tvSafeInsets.verticalDp.dp,
                         )
                     } else {
@@ -1965,7 +1965,7 @@ private fun LiveCatalogScreen(
                 .then(
                     if (isTv) {
                         Modifier.padding(
-                            horizontal = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            start = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
                             top = tvSafeInsets.verticalDp.dp,
                         )
                     } else {
@@ -2032,7 +2032,7 @@ private fun LiveCatalogScreen(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .padding(end = 12.dp, bottom = 12.dp),
+                        .padding(bottom = 12.dp),
                 ) {
                     LivePreviewStage(
                         previewState = previewState,
