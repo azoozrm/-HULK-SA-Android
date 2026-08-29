@@ -13,6 +13,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -46,8 +48,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -81,6 +81,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -97,19 +98,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -238,17 +244,99 @@ private fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier
     }
 }
 
+internal fun categoryPhysicalNonSidebarEdgeCorrection(
+    viewportLeft: Float,
+    viewportRight: Float,
+    chipLeft: Float,
+    chipRight: Float,
+    sidebarOnPhysicalRight: Boolean,
+): Float {
+    if (viewportRight <= viewportLeft || chipRight <= chipLeft) return 0f
+    return if (sidebarOnPhysicalRight) {
+        (viewportLeft - chipLeft).coerceAtLeast(0f)
+    } else {
+        (chipRight - viewportRight).coerceAtLeast(0f)
+    }
+}
+
+private class CategoryPhysicalEdgeState {
+    var viewportBounds: Rect? = null
+    var correctionJob: Job? = null
+    var correctionOwner: CategoryChipPhysicalState? = null
+}
+
+private class CategoryChipPhysicalState {
+    var bounds: Rect? = null
+    var focused: Boolean = false
+}
+
+private fun categoryPhysicalNonSidebarEdgeCorrection(
+    edgeState: CategoryPhysicalEdgeState,
+    chipState: CategoryChipPhysicalState,
+    sidebarOnPhysicalRight: Boolean,
+): Float {
+    val viewport = edgeState.viewportBounds ?: return 0f
+    val chip = chipState.bounds ?: return 0f
+    return categoryPhysicalNonSidebarEdgeCorrection(
+        viewportLeft = viewport.left,
+        viewportRight = viewport.right,
+        chipLeft = chip.left,
+        chipRight = chip.right,
+        sidebarOnPhysicalRight = sidebarOnPhysicalRight,
+    )
+}
+
 @Composable
-private fun Modifier.keepCategoryChipFullyVisibleOnFocus(isTv: Boolean): Modifier {
+private fun Modifier.keepCategoryChipFullyVisibleOnFocus(
+    isTv: Boolean,
+    listState: LazyListState,
+    sidebarOnPhysicalRight: Boolean,
+    scope: CoroutineScope,
+    edgeState: CategoryPhysicalEdgeState,
+): Modifier {
     if (!isTv) return this
-    val requester = remember { BringIntoViewRequester() }
-    val scope = rememberCoroutineScope()
-    return bringIntoViewRequester(requester)
-        .onFocusChanged { focusState ->
-            if (focusState.isFocused) {
-                scope.launch { requester.bringIntoView() }
+    val chipState = remember { CategoryChipPhysicalState() }
+
+    fun correctPhysicalEdgeIfNeeded() {
+        if (!chipState.focused) return
+        val correction = categoryPhysicalNonSidebarEdgeCorrection(
+            edgeState = edgeState,
+            chipState = chipState,
+            sidebarOnPhysicalRight = sidebarOnPhysicalRight,
+        )
+        if (correction <= 0f) return
+
+        val activeJob = edgeState.correctionJob
+        if (activeJob?.isActive == true) {
+            if (edgeState.correctionOwner === chipState) return
+            activeJob.cancel()
+        }
+        edgeState.correctionOwner = chipState
+        edgeState.correctionJob = scope.launch {
+            try {
+                listState.scrollBy(correction)
+            } finally {
+                if (edgeState.correctionOwner === chipState) {
+                    edgeState.correctionOwner = null
+                    edgeState.correctionJob = null
+                }
             }
         }
+    }
+
+    return onGloballyPositioned { coordinates ->
+        chipState.bounds = coordinates.boundsInRoot()
+        correctPhysicalEdgeIfNeeded()
+    }.onFocusChanged { focusState ->
+        chipState.focused = focusState.isFocused
+        if (focusState.isFocused) {
+            correctPhysicalEdgeIfNeeded()
+        } else if (edgeState.correctionOwner === chipState) {
+            edgeState.correctionJob?.cancel()
+            edgeState.correctionJob = null
+            edgeState.correctionOwner = null
+        }
+    }
 }
 
 private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
@@ -3441,6 +3529,8 @@ private fun ReorderableCatalogCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val sidebarOnPhysicalRight = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val physicalEdgeState = remember(listState) { CategoryPhysicalEdgeState() }
     val allFocusRequester = remember(type) { FocusRequester() }
     val favoritesFocusRequester = remember(type) { FocusRequester() }
     val continueFocusRequester = remember(type) { FocusRequester() }
@@ -3510,6 +3600,9 @@ private fun ReorderableCatalogCategoryBar(
             }
             .focusGroup()
             .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .onGloballyPositioned { coordinates ->
+                physicalEdgeState.viewportBounds = coordinates.boundsInRoot()
+            }
             .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(
@@ -3527,7 +3620,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(allFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == null
                     },
@@ -3541,7 +3634,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(favoritesFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
                     },
@@ -3555,7 +3648,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(continueFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == CONTINUE_CATEGORY_ID
                     },
@@ -3573,7 +3666,7 @@ private fun ReorderableCatalogCategoryBar(
                 onMoveRight = { move(category.id, -1) },
                 modifier = Modifier
                     .focusRequester(categoryFocusRequesters.getValue(category.id))
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                     },
@@ -3615,6 +3708,8 @@ private fun ReorderableLiveCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val sidebarOnPhysicalRight = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val physicalEdgeState = remember(listState) { CategoryPhysicalEdgeState() }
     val allFocusRequester = remember { FocusRequester() }
     val favoritesFocusRequester = remember { FocusRequester() }
     val stableCategoryIds = remember(categories) { categories.map(Category::id) }
@@ -3687,6 +3782,9 @@ private fun ReorderableLiveCategoryBar(
             }
             .focusGroup()
             .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .onGloballyPositioned { coordinates ->
+                physicalEdgeState.viewportBounds = coordinates.boundsInRoot()
+            }
             .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(
@@ -3704,7 +3802,7 @@ private fun ReorderableLiveCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(allFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == null
                     },
@@ -3718,7 +3816,7 @@ private fun ReorderableLiveCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(favoritesFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
                     },
@@ -3733,7 +3831,7 @@ private fun ReorderableLiveCategoryBar(
                     compact = true,
                     modifier = Modifier
                         .focusRequester(categoryFocusRequesters.getValue(category.id))
-                        .keepCategoryChipFullyVisibleOnFocus(isTv)
+                        .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                         .focusProperties {
                             canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                         },
@@ -3752,7 +3850,7 @@ private fun ReorderableLiveCategoryBar(
                     onMoveRight = { move(category.id, -1) },
                     modifier = Modifier
                         .focusRequester(categoryFocusRequesters.getValue(category.id))
-                        .keepCategoryChipFullyVisibleOnFocus(isTv)
+                        .keepCategoryChipFullyVisibleOnFocus(isTv, listState, sidebarOnPhysicalRight, scope, physicalEdgeState)
                         .focusProperties {
                             canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                         },
