@@ -66,9 +66,9 @@ class TvPlatformIntegrationProviderTest {
             )
 
             runBlocking {
-                val first = async { provider.withInstance { it } }
+                val first = async(dispatcher) { provider.withInstance { it } }
                 assertTrue(initializationStarted.await(5, TimeUnit.SECONDS))
-                val second = async { provider.withInstance { it } }
+                val second = async(dispatcher) { provider.withInstance { it } }
 
                 assertFalse(first.isCompleted)
                 assertFalse(second.isCompleted)
