@@ -109,6 +109,18 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private const val HULK_WEBSITE = "https://hulksa.com/"
 
+internal class LoginCardFocusRequesterHolder(
+    initialRequester: FocusRequester,
+) {
+    private var currentRequester = initialRequester
+
+    fun update(requester: FocusRequester) {
+        currentRequester = requester
+    }
+
+    fun current(): FocusRequester = currentRequester
+}
+
 private enum class LoginComposition {
     PREMIUM_SPLIT,
     CENTERED,
@@ -303,7 +315,9 @@ fun LoginScreen(
     val tvInitialFocusRequester = remember { FocusRequester() }
     val submitRequester = remember { FocusRequester() }
     val subscribeRequester = remember { FocusRequester() }
-    var lastCardFocusRequester by remember { mutableStateOf(submitRequester) }
+    val lastCardFocusRequester = remember(submitRequester) {
+        LoginCardFocusRequesterHolder(submitRequester)
+    }
     var initialTvFocusRequested by remember { mutableStateOf(false) }
     var showSubscriptionQr by rememberSaveable { mutableStateOf(false) }
     val loginRenewalLink = remember {
@@ -425,7 +439,7 @@ fun LoginScreen(
                     onSubmit = submit,
                     onOpenWebsite = openWebsite,
                     onNonTextFocus = hideKeyboard,
-                    onCardFocusChanged = { lastCardFocusRequester = it },
+                    onCardFocusChanged = lastCardFocusRequester::update,
                     initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
                     showSecondaryAction = !secondaryInBrand,
                     submitRequester = submitRequester,
@@ -489,7 +503,7 @@ fun LoginScreen(
                                 LoginSubscriptionAction(
                                     onClick = { showSubscriptionQr = true },
                                     onNonTextFocus = hideKeyboard,
-                                    returnRequester = lastCardFocusRequester,
+                                    returnRequester = lastCardFocusRequester::current,
                                     subscribeRequester = subscribeRequester,
                                     policy = policy,
                                     modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
@@ -524,7 +538,7 @@ fun LoginScreen(
                             LoginSubscriptionAction(
                                 onClick = { showSubscriptionQr = true },
                                 onNonTextFocus = hideKeyboard,
-                                returnRequester = lastCardFocusRequester,
+                                returnRequester = lastCardFocusRequester::current,
                                 subscribeRequester = subscribeRequester,
                                 policy = policy,
                                 modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
@@ -736,7 +750,7 @@ private fun LoginBrandRegion(
 private fun LoginSubscriptionAction(
     onClick: () -> Unit,
     onNonTextFocus: () -> Unit,
-    returnRequester: FocusRequester,
+    returnRequester: () -> FocusRequester,
     subscribeRequester: FocusRequester,
     policy: LoginLayoutPolicy,
     modifier: Modifier = Modifier,
@@ -758,7 +772,7 @@ private fun LoginSubscriptionAction(
                 up = FocusRequester.Cancel
                 down = FocusRequester.Cancel
                 left = FocusRequester.Cancel
-                right = returnRequester
+                right = returnRequester()
             },
     )
 }
