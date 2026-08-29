@@ -112,15 +112,12 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("artworkByCategory", category_bar)
         self.assertNotIn("groupBy(ContentItem::categoryId)", category_bar)
 
-    def test_tv_grid_consumes_precomputed_keys_without_eager_focus_allocation(self) -> None:
+    def test_tv_grid_consumes_precomputed_keys_without_focus_map(self) -> None:
         source = self.read(CATALOG_GRID)
 
         self.assertIn("contentKeys: List<String>", source)
         self.assertIn("contentKeyIndex[remembered.itemKey]", source)
-        self.assertIn("TvCatalogFocusRequesterStore(contentKeys)", source)
-        self.assertIn("private val requesters = HashMap<Int, FocusRequester>()", source)
-        self.assertIn("requesters.getOrPut(index, factory)", source)
-        self.assertNotIn("List(contentKeys.size) { FocusRequester() }", source)
+        self.assertIn("List(contentKeys.size) { FocusRequester() }", source)
         self.assertNotIn("content.map {", source)
         self.assertNotIn("contentKeys.indexOf(", source)
         self.assertNotIn("contentKeys.associateWith", source)

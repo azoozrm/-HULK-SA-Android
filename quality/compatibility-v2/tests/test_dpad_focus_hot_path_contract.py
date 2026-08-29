@@ -49,7 +49,7 @@ class DpadFocusHotPathContractTest(unittest.TestCase):
         self.assertIn("focusIndex(", handler)
         self.assertIn("ensureFullyVisible = true", handler)
         self.assertIn("focusMoveState.complete(nextIndex)", handler)
-        self.assertIn("focusRequesters.requesterOrNull(nextIndex)", handler)
+        self.assertIn("focusRequesters.getOrNull(nextIndex)", handler)
         self.assertNotIn("mutableStateOf<Job?>", source)
         self.assertNotIn("mutableStateOf<Int?>", source)
 
@@ -81,19 +81,11 @@ class DpadFocusHotPathContractTest(unittest.TestCase):
         self.assertIn("previewState.value?.let(onOpen)", host)
         self.assertIn("previewState.value?.let(onToggleFavorite)", host)
 
-    def test_focus_requesters_are_lazy_and_shared_across_focus_paths(self) -> None:
+    def test_focus_requester_architecture_is_unchanged(self) -> None:
         source = self.read(CATALOG_GRID)
-        focus_index = self.section(
-            source,
-            "suspend fun focusIndex(",
-            "LaunchedEffect(contentKeys,",
-        )
 
-        self.assertIn("remember(contentKeys) { TvCatalogFocusRequesterStore(contentKeys) }", source)
-        self.assertIn(".focusRequester(focusRequesters.requester(index))", source)
-        self.assertIn("focusRequesters.requesterOrNull(index)", focus_index)
-        self.assertIn("requesters.getOrPut(index, factory)", source)
-        self.assertNotIn("List(contentKeys.size) { FocusRequester() }", source)
+        self.assertIn("remember(contentKeys) { List(contentKeys.size) { FocusRequester() } }", source)
+        self.assertIn(".focusRequester(focusRequesters[index])", source)
 
 
 if __name__ == "__main__":

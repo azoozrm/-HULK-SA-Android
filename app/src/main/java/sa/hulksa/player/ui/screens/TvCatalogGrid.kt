@@ -129,21 +129,6 @@ internal class TvCatalogFocusMoveState {
     fun pendingTargetIndex(): Int? = pendingTargetIndex
 }
 
-internal class TvCatalogFocusRequesterStore(
-    private val contentKeys: List<String>,
-    private val factory: () -> FocusRequester = { FocusRequester() },
-) {
-    private val requesters = HashMap<Int, FocusRequester>()
-
-    fun requester(index: Int): FocusRequester {
-        require(index in contentKeys.indices)
-        return requesters.getOrPut(index, factory)
-    }
-
-    fun requesterOrNull(index: Int): FocusRequester? =
-        if (index in contentKeys.indices) requester(index) else null
-}
-
 @Composable
 internal fun TvCatalogGrid(
     content: List<ContentItem>,
@@ -180,7 +165,7 @@ internal fun TvCatalogGrid(
         .coerceIn(0, content.lastIndex.coerceAtLeast(0))
     val targetKey = contentKeys.getOrNull(targetIndex)
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
-    val focusRequesters = remember(contentKeys) { TvCatalogFocusRequesterStore(contentKeys) }
+    val focusRequesters = remember(contentKeys) { List(contentKeys.size) { FocusRequester() } }
     val focusScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val focusViewportInsetPx = with(density) { focusViewportInset.roundToPx() }
@@ -211,7 +196,7 @@ internal fun TvCatalogGrid(
         columnCount: Int,
         ensureFullyVisible: Boolean,
     ) {
-        val requester = focusRequesters.requesterOrNull(index) ?: return
+        val requester = focusRequesters.getOrNull(index) ?: return
         val visible = gridState.layoutInfo.visibleItemsInfo
         if (visible.none { it.index == index }) {
             val firstVisible = visible.minOfOrNull { it.index } ?: index
@@ -242,7 +227,7 @@ internal fun TvCatalogGrid(
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
                 .first { it }
             ensureIndexFullyVisible(targetIndex)
-            runCatching { focusRequesters.requester(targetIndex).requestFocus() }
+            runCatching { focusRequesters[targetIndex].requestFocus() }
         }
     }
 
@@ -272,7 +257,7 @@ internal fun TvCatalogGrid(
                 val key = contentKeys[index]
                 val cardModifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(focusRequesters.requester(index))
+                    .focusRequester(focusRequesters[index])
                     .onPreviewKeyEvent { event ->
                         val move = when (event.key) {
                             Key.DirectionLeft -> TvGridFocusMove.LEFT
@@ -306,7 +291,7 @@ internal fun TvCatalogGrid(
                             return@onPreviewKeyEvent move == TvGridFocusMove.LEFT
                         }
 
-                        val requester = focusRequesters.requesterOrNull(nextIndex)
+                        val requester = focusRequesters.getOrNull(nextIndex)
                             ?: return@onPreviewKeyEvent false
                         val layoutInfo = gridState.layoutInfo
                         val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == nextIndex }

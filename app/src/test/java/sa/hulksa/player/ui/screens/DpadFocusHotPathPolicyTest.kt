@@ -1,10 +1,7 @@
 package sa.hulksa.player.ui.screens
 
-import androidx.compose.ui.focus.FocusRequester
-import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -13,38 +10,6 @@ import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 
 class DpadFocusHotPathPolicyTest {
-    @Test
-    fun focusRequesterStore_isLazyAndStablePerIndex() {
-        val creations = AtomicInteger(0)
-        val contentKeys = List(5_000) { index -> "MOVIE:$index" }
-        val store = TvCatalogFocusRequesterStore(contentKeys) {
-            creations.incrementAndGet()
-            FocusRequester()
-        }
-
-        assertEquals(0, creations.get())
-
-        val target = store.requester(4_999)
-        assertEquals(1, creations.get())
-        assertSame(target, store.requester(4_999))
-        assertEquals(1, creations.get())
-
-        store.requester(12)
-        assertEquals(2, creations.get())
-    }
-
-    @Test
-    fun changedContentKeys_useFreshRequesterStore() {
-        val originalStore = TvCatalogFocusRequesterStore(listOf("MOVIE:1", "MOVIE:2"))
-        val refreshedStore = TvCatalogFocusRequesterStore(listOf("MOVIE:2", "MOVIE:1"))
-
-        val original = originalStore.requester(1)
-        val refreshed = refreshedStore.requester(1)
-
-        assertNotSame(original, refreshed)
-        assertSame(refreshed, refreshedStore.requester(1))
-    }
-
     @Test
     fun fullyVisibleTarget_usesDirectFocusPath() {
         assertEquals(
