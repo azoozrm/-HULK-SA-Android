@@ -229,14 +229,15 @@ internal class CatalogScreenEntryModelStore(
     }
 
     fun lastGoodHome(): KeyedHomeContentModel? = synchronized(lock) {
-        homeModel ?: latestHomeInput?.let { input ->
-            homePresentationFallback
+        val input = latestHomeInput ?: return@synchronized homeModel
+        homeModel
+            ?.takeIf { it.input == input }
+            ?: homePresentationFallback
                 ?.takeIf { it.input == input }
-                ?: KeyedHomeContentModel(
-                    input = input,
-                    model = initialHomePresentation(input),
-                ).also { homePresentationFallback = it }
-        }
+            ?: KeyedHomeContentModel(
+                input = input,
+                model = initialHomePresentation(input),
+            ).also { homePresentationFallback = it }
     }
 
     suspend fun home(input: HomeContentModelInput): KeyedHomeContentModel {

@@ -81,7 +81,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("buildSmartHomeRecommendations(", home)
         self.assertNotIn("navigationMemory.homeContent(state)", home)
 
-    def test_first_home_model_uses_profile_owned_first_frame_presentation(self) -> None:
+    def test_first_home_model_uses_current_input_profile_owned_presentation(self) -> None:
         shell_source = self.read(MAIN_SHELL)
         derived_source = self.read(DERIVED_MODELS)
         handoff = self.section(
@@ -101,14 +101,56 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
             handoff.index("navigationMemory.lastGoodHomeModel()"),
         )
         self.assertIn("latestHomeInput = input", store)
-        self.assertIn("homeModel ?: latestHomeInput?.let", store)
-        self.assertIn("initialHomePresentation(input)", store)
+        self.assertIn("val input = latestHomeInput ?: return@synchronized homeModel", store)
+        self.assertIn("homeModel\n            ?.takeIf { it.input == input }", store)
         self.assertIn("homePresentationFallback", store)
+        self.assertIn("initialHomePresentation(input)", store)
+        self.assertNotIn("homeModel ?: latestHomeInput?.let", store)
         self.assertNotIn("buildSmartHomeRecommendations(", initial)
         self.assertNotIn("newest(", initial)
         self.assertNotIn(".filter", initial)
         self.assertNotIn(".sorted", initial)
         self.assertNotIn(".groupBy", initial)
+
+    def test_home_hero_can_use_current_catalog_before_exact_model(self) -> None:
+        source = self.read(MAIN_SHELL)
+        home = self.section(
+            source,
+            "private fun CinemaHomeScreen(",
+            "private fun RenewalBanner(",
+        )
+        derived_source = self.read(DERIVED_MODELS)
+        initial = self.section(
+            derived_source,
+            "internal fun initialHomePresentation(",
+            "internal fun deriveCatalogScreenModel(",
+        )
+
+        self.assertIn("movies = input.movieCatalog?.items.orEmpty()", initial)
+        self.assertIn("series = input.seriesCatalog?.items.orEmpty()", initial)
+        self.assertIn("featuredCandidates = emptyList()", initial)
+        self.assertIn(
+            "featuredCandidates.getOrNull(featuredIndex) ?: movies.firstOrNull() ?: series.firstOrNull()",
+            home,
+        )
+
+    def test_home_handoff_has_no_refresh_polling_or_full_screen_loading_workaround(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        handoff = self.section(
+            source,
+            "private fun rememberHomeModelForPresentation(",
+            "private fun rememberCatalogModelForPresentation(",
+        )
+
+        self.assertNotIn("if (state.destination == MainDestination.HOME && homeModel == null)", shell)
+        self.assertNotIn("refresh(", handoff)
+        self.assertNotIn("delay(", handoff)
+        self.assertNotIn("while (", handoff)
 
     def test_profile_switch_keeps_navigation_home_models_profile_owned(self) -> None:
         source = self.read(PROFILE_AWARE_APP)
@@ -148,13 +190,17 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("contentKeys.indexOf(", source)
         self.assertNotIn("contentKeys.associateWith", source)
 
-    def test_heavy_models_are_built_on_worker_dispatcher(self) -> None:
+    def test_heavy_models_are_built_on_worker_dispatcher_and_stale_results_are_guarded(self) -> None:
         source = self.read(DERIVED_MODELS)
+        store = source[source.index("internal class CatalogScreenEntryModelStore(") :]
 
         self.assertIn("Dispatchers.Default", source)
         self.assertGreaterEqual(source.count("withContext(dispatcher)"), 2)
+        self.assertIn("withContext(dispatcher) { homeBuilder(input) }", store)
+        self.assertIn("if (latestHomeInput == input)", store)
         self.assertIn("deriveCatalogScreenModel", source)
         self.assertIn("deriveHomeContentModel", source)
+        self.assertIn("buildSmartHomeRecommendations(", source)
 
 
 if __name__ == "__main__":

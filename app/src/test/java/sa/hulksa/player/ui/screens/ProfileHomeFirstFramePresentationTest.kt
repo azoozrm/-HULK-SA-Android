@@ -14,18 +14,8 @@ import sa.hulksa.player.model.HistoryEntry
 
 class ProfileHomeFirstFramePresentationTest {
     @Test
-    fun `fresh profile exposes cheap home presentation before exact derivation`() {
-        val movieCatalog = Catalog(
-            categories = emptyList(),
-            items = listOf(movie(1, "Account Movie")),
-        )
-        val input = HomeContentModelInput(
-            movieCatalog = movieCatalog,
-            seriesCatalog = null,
-            liveCatalog = null,
-            history = listOf(history(91, "Old Profile History")),
-            favorites = setOf("MOVIE:91"),
-        )
+    fun `fresh profile exposes non-null cheap empty home presentation`() {
+        val input = homeInput()
         val store = CatalogScreenEntryModelStore(
             homeBuilder = { error("exact Home derivation must not run for first-frame presentation") },
         )
@@ -34,53 +24,125 @@ class ProfileHomeFirstFramePresentationTest {
         val fallback = checkNotNull(store.lastGoodHome())
 
         assertSame(input, fallback.input)
-        assertSame(movieCatalog.items, fallback.model.movies)
+        assertTrue(fallback.model.movies.isEmpty())
         assertTrue(fallback.model.series.isEmpty())
         assertTrue(fallback.model.live.isEmpty())
-        assertTrue(fallback.model.continueWatching.isEmpty())
-        assertNull(fallback.model.lastLive)
-        assertTrue(fallback.model.becauseYouWatched.isEmpty())
-        assertTrue(fallback.model.suggested.isEmpty())
-        assertTrue(fallback.model.personalizedLive.isEmpty())
-        assertTrue(fallback.model.popularMovies.isEmpty())
-        assertTrue(fallback.model.popularSeries.isEmpty())
-        assertTrue(fallback.model.featuredCandidates.isEmpty())
+        assertNull(heroId(fallback.model))
+        assertPersonalizedSectionsEmpty(fallback.model)
     }
 
     @Test
-    fun `exact home model replaces first-frame presentation`() = runBlocking {
-        val input = HomeContentModelInput(
-            movieCatalog = Catalog(emptyList(), listOf(movie(2, "Exact Movie"))),
-            seriesCatalog = null,
-            liveCatalog = null,
-            history = emptyList(),
-            favorites = emptySet(),
-        )
+    fun `movie catalog arrival replaces empty fallback immediately before exact derivation`() = runBlocking {
+        val emptyInput = homeInput()
+        val movieCatalog = Catalog(emptyList(), listOf(movie(2, "Movie Hero")))
+        val movieInput = homeInput(movieCatalog = movieCatalog)
         val store = CatalogScreenEntryModelStore()
 
-        assertNull(store.cachedHome(input))
-        val fallback = checkNotNull(store.lastGoodHome())
-        val exact = store.home(input)
+        assertNull(store.cachedHome(emptyInput))
+        val emptyFallback = checkNotNull(store.lastGoodHome())
+        assertNull(heroId(emptyFallback.model))
 
-        assertNotSame(fallback, exact)
-        assertSame(exact, store.cachedHome(input))
+        assertNull(store.cachedHome(movieInput))
+        val movieFallback = checkNotNull(store.lastGoodHome())
+
+        assertNotSame(emptyFallback, movieFallback)
+        assertSame(movieInput, movieFallback.input)
+        assertSame(movieCatalog.items, movieFallback.model.movies)
+        assertEquals(2, heroId(movieFallback.model))
+        assertPersonalizedSectionsEmpty(movieFallback.model)
+
+        val exact = store.home(movieInput)
+        assertNotSame(movieFallback, exact)
+        assertSame(exact, store.cachedHome(movieInput))
         assertSame(exact, store.lastGoodHome())
-        assertEquals(listOf(2), exact.model.movies.map(ContentItem::id))
+        assertEquals(2, heroId(exact.model))
     }
 
     @Test
-    fun `fresh profile stores never share first-frame home presentation`() {
-        val profileAInput = HomeContentModelInput(
+    fun `series catalog arrival exposes hero source without manual refresh`() {
+        val emptyInput = homeInput()
+        val seriesCatalog = Catalog(emptyList(), listOf(series(3, "Series Hero")))
+        val seriesInput = homeInput(seriesCatalog = seriesCatalog)
+        val store = CatalogScreenEntryModelStore(
+            homeBuilder = { error("exact Home derivation must not be required for Hero availability") },
+        )
+
+        store.cachedHome(emptyInput)
+        val emptyFallback = checkNotNull(store.lastGoodHome())
+        assertNull(heroId(emptyFallback.model))
+
+        store.cachedHome(seriesInput)
+        val seriesFallback = checkNotNull(store.lastGoodHome())
+
+        assertNotSame(emptyFallback, seriesFallback)
+        assertSame(seriesInput, seriesFallback.input)
+        assertSame(seriesCatalog.items, seriesFallback.model.series)
+        assertEquals(3, heroId(seriesFallback.model))
+        assertPersonalizedSectionsEmpty(seriesFallback.model)
+    }
+
+    @Test
+    fun `stale exact model from previous input never masks current catalog fallback`() = runBlocking {
+        val emptyInput = homeInput()
+        val exactEmpty = CatalogScreenEntryModelStore().run {
+            cachedHome(emptyInput)
+            home(emptyInput)
+        }
+        val movieCatalog = Catalog(emptyList(), listOf(movie(4, "Current Movie")))
+        val movieInput = homeInput(movieCatalog = movieCatalog)
+        val store = CatalogScreenEntryModelStore()
+
+        store.cachedHome(emptyInput)
+        val storedEmpty = store.home(emptyInput)
+        assertEquals(exactEmpty.model, storedEmpty.model)
+
+        assertNull(store.cachedHome(movieInput))
+        val current = checkNotNull(store.lastGoodHome())
+
+        assertNotSame(storedEmpty, current)
+        assertSame(movieInput, current.input)
+        assertEquals(4, heroId(current.model))
+    }
+
+    @Test
+    fun `stale exact completion cannot replace newer current input presentation`() = runBlocking {
+        val inputA = homeInput()
+        val movieCatalog = Catalog(emptyList(), listOf(movie(5, "Input B Movie")))
+        val inputB = homeInput(movieCatalog = movieCatalog)
+        lateinit var store: CatalogScreenEntryModelStore
+        store = CatalogScreenEntryModelStore(
+            homeBuilder = { input ->
+                if (input == inputA) {
+                    store.cachedHome(inputB)
+                }
+                initialHomePresentation(input)
+            },
+        )
+
+        val staleA = store.home(inputA)
+        val currentB = checkNotNull(store.lastGoodHome())
+
+        assertSame(inputA, staleA.input)
+        assertSame(inputB, currentB.input)
+        assertEquals(5, heroId(currentB.model))
+        assertNull(store.cachedHome(inputB))
+
+        val exactB = store.home(inputB)
+        assertSame(inputB, exactB.input)
+        assertSame(exactB, store.cachedHome(inputB))
+        assertSame(exactB, store.lastGoodHome())
+        assertEquals(5, heroId(exactB.model))
+    }
+
+    @Test
+    fun `fresh profile stores never share catalog or personalized presentation`() = runBlocking {
+        val profileAInput = homeInput(
             movieCatalog = Catalog(emptyList(), listOf(movie(10, "Profile A Catalog"))),
-            seriesCatalog = null,
-            liveCatalog = null,
             history = listOf(history(10, "Profile A History")),
             favorites = setOf("MOVIE:10"),
         )
-        val profileBInput = HomeContentModelInput(
+        val profileBInput = homeInput(
             movieCatalog = Catalog(emptyList(), listOf(movie(20, "Profile B Catalog"))),
-            seriesCatalog = null,
-            liveCatalog = null,
             history = listOf(history(20, "Profile B History")),
             favorites = setOf("MOVIE:20"),
         )
@@ -88,24 +150,57 @@ class ProfileHomeFirstFramePresentationTest {
         val profileBStore = CatalogScreenEntryModelStore()
 
         profileAStore.cachedHome(profileAInput)
+        val profileAExact = profileAStore.home(profileAInput)
         profileBStore.cachedHome(profileBInput)
-        val profileA = checkNotNull(profileAStore.lastGoodHome())
-        val profileB = checkNotNull(profileBStore.lastGoodHome())
+        val profileBFallback = checkNotNull(profileBStore.lastGoodHome())
 
-        assertNotSame(profileA, profileB)
-        assertSame(profileAInput, profileA.input)
-        assertSame(profileBInput, profileB.input)
-        assertEquals(listOf(10), profileA.model.movies.map(ContentItem::id))
-        assertEquals(listOf(20), profileB.model.movies.map(ContentItem::id))
-        assertTrue(profileA.model.continueWatching.isEmpty())
-        assertTrue(profileB.model.continueWatching.isEmpty())
+        assertNotSame(profileAExact, profileBFallback)
+        assertSame(profileAInput, profileAExact.input)
+        assertSame(profileBInput, profileBFallback.input)
+        assertEquals(10, heroId(profileAExact.model))
+        assertEquals(20, heroId(profileBFallback.model))
+        assertTrue(profileBFallback.model.movies.none { it.id == 10 })
+        assertPersonalizedSectionsEmpty(profileBFallback.model)
     }
 
-    private fun movie(id: Int, name: String): ContentItem = ContentItem(
+    private fun homeInput(
+        movieCatalog: Catalog? = null,
+        seriesCatalog: Catalog? = null,
+        history: List<HistoryEntry> = emptyList(),
+        favorites: Set<String> = emptySet(),
+    ): HomeContentModelInput = HomeContentModelInput(
+        movieCatalog = movieCatalog,
+        seriesCatalog = seriesCatalog,
+        liveCatalog = null,
+        history = history,
+        favorites = favorites,
+    )
+
+    private fun heroId(model: HomeContentSnapshot): Int? =
+        model.featuredCandidates.firstOrNull()?.id
+            ?: model.movies.firstOrNull()?.id
+            ?: model.series.firstOrNull()?.id
+
+    private fun assertPersonalizedSectionsEmpty(model: HomeContentSnapshot) {
+        assertTrue(model.continueWatching.isEmpty())
+        assertNull(model.lastLive)
+        assertTrue(model.becauseYouWatched.isEmpty())
+        assertTrue(model.suggested.isEmpty())
+        assertTrue(model.personalizedLive.isEmpty())
+        assertTrue(model.popularMovies.isEmpty())
+        assertTrue(model.popularSeries.isEmpty())
+        assertTrue(model.featuredCandidates.isEmpty())
+    }
+
+    private fun movie(id: Int, name: String): ContentItem = content(id, name, ContentType.MOVIE)
+
+    private fun series(id: Int, name: String): ContentItem = content(id, name, ContentType.SERIES)
+
+    private fun content(id: Int, name: String, type: ContentType): ContentItem = ContentItem(
         id = id,
         name = name,
         categoryId = "all",
-        type = ContentType.MOVIE,
+        type = type,
         posterUrl = null,
         rating = "8.0",
         year = "2026",
