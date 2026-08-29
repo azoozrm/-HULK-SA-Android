@@ -243,7 +243,7 @@ class CatalogScreenEntryModelsTest {
     }
 
     @Test
-    fun `last good home remains available until exact revalidation replaces it`() {
+    fun `current home fallback replaces stale exact model until revalidation completes`() {
         val refreshedCatalog = Catalog(emptyList(), listOf(movie(2, "Refreshed", "all", 200L)))
         val refreshStarted = CountDownLatch(1)
         val releaseRefresh = CountDownLatch(1)
@@ -260,15 +260,33 @@ class CatalogScreenEntryModelsTest {
             )
             runBlocking {
                 val firstInput = homeInput(Catalog(emptyList(), listOf(movie(1, "Initial", "all", 100L))))
-                val refreshedInput = homeInput(refreshedCatalog)
                 val first = store.home(firstInput)
+                val refreshedInput = HomeContentModelInput(
+                    movieCatalog = refreshedCatalog,
+                    seriesCatalog = null,
+                    liveCatalog = null,
+                    history = listOf(history("movie:2", "Refreshed", "movie", positionMs = 20L)),
+                    favorites = setOf("MOVIE:2"),
+                )
                 val refresh = async(dispatcher) { store.home(refreshedInput) }
 
                 val startedInTime = refreshStarted.await(5, TimeUnit.SECONDS)
                 try {
                     assertTrue(startedInTime)
-                    assertSame(first, store.lastGoodHome())
+                    val fallback = store.lastGoodHome()
+                    assertNotSame(first, fallback)
+                    assertSame(refreshedInput, fallback?.input)
                     assertNull(store.cachedHome(refreshedInput))
+                    assertEquals(listOf(2), fallback?.model?.movies?.map(ContentItem::id))
+                    assertTrue(fallback?.model?.series?.isEmpty() == true)
+                    assertTrue(fallback?.model?.continueWatching?.isEmpty() == true)
+                    assertNull(fallback?.model?.lastLive)
+                    assertTrue(fallback?.model?.becauseYouWatched?.isEmpty() == true)
+                    assertTrue(fallback?.model?.suggested?.isEmpty() == true)
+                    assertTrue(fallback?.model?.personalizedLive?.isEmpty() == true)
+                    assertTrue(fallback?.model?.popularMovies?.isEmpty() == true)
+                    assertTrue(fallback?.model?.popularSeries?.isEmpty() == true)
+                    assertTrue(fallback?.model?.featuredCandidates?.isEmpty() == true)
                 } finally {
                     releaseRefresh.countDown()
                 }
@@ -277,6 +295,25 @@ class CatalogScreenEntryModelsTest {
                 assertSame(exact, store.lastGoodHome())
                 assertSame(exact, store.cachedHome(refreshedInput))
                 assertEquals(listOf(2), exact.model.movies.map(ContentItem::id))
+
+                val seriesOnlyCatalog = Catalog(
+                    emptyList(),
+                    listOf(movie(7, "Current Series", "all", 700L).copy(type = ContentType.SERIES)),
+                )
+                val seriesOnlyInput = HomeContentModelInput(
+                    movieCatalog = null,
+                    seriesCatalog = seriesOnlyCatalog,
+                    liveCatalog = null,
+                    history = listOf(history("series:7", "Current Series", "series", positionMs = 20L)),
+                    favorites = setOf("SERIES:7"),
+                )
+                assertNull(store.cachedHome(seriesOnlyInput))
+                val seriesFallback = store.lastGoodHome()
+                assertSame(seriesOnlyInput, seriesFallback?.input)
+                assertTrue(seriesFallback?.model?.movies?.isEmpty() == true)
+                assertEquals(listOf(7), seriesFallback?.model?.series?.map(ContentItem::id))
+                assertTrue(seriesFallback?.model?.continueWatching?.isEmpty() == true)
+                assertTrue(seriesFallback?.model?.featuredCandidates?.isEmpty() == true)
             }
         }
     }
