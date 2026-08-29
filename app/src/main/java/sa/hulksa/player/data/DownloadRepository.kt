@@ -67,6 +67,8 @@ class DownloadRepository internal constructor(
     @Volatile
     private var accountBoundarySuspended = false
     private var cache = readStored().map(::recoverInterruptedState).toMutableList()
+    @Volatile
+    private var publishedSnapshot: List<OfflineDownload> = emptyList()
 
     init {
         require(accountId.isNotBlank()) { "accountId must not be blank" }
@@ -75,8 +77,15 @@ class DownloadRepository internal constructor(
             writeStoredLocked()
         }
         schedule()
+        scope.launch {
+            downloads()
+        }
     }
 
+    /**
+     * Maintenance read used by repository/background lifecycle paths.
+     * It may validate completed files, persist corrections, and schedule work.
+     */
     fun downloads(): List<OfflineDownload> {
         val snapshot = synchronized(lock) {
             var changed = false
@@ -94,12 +103,18 @@ class DownloadRepository internal constructor(
                     item
                 }
             }.toMutableList()
-            if (changed) writeStoredLocked()
-            sortedSnapshotLocked()
+            if (changed) {
+                publishSnapshotLocked()
+                writeStoredLocked()
+            }
+            publishedSnapshot
         }
         schedule()
         return snapshot
     }
+
+    /** Cheap immutable UI snapshot. No file validation, persistence, or scheduling. */
+    internal fun snapshot(): List<OfflineDownload> = publishedSnapshot
 
     internal fun record(downloadId: Long): OfflineDownload? = item(downloadId)
 
@@ -119,6 +134,7 @@ class DownloadRepository internal constructor(
                 errorMessage = "توقف التنفيذ الخلفي مؤقتا. سيستأنف التحميل تلقائيا.",
                 integrityVerified = false,
             )
+            publishSnapshotLocked()
             writeStoredLocked(synchronous = true)
             true
         }
@@ -134,6 +150,7 @@ class DownloadRepository internal constructor(
         jobs.values.forEach(Job::cancel)
         synchronized(lock) {
             cache = suspendDownloadsForAccountBoundary(cache).toMutableList()
+            publishSnapshotLocked()
             writeStoredLocked(synchronous = true)
         }
         calls.clear()
@@ -206,7 +223,7 @@ class DownloadRepository internal constructor(
             writeStoredLocked()
         }
         schedule()
-        return downloads()
+        return snapshot()
     }
 
     fun enqueue(
@@ -261,6 +278,7 @@ class DownloadRepository internal constructor(
                 scheduledAtEpochMs = scheduledAt,
             ).also {
                 cache.add(it)
+                publishSnapshotLocked()
                 writeStoredLocked()
             }
         }
@@ -285,7 +303,8 @@ class DownloadRepository internal constructor(
         }
         calls.remove(downloadId)?.cancel()
         jobs.remove(downloadId)?.cancel()
-        return downloads()
+        schedule()
+        return snapshot()
     }
 
     fun resume(downloadId: Long): Boolean {
@@ -315,7 +334,7 @@ class DownloadRepository internal constructor(
         jobs.remove(downloadId)?.cancel()
         val candidate = synchronized(lock) {
             cache.firstOrNull { it.downloadId == downloadId }
-        } ?: return downloads()
+        } ?: return snapshot()
 
         if (!deleteDownloadFiles(candidate)) {
             synchronized(lock) {
@@ -329,7 +348,7 @@ class DownloadRepository internal constructor(
                     )
                 }
             }
-            return downloads()
+            return snapshot()
         }
 
         synchronized(lock) {
@@ -337,7 +356,8 @@ class DownloadRepository internal constructor(
             normalizeQueueLocked()
             writeStoredLocked(synchronous = true)
         }
-        return downloads()
+        schedule()
+        return snapshot()
     }
 
     private fun schedule() {
@@ -1052,6 +1072,7 @@ class DownloadRepository internal constructor(
             val index = cache.indexOfFirst { it.downloadId == downloadId }
             if (index >= 0) {
                 cache[index] = replacement.copy(sourceCandidates = emptyList())
+                publishSnapshotLocked()
                 writeStoredLocked()
             }
         }
@@ -1070,6 +1091,7 @@ class DownloadRepository internal constructor(
         val updated = transform(cache[index]).copy(sourceCandidates = emptyList())
         if (updated != cache[index]) {
             cache[index] = updated
+            publishSnapshotLocked()
             writeStoredLocked()
         }
     }
@@ -1082,6 +1104,11 @@ class DownloadRepository internal constructor(
         ).mapIndexed { index, item ->
             item.copy(queuePosition = index, sourceCandidates = emptyList())
         }.toMutableList()
+        publishSnapshotLocked()
+    }
+
+    private fun publishSnapshotLocked() {
+        publishedSnapshot = sortedSnapshotLocked()
     }
 
     private fun sortedSnapshotLocked(): List<OfflineDownload> = cache.sortedWith(

@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -11,7 +12,7 @@ import sa.hulksa.player.model.ContentType
 
 class HomeContentCacheTest {
     @Test
-    fun changingFavoritesInvalidatesPersonalizedHomeSnapshot() {
+    fun changingFavoritesInvalidatesPersonalizedHomeSnapshot() = runBlocking {
         val movieCatalog = Catalog(
             categories = emptyList(),
             items = listOf(
@@ -26,14 +27,24 @@ class HomeContentCacheTest {
         )
         val store = NavigationMemoryStore()
 
-        val initialSnapshot = store.homeContent(initialState)
+        val initialInput = initialState.homeModelInput()
+        val initialSnapshot = store.homeModel(initialInput).model
         val favoritedState = initialState.copy(favorites = setOf("MOVIE:2"))
-        val personalizedSnapshot = store.homeContent(favoritedState)
+        val personalizedInput = favoritedState.homeModelInput()
+        val personalizedSnapshot = store.homeModel(personalizedInput).model
 
         assertNotSame(initialSnapshot, personalizedSnapshot)
         assertTrue(personalizedSnapshot.becauseYouWatched.any { it.categoryId == "drama" })
-        assertSame(personalizedSnapshot, store.homeContent(favoritedState))
+        assertSame(personalizedSnapshot, store.homeModel(personalizedInput).model)
     }
+
+    private fun HulkUiState.homeModelInput(): HomeContentModelInput = HomeContentModelInput(
+        movieCatalog = catalogs[ContentType.MOVIE],
+        seriesCatalog = catalogs[ContentType.SERIES],
+        liveCatalog = catalogs[ContentType.LIVE],
+        history = history,
+        favorites = favorites,
+    )
 
     private fun movie(
         id: Int,

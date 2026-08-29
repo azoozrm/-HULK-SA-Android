@@ -204,10 +204,10 @@ fun HulkApp(
                                 onSwitchProfile = requestProfileSwitch,
                             )
                         } else {
-                            // MainShell historically kept one local category/query map. Re-key the
-                            // shell at each top-level destination so that local map cannot override
-                            // the profile-owned catalog context restored above.
-                            key(catalogNavigationMemory, state.destination) {
+                            // Keep the shell and navigation rail alive while destinations change.
+                            // Profile changes still replace catalogNavigationMemory and reset the
+                            // shell-level state at the existing profile ownership boundary.
+                            key(catalogNavigationMemory) {
                                 MainShellScreen(
                                     state = when (state.destination) {
                                         MainDestination.HOME -> state.copy(favorites = homeRecommendationFavorites)

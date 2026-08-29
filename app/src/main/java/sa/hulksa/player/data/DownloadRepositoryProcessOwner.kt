@@ -216,11 +216,13 @@ internal class ProfileScopedDownloadRepository(context: Context) {
     private val profileStore = ProfileStore(appContext)
     private val ownershipStores = mutableMapOf<String, ProfileDownloadOwnershipStore>()
 
-    fun downloads(): List<OfflineDownload> {
-        val binding = activeBinding() ?: return emptyList()
+    fun downloads(): List<OfflineDownload> = snapshot()
+
+    fun snapshot(): List<OfflineDownload> {
+        val binding = activeSnapshotBinding() ?: return emptyList()
         return ProfileDownloadSnapshotList(
             accountId = binding.accountId,
-            allDownloads = binding.delegate.downloads(),
+            allDownloads = binding.delegate.snapshot(),
             activeAccountId = ::activeAccountId,
             activeProfileId = profileStore::activeProfileId,
             ownersForExistingDownload = binding.ownershipStore::ownersForExistingDownload,
@@ -241,7 +243,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
     fun cyclePriority(downloadId: Long): List<OfflineDownload> {
         val binding = activeBinding() ?: return emptyList()
         if (owns(binding, downloadId)) binding.delegate.cyclePriority(downloadId)
-        return downloads()
+        return snapshot()
     }
 
     fun enqueue(
@@ -253,7 +255,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         val binding = activeBinding()
             ?: return DownloadRepository.EnqueueResult.Failed("سجل الدخول قبل بدء التحميل.")
         val profileId = profileStore.activeProfileId()
-        val existing = binding.delegate.downloads().firstOrNull { it.historyKey == request.historyKey }
+        val existing = binding.delegate.snapshot().firstOrNull { it.historyKey == request.historyKey }
         val ownersBefore = if (existing != null) {
             binding.ownershipStore.ownersForExistingDownload(request.historyKey)
         } else {
@@ -289,7 +291,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
     fun pause(downloadId: Long): List<OfflineDownload> {
         val binding = activeBinding() ?: return emptyList()
         if (owns(binding, downloadId)) binding.delegate.pause(downloadId)
-        return downloads()
+        return snapshot()
     }
 
     fun resume(downloadId: Long): Boolean {
@@ -299,11 +301,11 @@ internal class ProfileScopedDownloadRepository(context: Context) {
 
     fun remove(downloadId: Long): List<OfflineDownload> {
         val binding = activeBinding() ?: return emptyList()
-        val item = binding.delegate.downloads().firstOrNull { it.downloadId == downloadId }
-            ?: return downloads()
+        val item = binding.delegate.snapshot().firstOrNull { it.downloadId == downloadId }
+            ?: return snapshot()
         val profileId = profileStore.activeProfileId()
         val owners = binding.ownershipStore.ownersForExistingDownload(item.historyKey)
-        if (profileId !in owners) return downloads()
+        if (profileId !in owners) return snapshot()
 
         val removal = profileReferenceRemoval(owners, profileId)
         if (removal.deletePhysicalDownload) {
@@ -314,7 +316,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         } else {
             binding.ownershipStore.removeExistingOwner(item.historyKey, profileId)
         }
-        return downloads()
+        return snapshot()
     }
 
     fun playableLocalUri(downloadId: Long, historyKey: String): String? {
@@ -332,8 +334,9 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         val normalizedProfileId = profileId.trim().takeIf(String::isNotEmpty) ?: return
         val delegate = DownloadRepositoryProcessOwner.get(appContext, normalizedAccountId)
         val ownershipStore = ownershipStore(normalizedAccountId)
-        ownershipStore.migrateLegacy(delegate.downloads())
-        delegate.downloads().forEach { item ->
+        val downloads = delegate.downloads()
+        ownershipStore.migrateLegacy(downloads)
+        downloads.forEach { item ->
             val owners = ownershipStore.ownersForExistingDownload(item.historyKey)
             if (normalizedProfileId !in owners) return@forEach
             val removal = profileReferenceRemoval(owners, normalizedProfileId)
@@ -367,11 +370,15 @@ internal class ProfileScopedDownloadRepository(context: Context) {
     }
 
     private fun activeBinding(): Binding? {
+        val binding = activeSnapshotBinding() ?: return null
+        binding.ownershipStore.migrateLegacy(binding.delegate.snapshot())
+        return binding
+    }
+
+    private fun activeSnapshotBinding(): Binding? {
         val accountId = activeAccountId() ?: return null
         val delegate = DownloadRepositoryProcessOwner.activate(appContext, accountId)
-        val ownershipStore = ownershipStore(accountId)
-        ownershipStore.migrateLegacy(delegate.downloads())
-        return Binding(accountId, delegate, ownershipStore)
+        return Binding(accountId, delegate, ownershipStore(accountId))
     }
 
     private fun activeAccountId(): String? = authenticatedDownloadAccountId(
@@ -394,40 +401,44 @@ internal class ProfileScopedDownloadRepository(context: Context) {
 }
 
 /**
- * A snapshot of physical download state with dynamic profile filtering.
+ * Immutable profile-scoped view of one physical download snapshot.
  *
- * The physical entries are snapshotted so download progress comparisons still
- * work normally. The active profile and owner mapping are resolved when the list
- * is read, so the state update already performed during profile switching can
- * immediately render the new profile's Downloads list without waiting for the
- * ViewModel polling interval.
+ * Account/profile resolution and ownership filtering happen exactly once when
+ * the snapshot is built. List accessors only read the already-filtered list.
  */
 internal class ProfileDownloadSnapshotList(
-    private val accountId: String,
-    private val allDownloads: List<OfflineDownload>,
-    private val activeAccountId: () -> String?,
-    private val activeProfileId: () -> String,
-    private val ownersForExistingDownload: (String) -> Set<String>,
+    accountId: String,
+    allDownloads: List<OfflineDownload>,
+    activeAccountId: () -> String?,
+    activeProfileId: () -> String,
+    ownersForExistingDownload: (String) -> Set<String>,
 ) : AbstractList<OfflineDownload>() {
-    private fun current(): List<OfflineDownload> {
-        val profileId = activeProfileId()
-        return allDownloads.filter { item ->
-            accountDownloadAccessAllowed(
+    private val snapshot: List<OfflineDownload> = run {
+        val resolvedAccountId = activeAccountId()
+        if (
+            !accountDownloadAccessAllowed(
                 recordAccountId = accountId,
-                activeAccountId = activeAccountId(),
-                profileOwnsRecord = profileId in ownersForExistingDownload(item.historyKey),
+                activeAccountId = resolvedAccountId,
+                profileOwnsRecord = true,
             )
+        ) {
+            emptyList()
+        } else {
+            val profileId = activeProfileId()
+            allDownloads.filter { item ->
+                profileId in ownersForExistingDownload(item.historyKey)
+            }
         }
     }
 
     override val size: Int
-        get() = current().size
+        get() = snapshot.size
 
-    override fun get(index: Int): OfflineDownload = current()[index]
+    override fun get(index: Int): OfflineDownload = snapshot[index]
 
-    override fun iterator(): Iterator<OfflineDownload> = current().iterator()
+    override fun iterator(): Iterator<OfflineDownload> = snapshot.iterator()
 
-    override fun listIterator(index: Int): ListIterator<OfflineDownload> = current().listIterator(index)
+    override fun listIterator(index: Int): ListIterator<OfflineDownload> = snapshot.listIterator(index)
 }
 
 /**

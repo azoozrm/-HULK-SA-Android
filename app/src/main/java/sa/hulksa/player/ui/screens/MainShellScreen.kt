@@ -46,6 +46,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -67,6 +69,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -93,6 +97,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -103,6 +108,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -152,8 +158,98 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 
 private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
 private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
+private const val TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP = 14f
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
+
+/** Keeps the resting chip position unchanged while extending only the scroll viewport. */
+internal data class CategorySidebarUnderlapPolicy(
+    val viewportExtraDp: Float,
+    val startContentPaddingDp: Float,
+)
+
+internal fun categorySidebarUnderlapPolicy(
+    isTv: Boolean,
+    railExpandedWidthDp: Float,
+    baseContentPaddingDp: Float,
+    parentHorizontalInsetDp: Float = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP,
+): CategorySidebarUnderlapPolicy {
+    val safeBasePadding = baseContentPaddingDp.coerceAtLeast(0f)
+    val viewportExtra = if (isTv) {
+        railExpandedWidthDp.coerceAtLeast(0f) + parentHorizontalInsetDp.coerceAtLeast(0f)
+    } else {
+        0f
+    }
+    return CategorySidebarUnderlapPolicy(
+        viewportExtraDp = viewportExtra,
+        startContentPaddingDp = safeBasePadding + viewportExtra,
+    )
+}
+
+@Composable
+private fun rememberCategorySidebarUnderlap(
+    isTv: Boolean,
+    baseContentPadding: Dp,
+): CategorySidebarUnderlapPolicy {
+    val adaptiveUi = LocalAdaptiveUi.current
+    return remember(
+        isTv,
+        baseContentPadding,
+        adaptiveUi.screenWidthDp,
+        adaptiveUi.screenHeightDp,
+    ) {
+        categorySidebarUnderlapPolicy(
+            isTv = isTv,
+            railExpandedWidthDp = tvRailMetrics(
+                screenWidthDp = adaptiveUi.screenWidthDp,
+                screenHeightDp = adaptiveUi.screenHeightDp,
+            ).expandedWidthDp,
+            baseContentPaddingDp = baseContentPadding.value,
+        )
+    }
+}
+
+/**
+ * Measures the LazyRow through the sidebar-side inset while reporting its original width upstream.
+ * The rail remains responsible for visually occluding chips that scroll into this extra viewport.
+ */
+private fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier {
+    if (extraWidth <= 0.dp) return this
+    return layout { measurable, constraints ->
+        val extraWidthPx = extraWidth.roundToPx().coerceAtLeast(0)
+        if (extraWidthPx == 0 || !constraints.hasBoundedWidth) {
+            val placeable = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) {
+                placeable.placeRelative(0, 0)
+            }
+        } else {
+            val placeable = measurable.measure(
+                constraints.copy(
+                    minWidth = constraints.minWidth + extraWidthPx,
+                    maxWidth = constraints.maxWidth + extraWidthPx,
+                ),
+            )
+            val reportedWidth = (placeable.width - extraWidthPx)
+                .coerceIn(constraints.minWidth, constraints.maxWidth)
+            layout(reportedWidth, placeable.height) {
+                placeable.placeRelative(-extraWidthPx, 0)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Modifier.keepCategoryChipFullyVisibleOnFocus(isTv: Boolean): Modifier {
+    if (!isTv) return this
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    return bringIntoViewRequester(requester)
+        .onFocusChanged { focusState ->
+            if (focusState.isFocused) {
+                scope.launch { requester.bringIntoView() }
+            }
+        }
+}
 
 private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
@@ -228,12 +324,7 @@ internal data class HomeContentSnapshot(
 
 class NavigationMemoryStore {
     private val positions = mutableMapOf<MainDestination, NavigationPosition>()
-    private var homeMoviesCatalog: Any? = null
-    private var homeSeriesCatalog: Any? = null
-    private var homeLiveCatalog: Any? = null
-    private var homeHistory: Any? = null
-    private var homeFavorites: Any? = null
-    private var cachedHome: HomeContentSnapshot? = null
+    private val screenEntryModels = CatalogScreenEntryModelStore()
     private var mobileNavigationFirstVisibleIndex: Int = 0
     private var mobileNavigationFirstVisibleOffset: Int = 0
 
@@ -258,53 +349,73 @@ class NavigationMemoryStore {
         mobileNavigationFirstVisibleOffset = firstVisibleOffset.coerceAtLeast(0)
     }
 
-    internal fun homeContent(state: HulkUiState): HomeContentSnapshot {
-        val movieCatalog = state.catalogs[ContentType.MOVIE]
-        val seriesCatalog = state.catalogs[ContentType.SERIES]
-        val liveCatalog = state.catalogs[ContentType.LIVE]
-        val cached = cachedHome
-        if (
-            cached != null &&
-            homeMoviesCatalog === movieCatalog &&
-            homeSeriesCatalog === seriesCatalog &&
-            homeLiveCatalog === liveCatalog &&
-            homeHistory === state.history &&
-            homeFavorites === state.favorites
-        ) {
-            return cached
-        }
+    internal fun cachedCatalogModel(input: CatalogScreenModelInput): KeyedCatalogScreenModel? =
+        screenEntryModels.cachedCatalog(input)
 
-        val movies = newest(movieCatalog?.items.orEmpty())
-        val series = newest(seriesCatalog?.items.orEmpty())
-        val live = liveCatalog?.items.orEmpty()
-        val smartHome = buildSmartHomeRecommendations(
-            movies = movies,
-            series = series,
-            live = live,
-            history = state.history,
-            favorites = state.favorites,
+    internal fun lastGoodCatalogModel(destination: MainDestination): KeyedCatalogScreenModel? =
+        screenEntryModels.lastGoodCatalog(destination)
+
+    internal suspend fun catalogModel(input: CatalogScreenModelInput): KeyedCatalogScreenModel =
+        screenEntryModels.catalog(input)
+
+    internal fun cachedHomeModel(input: HomeContentModelInput): KeyedHomeContentModel? =
+        screenEntryModels.cachedHome(input)
+
+    internal fun lastGoodHomeModel(): KeyedHomeContentModel? =
+        screenEntryModels.lastGoodHome()
+
+    internal suspend fun homeModel(input: HomeContentModelInput): KeyedHomeContentModel =
+        screenEntryModels.home(input)
+}
+
+@Composable
+private fun rememberHomeModelForPresentation(
+    navigationMemory: NavigationMemoryStore,
+    input: HomeContentModelInput,
+): KeyedHomeContentModel? {
+    var presented by remember(navigationMemory) {
+        mutableStateOf(
+            navigationMemory.cachedHomeModel(input)
+                ?: navigationMemory.lastGoodHomeModel(),
         )
-        return HomeContentSnapshot(
-            movies = movies,
-            series = series,
-            live = live,
-            continueWatching = smartHome.continueWatching,
-            lastLive = smartHome.lastLive,
-            becauseYouWatched = smartHome.becauseYouWatched,
-            suggested = smartHome.suggested,
-            personalizedLive = smartHome.personalizedLive,
-            popularMovies = smartHome.popularMovies,
-            popularSeries = smartHome.popularSeries,
-            featuredCandidates = smartHome.featuredCandidates,
-        ).also { snapshot ->
-            homeMoviesCatalog = movieCatalog
-            homeSeriesCatalog = seriesCatalog
-            homeLiveCatalog = liveCatalog
-            homeHistory = state.history
-            homeFavorites = state.favorites
-            cachedHome = snapshot
-        }
     }
+    LaunchedEffect(navigationMemory, input) {
+        navigationMemory.cachedHomeModel(input)?.let { exact ->
+            presented = exact
+            return@LaunchedEffect
+        }
+        navigationMemory.lastGoodHomeModel()?.let { lastGood ->
+            presented = lastGood
+        }
+        val exact = navigationMemory.homeModel(input)
+        if (exact.input == input) presented = exact
+    }
+    return presented
+}
+
+@Composable
+private fun rememberCatalogModelForPresentation(
+    navigationMemory: NavigationMemoryStore,
+    input: CatalogScreenModelInput,
+): KeyedCatalogScreenModel? {
+    var presented by remember(navigationMemory, input.destination) {
+        mutableStateOf(
+            navigationMemory.cachedCatalogModel(input)
+                ?: navigationMemory.lastGoodCatalogModel(input.destination),
+        )
+    }
+    LaunchedEffect(navigationMemory, input) {
+        navigationMemory.cachedCatalogModel(input)?.let { exact ->
+            presented = exact
+            return@LaunchedEffect
+        }
+        navigationMemory.lastGoodCatalogModel(input.destination)?.let { lastGood ->
+            presented = lastGood
+        }
+        val exact = navigationMemory.catalogModel(input)
+        if (exact.input == input) presented = exact
+    }
+    return presented
 }
 
 private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): Modifier =
@@ -365,27 +476,34 @@ fun MainShellScreen(
     val adaptiveUi = LocalAdaptiveUi.current
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
+    val homeModel = if (state.destination == MainDestination.HOME) {
+        rememberHomeModelForPresentation(
+            navigationMemory = navigationMemory,
+            input = HomeContentModelInput(
+                movieCatalog = state.catalogs[ContentType.MOVIE],
+                seriesCatalog = state.catalogs[ContentType.SERIES],
+                liveCatalog = state.catalogs[ContentType.LIVE],
+                history = state.history,
+                favorites = state.favorites,
+            ),
+        )
+    } else {
+        null
+    }
+    if (state.destination == MainDestination.HOME && homeModel == null) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(colors.background),
+            contentAlignment = Alignment.Center,
+        ) {
+            LoadingRing()
+        }
+        return
+    }
+    val homeContent = homeModel?.model
     val downloadsEnabled = state.operations.features.downloadsEnabled
     val navigationEntries = remember(downloadsEnabled) {
         destinations.filterNot { entry ->
             !downloadsEnabled && entry.destination == MainDestination.DOWNLOADS
-        }
-    }
-    val queryMemory = remember { mutableStateMapOf<MainDestination, String>() }
-    val categoryMemory = remember { mutableStateMapOf<MainDestination, String?>() }
-    var previousDestination by remember { mutableStateOf(state.destination) }
-    val rememberingSelectDestination: (MainDestination) -> Unit = { destination ->
-        queryMemory[state.destination] = state.searchQuery
-        categoryMemory[state.destination] = state.selectedCategoryId
-        onSelectDestination(destination)
-    }
-    LaunchedEffect(state.destination) {
-        if (previousDestination != state.destination) {
-            val restoredQuery = queryMemory[state.destination].orEmpty()
-            val restoredCategory = categoryMemory[state.destination]
-            if (state.searchQuery != restoredQuery) onSearch(restoredQuery)
-            if (state.selectedCategoryId != restoredCategory) onSelectCategory(restoredCategory)
-            previousDestination = state.destination
         }
     }
     val favoriteOverrides = remember { mutableStateMapOf<String, Boolean>() }
@@ -396,6 +514,10 @@ fun MainShellScreen(
             if ((key in state.favorites) == optimisticValue) favoriteOverrides.remove(key)
         }
     }
+    val favoriteSnapshot = CatalogFavoriteSnapshot(
+        persisted = state.favorites,
+        optimistic = favoriteOverrides.toMap(),
+    )
     val resolvedIsFavorite: (ContentItem) -> Boolean = { item ->
         val key = "${item.type.name}:${item.id}"
         favoriteOverrides[key] ?: isFavorite(item)
@@ -450,7 +572,7 @@ fun MainShellScreen(
                 CinematicNavigationRail(
                     entries = navigationEntries,
                     selected = state.destination,
-                    onSelect = rememberingSelectDestination,
+                    onSelect = onSelectDestination,
                     onSwitchProfile = requestProfileSwitch,
                     destinationFocusRequesters = tvRailFocusRequesters,
                 )
@@ -459,6 +581,8 @@ fun MainShellScreen(
                         state = state,
                         isTv = isTv,
                         navigationMemory = navigationMemory,
+                        homeContent = homeContent,
+                        favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
                         onSearch = onSearch,
@@ -468,7 +592,7 @@ fun MainShellScreen(
                         onRefresh = onRefresh,
                         onOpenNotifications = onOpenNotifications,
                         onGrowthAction = openGrowthDestination,
-                        onSelectDestination = rememberingSelectDestination,
+                        onSelectDestination = onSelectDestination,
                         onClearHistory = onClearHistory,
                         onPlayDownload = onPlayDownload,
                         onDeleteDownload = onDeleteDownload,
@@ -501,6 +625,8 @@ fun MainShellScreen(
                         state = state,
                         isTv = false,
                         navigationMemory = navigationMemory,
+                        homeContent = homeContent,
+                        favoriteSnapshot = favoriteSnapshot,
                         isFavorite = resolvedIsFavorite,
                         onSelectCategory = onSelectCategory,
                         onSearch = onSearch,
@@ -527,7 +653,7 @@ fun MainShellScreen(
                 }
                 MobileNavigation(
                     selected = state.destination,
-                    onSelect = rememberingSelectDestination,
+                    onSelect = onSelectDestination,
                     navigationMemory = navigationMemory,
                     entries = navigationEntries,
                 )
@@ -565,13 +691,12 @@ private fun CinematicNavigationRail(
     val profileRequester = remember { FocusRequester() }
     val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
     val selectedRequester = destinationFocusRequesters.getValue(selected)
-    val railWidth by animateDpAsState(
-        targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
-        label = "railWidth",
-    )
+    val railWidth = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp
 
     Column(
         modifier = Modifier
+            // Category rows may draw beneath the rail; the rail stays the top visual layer.
+            .zIndex(1f)
             .width(railWidth)
             .fillMaxHeight()
             .focusProperties {
@@ -583,7 +708,7 @@ private fun CinematicNavigationRail(
             .onFocusChanged { railHasFocus = it.hasFocus }
             .background(
                 Brush.horizontalGradient(
-                    listOf(Color(0xFF090A07), Color(0xF70A0B08)),
+                    listOf(Color(0xFF090A07), Color(0xFF0A0B08)),
                 ),
             )
             .padding(
@@ -976,6 +1101,8 @@ private fun DestinationContent(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    homeContent: HomeContentSnapshot?,
+    favoriteSnapshot: CatalogFavoriteSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onSelectCategory: (String?) -> Unit,
     onSearch: (String) -> Unit,
@@ -1004,6 +1131,7 @@ private fun DestinationContent(
             state = state,
             isTv = isTv,
             navigationMemory = navigationMemory,
+            homeContent = requireNotNull(homeContent),
             isFavorite = isFavorite,
             onOpen = onOpen,
             onOpenHistory = onOpenHistory,
@@ -1014,8 +1142,8 @@ private fun DestinationContent(
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
         )
         MainDestination.LIVE -> LiveCatalogScreen(state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onToggleFavorite, onRefresh)
-        MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
-        MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
+        MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
+        MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
         MainDestination.FAVORITES -> FavoritesScreen(state, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite)
         MainDestination.SEARCH -> UnifiedSearchScreen(state, isTv, navigationMemory, isFavorite, onSearch, onOpen, onToggleFavorite)
         MainDestination.DOWNLOADS -> DownloadsScreen(
@@ -1059,6 +1187,7 @@ private fun CinemaHomeScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    homeContent: HomeContentSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onOpenHistory: (HistoryEntry) -> Unit,
@@ -1068,7 +1197,6 @@ private fun CinemaHomeScreen(
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
 ) {
-    val homeContent = navigationMemory.homeContent(state)
     val movies = homeContent.movies
     val series = homeContent.series
     val live = homeContent.live
@@ -1082,8 +1210,10 @@ private fun CinemaHomeScreen(
         if (!smartRecommendationsEnabled) return@remember emptyList()
         val lastLiveId = lastLive?.streamId
         personalizedLive
+            .asSequence()
             .filterNot { lastLiveId != null && it.id == lastLiveId }
             .take(20)
+            .toList()
     }
     val popularMovies = homeContent.popularMovies
     val popularSeries = homeContent.popularSeries
@@ -1105,8 +1235,18 @@ private fun CinemaHomeScreen(
         }
     }
     val featured = featuredCandidates.getOrNull(featuredIndex) ?: movies.firstOrNull() ?: series.firstOrNull()
-    val homeMovies = remember(movies, featured) { movies.filterNot { it.type == featured?.type && it.id == featured.id } }
-    val homeSeries = remember(series, featured) { series.filterNot { it.type == featured?.type && it.id == featured.id } }
+    val homeMovies = remember(movies, featured) {
+        movies.asSequence()
+            .filterNot { it.type == featured?.type && it.id == featured.id }
+            .take(28)
+            .toList()
+    }
+    val homeSeries = remember(series, featured) {
+        series.asSequence()
+            .filterNot { it.type == featured?.type && it.id == featured.id }
+            .take(28)
+            .toList()
+    }
     val loading = ContentType.MOVIE in state.loadingTypes || ContentType.SERIES in state.loadingTypes
     val remembered = navigationMemory.position(MainDestination.HOME)
     val renewalBanner = evaluateRenewalBanner(
@@ -1209,10 +1349,10 @@ private fun CinemaHomeScreen(
             item { HomeSectionPadding(isTv) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries.take(28), isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularMovies.isNotEmpty()) {
             item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
@@ -1644,6 +1784,7 @@ private fun PosterCatalogScreen(
     state: HulkUiState,
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
+    favoriteSnapshot: CatalogFavoriteSnapshot,
     isFavorite: (ContentItem) -> Boolean,
     onSelectCategory: (String?) -> Unit,
     onSearch: (String) -> Unit,
@@ -1652,21 +1793,21 @@ private fun PosterCatalogScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val colors = LocalHulkColors.current
     val catalog = state.catalogs[type]
-    val ordered = remember(catalog) { newest(catalog?.items.orEmpty()) }
-    val visible = remember(ordered, state.selectedCategoryId, state.searchQuery, state.favorites) {
-        ordered.filter { item ->
-            categoryMatches(item, state.selectedCategoryId, isFavorite) &&
-                item.matchesSearch(state.searchQuery)
-        }
-    }
-    val continueWatching = remember(state.history, state.searchQuery, type) {
-        val kind = if (type == ContentType.MOVIE) "movie" else "series"
-        state.history.filter { entry ->
-            entry.streamKind == kind && entry.isResumable() &&
-                (state.searchQuery.isBlank() || entry.title.contains(state.searchQuery.trim(), ignoreCase = true))
-        }
-    }
+    val modelInput = CatalogScreenModelInput(
+        catalog = catalog,
+        history = state.history,
+        favorites = favoriteSnapshot,
+        type = type,
+        destination = destination,
+        categoryId = state.selectedCategoryId,
+        query = state.searchQuery,
+    )
+    val keyedModel = rememberCatalogModelForPresentation(navigationMemory, modelInput)
+    val model = keyedModel?.model
+    val visible = model?.visible.orEmpty()
+    val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1679,6 +1820,7 @@ private fun PosterCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .background(colors.background)
             .then(
                 if (isTv) {
                     Modifier
@@ -1692,7 +1834,10 @@ private fun PosterCatalogScreen(
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(
+                            start = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                        )
                     } else {
                         Modifier
                     },
@@ -1701,12 +1846,14 @@ private fun PosterCatalogScreen(
             CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
             if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(11.dp))
-            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), ordered, state.selectedCategoryId, onSelectCategory, isTv)
+            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), state.selectedCategoryId, onSelectCategory, isTv)
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (showingContinue && continueWatching.isNotEmpty()) {
+            if (model == null) {
+                LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
+            } else if (showingContinue && continueWatching.isNotEmpty()) {
                 HistoryGrid(continueWatching, isTv, destination, navigationMemory, onOpenHistory)
             } else if (showingContinue) {
                 EmptyState("لا توجد مشاهدة غير مكتملة في $title")
@@ -1717,6 +1864,8 @@ private fun PosterCatalogScreen(
             } else if (isTv) {
                 TvCatalogGrid(
                     content = visible,
+                    contentKeys = model.contentKeys,
+                    contentKeyIndex = model.contentKeyIndex,
                     destination = destination,
                     navigationMemory = navigationMemory,
                     isFavorite = isFavorite,
@@ -1728,11 +1877,30 @@ private fun PosterCatalogScreen(
                 ContentGrid(
                     visible, false, destination, navigationMemory, isFavorite, onOpen, onToggleFavorite,
                     restoreFocusedCard = state.searchQuery.isBlank(),
+                    preparedContentKeys = model.contentKeys,
+                    preparedContentKeyIndex = model.contentKeyIndex,
                 )
             }
         }
     }
 }
+
+internal fun resolveLivePreview(
+    current: ContentItem?,
+    visible: List<ContentItem>,
+    rememberedItemKey: String,
+    rememberedIndex: Int,
+): ContentItem? {
+    if (current != null && current in visible) return current
+    return visible.firstOrNull { "${it.type}:${it.id}" == rememberedItemKey }
+        ?: visible.getOrNull(rememberedIndex)
+        ?: visible.firstOrNull()
+}
+
+internal fun isLivePreviewSelected(
+    preview: ContentItem?,
+    channel: ContentItem,
+): Boolean = preview?.id == channel.id
 
 @Composable
 private fun LiveCatalogScreen(
@@ -1746,6 +1914,7 @@ private fun LiveCatalogScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val colors = LocalHulkColors.current
     val catalog = state.catalogs[ContentType.LIVE]
     val visible = remember(catalog, state.selectedCategoryId, state.searchQuery, state.favorites) {
         catalog?.items.orEmpty().filter { item ->
@@ -1755,7 +1924,7 @@ private fun LiveCatalogScreen(
     }
     val remembered = navigationMemory.position(MainDestination.LIVE)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
-    var preview by remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
+    val previewState = remember(catalog, state.selectedCategoryId) { mutableStateOf<ContentItem?>(null) }
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
@@ -1773,9 +1942,12 @@ private fun LiveCatalogScreen(
         }
     }
     LaunchedEffect(visible) {
-        if (preview == null || preview !in visible) {
-            preview = visible.firstOrNull { "${it.type}:${it.id}" == remembered.itemKey } ?: visible.getOrNull(rememberedIndex) ?: visible.firstOrNull()
-        }
+        previewState.value = resolveLivePreview(
+            current = previewState.value,
+            visible = visible,
+            rememberedItemKey = remembered.itemKey,
+            rememberedIndex = rememberedIndex,
+        )
         if (state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty()) {
             listState.scrollToItem(rememberedIndex)
             delay(180)
@@ -1783,13 +1955,16 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(colors.background)) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .then(
                     if (isTv) {
-                        Modifier.padding(horizontal = 14.dp, top = tvSafeInsets.verticalDp.dp)
+                        Modifier.padding(
+                            start = TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP.dp,
+                            top = tvSafeInsets.verticalDp.dp,
+                        )
                     } else {
                         Modifier.padding(horizontal = MOBILE_SECTION_HORIZONTAL_PADDING)
                     },
@@ -1810,52 +1985,63 @@ private fun LiveCatalogScreen(
             Row(
                 Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    .fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                Column(
-                    modifier = Modifier.width(408.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp))
-                        .background(Color(0xA30D0E0B)).padding(9.dp),
-                ) {
-                    Text("القنوات", color = LocalHulkColors.current.text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp),
+                Box(Modifier.padding(start = 12.dp, bottom = 12.dp)) {
+                    Column(
+                        modifier = Modifier.width(408.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xA30D0E0B)).padding(9.dp),
                     ) {
-                        itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
-                            val key = "${channel.type}:${channel.id}"
-                            val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
-                            ChannelListItem(
-                                item = channel,
-                                selected = preview?.id == channel.id,
-                                onFocused = {
-                                    preview = channel
-                                    navigationMemory.save(MainDestination.LIVE, key, index)
-                                },
-                                onClick = { onOpen(channel) },
-                                modifier = Modifier.restoreFocus(restore, channelRequester).focusProperties {
-                                    left = playRequester
-                                },
-                                isFavorite = isFavorite(channel),
-                                onLongClick = { onToggleFavorite(channel) },
-                            )
+                        Text("القنوات", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp),
+                        ) {
+                            itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
+                                val key = "${channel.type}:${channel.id}"
+                                val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
+                                val selected by remember(previewState, channel.id) {
+                                    derivedStateOf { isLivePreviewSelected(previewState.value, channel) }
+                                }
+                                ChannelListItem(
+                                    item = channel,
+                                    selected = selected,
+                                    onFocused = {
+                                        previewState.value = channel
+                                        navigationMemory.save(MainDestination.LIVE, key, index)
+                                    },
+                                    onClick = { onOpen(channel) },
+                                    modifier = Modifier.restoreFocus(restore, channelRequester).focusProperties {
+                                        left = playRequester
+                                    },
+                                    isFavorite = isFavorite(channel),
+                                    onLongClick = { onToggleFavorite(channel) },
+                                )
+                            }
                         }
                     }
                 }
-                LiveStage(
-                    item = preview,
-                    isFavorite = preview?.let(isFavorite) == true,
-                    channelRequester = channelRequester,
-                    playRequester = playRequester,
-                    favoriteRequester = favoriteRequester,
-                    onWatch = { preview?.let(onOpen) },
-                    onToggleFavorite = { preview?.let(onToggleFavorite) },
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(bottom = 12.dp),
+                ) {
+                    LivePreviewStage(
+                        previewState = previewState,
+                        isFavorite = isFavorite,
+                        channelRequester = channelRequester,
+                        playRequester = playRequester,
+                        favoriteRequester = favoriteRequester,
+                        onOpen = onOpen,
+                        onToggleFavorite = onToggleFavorite,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         } else {
             LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -1872,6 +2058,30 @@ private fun LiveCatalogScreen(
             }
         }
     }
+}
+
+@Composable
+private fun LivePreviewStage(
+    previewState: State<ContentItem?>,
+    isFavorite: (ContentItem) -> Boolean,
+    channelRequester: FocusRequester,
+    playRequester: FocusRequester,
+    favoriteRequester: FocusRequester,
+    onOpen: (ContentItem) -> Unit,
+    onToggleFavorite: (ContentItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val preview = previewState.value
+    LiveStage(
+        item = preview,
+        isFavorite = preview?.let(isFavorite) == true,
+        channelRequester = channelRequester,
+        playRequester = playRequester,
+        favoriteRequester = favoriteRequester,
+        onWatch = { previewState.value?.let(onOpen) },
+        onToggleFavorite = { previewState.value?.let(onToggleFavorite) },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -2696,27 +2906,37 @@ private fun ContentGrid(
     restoreFocusedCard: Boolean = true,
     firstItemFocusRequester: FocusRequester? = null,
     firstItemUpRequester: FocusRequester? = null,
+    preparedContentKeys: List<String>? = null,
+    preparedContentKeyIndex: Map<String, Int>? = null,
 ) {
+    val contentIdentity = preparedContentKeys ?: content
+    val contentKeys = remember(contentIdentity) {
+        preparedContentKeys ?: content.map { "${it.type}:${it.id}" }
+    }
+    require(contentKeys.size == content.size)
+    val contentKeyIndex = remember(contentKeys, preparedContentKeyIndex) {
+        preparedContentKeyIndex ?: indexContentKeys(contentKeys)
+    }
     val remembered = navigationMemory.position(destination)
-    val rememberedKeyIndex = content.indexOfFirst { "${it.type}:${it.id}" == remembered.itemKey }
+    val rememberedKeyIndex = contentKeyIndex[remembered.itemKey] ?: -1
     val targetIndex = if (destination == MainDestination.SEARCH) {
         0
     } else {
         (if (rememberedKeyIndex >= 0) rememberedKeyIndex else remembered.itemIndex)
             .coerceIn(0, content.lastIndex.coerceAtLeast(0))
     }
-    val targetKey = content.getOrNull(targetIndex)?.let { "${it.type}:${it.id}" }.orEmpty()
+    val targetKey = contentKeys.getOrNull(targetIndex).orEmpty()
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
     LaunchedEffect(gridState, content, destination) {
         snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
-            content.getOrNull(index)?.let { navigationMemory.save(destination, "${it.type}:${it.id}", index) }
+            contentKeys.getOrNull(index)?.let { navigationMemory.save(destination, it, index) }
         }
     }
     val targetRequester = remember { FocusRequester() }
-    LaunchedEffect(content.map { "${it.type}:${it.id}" }, remembered.itemKey, destination, restoreFocusedCard) {
+    LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard) {
         if (destination == MainDestination.SEARCH) {
             if (content.isNotEmpty()) gridState.scrollToItem(0)
-            navigationMemory.save(destination, content.firstOrNull()?.let { "${it.type}:${it.id}" }.orEmpty(), 0)
+            navigationMemory.save(destination, contentKeys.firstOrNull().orEmpty(), 0)
         } else if (restoreFocusedCard && content.isNotEmpty()) {
             if (destination == MainDestination.FAVORITES && targetKey.isNotBlank() && targetKey != remembered.itemKey) {
                 navigationMemory.save(destination, targetKey, targetIndex)
@@ -2742,8 +2962,8 @@ private fun ContentGrid(
         ),
         modifier = Modifier.fillMaxSize(),
     ) {
-        itemsIndexed(content, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
-            val key = "${item.type}:${item.id}"
+        itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
+            val key = contentKeys[index]
             val restore = remembered.itemKey == key || index == targetIndex
             UniversalPosterCard(
                 item = item,
@@ -3147,7 +3367,9 @@ private fun CatalogHeader(
 ) {
     val colors = LocalHulkColors.current
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(end = if (isTv) TV_PAGE_GUTTER else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
@@ -3206,7 +3428,6 @@ private fun CategoryBar(
 private fun ReorderableCatalogCategoryBar(
     type: ContentType,
     categories: List<Category>,
-    items: List<ContentItem>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
     isTv: Boolean,
@@ -3231,12 +3452,9 @@ private fun ReorderableCatalogCategoryBar(
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
     }
-    val artworkByCategory = remember(items) {
-        items.filter { !it.posterUrl.isNullOrBlank() }
-            .groupBy(ContentItem::categoryId)
-            .mapValues { (_, content) -> content.first() }
-    }
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
+    val baseContentPadding = if (isTv) 8.dp else 24.dp
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
     fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
         val targetIndex = selectedCategoryFocusIndex(
@@ -3290,9 +3508,15 @@ private fun ReorderableCatalogCategoryBar(
                 }
             }
             .focusGroup()
-            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus },
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 24.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = baseContentPadding,
+            bottom = 8.dp,
+        ),
     ) {
         item {
             FocusButton(
@@ -3302,6 +3526,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(allFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == null
                     },
@@ -3315,6 +3540,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(favoritesFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
                     },
@@ -3328,6 +3554,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(continueFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == CONTINUE_CATEGORY_ID
                     },
@@ -3345,6 +3572,7 @@ private fun ReorderableCatalogCategoryBar(
                 onMoveRight = { move(category.id, -1) },
                 modifier = Modifier
                     .focusRequester(categoryFocusRequesters.getValue(category.id))
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                     },
@@ -3403,6 +3631,8 @@ private fun ReorderableLiveCategoryBar(
             .mapValues { (_, channels) -> channels.first() }
     }
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID) }
+    val baseContentPadding = 8.dp
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
     fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
         val targetIndex = selectedCategoryFocusIndex(
@@ -3455,9 +3685,15 @@ private fun ReorderableLiveCategoryBar(
                 }
             }
             .focusGroup()
-            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus },
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = baseContentPadding,
+            bottom = 8.dp,
+        ),
     ) {
         item {
             FocusButton(
@@ -3467,6 +3703,7 @@ private fun ReorderableLiveCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(allFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == null
                     },
@@ -3480,6 +3717,7 @@ private fun ReorderableLiveCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(favoritesFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
                     },
@@ -3494,6 +3732,7 @@ private fun ReorderableLiveCategoryBar(
                     compact = true,
                     modifier = Modifier
                         .focusRequester(categoryFocusRequesters.getValue(category.id))
+                        .keepCategoryChipFullyVisibleOnFocus(isTv)
                         .focusProperties {
                             canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                         },
@@ -3512,6 +3751,7 @@ private fun ReorderableLiveCategoryBar(
                     onMoveRight = { move(category.id, -1) },
                     modifier = Modifier
                         .focusRequester(categoryFocusRequesters.getValue(category.id))
+                        .keepCategoryChipFullyVisibleOnFocus(isTv)
                         .focusProperties {
                             canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                         },
@@ -3742,10 +3982,10 @@ private fun EmptyState(message: String) {
     }
 }
 
-private fun newest(content: List<ContentItem>): List<ContentItem> =
+internal fun newest(content: List<ContentItem>): List<ContentItem> =
     content.sortedByDescending { it.addedAtEpochSeconds ?: 0L }
 
-private fun ContentItem.matchesSearch(rawQuery: String): Boolean {
+internal fun ContentItem.matchesSearch(rawQuery: String): Boolean {
     val query = rawQuery.trim()
     if (query.isBlank()) return true
     return sequenceOf(name, year, genre, plot, nowPlaying)
@@ -3753,11 +3993,11 @@ private fun ContentItem.matchesSearch(rawQuery: String): Boolean {
         .any { value -> value.contains(query, ignoreCase = true) }
 }
 
-private fun HistoryEntry.isResumable(): Boolean =
+internal fun HistoryEntry.isResumable(): Boolean =
     !isLive && positionMs > 0L &&
         (durationMs <= 0L || positionMs.toDouble() / durationMs < .92)
 
-private fun categoryMatches(
+internal fun categoryMatches(
     item: ContentItem,
     selectedId: String?,
     isFavorite: (ContentItem) -> Boolean,

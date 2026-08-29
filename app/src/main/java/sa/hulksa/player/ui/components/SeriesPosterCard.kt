@@ -81,16 +81,25 @@ fun SeriesPosterCard(
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale by animateFloatAsState(if (showFocused) 1.04f else 1f, label = "seriesPosterScale")
+    val scale = if (adaptiveUi.isTelevision) {
+        1f
+    } else {
+        animateFloatAsState(if (showFocused) 1.04f else 1f, label = "seriesPosterScale").value
+    }
+    val focusTransform = if (adaptiveUi.isTelevision) {
+        Modifier
+    } else {
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+        }
+    }
     val shape = RoundedCornerShape(12.dp)
 
     Box(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                shadowElevation = if (showFocused) 14.dp.toPx() else 0f
-            }
+            .then(focusTransform)
             .aspectRatio(2f / 3f)
             .clip(shape)
             .background(Color(0xFF15160F))

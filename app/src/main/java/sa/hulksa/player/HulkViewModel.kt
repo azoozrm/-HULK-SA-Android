@@ -204,6 +204,12 @@ private fun Application.isTelevisionDevice(): Boolean {
         packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TELEVISION)
 }
 
+internal suspend fun loadDownloadUiSnapshot(
+    snapshotLoader: () -> List<OfflineDownload>,
+): List<OfflineDownload> = withContext(Dispatchers.IO) {
+    snapshotLoader()
+}
+
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
     private val repository = HulkRepository(application)
@@ -225,8 +231,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         HulkUiState(
             favorites = userLibrary.favorites(),
             history = userLibrary.history(),
-            downloads = downloadRepository.downloads(),
-            downloadSettings = downloadRepository.settings(),
+            downloads = emptyList(),
+            downloadSettings = DownloadSettings(),
             notificationSubscribedSeriesIds = initialNotificationSnapshot.subscribedSeriesIds,
             localNotifications = mergeNotificationCenterItems(
                 initialNotificationSnapshot.notifications,
@@ -298,7 +304,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         restoreSession()
         viewModelScope.launch {
             while (isActive) {
-                val downloads = downloadRepository.downloads()
+                val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
                 if (downloads != mutableState.value.downloads) {
                     mutableState.update { it.copy(downloads = downloads) }
                 }
@@ -1417,12 +1423,20 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     selectedDetails = null,
                     episodes = emptyList(),
                     seriesEpisodeTarget = null,
+                    downloads = emptyList(),
                     isLoading = false,
                     notificationPopup = null,
                     errorMessage = null,
                 )
             } else {
-                state.copy(notificationPopup = null)
+                state.copy(downloads = emptyList(), notificationPopup = null)
+            }
+        }
+        val expectedProfileId = profileStore.activeProfileId()
+        viewModelScope.launch {
+            val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
+            if (profileStore.activeProfileId() == expectedProfileId) {
+                mutableState.update { state -> state.copy(downloads = downloads) }
             }
         }
         refreshNotificationState(clearPopup = true)
@@ -2261,6 +2275,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 session = authenticated
                 sessionRestorationComplete = true
                 clearCatalogMemory()
+                val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
+                val downloadSettings = withContext(Dispatchers.IO) {
+                    downloadRepository.settings()
+                }
                 mutableState.update {
                     it.copy(
                         screen = HulkScreen.MAIN,
@@ -2271,8 +2289,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         catalogs = emptyMap(),
                         selectedCategoryId = null,
                         searchQuery = "",
-                        downloads = downloadRepository.downloads(),
-                        downloadSettings = downloadRepository.settings(),
+                        downloads = downloads,
+                        downloadSettings = downloadSettings,
                         errorMessage = null,
                     )
                 }
