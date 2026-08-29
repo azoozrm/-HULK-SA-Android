@@ -73,6 +73,29 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
             + live.count(".extendCategoryViewportTowardStart"),
         )
 
+    def test_sidebar_width_change_is_discrete_and_content_remains_sibling(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        rail = self.section(
+            source,
+            "private fun CinematicNavigationRail(",
+            "private fun NavigationItem(",
+        )
+
+        self.assertIn("Row(Modifier.fillMaxSize())", shell)
+        self.assertIn("Modifier.weight(1f).fillMaxHeight()", shell)
+        self.assertIn(
+            "val railWidth = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp",
+            rail,
+        )
+        self.assertIn(".width(railWidth)", rail)
+        self.assertNotIn("animateDpAsState(", rail)
+        self.assertNotIn('label = "railWidth"', rail)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -691,10 +691,7 @@ private fun CinematicNavigationRail(
     val profileRequester = remember { FocusRequester() }
     val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
     val selectedRequester = destinationFocusRequesters.getValue(selected)
-    val railWidth by animateDpAsState(
-        targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
-        label = "railWidth",
-    )
+    val railWidth = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp
 
     Column(
         modifier = Modifier
