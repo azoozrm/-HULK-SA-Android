@@ -7,6 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
 CATALOG_GRID = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/TvCatalogGrid.kt"
 DERIVED_MODELS = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/CatalogScreenEntryModels.kt"
+PROFILE_AWARE_APP = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/ProfileAwareHulkApp.kt"
 
 
 class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
@@ -80,18 +81,42 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         self.assertNotIn("buildSmartHomeRecommendations(", home)
         self.assertNotIn("navigationMemory.homeContent(state)", home)
 
-    def test_first_home_model_gates_shell_without_second_destination_loader(self) -> None:
-        source = self.read(MAIN_SHELL)
-        shell = self.section(
-            source,
-            "fun MainShellScreen(",
-            "private fun CinematicNavigationRail(",
+    def test_first_home_model_uses_profile_owned_first_frame_presentation(self) -> None:
+        shell_source = self.read(MAIN_SHELL)
+        derived_source = self.read(DERIVED_MODELS)
+        handoff = self.section(
+            shell_source,
+            "private fun rememberHomeModelForPresentation(",
+            "private fun rememberCatalogModelForPresentation(",
         )
-        gate = "if (state.destination == MainDestination.HOME && homeModel == null)"
+        initial = self.section(
+            derived_source,
+            "internal fun initialHomePresentation(",
+            "internal fun deriveCatalogScreenModel(",
+        )
+        store = derived_source[derived_source.index("internal class CatalogScreenEntryModelStore(") :]
 
-        self.assertIn(gate, shell)
-        self.assertLess(shell.index(gate), shell.index("CinematicNavigationRail("))
-        self.assertNotIn("جاري تجهيز الرئيسية", source)
+        self.assertLess(
+            handoff.index("navigationMemory.cachedHomeModel(input)"),
+            handoff.index("navigationMemory.lastGoodHomeModel()"),
+        )
+        self.assertIn("latestHomeInput = input", store)
+        self.assertIn("homeModel ?: latestHomeInput?.let", store)
+        self.assertIn("initialHomePresentation(input)", store)
+        self.assertIn("homePresentationFallback", store)
+        self.assertNotIn("buildSmartHomeRecommendations(", initial)
+        self.assertNotIn("newest(", initial)
+        self.assertNotIn(".filter", initial)
+        self.assertNotIn(".sorted", initial)
+        self.assertNotIn(".groupBy", initial)
+
+    def test_profile_switch_keeps_navigation_home_models_profile_owned(self) -> None:
+        source = self.read(PROFILE_AWARE_APP)
+
+        self.assertIn("mutableMapOf<String, NavigationMemoryStore>()", source)
+        self.assertIn("navigationMemoryByProfile.getOrPut(activeProfileId) { NavigationMemoryStore() }", source)
+        self.assertIn("navigationMemoryByProfile.remove(profileId)", source)
+        self.assertIn("navigationMemoryByProfile.clear()", source)
 
     def test_last_good_models_remain_profile_store_owned(self) -> None:
         source = self.read(DERIVED_MODELS)
@@ -99,6 +124,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         self.assertIn("fun lastGoodHome()", source)
         self.assertIn("fun lastGoodCatalog(destination: MainDestination)", source)
         self.assertIn("private var homeModel: KeyedHomeContentModel?", source)
+        self.assertIn("private var homePresentationFallback: KeyedHomeContentModel?", source)
         self.assertIn("private val catalogModels = EnumMap", source)
 
     def test_catalog_category_bar_does_not_build_unused_artwork_index(self) -> None:

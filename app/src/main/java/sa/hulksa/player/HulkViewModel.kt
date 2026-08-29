@@ -211,17 +211,6 @@ internal suspend fun loadDownloadUiSnapshot(
     snapshotLoader()
 }
 
-internal fun isCurrentTvPlatformWork(
-    currentGeneration: Long,
-    expectedGeneration: Long,
-    sessionStillCurrent: Boolean,
-    currentProfileId: String,
-    expectedProfileId: String,
-): Boolean =
-    currentGeneration == expectedGeneration &&
-        sessionStillCurrent &&
-        currentProfileId == expectedProfileId
-
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
     private val repository = HulkRepository(application)
@@ -279,7 +268,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var notificationScanJob: Job? = null
     private var operationsRefreshJob: Job? = null
     private var operationsDownloadJob: Job? = null
-    private var tvPlatformInitializationJob: Job? = null
     private var tvPlatformSyncJob: Job? = null
     private var tvPlatformClearJob: Job? = null
     private var tvDeepLinkEpisodeJob: Job? = null
@@ -392,52 +380,29 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val expectedSession = session ?: run {
-            beginTvPlatformProfileTransition(resetPublishedScope = false)
+        val scope = tvPlatformIntegration.get().activeProfileScope()
+        val phases = planTvProfilePublication(
+            previouslyPublishedScopeId = tvPublishedProfileScopeId,
+            activeScopeId = scope?.providerScopeId,
+            hasSession = session != null,
+            profileResolved = true,
+            kidsVerificationRequired = scope?.profileKind == ProfileKind.KIDS,
+            kidsVerified = true,
+        )
+        if (TvProfilePublicationPhase.CLEAR in phases) {
+            clearTvPlatformPrograms(resetPublishedScope = false)
+        }
+        if (TvProfilePublicationPhase.PUBLISH !in phases || scope == null) {
+            tvPlatformProfileReady = false
+            tvExpectedProfileScopeId = null
             return
         }
-        val expectedProfileId = profileStore.activeProfileId()
-        tvPlatformInitializationJob?.cancel()
+
         tvPlatformGeneration++
-        val expectedGeneration = tvPlatformGeneration
-        tvPlatformProfileReady = false
-        tvExpectedProfileScopeId = null
-        tvPlatformInitializationJob = viewModelScope.launch {
-            val scope = tvPlatformIntegration.withInstance { integration ->
-                integration.activeProfileScope()
-            }
-            if (
-                !isCurrentTvPlatformWork(
-                    currentGeneration = tvPlatformGeneration,
-                    expectedGeneration = expectedGeneration,
-                    sessionStillCurrent = session?.credentials == expectedSession.credentials,
-                    currentProfileId = profileStore.activeProfileId(),
-                    expectedProfileId = expectedProfileId,
-                ) || (scope != null && scope.profileId != expectedProfileId)
-            ) return@launch
-
-            val phases = planTvProfilePublication(
-                previouslyPublishedScopeId = tvPublishedProfileScopeId,
-                activeScopeId = scope?.providerScopeId,
-                hasSession = true,
-                profileResolved = true,
-                kidsVerificationRequired = scope?.profileKind == ProfileKind.KIDS,
-                kidsVerified = true,
-            )
-            if (TvProfilePublicationPhase.CLEAR in phases) {
-                clearTvPlatformPrograms(resetPublishedScope = false)
-            }
-            if (TvProfilePublicationPhase.PUBLISH !in phases || scope == null) {
-                tvPlatformProfileReady = false
-                tvExpectedProfileScopeId = null
-                return@launch
-            }
-
-            tvPlatformProfileReady = true
-            tvExpectedProfileScopeId = scope.providerScopeId
-            scheduleTvPlatformSync(immediate = true)
-            resolvePendingTvDeepLink()
-        }
+        tvPlatformProfileReady = true
+        tvExpectedProfileScopeId = scope.providerScopeId
+        scheduleTvPlatformSync(immediate = true)
+        resolvePendingTvDeepLink()
     }
 
     /** Called before ProfileStore changes so stale provider work is cancelled and cleared first. */
@@ -2421,7 +2386,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             TvDeepLinkDispatchDecision.DISPATCH -> Unit
         }
         val activeSession = session ?: return
-        val activeProfileScopeId = tvExpectedProfileScopeId
+        val activeProfileScopeId = tvPlatformIntegration.get().activeProfileScope()?.providerScopeId
             ?: return failPendingTvDeepLink("تعذر تحديد الملف الشخصي النشط.")
         when (
             val resolution = resolveTvDeepLink(
@@ -2511,7 +2476,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     session !== activeSession ||
                     !tvPlatformProfileReady ||
                     profileStore.activeProfileId() != expectedProfileId ||
-                    tvExpectedProfileScopeId != expectedProfileScopeId
+                    tvPlatformIntegration.get().activeProfileScope()?.providerScopeId != expectedProfileScopeId
                 ) return@launch
 
                 val rechecked = resolveTvDeepLink(
@@ -2579,9 +2544,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scheduleTvPlatformSync(immediate: Boolean) {
-        if (!operationsDeviceIsTv || !tvPlatformProfileReady) return
-        val expectedSession = session ?: return
-        val expectedProfileId = profileStore.activeProfileId()
+        if (
+            !operationsDeviceIsTv ||
+            !tvPlatformProfileReady ||
+            session == null
+        ) return
         val expectedProfileScopeId = tvExpectedProfileScopeId ?: return
         val expectedGeneration = tvPlatformGeneration
         val pendingClear = tvPlatformClearJob
@@ -2591,40 +2558,20 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             if (!immediate) delay(TV_PLATFORM_SYNC_DEBOUNCE_MS)
             if (
                 tvPlatformProfileReady &&
+                session != null &&
+                tvPlatformGeneration == expectedGeneration &&
                 tvExpectedProfileScopeId == expectedProfileScopeId &&
-                isCurrentTvPlatformWork(
-                    currentGeneration = tvPlatformGeneration,
-                    expectedGeneration = expectedGeneration,
-                    sessionStillCurrent = session?.credentials == expectedSession.credentials,
-                    currentProfileId = profileStore.activeProfileId(),
-                    expectedProfileId = expectedProfileId,
-                )
+                tvPlatformIntegration.get().activeProfileScope()?.providerScopeId == expectedProfileScopeId
             ) {
-                val landscapeArtwork = tvLandscapeArtworkSnapshot()
-                val result = tvPlatformIntegration.withInstance { integration ->
-                    if (
-                        integration.activeProfileScope()?.providerScopeId != expectedProfileScopeId
-                    ) {
-                        null
-                    } else {
-                        integration.syncActiveProfile(
-                            expectedProfileScopeId = expectedProfileScopeId,
-                            kidsVerified = true,
-                            landscapeArtworkByContentKey = landscapeArtwork,
-                        )
-                    }
-                }
+                val result = tvPlatformIntegration.get().syncActiveProfile(
+                    expectedProfileScopeId = expectedProfileScopeId,
+                    kidsVerified = true,
+                    landscapeArtworkByContentKey = tvLandscapeArtworkSnapshot(),
+                )
                 if (
                     result is TvPlatformSyncResult.Synced &&
-                    tvPlatformProfileReady &&
-                    tvExpectedProfileScopeId == expectedProfileScopeId &&
-                    isCurrentTvPlatformWork(
-                        currentGeneration = tvPlatformGeneration,
-                        expectedGeneration = expectedGeneration,
-                        sessionStillCurrent = session?.credentials == expectedSession.credentials,
-                        currentProfileId = profileStore.activeProfileId(),
-                        expectedProfileId = expectedProfileId,
-                    )
+                    tvPlatformGeneration == expectedGeneration &&
+                    tvExpectedProfileScopeId == expectedProfileScopeId
                 ) {
                     tvPublishedProfileScopeId = expectedProfileScopeId
                 }
@@ -2634,8 +2581,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun beginTvPlatformProfileTransition(resetPublishedScope: Boolean) {
         if (!operationsDeviceIsTv) return
-        tvPlatformInitializationJob?.cancel()
-        tvPlatformInitializationJob = null
         tvPlatformGeneration++
         tvPlatformProfileReady = false
         tvExpectedProfileScopeId = null
@@ -2651,11 +2596,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         tvPlatformSyncJob = null
         if (resetPublishedScope) tvPublishedProfileScopeId = null
         if (tvPlatformClearJob?.isActive == true) return
-        if (tvPlatformIntegration.getIfInitialized() == null && session == null) return
+        val integration = tvPlatformIntegration.getIfInitialized()
+            ?: if (session != null) tvPlatformIntegration.get() else return
         tvPlatformClearJob = viewModelScope.launch {
-            tvPlatformIntegration.withInstance { integration ->
-                integration.clearUserContent()
-            }
+            integration.clearUserContent()
         }
     }
 

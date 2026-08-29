@@ -105,6 +105,28 @@ internal data class KeyedHomeContentModel(
     val model: HomeContentSnapshot,
 )
 
+/**
+ * Cheap first-frame Home presentation for a fresh profile-owned store.
+ *
+ * It only references the already-loaded account catalogs and deliberately excludes history,
+ * favorites, and every smart/personalized recommendation. No sorting, filtering, grouping, or
+ * recommendation work is performed here, so the exact Home model can remain on Dispatchers.Default.
+ */
+internal fun initialHomePresentation(input: HomeContentModelInput): HomeContentSnapshot =
+    HomeContentSnapshot(
+        movies = input.movieCatalog?.items.orEmpty(),
+        series = input.seriesCatalog?.items.orEmpty(),
+        live = input.liveCatalog?.items.orEmpty(),
+        continueWatching = emptyList(),
+        lastLive = null,
+        becauseYouWatched = emptyList(),
+        suggested = emptyList(),
+        personalizedLive = emptyList(),
+        popularMovies = emptyList(),
+        popularSeries = emptyList(),
+        featuredCandidates = emptyList(),
+    )
+
 internal fun deriveCatalogScreenModel(input: CatalogScreenModelInput): CatalogScreenModel {
     val ordered = newest(input.catalog?.items.orEmpty())
     val visible = ordered.filter { item ->
@@ -170,6 +192,7 @@ internal class CatalogScreenEntryModelStore(
     private val catalogModels = EnumMap<MainDestination, KeyedCatalogScreenModel>(MainDestination::class.java)
     private val latestCatalogInputs = EnumMap<MainDestination, CatalogScreenModelInput>(MainDestination::class.java)
     private var homeModel: KeyedHomeContentModel? = null
+    private var homePresentationFallback: KeyedHomeContentModel? = null
     private var latestHomeInput: HomeContentModelInput? = null
 
     fun cachedCatalog(input: CatalogScreenModelInput): KeyedCatalogScreenModel? = synchronized(lock) {
@@ -199,11 +222,21 @@ internal class CatalogScreenEntryModelStore(
     }
 
     fun cachedHome(input: HomeContentModelInput): KeyedHomeContentModel? = synchronized(lock) {
+        // Register the current profile-owned input before presentation asks for last-good.
+        // This lets a fresh store expose a cheap current-input fallback without sharing state.
+        latestHomeInput = input
         homeModel?.takeIf { it.input == input }
     }
 
     fun lastGoodHome(): KeyedHomeContentModel? = synchronized(lock) {
-        homeModel
+        homeModel ?: latestHomeInput?.let { input ->
+            homePresentationFallback
+                ?.takeIf { it.input == input }
+                ?: KeyedHomeContentModel(
+                    input = input,
+                    model = initialHomePresentation(input),
+                ).also { homePresentationFallback = it }
+        }
     }
 
     suspend fun home(input: HomeContentModelInput): KeyedHomeContentModel {
@@ -217,7 +250,10 @@ internal class CatalogScreenEntryModelStore(
             homeModel
                 ?.takeIf { it.input == input }
                 ?: keyed.also {
-                    if (latestHomeInput == input) homeModel = it
+                    if (latestHomeInput == input) {
+                        homeModel = it
+                        homePresentationFallback = null
+                    }
                 }
         }
     }
