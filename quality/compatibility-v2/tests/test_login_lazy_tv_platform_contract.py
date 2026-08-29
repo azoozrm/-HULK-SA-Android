@@ -37,10 +37,9 @@ class LoginLazyTvPlatformContractTest(unittest.TestCase):
         )
 
         self.assertIn("tvPlatformIntegration.getIfInitialized()", clear_path)
-        self.assertIn(
-            "?: if (session != null) tvPlatformIntegration.get() else return",
-            clear_path,
-        )
+        self.assertIn("session == null", clear_path)
+        self.assertIn("tvPlatformIntegration.withInstance", clear_path)
+        self.assertNotIn("tvPlatformIntegration.get()", clear_path)
 
     def test_authenticated_platform_entry_points_use_the_stable_provider(self) -> None:
         profile_ready = self.section(
@@ -52,9 +51,12 @@ class LoginLazyTvPlatformContractTest(unittest.TestCase):
             "private fun beginTvPlatformProfileTransition(",
         )
 
-        self.assertIn("tvPlatformIntegration.get().activeProfileScope()", profile_ready)
-        self.assertIn("tvPlatformIntegration.get().activeProfileScope()", sync)
-        self.assertIn("tvPlatformIntegration.get().syncActiveProfile(", sync)
+        self.assertIn("tvPlatformIntegration.withInstance", profile_ready)
+        self.assertIn("integration.activeProfileScope()", profile_ready)
+        self.assertIn("tvPlatformIntegration.withInstance", sync)
+        self.assertIn("integration.activeProfileScope()", sync)
+        self.assertIn("integration.syncActiveProfile(", sync)
+        self.assertNotIn("tvPlatformIntegration.get()", self.source)
 
 
 if __name__ == "__main__":
