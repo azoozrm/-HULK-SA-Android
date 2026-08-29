@@ -134,7 +134,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
             home,
         )
 
-    def test_home_handoff_has_no_refresh_polling_or_full_screen_loading_workaround(self) -> None:
+    def test_home_handoff_keeps_defensive_gate_off_normal_path_without_workarounds(self) -> None:
         source = self.read(MAIN_SHELL)
         shell = self.section(
             source,
@@ -146,8 +146,15 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
             "private fun rememberHomeModelForPresentation(",
             "private fun rememberCatalogModelForPresentation(",
         )
+        gate = "if (state.destination == MainDestination.HOME && homeModel == null)"
 
-        self.assertNotIn("if (state.destination == MainDestination.HOME && homeModel == null)", shell)
+        self.assertIn(gate, shell)
+        self.assertLess(shell.index("rememberHomeModelForPresentation("), shell.index(gate))
+        self.assertLess(
+            handoff.index("navigationMemory.cachedHomeModel(input)"),
+            handoff.index("navigationMemory.lastGoodHomeModel()"),
+        )
+        self.assertIn("return presented", handoff)
         self.assertNotIn("refresh(", handoff)
         self.assertNotIn("delay(", handoff)
         self.assertNotIn("while (", handoff)
