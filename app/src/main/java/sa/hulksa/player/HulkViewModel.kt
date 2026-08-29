@@ -81,6 +81,7 @@ import sa.hulksa.player.tv.TvDeepLinkResolution
 import sa.hulksa.player.tv.TvDeepLinkRouter
 import sa.hulksa.player.tv.TvDeepLinkTarget
 import sa.hulksa.player.tv.TvPlatformIntegration
+import sa.hulksa.player.tv.TvPlatformIntegrationProvider
 import sa.hulksa.player.tv.TvPlatformSyncResult
 import sa.hulksa.player.tv.TvProfilePublicationPhase
 import sa.hulksa.player.tv.decideTvDeepLinkDispatch
@@ -222,7 +223,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val operationsClient = OperationsClient()
     private val operationsInstaller = OperationsApkInstaller(application)
     private val operationsDeviceIsTv = application.isTelevisionDevice()
-    private val tvPlatformIntegration = TvPlatformIntegration(application)
+    private val tvPlatformIntegration = TvPlatformIntegrationProvider {
+        TvPlatformIntegration(application)
+    }
     private val initialCachedOperations = operationsStore.cachedConfig()
     private val initialNotificationSnapshot = localEpisodeNotificationStore.snapshot(
         profileStore.activeProfileId(),
@@ -377,7 +380,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val scope = tvPlatformIntegration.activeProfileScope()
+        val scope = tvPlatformIntegration.get().activeProfileScope()
         val phases = planTvProfilePublication(
             previouslyPublishedScopeId = tvPublishedProfileScopeId,
             activeScopeId = scope?.providerScopeId,
@@ -2383,7 +2386,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             TvDeepLinkDispatchDecision.DISPATCH -> Unit
         }
         val activeSession = session ?: return
-        val activeProfileScopeId = tvPlatformIntegration.activeProfileScope()?.providerScopeId
+        val activeProfileScopeId = tvPlatformIntegration.get().activeProfileScope()?.providerScopeId
             ?: return failPendingTvDeepLink("تعذر تحديد الملف الشخصي النشط.")
         when (
             val resolution = resolveTvDeepLink(
@@ -2473,7 +2476,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     session !== activeSession ||
                     !tvPlatformProfileReady ||
                     profileStore.activeProfileId() != expectedProfileId ||
-                    tvPlatformIntegration.activeProfileScope()?.providerScopeId != expectedProfileScopeId
+                    tvPlatformIntegration.get().activeProfileScope()?.providerScopeId != expectedProfileScopeId
                 ) return@launch
 
                 val rechecked = resolveTvDeepLink(
@@ -2558,9 +2561,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 session != null &&
                 tvPlatformGeneration == expectedGeneration &&
                 tvExpectedProfileScopeId == expectedProfileScopeId &&
-                tvPlatformIntegration.activeProfileScope()?.providerScopeId == expectedProfileScopeId
+                tvPlatformIntegration.get().activeProfileScope()?.providerScopeId == expectedProfileScopeId
             ) {
-                val result = tvPlatformIntegration.syncActiveProfile(
+                val result = tvPlatformIntegration.get().syncActiveProfile(
                     expectedProfileScopeId = expectedProfileScopeId,
                     kidsVerified = true,
                     landscapeArtworkByContentKey = tvLandscapeArtworkSnapshot(),
@@ -2593,8 +2596,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         tvPlatformSyncJob = null
         if (resetPublishedScope) tvPublishedProfileScopeId = null
         if (tvPlatformClearJob?.isActive == true) return
+        val integration = tvPlatformIntegration.getIfInitialized()
+            ?: if (session != null) tvPlatformIntegration.get() else return
         tvPlatformClearJob = viewModelScope.launch {
-            tvPlatformIntegration.clearUserContent()
+            integration.clearUserContent()
         }
     }
 
