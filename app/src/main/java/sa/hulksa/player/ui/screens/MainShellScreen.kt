@@ -46,6 +46,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -234,6 +236,19 @@ private fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier
             }
         }
     }
+}
+
+@Composable
+private fun Modifier.keepCategoryChipFullyVisibleOnFocus(isTv: Boolean): Modifier {
+    if (!isTv) return this
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    return bringIntoViewRequester(requester)
+        .onFocusChanged { focusState ->
+            if (focusState.isFocused) {
+                scope.launch { requester.bringIntoView() }
+            }
+        }
 }
 
 private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
@@ -696,7 +711,7 @@ private fun CinematicNavigationRail(
             .onFocusChanged { railHasFocus = it.hasFocus }
             .background(
                 Brush.horizontalGradient(
-                    listOf(Color(0xFF090A07), Color(0xF70A0B08)),
+                    listOf(Color(0xFF090A07), Color(0xFF0A0B08)),
                 ),
             )
             .padding(
@@ -1781,6 +1796,7 @@ private fun PosterCatalogScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val colors = LocalHulkColors.current
     val catalog = state.catalogs[type]
     val modelInput = CatalogScreenModelInput(
         catalog = catalog,
@@ -1807,6 +1823,7 @@ private fun PosterCatalogScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .background(colors.background)
             .then(
                 if (isTv) {
                     Modifier
@@ -1900,6 +1917,7 @@ private fun LiveCatalogScreen(
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val colors = LocalHulkColors.current
     val catalog = state.catalogs[ContentType.LIVE]
     val visible = remember(catalog, state.selectedCategoryId, state.searchQuery, state.favorites) {
         catalog?.items.orEmpty().filter { item ->
@@ -1940,7 +1958,7 @@ private fun LiveCatalogScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(colors.background)) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1970,55 +1988,63 @@ private fun LiveCatalogScreen(
             Row(
                 Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    .fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                Column(
-                    modifier = Modifier.width(408.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp))
-                        .background(Color(0xA30D0E0B)).padding(9.dp),
-                ) {
-                    Text("القنوات", color = LocalHulkColors.current.text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp),
+                Box(Modifier.padding(start = 12.dp, bottom = 12.dp)) {
+                    Column(
+                        modifier = Modifier.width(408.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xA30D0E0B)).padding(9.dp),
                     ) {
-                        itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
-                            val key = "${channel.type}:${channel.id}"
-                            val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
-                            val selected by remember(previewState, channel.id) {
-                                derivedStateOf { isLivePreviewSelected(previewState.value, channel) }
+                        Text("القنوات", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp),
+                        ) {
+                            itemsIndexed(visible, key = { _, channel -> channel.id }) { index, channel ->
+                                val key = "${channel.type}:${channel.id}"
+                                val restore = key == remembered.itemKey || (remembered.itemKey.isBlank() && index == rememberedIndex)
+                                val selected by remember(previewState, channel.id) {
+                                    derivedStateOf { isLivePreviewSelected(previewState.value, channel) }
+                                }
+                                ChannelListItem(
+                                    item = channel,
+                                    selected = selected,
+                                    onFocused = {
+                                        previewState.value = channel
+                                        navigationMemory.save(MainDestination.LIVE, key, index)
+                                    },
+                                    onClick = { onOpen(channel) },
+                                    modifier = Modifier.restoreFocus(restore, channelRequester).focusProperties {
+                                        left = playRequester
+                                    },
+                                    isFavorite = isFavorite(channel),
+                                    onLongClick = { onToggleFavorite(channel) },
+                                )
                             }
-                            ChannelListItem(
-                                item = channel,
-                                selected = selected,
-                                onFocused = {
-                                    previewState.value = channel
-                                    navigationMemory.save(MainDestination.LIVE, key, index)
-                                },
-                                onClick = { onOpen(channel) },
-                                modifier = Modifier.restoreFocus(restore, channelRequester).focusProperties {
-                                    left = playRequester
-                                },
-                                isFavorite = isFavorite(channel),
-                                onLongClick = { onToggleFavorite(channel) },
-                            )
                         }
                     }
                 }
-                LivePreviewStage(
-                    previewState = previewState,
-                    isFavorite = isFavorite,
-                    channelRequester = channelRequester,
-                    playRequester = playRequester,
-                    favoriteRequester = favoriteRequester,
-                    onOpen = onOpen,
-                    onToggleFavorite = onToggleFavorite,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(end = 12.dp, bottom = 12.dp),
+                ) {
+                    LivePreviewStage(
+                        previewState = previewState,
+                        isFavorite = isFavorite,
+                        channelRequester = channelRequester,
+                        playRequester = playRequester,
+                        favoriteRequester = favoriteRequester,
+                        onOpen = onOpen,
+                        onToggleFavorite = onToggleFavorite,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         } else {
             LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -3501,6 +3527,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(allFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == null
                     },
@@ -3514,6 +3541,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(favoritesFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
                     },
@@ -3527,6 +3555,7 @@ private fun ReorderableCatalogCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(continueFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == CONTINUE_CATEGORY_ID
                     },
@@ -3544,6 +3573,7 @@ private fun ReorderableCatalogCategoryBar(
                 onMoveRight = { move(category.id, -1) },
                 modifier = Modifier
                     .focusRequester(categoryFocusRequesters.getValue(category.id))
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                     },
@@ -3674,6 +3704,7 @@ private fun ReorderableLiveCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(allFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == null
                     },
@@ -3687,6 +3718,7 @@ private fun ReorderableLiveCategoryBar(
                 compact = true,
                 modifier = Modifier
                     .focusRequester(favoritesFocusRequester)
+                    .keepCategoryChipFullyVisibleOnFocus(isTv)
                     .focusProperties {
                         canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
                     },
@@ -3701,6 +3733,7 @@ private fun ReorderableLiveCategoryBar(
                     compact = true,
                     modifier = Modifier
                         .focusRequester(categoryFocusRequesters.getValue(category.id))
+                        .keepCategoryChipFullyVisibleOnFocus(isTv)
                         .focusProperties {
                             canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                         },
@@ -3719,6 +3752,7 @@ private fun ReorderableLiveCategoryBar(
                     onMoveRight = { move(category.id, -1) },
                     modifier = Modifier
                         .focusRequester(categoryFocusRequesters.getValue(category.id))
+                        .keepCategoryChipFullyVisibleOnFocus(isTv)
                         .focusProperties {
                             canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
                         },
