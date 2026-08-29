@@ -5,7 +5,7 @@ import sa.hulksa.player.model.ProfileKind
 internal enum class ProfileSwitchAuthorization {
     ALLOW,
     REQUIRE_TARGET_PIN,
-    REQUIRE_PRIMARY_PARENT_PIN,
+    REQUIRE_PARENTAL_CODE,
     DENY_NO_PARENT_CREDENTIAL,
 }
 
@@ -16,23 +16,25 @@ internal fun profileSwitchAuthorization(
     targetProfileKind: ProfileKind,
     targetProtected: Boolean,
     resolvedForSession: Boolean,
-    primaryParentPinAvailable: Boolean,
+    parentalCodeAvailable: Boolean,
+    parentalAuthorizationGranted: Boolean = false,
 ): ProfileSwitchAuthorization {
     val switchingProfiles = currentProfileId != targetProfileId
-    if (targetProtected && (switchingProfiles || !resolvedForSession)) {
-        return ProfileSwitchAuthorization.REQUIRE_TARGET_PIN
-    }
-
     if (
         switchingProfiles &&
         currentProfileKind == ProfileKind.KIDS &&
-        targetProfileKind == ProfileKind.STANDARD
+        targetProfileKind == ProfileKind.STANDARD &&
+        !parentalAuthorizationGranted
     ) {
-        return if (primaryParentPinAvailable) {
-            ProfileSwitchAuthorization.REQUIRE_PRIMARY_PARENT_PIN
+        return if (parentalCodeAvailable) {
+            ProfileSwitchAuthorization.REQUIRE_PARENTAL_CODE
         } else {
             ProfileSwitchAuthorization.DENY_NO_PARENT_CREDENTIAL
         }
+    }
+
+    if (targetProtected && (switchingProfiles || !resolvedForSession)) {
+        return ProfileSwitchAuthorization.REQUIRE_TARGET_PIN
     }
 
     return ProfileSwitchAuthorization.ALLOW

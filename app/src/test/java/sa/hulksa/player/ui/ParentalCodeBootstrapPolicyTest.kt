@@ -10,32 +10,32 @@ import sa.hulksa.player.AuthenticationAttemptGate
 import sa.hulksa.player.ManualParentAuthProofTracker
 import sa.hulksa.player.model.ProfileKind
 
-class ParentPinBootstrapPolicyTest {
+class ParentalCodeBootstrapPolicyTest {
 
     @Test
-    fun `adult to kids without parent pin requires setup`() {
+    fun `adult to kids without parental code requires setup`() {
         assertEquals(
-            ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP,
-            decision(ProfileKind.STANDARD, ProfileKind.KIDS, parentPin = false, resolved = true),
+            ParentalCodeBootstrapDecision.REQUIRE_PARENTAL_CODE_SETUP,
+            decision(ProfileKind.STANDARD, ProfileKind.KIDS, parentalCode = false, resolved = true),
         )
     }
 
     @Test
-    fun `adult to kids with parent pin is allowed`() {
+    fun `adult to kids with parental code is allowed`() {
         assertEquals(
-            ParentPinBootstrapDecision.ALLOW,
-            decision(ProfileKind.STANDARD, ProfileKind.KIDS, parentPin = true, resolved = true),
+            ParentalCodeBootstrapDecision.ALLOW,
+            decision(ProfileKind.STANDARD, ProfileKind.KIDS, parentalCode = true, resolved = true),
         )
     }
 
     @Test
     fun `unresolved legacy kids session without manual proof is denied`() {
         assertEquals(
-            ParentPinBootstrapDecision.DENY_FAIL_CLOSED,
+            ParentalCodeBootstrapDecision.DENY_FAIL_CLOSED,
             decision(
                 current = ProfileKind.KIDS,
                 target = ProfileKind.STANDARD,
-                parentPin = false,
+                parentalCode = false,
                 resolved = false,
                 manualProof = false,
             ),
@@ -47,19 +47,19 @@ class ParentPinBootstrapPolicyTest {
         val unresolved = decision(
             ProfileKind.KIDS,
             ProfileKind.STANDARD,
-            parentPin = false,
+            parentalCode = false,
             resolved = false,
             manualProof = false,
         )
         val resolved = decision(
             ProfileKind.KIDS,
             ProfileKind.STANDARD,
-            parentPin = false,
+            parentalCode = false,
             resolved = true,
             manualProof = false,
         )
 
-        assertEquals(ParentPinBootstrapDecision.DENY_FAIL_CLOSED, unresolved)
+        assertEquals(ParentalCodeBootstrapDecision.DENY_FAIL_CLOSED, unresolved)
         assertEquals(unresolved, resolved)
     }
 
@@ -74,11 +74,11 @@ class ParentPinBootstrapPolicyTest {
 
         assertFalse(tracker.hasValidProof())
         assertEquals(
-            ParentPinBootstrapDecision.DENY_FAIL_CLOSED,
+            ParentalCodeBootstrapDecision.DENY_FAIL_CLOSED,
             decision(
                 ProfileKind.KIDS,
                 ProfileKind.STANDARD,
-                parentPin = false,
+                parentalCode = false,
                 resolved = false,
                 manualProof = tracker.hasValidProof(),
             ),
@@ -91,11 +91,11 @@ class ParentPinBootstrapPolicyTest {
 
         assertTrue(tracker.hasValidProofFor("account-a", "session-1"))
         assertEquals(
-            ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP,
+            ParentalCodeBootstrapDecision.REQUIRE_PARENTAL_CODE_SETUP,
             decision(
                 ProfileKind.KIDS,
                 ProfileKind.STANDARD,
-                parentPin = false,
+                parentalCode = false,
                 resolved = true,
                 manualProof = tracker.hasValidProof(),
             ),
@@ -212,15 +212,15 @@ class ParentPinBootstrapPolicyTest {
     }
 
     @Test
-    fun `successful parent pin bootstrap consumes manual proof`() {
+    fun `successful parental code bootstrap consumes manual proof`() {
         val tracker = successfulManualLoginProof("account-a", "session-1")
 
         assertEquals(
-            ParentPinBootstrapDecision.REQUIRE_PARENT_PIN_SETUP,
+            ParentalCodeBootstrapDecision.REQUIRE_PARENTAL_CODE_SETUP,
             decision(
                 ProfileKind.KIDS,
                 ProfileKind.STANDARD,
-                parentPin = false,
+                parentalCode = false,
                 resolved = false,
                 manualProof = tracker.hasValidProof(),
             ),
@@ -230,13 +230,13 @@ class ParentPinBootstrapPolicyTest {
     }
 
     @Test
-    fun `kids to adult with parent pin still requires existing parent pin verification`() {
+    fun `kids to adult with parental code still requires verification`() {
         assertEquals(
-            ParentPinBootstrapDecision.ALLOW,
-            decision(ProfileKind.KIDS, ProfileKind.STANDARD, parentPin = true, resolved = true),
+            ParentalCodeBootstrapDecision.ALLOW,
+            decision(ProfileKind.KIDS, ProfileKind.STANDARD, parentalCode = true, resolved = true),
         )
         assertEquals(
-            ProfileSwitchAuthorization.REQUIRE_PRIMARY_PARENT_PIN,
+            ProfileSwitchAuthorization.REQUIRE_PARENTAL_CODE,
             profileSwitchAuthorization(
                 currentProfileId = "kids",
                 currentProfileKind = ProfileKind.KIDS,
@@ -244,13 +244,13 @@ class ParentPinBootstrapPolicyTest {
                 targetProfileKind = ProfileKind.STANDARD,
                 targetProtected = false,
                 resolvedForSession = true,
-                primaryParentPinAvailable = true,
+                parentalCodeAvailable = true,
             ),
         )
     }
 
     @Test
-    fun `wrong parent pin cannot bypass kids to adult authorization requirement`() {
+    fun `wrong parental code cannot bypass kids to adult authorization requirement`() {
         val authorization = profileSwitchAuthorization(
             currentProfileId = "kids",
             currentProfileKind = ProfileKind.KIDS,
@@ -258,32 +258,34 @@ class ParentPinBootstrapPolicyTest {
             targetProfileKind = ProfileKind.STANDARD,
             targetProtected = false,
             resolvedForSession = true,
-            primaryParentPinAvailable = true,
+            parentalCodeAvailable = true,
         )
 
-        assertEquals(ProfileSwitchAuthorization.REQUIRE_PRIMARY_PARENT_PIN, authorization)
+        assertEquals(ProfileSwitchAuthorization.REQUIRE_PARENTAL_CODE, authorization)
     }
 
     @Test
-    fun `adult to adult remains unchanged without parent pin`() {
+    fun `adult to adult remains unchanged without parental code`() {
         assertEquals(
-            ParentPinBootstrapDecision.ALLOW,
-            decision(ProfileKind.STANDARD, ProfileKind.STANDARD, parentPin = false, resolved = true),
+            ParentalCodeBootstrapDecision.ALLOW,
+            decision(ProfileKind.STANDARD, ProfileKind.STANDARD, parentalCode = false, resolved = true),
         )
     }
 
     @Test
-    fun `kids to kids remains normal once parent pin exists`() {
+    fun `kids to kids remains normal once parental code exists`() {
         assertEquals(
-            ParentPinBootstrapDecision.ALLOW,
-            decision(ProfileKind.KIDS, ProfileKind.KIDS, parentPin = true, resolved = true),
+            ParentalCodeBootstrapDecision.ALLOW,
+            decision(ProfileKind.KIDS, ProfileKind.KIDS, parentalCode = true, resolved = true),
         )
     }
 
     @Test
-    fun `primary parent pin cannot be cleared while kids profiles exist`() {
-        assertFalse(canClearPrimaryParentPin(hasKidsProfiles = true))
-        assertTrue(canClearPrimaryParentPin(hasKidsProfiles = false))
+    fun `kids to kids does not require parental code`() {
+        assertEquals(
+            ParentalCodeBootstrapDecision.ALLOW,
+            decision(ProfileKind.KIDS, ProfileKind.KIDS, parentalCode = false, resolved = true),
+        )
     }
 
     @Test
@@ -316,13 +318,13 @@ class ParentPinBootstrapPolicyTest {
     private fun decision(
         current: ProfileKind?,
         target: ProfileKind,
-        parentPin: Boolean,
+        parentalCode: Boolean,
         resolved: Boolean,
         manualProof: Boolean = false,
-    ) = parentPinBootstrapDecision(
+    ) = parentalCodeBootstrapDecision(
         currentProfileKind = current,
         targetProfileKind = target,
-        primaryParentPinAvailable = parentPin,
+        parentalCodeAvailable = parentalCode,
         resolvedForSession = resolved,
         manualAuthProofValid = manualProof,
     )
