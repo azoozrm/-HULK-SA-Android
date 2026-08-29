@@ -155,6 +155,7 @@ internal fun TvCatalogGrid(
     val horizontalSpacing = metrics.horizontalSpacingDp.dp
     val verticalSpacing = metrics.verticalSpacingDp.dp
     val horizontalContentPadding = metrics.horizontalContentPaddingDp.dp
+    val focusSafeEndPadding = 6.dp
     val bottomContentPadding = metrics.bottomContentPaddingDp.dp
     val focusViewportInset = metrics.focusViewportInsetDp.dp
 
@@ -231,7 +232,9 @@ internal fun TvCatalogGrid(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val availableGridWidth = (maxWidth - horizontalContentPadding).coerceAtLeast(minCellWidth)
+        val availableGridWidth = (
+            maxWidth - horizontalContentPadding - focusSafeEndPadding
+        ).coerceAtLeast(minCellWidth)
         val columnCount = (((availableGridWidth + horizontalSpacing).value) /
             (minCellWidth + horizontalSpacing).value)
             .toInt()
@@ -245,7 +248,7 @@ internal fun TvCatalogGrid(
             contentPadding = PaddingValues(
                 start = horizontalContentPadding,
                 top = horizontalContentPadding,
-                end = 0.dp,
+                end = focusSafeEndPadding,
                 bottom = bottomContentPadding,
             ),
             modifier = Modifier.fillMaxSize(),

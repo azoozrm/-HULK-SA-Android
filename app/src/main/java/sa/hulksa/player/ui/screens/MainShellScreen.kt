@@ -3370,7 +3370,9 @@ private fun CatalogHeader(
 ) {
     val colors = LocalHulkColors.current
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(end = if (isTv) TV_PAGE_GUTTER else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
