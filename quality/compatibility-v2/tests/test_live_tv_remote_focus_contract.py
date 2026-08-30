@@ -76,6 +76,7 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         self.assertIn("onEnter = {", block)
         self.assertIn("restoreSelectedCategoryFocus(", block)
         self.assertIn("focusRestoreState.resolveTarget = { selectedFocusTarget() }", block)
+        self.assertIn("cancelDefaultEntry = { cancelFocusChange() }", block)
         self.assertNotIn("selectedFocusTarget()?.second?.requestFocus()", block)
         self.assertIn("var categoryBarHasFocus by remember", block)
         self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == null", block)

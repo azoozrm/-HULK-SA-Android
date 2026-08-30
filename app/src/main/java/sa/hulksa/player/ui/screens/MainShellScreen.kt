@@ -272,6 +272,7 @@ private fun restoreSelectedCategoryFocus(
     listState: LazyListState,
     scope: CoroutineScope,
     restoreState: CategoryFocusRestoreState,
+    cancelDefaultEntry: () -> Unit,
 ) {
     fun resolveTarget(): Pair<Int, FocusRequester>? = restoreState.resolveTarget?.invoke()
     fun isVisible(index: Int): Boolean =
@@ -286,6 +287,7 @@ private fun restoreSelectedCategoryFocus(
         return
     }
 
+    cancelDefaultEntry()
     restoreState.job = scope.launch {
         suspend fun scrollTargetIntoComposition(targetIndex: Int) {
             listState.scrollToItem(targetIndex)
@@ -3786,6 +3788,7 @@ private fun ReorderableCatalogCategoryBar(
                             listState = listState,
                             scope = scope,
                             restoreState = focusRestoreState,
+                            cancelDefaultEntry = { cancelFocusChange() },
                         )
                     }
                 }
@@ -3971,6 +3974,7 @@ private fun ReorderableLiveCategoryBar(
                             listState = listState,
                             scope = scope,
                             restoreState = focusRestoreState,
+                            cancelDefaultEntry = { cancelFocusChange() },
                         )
                     }
                 }
