@@ -2184,7 +2184,14 @@ private fun LiveStage(
                 Text("على الهواء الان", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(item.name, color = colors.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().padding(bottom = TV_LIVE_ACTION_INSET)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = TV_PAGE_GUTTER,
+                            bottom = TV_LIVE_ACTION_INSET,
+                        ),
+                ) {
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
