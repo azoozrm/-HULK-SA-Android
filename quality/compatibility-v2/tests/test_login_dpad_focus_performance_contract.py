@@ -186,6 +186,38 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertGreaterEqual(panel.count("onTextInputFocus()"), 3)
         self.assertGreaterEqual(panel.count("onNonTextFocus()"), 3)
 
+    def test_keyboard_hide_uses_one_mechanism_per_request(self) -> None:
+        screen = self.section(
+            self.source,
+            "fun LoginScreen(",
+            "private fun PremiumCinematicBackground(",
+        )
+        hide = self.section(screen, "val hideKeyboard: () -> Unit = {", "val dismissKeyboard")
+
+        self.assertIn("if (keyboardController != null)", hide)
+        self.assertIn("keyboardController.hide()", hide)
+        self.assertIn("} else {", hide)
+        self.assertEqual(1, hide.count("hideSoftInputFromWindow"))
+        self.assertNotIn("keyboardController?.hide()", hide)
+
+    def test_tv_login_options_skip_focus_color_animation_hot_path(self) -> None:
+        panel = self.section(
+            self.source,
+            "private fun LoginPanel(",
+            "private fun LoginCredentialTextField(",
+        )
+        option = self.section(
+            self.source,
+            "private fun LoginOption(",
+            "private fun LoginActionButton(",
+        )
+
+        self.assertEqual(2, panel.count("animateFocus = !isTv"))
+        self.assertIn("animateFocus: Boolean = true", option)
+        self.assertIn("val targetBackground", option)
+        self.assertIn("val targetOutline", option)
+        self.assertIn("if (animateFocus)", option)
+
     def test_submit_preserves_authentication_values_and_remember_account(self) -> None:
         screen = self.section(
             self.source,

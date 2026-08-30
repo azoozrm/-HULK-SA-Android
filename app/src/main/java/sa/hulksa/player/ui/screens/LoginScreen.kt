@@ -365,9 +365,12 @@ fun LoginScreen(
     }
 
     val hideKeyboard: () -> Unit = {
-        keyboardController?.hide()
-        (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-            ?.hideSoftInputFromWindow(view.windowToken, 0)
+        if (keyboardController != null) {
+            keyboardController.hide()
+        } else {
+            (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                ?.hideSoftInputFromWindow(view.windowToken, 0)
+        }
         Unit
     }
     val dismissKeyboard: () -> Unit = {
@@ -1039,6 +1042,7 @@ private fun LoginPanel(
                 },
                 minHeight = policy.optionHeight,
                 textSizeSp = policy.optionTextSizeSp,
+                animateFocus = !isTv,
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(rememberRequester)
@@ -1059,6 +1063,7 @@ private fun LoginPanel(
                 },
                 minHeight = policy.optionHeight,
                 textSizeSp = policy.optionTextSizeSp,
+                animateFocus = !isTv,
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(showPasswordRequester)
@@ -1342,19 +1347,32 @@ private fun LoginOption(
     onFocused: () -> Unit,
     minHeight: Dp,
     textSizeSp: Int,
+    animateFocus: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(11.dp)
-    val background by animateColorAsState(
-        targetValue = if (focused) colors.gold.copy(alpha = .08f) else Color.Transparent,
-        label = "loginOptionBackground",
-    )
-    val outline by animateColorAsState(
-        targetValue = if (focused) colors.gold.copy(alpha = .78f) else Color.Transparent,
-        label = "loginOptionOutline",
-    )
+    val targetBackground = if (focused) colors.gold.copy(alpha = .08f) else Color.Transparent
+    val targetOutline = if (focused) colors.gold.copy(alpha = .78f) else Color.Transparent
+    val background = if (animateFocus) {
+        val animated by animateColorAsState(
+            targetValue = targetBackground,
+            label = "loginOptionBackground",
+        )
+        animated
+    } else {
+        targetBackground
+    }
+    val outline = if (animateFocus) {
+        val animated by animateColorAsState(
+            targetValue = targetOutline,
+            label = "loginOptionOutline",
+        )
+        animated
+    } else {
+        targetOutline
+    }
 
     Row(
         modifier = modifier

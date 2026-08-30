@@ -28,6 +28,84 @@ class ProfilePickerPolicyTest {
     }
 
     @Test
+    fun unresolvedParentalStateDoesNotBlockSelectingCurrentAdultProfile() {
+        assertFalse(
+            profileSelectionRequiresResolvedParentalState(
+                currentProfileId = "adult",
+                currentProfileKind = ProfileKind.STANDARD,
+                targetProfileId = "adult",
+                targetProfileKind = ProfileKind.STANDARD,
+                parentalCodeAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun unresolvedParentalStateDoesNotBlockAdultToAdultSelection() {
+        assertFalse(
+            profileSelectionRequiresResolvedParentalState(
+                currentProfileId = "adult-a",
+                currentProfileKind = ProfileKind.STANDARD,
+                targetProfileId = "adult-b",
+                targetProfileKind = ProfileKind.STANDARD,
+                parentalCodeAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun unresolvedParentalStateDoesNotBlockKidsToKidsSelection() {
+        assertFalse(
+            profileSelectionRequiresResolvedParentalState(
+                currentProfileId = "kids-a",
+                currentProfileKind = ProfileKind.KIDS,
+                targetProfileId = "kids-b",
+                targetProfileKind = ProfileKind.KIDS,
+                parentalCodeAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun kidsToAdultStillWaitsForResolvedParentalState() {
+        assertTrue(
+            profileSelectionRequiresResolvedParentalState(
+                currentProfileId = "kids",
+                currentProfileKind = ProfileKind.KIDS,
+                targetProfileId = "adult",
+                targetProfileKind = ProfileKind.STANDARD,
+                parentalCodeAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun adultToKidsWithoutParentalCodeStillWaitsForResolvedParentalState() {
+        assertTrue(
+            profileSelectionRequiresResolvedParentalState(
+                currentProfileId = "adult",
+                currentProfileKind = ProfileKind.STANDARD,
+                targetProfileId = "kids",
+                targetProfileKind = ProfileKind.KIDS,
+                parentalCodeAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun adultToKidsWithExplicitParentalCodeDoesNotNeedMigrationReadiness() {
+        assertFalse(
+            profileSelectionRequiresResolvedParentalState(
+                currentProfileId = "adult",
+                currentProfileKind = ProfileKind.STANDARD,
+                targetProfileId = "kids",
+                targetProfileKind = ProfileKind.KIDS,
+                parentalCodeAvailable = true,
+            ),
+        )
+    }
+
+    @Test
     fun adultToAdultUnprotectedRemainsAllowed() {
         assertEquals(
             ProfileSwitchAuthorization.ALLOW,

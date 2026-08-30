@@ -40,6 +40,32 @@ internal fun profileSwitchAuthorization(
     return ProfileSwitchAuthorization.ALLOW
 }
 
+/**
+ * Only profile changes whose authorization decision depends on parental state need to wait for
+ * legacy parental classification. Selecting the already-active profile, Adult -> Adult, and
+ * Kids -> Kids must remain responsive while that account-scoped classification finishes.
+ */
+internal fun profileSelectionRequiresResolvedParentalState(
+    currentProfileId: String,
+    currentProfileKind: ProfileKind?,
+    targetProfileId: String,
+    targetProfileKind: ProfileKind,
+    parentalCodeAvailable: Boolean,
+): Boolean {
+    if (currentProfileId == targetProfileId) return false
+
+    if (
+        currentProfileKind == ProfileKind.KIDS &&
+        targetProfileKind == ProfileKind.STANDARD
+    ) {
+        return true
+    }
+
+    return currentProfileKind != ProfileKind.KIDS &&
+        targetProfileKind == ProfileKind.KIDS &&
+        !parentalCodeAvailable
+}
+
 internal fun shouldRetainKidsProfileForDirectEntry(
     currentProfileId: String,
     currentProfileKind: ProfileKind?,
