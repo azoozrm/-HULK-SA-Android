@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PLAYER_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
 PLAYER_PRO = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerProEpisodeNavigation.kt"
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+LIVE_TV_BROWSER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LiveTvProChannelBrowser.kt"
 
 
 class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
@@ -88,6 +89,58 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         self.assertIn("focusedChannelIndex[0] == 0", text)
         self.assertIn("categoryFocusRestoreController.requestFromSource()", text)
         self.assertIn("restoreSelectedCategoryFocus(", block)
+
+    def test_player_browser_visible_selected_category_skips_reveal_scroll(self) -> None:
+        text = self.read(LIVE_TV_BROWSER)
+        start = text.index("fun returnFocusToSelectedCategory()")
+        end = text.index("LaunchedEffect(visible, selectedCategory, normalizedQuery)", start)
+        block = text[start:end]
+        self.assertIn("val targetCategoryId = selectedCategory", block)
+        self.assertIn("val initialTarget = resolveCategoryReturnTarget(targetCategoryId)", block)
+        self.assertIn("liveTvProCategoryReturnNeedsReveal(initialTarget.first, visibleIndices)", block)
+        self.assertEqual(1, block.count("categoryListState.scrollToItem"))
+        self.assertGreater(
+            block.index("categoryListState.scrollToItem(initialTarget.first)"),
+            block.index("if (liveTvProCategoryReturnNeedsReveal"),
+        )
+
+    def test_player_browser_offscreen_return_waits_for_exact_target_before_focus(self) -> None:
+        text = self.read(LIVE_TV_BROWSER)
+        start = text.index("fun returnFocusToSelectedCategory()")
+        end = text.index("LaunchedEffect(visible, selectedCategory, normalizedQuery)", start)
+        block = text[start:end]
+        scroll = block.index("categoryListState.scrollToItem(initialTarget.first)")
+        confirmation = block.index("snapshotFlow", scroll)
+        re_resolve = block.index("resolveCategoryReturnTarget(targetCategoryId)", confirmation)
+        focus = block.index("resolvedTarget.second.requestFocus()", re_resolve)
+        self.assertLess(scroll, confirmation)
+        self.assertLess(confirmation, re_resolve)
+        self.assertLess(re_resolve, focus)
+        self.assertIn(".first { it }", block)
+        self.assertNotIn("delay(", block)
+        self.assertNotIn("repeat(", block)
+        self.assertNotIn("while (", block)
+
+    def test_player_browser_return_never_focuses_interim_or_fallback_category(self) -> None:
+        text = self.read(LIVE_TV_BROWSER)
+        start = text.index("fun returnFocusToSelectedCategory()")
+        end = text.index("LaunchedEffect(visible, selectedCategory, normalizedQuery)", start)
+        block = text[start:end]
+        self.assertEqual(3, block.count("targetCategoryId"))
+        self.assertNotIn("allCategoryFocus.requestFocus", block)
+        self.assertNotIn("favoritesCategoryFocus.requestFocus", block)
+        self.assertNotIn("recentCategoryFocus.requestFocus", block)
+        self.assertIn("resolvedTarget.second.requestFocus()", block)
+
+    def test_player_browser_dpad_left_repeat_is_one_shot(self) -> None:
+        text = self.read(LIVE_TV_BROWSER)
+        row_start = text.index("fun BrowserChannelRow(")
+        row_end = text.index("fun ReorderableCategoryRow(", row_start)
+        row = text[row_start:row_end]
+        self.assertIn("event.nativeKeyEvent.repeatCount == 0", row)
+        self.assertIn("onReturnToCategory()", row)
+        self.assertIn("if (!categoryReturnGate.tryStart()) return", text)
+        self.assertIn("categoryReturnGate.finish()", text)
 
 
 if __name__ == "__main__":

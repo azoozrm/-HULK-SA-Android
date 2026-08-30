@@ -197,6 +197,39 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
             helper.index("controller.hasPendingTarget(directTarget.categoryId)"),
         )
 
+    def test_tv_destination_initial_entry_targets_all_without_changing_selection(self) -> None:
+        shell = self.section("fun MainShellScreen(", "@Composable\nprivate fun CinematicNavigationRail(")
+        destination = self.section("private fun DestinationContent(", "@Composable\nprivate fun CinemaHomeScreen(")
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
+        catalog_bar = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live_bar = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")
+
+        self.assertIn("val tvCatalogAllFocusRequesters = remember", shell)
+        for target in ("MainDestination.LIVE", "MainDestination.MOVIES", "MainDestination.SERIES"):
+            self.assertIn(f"{target} to FocusRequester()", shell)
+        self.assertIn(
+            "tvCatalogAllFocusRequesters[state.destination] ?: currentTvContentFocusRequester",
+            shell,
+        )
+        self.assertIn("currentTvDestinationFocusRequester.requestFocus()", shell)
+        self.assertNotIn("currentTvContentFocusRequester.requestFocus()", shell)
+        self.assertIn("initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination]", shell)
+        self.assertIn("initialAllFocusPending = currentTvCatalogInitialFocusPending", shell)
+        self.assertIn("initialAllFocusRequester: FocusRequester? = null", destination)
+        self.assertIn("initialAllFocusPending: Boolean = false", destination)
+        for block in (poster, live):
+            self.assertIn("initialAllFocusRequester", block)
+            self.assertIn("initialAllFocusPending", block)
+        for block in (catalog_bar, live_bar):
+            self.assertIn("val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester", block)
+            self.assertIn("allowInitialEntry = initialAllFocusPending", block)
+            self.assertIn("selectedFocusTarget()", block)
+        self.assertIn("RoundAction(Icons.Rounded.Refresh, \"تحديث\", onRefresh)", header)
+        self.assertNotIn("canFocus = false", header)
+        self.assertNotIn("onSelectCategory(null)", shell)
+
     def test_new_focus_flow_adds_no_arbitrary_delay_polling_or_retry_loop(self) -> None:
         helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
         target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")

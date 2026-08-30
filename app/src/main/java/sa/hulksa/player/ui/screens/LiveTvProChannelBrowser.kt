@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
@@ -68,6 +70,25 @@ import sa.hulksa.player.ui.components.HulkFallbackArtwork
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
+
+internal class LiveTvProCategoryReturnGate {
+    private var active = false
+
+    fun tryStart(): Boolean {
+        if (active) return false
+        active = true
+        return true
+    }
+
+    fun finish() {
+        active = false
+    }
+}
+
+internal fun liveTvProCategoryReturnNeedsReveal(
+    targetIndex: Int,
+    visibleIndices: Set<Int>,
+): Boolean = targetIndex !in visibleIndices
 
 /**
  * v1.6 Live TV Pro browser shown over playback.
@@ -211,6 +232,7 @@ fun LiveTvProChannelBrowser(
     val listState = rememberLazyListState()
     val categoryListState = rememberLazyListState()
     val categoryFocusScope = rememberCoroutineScope()
+    val categoryReturnGate = remember { LiveTvProCategoryReturnGate() }
     val channelFocus = remember { FocusRequester() }
     val searchFocus = remember { FocusRequester() }
     val allCategoryFocus = remember { FocusRequester() }
@@ -222,30 +244,55 @@ fun LiveTvProChannelBrowser(
     val categoryFocusRequesters = remember(stableCategoryIds) {
         stableCategoryIds.associateWith { FocusRequester() }
     }
-    val selectedCategoryFocusRequester = when (selectedCategory) {
-        null -> allCategoryFocus
-        LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> recentCategoryFocus
-        LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> favoritesCategoryFocus
-        else -> selectedCategory?.let(categoryFocusRequesters::get)
+    val leadingCategoryIds = remember {
+        listOf<String?>(
+            null,
+            LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY,
+            LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY,
+        )
     }
     val focusIndex = visible.indexOfFirst { it.id == currentStreamId }.takeIf { it >= 0 } ?: 0
 
+    fun categoryFocusRequester(categoryId: String?): FocusRequester? = when (categoryId) {
+        null -> allCategoryFocus
+        LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> recentCategoryFocus
+        LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> favoritesCategoryFocus
+        else -> categoryId?.let(categoryFocusRequesters::get)
+    }
+
+    fun resolveCategoryReturnTarget(categoryId: String?): Pair<Int, FocusRequester>? {
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = categoryId,
+            leadingIds = leadingCategoryIds,
+            orderedIds = orderedCategories.map { it.id },
+        ) ?: return null
+        val requester = categoryFocusRequester(categoryId) ?: return null
+        return targetIndex to requester
+    }
+
     fun returnFocusToSelectedCategory() {
         if (!tvLayout || normalizedQuery.isNotBlank()) return
-        val targetIndex = selectedCategoryFocusIndex(
-            selectedId = selectedCategory,
-            leadingIds = listOf(
-                null,
-                LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY,
-                LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY,
-            ),
-            orderedIds = orderedCategories.map { it.id },
-        ) ?: return
-        val requester = selectedCategoryFocusRequester ?: return
+        val targetCategoryId = selectedCategory
+        val initialTarget = resolveCategoryReturnTarget(targetCategoryId) ?: return
+        if (!categoryReturnGate.tryStart()) return
         categoryFocusScope.launch {
-            categoryListState.scrollToItem(targetIndex)
-            withFrameNanos { }
-            runCatching { requester.requestFocus() }
+            try {
+                val visibleIndices = categoryListState.layoutInfo.visibleItemsInfo
+                    .mapTo(mutableSetOf()) { it.index }
+                if (liveTvProCategoryReturnNeedsReveal(initialTarget.first, visibleIndices)) {
+                    categoryListState.scrollToItem(initialTarget.first)
+                    snapshotFlow {
+                        val resolvedIndex = resolveCategoryReturnTarget(targetCategoryId)?.first
+                        resolvedIndex != null &&
+                            categoryListState.layoutInfo.visibleItemsInfo.any { it.index == resolvedIndex }
+                    }.first { it }
+                    withFrameNanos { }
+                }
+                val resolvedTarget = resolveCategoryReturnTarget(targetCategoryId) ?: return@launch
+                runCatching { resolvedTarget.second.requestFocus() }
+            } finally {
+                categoryReturnGate.finish()
+            }
         }
     }
 
@@ -347,7 +394,9 @@ fun LiveTvProChannelBrowser(
                         code == AndroidKeyEvent.KEYCODE_SPACE
                     when {
                         returnToCategory -> {
-                            if (event.type == KeyEventType.KeyDown) onReturnToCategory()
+                            if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0) {
+                                onReturnToCategory()
+                            }
                             true
                         }
                         !remoteSelect -> false

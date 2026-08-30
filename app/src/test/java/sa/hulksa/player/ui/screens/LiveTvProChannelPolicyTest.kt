@@ -1,7 +1,9 @@
 package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
@@ -103,6 +105,36 @@ class LiveTvProChannelPolicyTest {
 
         assertEquals(2, liveTvProLastChannel(channels, listOf(99, 1, 2), currentStreamId = 1)?.id)
         assertNull(liveTvProLastChannel(channels, listOf(99, 1), currentStreamId = 1))
+    }
+
+    @Test
+    fun visibleCategoryReturnDoesNotRequireRevealScroll() {
+        assertFalse(
+            liveTvProCategoryReturnNeedsReveal(
+                targetIndex = 4,
+                visibleIndices = setOf(3, 4, 5),
+            ),
+        )
+    }
+
+    @Test
+    fun offscreenCategoryReturnRequiresExactlyOneRevealPath() {
+        assertTrue(
+            liveTvProCategoryReturnNeedsReveal(
+                targetIndex = 7,
+                visibleIndices = setOf(3, 4, 5),
+            ),
+        )
+    }
+
+    @Test
+    fun categoryReturnGateRejectsKeyRepeatUntilCurrentTransitionFinishes() {
+        val gate = LiveTvProCategoryReturnGate()
+
+        assertTrue(gate.tryStart())
+        assertFalse(gate.tryStart())
+        gate.finish()
+        assertTrue(gate.tryStart())
     }
 
     private fun channel(id: Int, categoryId: String) = ContentItem(

@@ -422,9 +422,10 @@ private fun Modifier.categoryChipFocus(
     categoryBarHasFocus: Boolean,
     requester: FocusRequester,
     controller: CategoryFocusRestoreController,
+    allowInitialEntry: Boolean = false,
 ): Modifier = categoryFocusTarget(isTv, categoryId, requester, controller)
     .focusProperties {
-        canFocus = canCategoryChipReceiveFocus(
+        canFocus = allowInitialEntry || canCategoryChipReceiveFocus(
             isTv = isTv,
             categoryBarHasFocus = categoryBarHasFocus,
             restorePending = controller.pendingRequest != null,
@@ -719,6 +720,13 @@ fun MainShellScreen(
     val tvContentFocusRequesters = remember {
         destinations.associate { entry -> entry.destination to FocusRequester() }
     }
+    val tvCatalogAllFocusRequesters = remember {
+        mapOf(
+            MainDestination.LIVE to FocusRequester(),
+            MainDestination.MOVIES to FocusRequester(),
+            MainDestination.SERIES to FocusRequester(),
+        )
+    }
     var tvContentFocusRequestId by remember { mutableLongStateOf(0L) }
     var pendingTvContentFocusHandoff by remember {
         mutableStateOf<TvContentFocusHandoffRequest?>(null)
@@ -824,6 +832,11 @@ fun MainShellScreen(
         navigationEntries.associate { entry -> entry.destination to FocusRequester() }
     }
     val currentTvContentFocusRequester = tvContentFocusRequesters.getValue(state.destination)
+    val currentTvDestinationFocusRequester =
+        tvCatalogAllFocusRequesters[state.destination] ?: currentTvContentFocusRequester
+    val currentTvCatalogInitialFocusPending =
+        pendingTvContentFocusHandoff?.destination == state.destination &&
+            state.destination in tvCatalogAllFocusRequesters
     LaunchedEffect(
         useNavigationRail,
         state.destination,
@@ -840,7 +853,7 @@ fun MainShellScreen(
             return@LaunchedEffect
         }
         val handedOff = runCatching {
-            currentTvContentFocusRequester.requestFocus()
+            currentTvDestinationFocusRequester.requestFocus()
         }.getOrDefault(false)
         if (handedOff && pendingTvContentFocusHandoff?.requestId == handoff.requestId) {
             pendingTvContentFocusHandoff = null
@@ -890,6 +903,8 @@ fun MainShellScreen(
                         onRefreshAccount = onRefreshAccount,
                         onRunDiagnostics = onRunDiagnostics,
                         onLogout = onLogout,
+                        initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination],
+                        initialAllFocusPending = currentTvCatalogInitialFocusPending,
                     )
                 }
             }
@@ -980,7 +995,6 @@ private fun CinematicNavigationRail(
 
     Column(
         modifier = Modifier
-            // Category rows may draw beneath the rail; the rail stays the top visual layer.
             .zIndex(1f)
             .width(railWidth)
             .fillMaxHeight()
@@ -1410,6 +1424,8 @@ private fun DestinationContent(
     onRefreshAccount: () -> Unit,
     onRunDiagnostics: () -> Unit,
     onLogout: () -> Unit,
+    initialAllFocusRequester: FocusRequester? = null,
+    initialAllFocusPending: Boolean = false,
 ) {
     when (state.destination) {
         MainDestination.HOME -> CinemaHomeScreen(
@@ -1426,9 +1442,55 @@ private fun DestinationContent(
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
         )
-        MainDestination.LIVE -> LiveCatalogScreen(state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onToggleFavorite, onRefresh)
-        MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
-        MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
+        MainDestination.LIVE -> LiveCatalogScreen(
+            state = state,
+            isTv = isTv,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            initialAllFocusRequester = initialAllFocusRequester,
+            initialAllFocusPending = initialAllFocusPending,
+        )
+        MainDestination.MOVIES -> PosterCatalogScreen(
+            title = "الافلام",
+            type = ContentType.MOVIE,
+            destination = MainDestination.MOVIES,
+            state = state,
+            isTv = isTv,
+            navigationMemory = navigationMemory,
+            favoriteSnapshot = favoriteSnapshot,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onOpenHistory = onOpenHistory,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            initialAllFocusRequester = initialAllFocusRequester,
+            initialAllFocusPending = initialAllFocusPending,
+        )
+        MainDestination.SERIES -> PosterCatalogScreen(
+            title = "المسلسلات",
+            type = ContentType.SERIES,
+            destination = MainDestination.SERIES,
+            state = state,
+            isTv = isTv,
+            navigationMemory = navigationMemory,
+            favoriteSnapshot = favoriteSnapshot,
+            isFavorite = isFavorite,
+            onSelectCategory = onSelectCategory,
+            onSearch = onSearch,
+            onOpen = onOpen,
+            onOpenHistory = onOpenHistory,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+            initialAllFocusRequester = initialAllFocusRequester,
+            initialAllFocusPending = initialAllFocusPending,
+        )
         MainDestination.FAVORITES -> FavoritesScreen(
             state = state,
             isTv = isTv,
@@ -2085,6 +2147,8 @@ private fun PosterCatalogScreen(
     onOpenHistory: (HistoryEntry) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    initialAllFocusRequester: FocusRequester? = null,
+    initialAllFocusPending: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val catalog = state.catalogs[type]
@@ -2200,6 +2264,8 @@ private fun PosterCatalogScreen(
                 onSelect = selectCategoryAndEnterContent,
                 isTv = isTv,
                 focusRestoreController = categoryFocusRestoreController,
+                initialAllFocusRequester = initialAllFocusRequester,
+                initialAllFocusPending = initialAllFocusPending,
             )
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
@@ -2285,6 +2351,8 @@ private fun LiveCatalogScreen(
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onRefresh: () -> Unit,
+    initialAllFocusRequester: FocusRequester? = null,
+    initialAllFocusPending: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val catalog = state.catalogs[ContentType.LIVE]
@@ -2409,6 +2477,8 @@ private fun LiveCatalogScreen(
                 onSelect = selectCategoryAndEnterContent,
                 isTv = isTv,
                 focusRestoreController = categoryFocusRestoreController,
+                initialAllFocusRequester = initialAllFocusRequester,
+                initialAllFocusPending = initialAllFocusPending,
             )
             LiveInteractionHints(isTv)
             Spacer(Modifier.height(8.dp))
@@ -3954,6 +4024,8 @@ private fun ReorderableCatalogCategoryBar(
     onSelect: (String?) -> Unit,
     isTv: Boolean,
     focusRestoreController: CategoryFocusRestoreController,
+    initialAllFocusRequester: FocusRequester? = null,
+    initialAllFocusPending: Boolean = false,
 ) {
     val context = LocalContext.current
     val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
@@ -3963,7 +4035,8 @@ private fun ReorderableCatalogCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val allFocusRequester = remember(type) { FocusRequester() }
+    val ownedAllFocusRequester = remember(type) { FocusRequester() }
+    val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
     val favoritesFocusRequester = remember(type) { FocusRequester() }
     val continueFocusRequester = remember(type) { FocusRequester() }
     val stableCategoryIds = remember(categories, type) { categories.map(Category::id) }
@@ -4075,6 +4148,7 @@ private fun ReorderableCatalogCategoryBar(
                     .categoryChipFocus(
                         isTv, null, selectedId, categoryBarHasFocus,
                         allFocusRequester, focusRestoreController,
+                        allowInitialEntry = initialAllFocusPending,
                     ),
             )
         }
@@ -4149,6 +4223,8 @@ private fun ReorderableLiveCategoryBar(
     onSelect: (String?) -> Unit,
     isTv: Boolean,
     focusRestoreController: CategoryFocusRestoreController,
+    initialAllFocusRequester: FocusRequester? = null,
+    initialAllFocusPending: Boolean = false,
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("live_category_order", android.content.Context.MODE_PRIVATE) }
@@ -4158,7 +4234,8 @@ private fun ReorderableLiveCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val allFocusRequester = remember { FocusRequester() }
+    val ownedAllFocusRequester = remember { FocusRequester() }
+    val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
     val favoritesFocusRequester = remember { FocusRequester() }
     val stableCategoryIds = remember(categories) { categories.map(Category::id) }
     val categoryFocusRequesters = remember(stableCategoryIds) {
@@ -4273,6 +4350,7 @@ private fun ReorderableLiveCategoryBar(
                     .categoryChipFocus(
                         isTv, null, selectedId, categoryBarHasFocus,
                         allFocusRequester, focusRestoreController,
+                        allowInitialEntry = initialAllFocusPending,
                     ),
             )
         }
