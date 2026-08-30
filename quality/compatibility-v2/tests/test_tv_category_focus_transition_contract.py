@@ -134,10 +134,15 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
     def test_special_categories_and_selected_only_entry_gate_remain_supported(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
         live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        controller = self.section(
+            "internal class CategoryFocusRestoreController",
+            "internal fun canCategoryChipReceiveFocus(",
+        )
         self.assertIn("listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID)", catalog)
         self.assertIn("CONTINUE_CATEGORY_ID -> continueFocusRequester", catalog)
         self.assertIn("listOf<String?>(null, FAVORITES_CATEGORY_ID)", live)
         self.assertIn("LIVE_TV_PRO_MAIN_RECENT_CATEGORY", live)
+        self.assertIn("pendingRequest?.let { it.categoryId == categoryId } == true", controller)
         for block in (catalog, live):
             self.assertIn(".categoryChipFocus(", block)
             self.assertIn("focusRestoreController", block)

@@ -280,7 +280,8 @@ internal class CategoryFocusRestoreController {
 
     fun requestFromSource(): Boolean = restore?.invoke({}) == true
 
-    fun hasPendingTarget(categoryId: String?): Boolean = pendingRequest?.categoryId == categoryId
+    fun hasPendingTarget(categoryId: String?): Boolean =
+        pendingRequest?.let { it.categoryId == categoryId } == true
 
     fun begin(categoryId: String?): CategoryFocusRestoreRequest {
         nextRequestId += 1L
@@ -293,16 +294,16 @@ internal class CategoryFocusRestoreController {
 
     fun markTargetPlaced(categoryId: String?) {
         placedTargets += categoryId
-        val request = pendingRequest
-        if (request?.categoryId == categoryId && !request.targetPlaced) {
+        val request = pendingRequest ?: return
+        if (request.categoryId == categoryId && !request.targetPlaced) {
             pendingRequest = request.copy(targetPlaced = true)
         }
     }
 
     fun markTargetDetached(categoryId: String?) {
         placedTargets -= categoryId
-        val request = pendingRequest
-        if (request?.categoryId == categoryId && request.targetPlaced) {
+        val request = pendingRequest ?: return
+        if (request.categoryId == categoryId && request.targetPlaced) {
             pendingRequest = request.copy(targetPlaced = false)
         }
     }
@@ -383,8 +384,8 @@ internal fun Modifier.categoryFocusTarget(
     }
     LaunchedEffect(isTv, categoryId, requester, readyRequestId) {
         if (!isTv || readyRequestId == null) return@LaunchedEffect
-        val target = controller.resolveTarget?.invoke()
-        if (target?.categoryId != categoryId || target.requester !== requester) return@LaunchedEffect
+        val target = controller.resolveTarget?.invoke() ?: return@LaunchedEffect
+        if (target.categoryId != categoryId || target.requester !== requester) return@LaunchedEffect
 
         controller.armBringIntoViewSuppression(readyRequestId, categoryId)
         controller.beginFocusDispatch(categoryId)
@@ -469,14 +470,14 @@ internal fun restoreSelectedCategoryFocus(
 
     controller.job = scope.launch {
         val target = resolveTarget()
-        if (target?.categoryId != request.categoryId) {
+        if (target == null || target.categoryId != request.categoryId) {
             controller.complete(request.requestId)
             return@launch
         }
 
         listState.scrollToItem(target.index)
         val resolvedAfterScroll = resolveTarget()
-        if (resolvedAfterScroll?.categoryId == request.categoryId) {
+        if (resolvedAfterScroll != null && resolvedAfterScroll.categoryId == request.categoryId) {
             controller.markScrollCompleted(request.requestId)
         } else {
             controller.complete(request.requestId)

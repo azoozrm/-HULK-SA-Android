@@ -47,6 +47,20 @@ class SelectedCategoryFocusPolicyTest {
     }
 
     @Test
+    fun allCategoryNullIdIsNotMistakenForAnAbsentPendingRequest() {
+        val controller = CategoryFocusRestoreController()
+
+        assertFalse(controller.hasPendingTarget(null))
+        val request = controller.begin(null)
+        assertTrue(controller.hasPendingTarget(null))
+
+        controller.markScrollCompleted(request.requestId)
+        assertNull(controller.readyRequestId(null))
+        controller.markTargetPlaced(null)
+        assertEquals(request.requestId, controller.readyRequestId(null))
+    }
+
+    @Test
     fun pendingRestoreAllowsOnlyTheSelectedCategoryEvenAfterTheGroupEnters() {
         assertTrue(canCategoryChipReceiveFocus(true, true, true, "selected", "selected"))
         assertFalse(canCategoryChipReceiveFocus(true, true, true, "selected", "visible-neighbor"))
