@@ -12,21 +12,27 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal const val PROFILE_PIN_LENGTH = 4
+internal const val FOUR_DIGIT_CREDENTIAL_LENGTH = 4
+internal const val PROFILE_PIN_LENGTH = FOUR_DIGIT_CREDENTIAL_LENGTH
+
+internal fun isValidFourDigitCredential(value: String): Boolean =
+    value.length == FOUR_DIGIT_CREDENTIAL_LENGTH && value.all { it in '0'..'9' }
 
 internal fun isValidProfilePin(pin: String): Boolean =
-    pin.length == PROFILE_PIN_LENGTH && pin.all { it in '0'..'9' }
+    isValidFourDigitCredential(pin)
 
-internal fun deriveProfilePinVerifier(
-    pin: String,
+internal fun deriveFourDigitCredentialVerifier(
+    value: String,
     salt: ByteArray,
     iterations: Int,
 ): ByteArray {
-    require(isValidProfilePin(pin)) { "Profile PIN must contain exactly four digits" }
-    require(salt.isNotEmpty()) { "PIN salt must not be empty" }
-    require(iterations > 0) { "PIN iteration count must be positive" }
+    require(isValidFourDigitCredential(value)) {
+        "Credential must contain exactly four digits"
+    }
+    require(salt.isNotEmpty()) { "Credential salt must not be empty" }
+    require(iterations > 0) { "Credential iteration count must be positive" }
 
-    val password = pin.toCharArray()
+    val password = value.toCharArray()
     return try {
         val spec = PBEKeySpec(password, salt, iterations, KEY_LENGTH_BITS)
         try {
@@ -40,6 +46,18 @@ internal fun deriveProfilePinVerifier(
         password.fill('\u0000')
     }
 }
+
+internal fun deriveProfilePinVerifier(
+    pin: String,
+    salt: ByteArray,
+    iterations: Int,
+): ByteArray = deriveFourDigitCredentialVerifier(pin, salt, iterations)
+
+internal data class SecureFourDigitCredentialSnapshot(
+    val salt: ByteArray,
+    val verifier: ByteArray,
+    val iterations: Int,
+)
 
 /**
  * Local credential store for profile PIN protection.
@@ -205,6 +223,36 @@ class ProfilePinCredentialStore(
         }
     }
 
+    /**
+     * Reads an opaque salted verifier for the one-time parental-code compatibility migration.
+     * The profile credential remains untouched and the explicit account id prevents an account
+     * switch during asynchronous migration from redirecting the read into another scope.
+     */
+    internal suspend fun credentialSnapshotForMigration(
+        accountId: String,
+        profileId: String,
+    ): SecureFourDigitCredentialSnapshot? {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank) ?: return null
+        val id = normalizeProfileId(profileId) ?: return null
+        return withContext(ioDispatcher) {
+            val scopedPreferences = if (accountScope.activeAccountId() == normalizedAccountId) {
+                accountScope.preferences(PREFERENCES_NAME)
+            } else {
+                appContext.getSharedPreferences(
+                    accountScopedPreferencesName(PREFERENCES_NAME, normalizedAccountId),
+                    Context.MODE_PRIVATE,
+                )
+            }
+            load(id, scopedPreferences)?.let { credential ->
+                SecureFourDigitCredentialSnapshot(
+                    salt = credential.salt.copyOf(),
+                    verifier = credential.verifier.copyOf(),
+                    iterations = credential.iterations,
+                )
+            }
+        }
+    }
+
     @Synchronized
     private fun persistCredential(
         profileId: String,
@@ -230,19 +278,22 @@ class ProfilePinCredentialStore(
         .remove(key(profileId, KEY_VERIFIER))
         .commit()
 
-    private fun load(profileId: String): StoredPinCredential? {
+    private fun load(
+        profileId: String,
+        sourcePreferences: SharedPreferences = preferences,
+    ): StoredPinCredential? {
         val id = normalizeProfileId(profileId) ?: return null
-        val version = preferences.getInt(key(id, KEY_VERSION), 0)
+        val version = sourcePreferences.getInt(key(id, KEY_VERSION), 0)
         if (version != CURRENT_CREDENTIAL_VERSION) return null
 
-        val iterations = preferences.getInt(key(id, KEY_ITERATIONS), 0)
+        val iterations = sourcePreferences.getInt(key(id, KEY_ITERATIONS), 0)
         if (iterations <= 0) return null
 
-        val salt = preferences.getString(key(id, KEY_SALT), null)
+        val salt = sourcePreferences.getString(key(id, KEY_SALT), null)
             ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
             ?.takeIf { it.isNotEmpty() }
             ?: return null
-        val verifier = preferences.getString(key(id, KEY_VERIFIER), null)
+        val verifier = sourcePreferences.getString(key(id, KEY_VERIFIER), null)
             ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
             ?.takeIf { it.isNotEmpty() }
             ?: return null

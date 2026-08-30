@@ -62,38 +62,55 @@ class ProfilePickerPolicyTest {
     }
 
     @Test
-    fun kidsToProtectedAdultRequiresTargetPin() {
+    fun kidsToProtectedAdultRequiresParentalCodeBeforeTargetPin() {
         assertEquals(
-            ProfileSwitchAuthorization.REQUIRE_TARGET_PIN,
+            ProfileSwitchAuthorization.REQUIRE_PARENTAL_CODE,
             authorization(
                 currentKind = ProfileKind.KIDS,
                 targetKind = ProfileKind.STANDARD,
                 targetProtected = true,
-                primaryParentPinAvailable = false,
+                parentalCodeAvailable = true,
             ),
         )
     }
 
     @Test
-    fun kidsToUnprotectedAdultUsesPrimaryParentPin() {
+    fun kidsToProtectedAdultRequiresTargetPinAfterParentalAuthorization() {
         assertEquals(
-            ProfileSwitchAuthorization.REQUIRE_PRIMARY_PARENT_PIN,
+            ProfileSwitchAuthorization.REQUIRE_TARGET_PIN,
+            profileSwitchAuthorization(
+                currentProfileId = "kids",
+                currentProfileKind = ProfileKind.KIDS,
+                targetProfileId = "adult",
+                targetProfileKind = ProfileKind.STANDARD,
+                targetProtected = true,
+                resolvedForSession = true,
+                parentalCodeAvailable = true,
+                parentalAuthorizationGranted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun kidsToUnprotectedAdultUsesParentalCode() {
+        assertEquals(
+            ProfileSwitchAuthorization.REQUIRE_PARENTAL_CODE,
             authorization(
                 currentKind = ProfileKind.KIDS,
                 targetKind = ProfileKind.STANDARD,
-                primaryParentPinAvailable = true,
+                parentalCodeAvailable = true,
             ),
         )
     }
 
     @Test
-    fun kidsToUnprotectedAdultFailsClosedWithoutParentPin() {
+    fun kidsToUnprotectedAdultFailsClosedWithoutParentalCode() {
         assertEquals(
             ProfileSwitchAuthorization.DENY_NO_PARENT_CREDENTIAL,
             authorization(
                 currentKind = ProfileKind.KIDS,
                 targetKind = ProfileKind.STANDARD,
-                primaryParentPinAvailable = false,
+                parentalCodeAvailable = false,
             ),
         )
     }
@@ -132,7 +149,7 @@ class ProfilePickerPolicyTest {
                 targetProfileKind = ProfileKind.KIDS,
                 targetProtected = true,
                 resolvedForSession = false,
-                primaryParentPinAvailable = false,
+                parentalCodeAvailable = false,
             ),
         )
     }
@@ -148,7 +165,7 @@ class ProfilePickerPolicyTest {
                 targetProfileKind = ProfileKind.KIDS,
                 targetProtected = true,
                 resolvedForSession = true,
-                primaryParentPinAvailable = false,
+                parentalCodeAvailable = false,
             ),
         )
     }
@@ -195,7 +212,7 @@ class ProfilePickerPolicyTest {
         currentKind: ProfileKind,
         targetKind: ProfileKind,
         targetProtected: Boolean = false,
-        primaryParentPinAvailable: Boolean = false,
+        parentalCodeAvailable: Boolean = false,
     ): ProfileSwitchAuthorization = profileSwitchAuthorization(
         currentProfileId = "current",
         currentProfileKind = currentKind,
@@ -203,6 +220,6 @@ class ProfilePickerPolicyTest {
         targetProfileKind = targetKind,
         targetProtected = targetProtected,
         resolvedForSession = true,
-        primaryParentPinAvailable = primaryParentPinAvailable,
+        parentalCodeAvailable = parentalCodeAvailable,
     )
 }

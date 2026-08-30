@@ -54,7 +54,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import sa.hulksa.player.data.PROFILE_PIN_LENGTH
+import sa.hulksa.player.data.FOUR_DIGIT_CREDENTIAL_LENGTH
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -570,7 +570,7 @@ private fun ProfilePinEntryScaffold(
                     Spacer(Modifier.height(if (compactTv) 12.dp else 18.dp))
 
                     PinPanel(
-                        profile = profile,
+                        stateKey = profile.id,
                         isTv = true,
                         shortLandscape = false,
                         compactHeight = false,
@@ -616,7 +616,7 @@ private fun ProfilePinEntryScaffold(
                             modifier = Modifier.weight(1f),
                         )
                         PinPanel(
-                            profile = profile,
+                            stateKey = profile.id,
                             isTv = false,
                             shortLandscape = shortLandscape,
                             compactHeight = compactHeight,
@@ -648,7 +648,7 @@ private fun ProfilePinEntryScaffold(
                     )
                     Spacer(Modifier.height(if (compactHeight) 6.dp else 9.dp))
                     PinPanel(
-                        profile = profile,
+                        stateKey = profile.id,
                         isTv = false,
                         shortLandscape = false,
                         compactHeight = compactHeight,
@@ -668,7 +668,7 @@ private fun ProfilePinEntryScaffold(
 }
 
 @Composable
-private fun ProfileSecurityBackdrop(
+internal fun ProfileSecurityBackdrop(
     isTv: Boolean,
     content: @Composable (
         useTwoColumns: Boolean,
@@ -755,8 +755,8 @@ private fun ProfileSecurityIdentity(
 }
 
 @Composable
-private fun PinPanel(
-    profile: UserProfile,
+internal fun PinPanel(
+    stateKey: String,
     isTv: Boolean,
     shortLandscape: Boolean,
     compactHeight: Boolean,
@@ -771,7 +771,8 @@ private fun PinPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    var pin by rememberSaveable(profile.id, title, resetToken) { mutableStateOf("") }
+    // PIN digits are intentionally not saveable so process state cannot persist the raw value.
+    var pin by remember(stateKey, title, resetToken) { mutableStateOf("") }
     val firstFocusRequester = remember(title, resetToken) { FocusRequester() }
     val cancelFocusRequester = remember(title, resetToken) { FocusRequester() }
     val keySize = when {
@@ -796,10 +797,10 @@ private fun PinPanel(
     }
 
     fun appendDigit(value: String) {
-        if (!inputEnabled || pin.length >= PROFILE_PIN_LENGTH) return
+        if (!inputEnabled || pin.length >= FOUR_DIGIT_CREDENTIAL_LENGTH) return
         val next = pin + value
         pin = next
-        if (next.length == PROFILE_PIN_LENGTH) {
+        if (next.length == FOUR_DIGIT_CREDENTIAL_LENGTH) {
             onComplete(next)
         }
     }
@@ -857,7 +858,7 @@ private fun PinPanel(
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 9.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            repeat(PROFILE_PIN_LENGTH) { index ->
+            repeat(FOUR_DIGIT_CREDENTIAL_LENGTH) { index ->
                 Box(
                     modifier = Modifier
                         .size(indicatorSize)
