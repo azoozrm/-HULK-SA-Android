@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -119,6 +120,20 @@ internal class LoginCardFocusRequesterHolder(
     }
 
     fun current(): FocusRequester = currentRequester
+}
+
+internal class LoginKeyboardFocusTransitionController {
+    private var textInputFocused = false
+
+    fun onTextInputFocused() {
+        textInputFocused = true
+    }
+
+    fun onNonTextFocused(hideKeyboard: () -> Unit) {
+        if (!textInputFocused) return
+        textInputFocused = false
+        hideKeyboard()
+    }
 }
 
 private enum class LoginComposition {
@@ -318,6 +333,7 @@ fun LoginScreen(
     val lastCardFocusRequester = remember(submitRequester) {
         LoginCardFocusRequesterHolder(submitRequester)
     }
+    val keyboardFocusTransitionController = remember { LoginKeyboardFocusTransitionController() }
     var initialTvFocusRequested by remember { mutableStateOf(false) }
     var showSubscriptionQr by rememberSaveable { mutableStateOf(false) }
     val loginRenewalLink = remember {
@@ -331,9 +347,9 @@ fun LoginScreen(
     val persistedAccessCode = remember(view.context) {
         sa.hulksa.player.data.AccountSessionStore(view.context).lastAccessCode().orEmpty()
     }
-    var accessCode by rememberSaveable(persistedAccessCode) { mutableStateOf(persistedAccessCode) }
-    var username by rememberSaveable { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    val accessCodeState = rememberSaveable(persistedAccessCode) { mutableStateOf(persistedAccessCode) }
+    val usernameState = rememberSaveable { mutableStateOf("") }
+    val passwordState = remember { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
     var rememberAccount by rememberSaveable { mutableStateOf(true) }
 
@@ -359,14 +375,29 @@ fun LoginScreen(
         focusManager.clearFocus(force = true)
         Unit
     }
+    val onTextInputFocus: () -> Unit = {
+        if (isTv) keyboardFocusTransitionController.onTextInputFocused()
+    }
+    val onNonTextFocus: () -> Unit = {
+        if (isTv) {
+            keyboardFocusTransitionController.onNonTextFocused(hideKeyboard)
+        } else {
+            hideKeyboard()
+        }
+    }
     val submit = {
         if (!isLoading && !isStarting) {
             if (isTv) {
-                hideKeyboard()
+                onNonTextFocus()
             } else {
                 dismissKeyboard()
             }
-            onLogin(accessCode, username.trim(), password, rememberAccount)
+            onLogin(
+                accessCodeState.value,
+                usernameState.value.trim(),
+                passwordState.value,
+                rememberAccount,
+            )
         }
     }
     val openWebsite = {
@@ -401,7 +432,12 @@ fun LoginScreen(
                     detectTapGestures(onTap = { dismissKeyboard() })
                 },
         ) {
-            val imeVisible = WindowInsets.ime.getBottom(density) > 0
+            val imeVisible =
+                if (isTv) {
+                    false
+                } else {
+                    WindowInsets.ime.getBottom(density) > 0
+                }
             val policy = resolveLoginLayoutPolicy(
                 isTv = isTv,
                 width = maxWidth,
@@ -423,12 +459,9 @@ fun LoginScreen(
 
             val panel: @Composable (Modifier) -> Unit = { modifier ->
                 LoginPanel(
-                    accessCode = accessCode,
-                    onAccessCodeChange = { accessCode = it },
-                    username = username,
-                    onUsernameChange = { username = it },
-                    password = password,
-                    onPasswordChange = { password = it },
+                    accessCodeState = accessCodeState,
+                    usernameState = usernameState,
+                    passwordState = passwordState,
                     showPassword = showPassword,
                     onShowPasswordChange = { showPassword = !showPassword },
                     rememberAccount = rememberAccount,
@@ -438,7 +471,8 @@ fun LoginScreen(
                     errorMessage = errorMessage,
                     onSubmit = submit,
                     onOpenWebsite = openWebsite,
-                    onNonTextFocus = hideKeyboard,
+                    onTextInputFocus = onTextInputFocus,
+                    onNonTextFocus = onNonTextFocus,
                     onCardFocusChanged = lastCardFocusRequester::update,
                     initialFocusRequester = if (isTv) tvInitialFocusRequester else null,
                     showSecondaryAction = !secondaryInBrand,
@@ -502,7 +536,7 @@ fun LoginScreen(
                                 Spacer(Modifier.height(if (policy.compact) 38.dp else 42.dp))
                                 LoginSubscriptionAction(
                                     onClick = { showSubscriptionQr = true },
-                                    onNonTextFocus = hideKeyboard,
+                                    onNonTextFocus = onNonTextFocus,
                                     returnRequester = lastCardFocusRequester::current,
                                     subscribeRequester = subscribeRequester,
                                     policy = policy,
@@ -537,7 +571,7 @@ fun LoginScreen(
                             Spacer(Modifier.height(if (policy.compact) 30.dp else 34.dp))
                             LoginSubscriptionAction(
                                 onClick = { showSubscriptionQr = true },
-                                onNonTextFocus = hideKeyboard,
+                                onNonTextFocus = onNonTextFocus,
                                 returnRequester = lastCardFocusRequester::current,
                                 subscribeRequester = subscribeRequester,
                                 policy = policy,
@@ -779,12 +813,9 @@ private fun LoginSubscriptionAction(
 
 @Composable
 private fun LoginPanel(
-    accessCode: String,
-    onAccessCodeChange: (String) -> Unit,
-    username: String,
-    onUsernameChange: (String) -> Unit,
-    password: String,
-    onPasswordChange: (String) -> Unit,
+    accessCodeState: MutableState<String>,
+    usernameState: MutableState<String>,
+    passwordState: MutableState<String>,
     showPassword: Boolean,
     onShowPasswordChange: () -> Unit,
     rememberAccount: Boolean,
@@ -794,6 +825,7 @@ private fun LoginPanel(
     errorMessage: String?,
     onSubmit: () -> Unit,
     onOpenWebsite: () -> Unit,
+    onTextInputFocus: () -> Unit,
     onNonTextFocus: () -> Unit,
     onCardFocusChanged: (FocusRequester) -> Unit,
     initialFocusRequester: FocusRequester?,
@@ -816,7 +848,7 @@ private fun LoginPanel(
 
     LaunchedEffect(isLoading, errorMessage) {
         if (!isLoading && !errorMessage.isNullOrBlank()) {
-            when (resolveLoginErrorTarget(errorMessage, username, password)) {
+            when (resolveLoginErrorTarget(errorMessage, usernameState.value, passwordState.value)) {
                 LoginErrorTarget.ACCESS_CODE -> runCatching { accessRequester.requestFocus() }
                 LoginErrorTarget.USERNAME -> runCatching { usernameRequester.requestFocus() }
                 LoginErrorTarget.PASSWORD -> runCatching { passwordRequester.requestFocus() }
@@ -882,14 +914,16 @@ private fun LoginPanel(
         )
         Spacer(Modifier.height(if (policy.compact) 12.dp else 20.dp))
 
-        LoginTextField(
-            value = accessCode,
-            onValueChange = onAccessCodeChange,
+        LoginCredentialTextField(
+            state = accessCodeState,
             label = "كود الدخول",
             icon = Icons.Rounded.Key,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
-            onFocused = { onCardFocusChanged(accessRequester) },
+            onFocused = {
+                onTextInputFocus()
+                onCardFocusChanged(accessRequester)
+            },
             modifier = Modifier
                 .focusRequester(accessRequester)
                 .focusProperties {
@@ -910,14 +944,16 @@ private fun LoginPanel(
         )
         Spacer(Modifier.height(if (policy.compact) 2.dp else 10.dp))
 
-        LoginTextField(
-            value = username,
-            onValueChange = onUsernameChange,
+        LoginCredentialTextField(
+            state = usernameState,
             label = "اسم المستخدم",
             icon = Icons.Rounded.Person,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
-            onFocused = { onCardFocusChanged(usernameRequester) },
+            onFocused = {
+                onTextInputFocus()
+                onCardFocusChanged(usernameRequester)
+            },
             modifier = Modifier
                 .focusRequester(usernameRequester)
                 .focusProperties {
@@ -938,14 +974,16 @@ private fun LoginPanel(
         )
         Spacer(Modifier.height(if (policy.compact) 2.dp else 10.dp))
 
-        LoginTextField(
-            value = password,
-            onValueChange = onPasswordChange,
+        LoginCredentialTextField(
+            state = passwordState,
             label = "كلمة المرور",
             icon = Icons.Rounded.Lock,
             textSizeSp = policy.fieldTextSizeSp,
             bringIntoViewOnFocus = !isTv,
-            onFocused = { onCardFocusChanged(passwordRequester) },
+            onFocused = {
+                onTextInputFocus()
+                onCardFocusChanged(passwordRequester)
+            },
             modifier = Modifier
                 .focusRequester(passwordRequester)
                 .focusProperties {
@@ -1153,6 +1191,34 @@ private fun LoginPanel(
             )
         }
     }
+}
+
+@Composable
+private fun LoginCredentialTextField(
+    state: MutableState<String>,
+    label: String,
+    icon: ImageVector,
+    textSizeSp: Int,
+    bringIntoViewOnFocus: Boolean = true,
+    onFocused: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+) {
+    LoginTextField(
+        value = state.value,
+        onValueChange = { state.value = it },
+        label = label,
+        icon = icon,
+        textSizeSp = textSizeSp,
+        bringIntoViewOnFocus = bringIntoViewOnFocus,
+        onFocused = onFocused,
+        modifier = modifier,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+    )
 }
 
 @Composable
