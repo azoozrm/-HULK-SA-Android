@@ -126,7 +126,7 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         start = text.index("fun returnFocusToSelectedCategory()")
         end = text.index("LaunchedEffect(visible, selectedCategory, normalizedQuery)", start)
         block = text[start:end]
-        self.assertEqual(3, block.count("targetCategoryId"))
+        self.assertEqual(4, block.count("targetCategoryId"))
         self.assertNotIn("allCategoryFocus.requestFocus", block)
         self.assertNotIn("favoritesCategoryFocus.requestFocus", block)
         self.assertNotIn("recentCategoryFocus.requestFocus", block)
