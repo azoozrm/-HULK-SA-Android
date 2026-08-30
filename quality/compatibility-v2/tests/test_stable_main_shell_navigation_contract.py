@@ -6,6 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HULK_APP = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+SETTINGS_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt"
 
 
 class StableMainShellNavigationContractTest(unittest.TestCase):
@@ -38,7 +39,8 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertNotIn("val queryMemory = remember", shell)
         self.assertNotIn("val categoryMemory = remember", shell)
         self.assertNotIn("rememberingSelectDestination", shell)
-        self.assertGreaterEqual(shell.count("onSelect = onSelectDestination"), 2)
+        self.assertEqual(1, shell.count("onSelect = onSelectDestination"))
+        self.assertIn("onSelect = selectTvDestination", shell)
         self.assertIn("onSelectDestination = onSelectDestination", shell)
 
     def test_shared_category_underlap_preserves_shell_geometry(self) -> None:
@@ -95,6 +97,169 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertIn(".width(railWidth)", rail)
         self.assertNotIn("animateDpAsState(", rail)
         self.assertNotIn('label = "railWidth"', rail)
+
+    def test_sidebar_expansion_remains_derived_from_actual_focus(self) -> None:
+        source = self.read(MAIN_SHELL)
+        rail = self.section(
+            source,
+            "private fun CinematicNavigationRail(",
+            "private fun NavigationItem(",
+        )
+
+        self.assertIn("val expanded = railHasFocus", rail)
+        self.assertIn(".onFocusChanged { railHasFocus = it.hasFocus }", rail)
+        self.assertEqual(1, rail.count("railHasFocus ="))
+        self.assertNotIn("railHasFocus = false", rail)
+
+    def test_destination_selection_hands_focus_off_after_navigation(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        selection = self.section(
+            shell,
+            "val selectTvDestination: (MainDestination) -> Unit = { destination ->",
+            "val homeModel =",
+        )
+        handoff = self.section(
+            shell,
+            "LaunchedEffect(\n        useNavigationRail,",
+            "Box(Modifier.fillMaxSize().background(colors.background))",
+        )
+
+        self.assertIn("if (destination != state.destination)", selection)
+        self.assertLess(
+            selection.index("onSelectDestination(destination)"),
+            selection.index("pendingTvContentFocusHandoff ="),
+        )
+        self.assertIn("onSelect = selectTvDestination", shell)
+        self.assertIn("handoff.destination != state.destination", handoff)
+        self.assertIn("withFrameNanos { }", handoff)
+        self.assertIn("currentTvContentFocusRequester.requestFocus()", handoff)
+        self.assertIn("pendingTvContentFocusHandoff = null", handoff)
+        self.assertNotIn("delay(", handoff)
+        self.assertNotIn("debounce", handoff.lower())
+        self.assertNotIn("poll", handoff.lower())
+
+    def test_same_destination_skips_navigation_churn_but_still_requests_handoff(self) -> None:
+        source = self.read(MAIN_SHELL)
+        selection = self.section(
+            source,
+            "val selectTvDestination: (MainDestination) -> Unit = { destination ->",
+            "val homeModel =",
+        )
+
+        navigation_guard_end = selection.index("}", selection.index("if (destination != state.destination)"))
+        handoff_assignment = selection.index("pendingTvContentFocusHandoff =")
+        self.assertLess(navigation_guard_end, handoff_assignment)
+        self.assertEqual(1, selection.count("onSelectDestination(destination)"))
+
+    def test_all_rail_destinations_share_the_content_focus_entry_contract(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        destination_content = self.section(
+            source,
+            "private fun DestinationContent(",
+            "private fun CinemaHomeScreen(",
+        )
+        destination_entries = source[source.index("private val destinations = listOf(") :]
+
+        self.assertIn(
+            "destinations.associate { entry -> entry.destination to FocusRequester() }",
+            shell,
+        )
+        self.assertIn(".focusRequester(currentTvContentFocusRequester)", shell)
+        for destination in (
+            "HOME",
+            "LIVE",
+            "MOVIES",
+            "SERIES",
+            "FAVORITES",
+            "DOWNLOADS",
+            "SETTINGS",
+        ):
+            marker = f"MainDestination.{destination}"
+            self.assertIn(marker, destination_entries)
+            self.assertIn(marker, destination_content)
+
+    def test_destination_content_container_owns_a_restoring_focus_group(self) -> None:
+        source = self.read(MAIN_SHELL)
+        shell = self.section(
+            source,
+            "fun MainShellScreen(",
+            "private fun CinematicNavigationRail(",
+        )
+        destination_content = self.section(
+            source,
+            "private fun DestinationContent(",
+            "private fun CinemaHomeScreen(",
+        )
+
+        self.assertIn(".focusRequester(currentTvContentFocusRequester)", shell)
+        self.assertIn(".focusRestorer()", shell)
+        self.assertIn(".focusGroup()", shell)
+        self.assertIn("navigationMemory = navigationMemory", destination_content)
+        self.assertNotIn("key(state.destination", destination_content)
+        self.assertNotIn("key( state.destination", destination_content)
+
+    def test_empty_and_loading_destinations_keep_a_safe_focus_target(self) -> None:
+        source = self.read(MAIN_SHELL)
+        favorites = self.section(
+            source,
+            "private fun FavoritesScreen(",
+            "private fun UnifiedSearchScreen(",
+        )
+        downloads = self.section(
+            source,
+            "private fun DownloadsScreen(",
+            "private fun DownloadCard(",
+        )
+        settings = self.read(SETTINGS_SCREEN)
+
+        self.assertIn("if (isTv && content.isEmpty())", favorites)
+        self.assertIn("else if (content.isEmpty() && state.loadingTypes.isEmpty())", favorites)
+        self.assertIn("loading = state.loadingTypes.isNotEmpty()", favorites)
+        self.assertIn("FavoritesFocusFallback(", favorites)
+        self.assertIn('FocusButton("تحديث القائمة", onRefresh', favorites)
+        self.assertIn("if (downloads.isEmpty())", downloads)
+        self.assertIn(".focusRequester(toolbarFocus.wifi)", downloads)
+        self.assertIn("focus.refreshAccount.requestFocus()", settings)
+        self.assertIn("focusRequester = focus.refreshAccount", settings)
+
+    def test_existing_destination_focus_memory_remains_in_place(self) -> None:
+        source = self.read(MAIN_SHELL)
+        home = self.section(
+            source,
+            "private fun CinemaHomeScreen(",
+            "private fun RenewalBanner(",
+        )
+        live = self.section(
+            source,
+            "private fun LiveCatalogScreen(",
+            "private fun FavoritesScreen(",
+        )
+        favorites = self.section(
+            source,
+            "private fun FavoritesScreen(",
+            "private fun UnifiedSearchScreen(",
+        )
+        downloads = self.section(
+            source,
+            "private fun DownloadsScreen(",
+            "private fun DownloadCard(",
+        )
+
+        self.assertIn("navigationMemory.position(MainDestination.HOME)", home)
+        self.assertIn("navigationMemory.position(MainDestination.LIVE)", live)
+        self.assertIn("channelRequester.requestFocus()", live)
+        self.assertIn("MainDestination.FAVORITES, navigationMemory", favorites)
+        self.assertIn("navigationMemory.position(MainDestination.DOWNLOADS)", downloads)
 
 
 if __name__ == "__main__":

@@ -73,12 +73,14 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -91,6 +93,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -308,6 +311,11 @@ data class NavigationPosition(
     val itemIndex: Int = 0,
 )
 
+private data class TvContentFocusHandoffRequest(
+    val destination: MainDestination,
+    val requestId: Long,
+)
+
 internal data class HomeContentSnapshot(
     val movies: List<ContentItem>,
     val series: List<ContentItem>,
@@ -476,6 +484,23 @@ fun MainShellScreen(
     val adaptiveUi = LocalAdaptiveUi.current
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
     val useNavigationRail = adaptiveUi.navigationType == HulkNavigationType.RAIL
+    val tvContentFocusRequesters = remember {
+        destinations.associate { entry -> entry.destination to FocusRequester() }
+    }
+    var tvContentFocusRequestId by remember { mutableLongStateOf(0L) }
+    var pendingTvContentFocusHandoff by remember {
+        mutableStateOf<TvContentFocusHandoffRequest?>(null)
+    }
+    val selectTvDestination: (MainDestination) -> Unit = { destination ->
+        if (destination != state.destination) {
+            onSelectDestination(destination)
+        }
+        tvContentFocusRequestId += 1L
+        pendingTvContentFocusHandoff = TvContentFocusHandoffRequest(
+            destination = destination,
+            requestId = tvContentFocusRequestId,
+        )
+    }
     val homeModel = if (state.destination == MainDestination.HOME) {
         rememberHomeModelForPresentation(
             navigationMemory = navigationMemory,
@@ -566,17 +591,45 @@ fun MainShellScreen(
     val tvRailFocusRequesters = remember(navigationEntries) {
         navigationEntries.associate { entry -> entry.destination to FocusRequester() }
     }
+    val currentTvContentFocusRequester = tvContentFocusRequesters.getValue(state.destination)
+    LaunchedEffect(
+        useNavigationRail,
+        state.destination,
+        pendingTvContentFocusHandoff?.requestId,
+    ) {
+        val handoff = pendingTvContentFocusHandoff ?: return@LaunchedEffect
+        if (!useNavigationRail || handoff.destination != state.destination) {
+            return@LaunchedEffect
+        }
+
+        // Wait for the selected destination's focus group to join the applied focus tree.
+        withFrameNanos { }
+        if (pendingTvContentFocusHandoff?.requestId != handoff.requestId) {
+            return@LaunchedEffect
+        }
+        val handedOff = runCatching {
+            currentTvContentFocusRequester.requestFocus()
+        }.getOrDefault(false)
+        if (handedOff && pendingTvContentFocusHandoff?.requestId == handoff.requestId) {
+            pendingTvContentFocusHandoff = null
+        }
+    }
     Box(Modifier.fillMaxSize().background(colors.background)) {
         if (useNavigationRail) {
             Row(Modifier.fillMaxSize()) {
                 CinematicNavigationRail(
                     entries = navigationEntries,
                     selected = state.destination,
-                    onSelect = onSelectDestination,
+                    onSelect = selectTvDestination,
                     onSwitchProfile = requestProfileSwitch,
                     destinationFocusRequesters = tvRailFocusRequesters,
                 )
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                Box(
+                    Modifier.weight(1f).fillMaxHeight()
+                        .focusRequester(currentTvContentFocusRequester)
+                        .focusRestorer()
+                        .focusGroup(),
+                ) {
                     DestinationContent(
                         state = state,
                         isTv = isTv,
@@ -1144,7 +1197,15 @@ private fun DestinationContent(
         MainDestination.LIVE -> LiveCatalogScreen(state, isTv, navigationMemory, isFavorite, onSelectCategory, onSearch, onOpen, onToggleFavorite, onRefresh)
         MainDestination.MOVIES -> PosterCatalogScreen("الافلام", ContentType.MOVIE, MainDestination.MOVIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
         MainDestination.SERIES -> PosterCatalogScreen("المسلسلات", ContentType.SERIES, MainDestination.SERIES, state, isTv, navigationMemory, favoriteSnapshot, isFavorite, onSelectCategory, onSearch, onOpen, onOpenHistory, onToggleFavorite, onRefresh)
-        MainDestination.FAVORITES -> FavoritesScreen(state, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite)
+        MainDestination.FAVORITES -> FavoritesScreen(
+            state = state,
+            isTv = isTv,
+            navigationMemory = navigationMemory,
+            isFavorite = isFavorite,
+            onOpen = onOpen,
+            onToggleFavorite = onToggleFavorite,
+            onRefresh = onRefresh,
+        )
         MainDestination.SEARCH -> UnifiedSearchScreen(state, isTv, navigationMemory, isFavorite, onSearch, onOpen, onToggleFavorite)
         MainDestination.DOWNLOADS -> DownloadsScreen(
             downloads = state.downloads,
@@ -2155,6 +2216,7 @@ private fun FavoritesScreen(
     isFavorite: (ContentItem) -> Boolean,
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onRefresh: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val content = remember(state.catalogs, state.favorites) {
@@ -2192,11 +2254,38 @@ private fun FavoritesScreen(
             PageTitle("قائمتي", "كل ما حفظته في مكان واحد", content.size, Icons.Rounded.Star, isTv)
             Spacer(Modifier.height(18.dp))
         }
-        if (content.isEmpty() && state.loadingTypes.isEmpty()) {
+        if (isTv && content.isEmpty()) {
+            FavoritesFocusFallback(
+                loading = state.loadingTypes.isNotEmpty(),
+                onRefresh = onRefresh,
+            )
+        } else if (content.isEmpty() && state.loadingTypes.isEmpty()) {
             EmptyState("لم تضف اي محتوى الى قائمتك بعد")
         } else {
             ContentGrid(content, isTv, MainDestination.FAVORITES, navigationMemory, isFavorite, onOpen, onToggleFavorite)
         }
+    }
+}
+
+@Composable
+private fun FavoritesFocusFallback(
+    loading: Boolean,
+    onRefresh: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (loading) {
+            LoadingRing(label = "جاري تجهيز قائمتك…")
+        } else {
+            BrandLogo(Modifier.size(70.dp).graphicsLayer { alpha = .65f })
+            Spacer(Modifier.height(10.dp))
+            Text("لم تضف اي محتوى الى قائمتك بعد", color = colors.textMuted, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(14.dp))
+        FocusButton("تحديث القائمة", onRefresh, compact = true)
     }
 }
 
