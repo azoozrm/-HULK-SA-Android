@@ -439,15 +439,22 @@ fun ProfileAwareHulkApp(
     }
 
     fun requestProfileSwitch(profile: UserProfile) {
+        val currentProfileId = profileStore.activeProfileId()
+        val currentProfile = profiles.firstOrNull { it.id == currentProfileId }
+        val parentalStateRequired = profileSelectionRequiresResolvedParentalState(
+            currentProfileId = currentProfileId,
+            currentProfileKind = currentProfile?.kind,
+            targetProfileId = profile.id,
+            targetProfileKind = profile.kind,
+            parentalCodeAvailable = parentalCodeAvailable,
+        )
         if (
             switching ||
-            !parentalCodeStateReady ||
+            (!parentalCodeStateReady && parentalStateRequired) ||
             pinUnlockCredentialProfileId != null ||
             parentalCodeBootstrapAction != null ||
             parentalCodeAuthorizationAction != null
         ) return
-        val currentProfileId = profileStore.activeProfileId()
-        val currentProfile = profiles.firstOrNull { it.id == currentProfileId }
 
         when (
             parentalCodeBootstrapDecision(
