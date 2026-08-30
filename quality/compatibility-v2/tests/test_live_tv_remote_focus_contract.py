@@ -74,7 +74,9 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         self.assertIn("selectedCategoryFocusIndex(", block)
         self.assertIn("fun selectedFocusTarget(): Pair<Int, FocusRequester>?", block)
         self.assertIn("onEnter = {", block)
-        self.assertIn("selectedFocusTarget()?.second?.requestFocus()", block)
+        self.assertIn("restoreSelectedCategoryFocus(", block)
+        self.assertIn("focusRestoreState.resolveTarget = { selectedFocusTarget() }", block)
+        self.assertNotIn("selectedFocusTarget()?.second?.requestFocus()", block)
         self.assertIn("var categoryBarHasFocus by remember", block)
         self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == null", block)
         self.assertIn(
@@ -82,7 +84,7 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
             block,
         )
         self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == category.id", block)
-        self.assertNotIn("restoreSelectedCategoryFocus()", block)
+        self.assertIn("restoreSelectedCategoryFocus(", block)
 
 
 if __name__ == "__main__":

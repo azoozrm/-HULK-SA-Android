@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -113,8 +114,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
@@ -252,6 +255,61 @@ private fun Modifier.keepCategoryChipFullyVisibleOnFocus(isTv: Boolean): Modifie
                 scope.launch { requester.bringIntoView() }
             }
         }
+}
+
+private data class CategoryContentFocusRequest(
+    val categoryId: String?,
+    val requestId: Long,
+    val focusFirstItem: Boolean,
+)
+
+private class CategoryFocusRestoreState {
+    var job: Job? = null
+    var resolveTarget: (() -> Pair<Int, FocusRequester>?)? = null
+}
+
+private fun restoreSelectedCategoryFocus(
+    listState: LazyListState,
+    scope: CoroutineScope,
+    restoreState: CategoryFocusRestoreState,
+) {
+    fun resolveTarget(): Pair<Int, FocusRequester>? = restoreState.resolveTarget?.invoke()
+    fun isVisible(index: Int): Boolean =
+        listState.layoutInfo.visibleItemsInfo.any { it.index == index }
+
+    restoreState.job?.cancel()
+    restoreState.job = null
+
+    val directTarget = resolveTarget() ?: return
+    if (isVisible(directTarget.first)) {
+        runCatching { directTarget.second.requestFocus() }
+        return
+    }
+
+    restoreState.job = scope.launch {
+        suspend fun scrollTargetIntoComposition(targetIndex: Int) {
+            listState.scrollToItem(targetIndex)
+            snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
+                .first { it }
+            withFrameNanos { }
+        }
+
+        var target = resolveTarget() ?: return@launch
+        if (!isVisible(target.first)) {
+            scrollTargetIntoComposition(target.first)
+        }
+
+        // Re-resolve from the selected category ID after layout so reorder never leaves a stale index.
+        target = resolveTarget() ?: return@launch
+        if (!isVisible(target.first)) {
+            scrollTargetIntoComposition(target.first)
+            target = resolveTarget() ?: return@launch
+        }
+
+        if (isVisible(target.first)) {
+            runCatching { target.second.requestFocus() }
+        }
+    }
 }
 
 private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
@@ -1871,6 +1929,51 @@ private fun PosterCatalogScreen(
     val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
+    var nextCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
+    var categoryContentFocusRequest by remember(destination) { mutableStateOf<CategoryContentFocusRequest?>(null) }
+    var armedCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
+    val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
+        if (isTv) {
+            nextCategoryContentFocusRequestId += 1L
+            val categoryChanged = state.selectedCategoryId != categoryId
+            categoryContentFocusRequest = CategoryContentFocusRequest(
+                categoryId = categoryId,
+                requestId = nextCategoryContentFocusRequestId,
+                focusFirstItem = categoryChanged,
+            )
+            if (categoryChanged) {
+                navigationMemory.save(destination, itemKey = "", itemIndex = 0)
+                onSelectCategory(categoryId)
+            }
+        } else {
+            onSelectCategory(categoryId)
+        }
+    }
+    val categoryContentFocusReady = categoryContentFocusRequest?.let { request ->
+        request.categoryId == state.selectedCategoryId && keyedModel?.input == modelInput &&
+            if (showingContinue) continueWatching.isNotEmpty() else visible.isNotEmpty()
+    } == true
+    LaunchedEffect(
+        categoryContentFocusRequest,
+        categoryContentFocusReady,
+        keyedModel?.input,
+        resultCount,
+        state.loadingTypes,
+    ) {
+        val request = categoryContentFocusRequest ?: return@LaunchedEffect
+        val exactCategoryApplied = request.categoryId == state.selectedCategoryId && keyedModel?.input == modelInput
+        if (categoryContentFocusReady && request.requestId != armedCategoryContentFocusRequestId) {
+            withFrameNanos { }
+            armedCategoryContentFocusRequestId = request.requestId
+        } else if (
+            exactCategoryApplied &&
+            resultCount == 0 &&
+            type !in state.loadingTypes &&
+            categoryContentFocusRequest?.requestId == request.requestId
+        ) {
+            categoryContentFocusRequest = null
+        }
+    }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         tvPageSafeInsets(
@@ -1907,7 +2010,7 @@ private fun PosterCatalogScreen(
             CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
             if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(11.dp))
-            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), state.selectedCategoryId, onSelectCategory, isTv)
+            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), state.selectedCategoryId, selectCategoryAndEnterContent, isTv)
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
         }
@@ -1915,7 +2018,21 @@ private fun PosterCatalogScreen(
             if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
             } else if (showingContinue && continueWatching.isNotEmpty()) {
-                HistoryGrid(continueWatching, isTv, destination, navigationMemory, onOpenHistory)
+                HistoryGrid(
+                    entries = continueWatching,
+                    isTv = isTv,
+                    destination = destination,
+                    navigationMemory = navigationMemory,
+                    onOpen = onOpenHistory,
+                    focusFirstItemRequestId = categoryContentFocusRequest
+                        ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
+                        ?.requestId
+                        ?: 0L,
+                    focusContentRequestId = categoryContentFocusRequest
+                        ?.takeIf { categoryContentFocusReady }
+                        ?.requestId
+                        ?: 0L,
+                )
             } else if (showingContinue) {
                 EmptyState("لا توجد مشاهدة غير مكتملة في $title")
             } else if (catalog == null && type in state.loadingTypes) {
@@ -1932,7 +2049,9 @@ private fun PosterCatalogScreen(
                     isFavorite = isFavorite,
                     onOpen = onOpen,
                     onToggleFavorite = onToggleFavorite,
-                    restoreFocusedCard = state.searchQuery.isBlank(),
+                    restoreFocusedCard = categoryContentFocusRequest?.let { request ->
+                        armedCategoryContentFocusRequestId == request.requestId
+                    } ?: state.searchQuery.isBlank(),
                 )
             } else {
                 ContentGrid(
@@ -1990,6 +2109,25 @@ private fun LiveCatalogScreen(
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    var nextCategoryContentFocusRequestId by remember { mutableLongStateOf(0L) }
+    var categoryContentFocusRequest by remember { mutableStateOf<CategoryContentFocusRequest?>(null) }
+    val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
+        if (isTv) {
+            nextCategoryContentFocusRequestId += 1L
+            val categoryChanged = state.selectedCategoryId != categoryId
+            categoryContentFocusRequest = CategoryContentFocusRequest(
+                categoryId = categoryId,
+                requestId = nextCategoryContentFocusRequestId,
+                focusFirstItem = categoryChanged,
+            )
+            if (categoryChanged) {
+                navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)
+                onSelectCategory(categoryId)
+            }
+        } else {
+            onSelectCategory(categoryId)
+        }
+    }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         tvPageSafeInsets(
@@ -2002,17 +2140,45 @@ private fun LiveCatalogScreen(
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
         }
     }
-    LaunchedEffect(visible) {
+    LaunchedEffect(
+        visible,
+        state.selectedCategoryId,
+        state.searchQuery,
+        remembered.itemKey,
+        categoryContentFocusRequest,
+    ) {
         previewState.value = resolveLivePreview(
             current = previewState.value,
             visible = visible,
             rememberedItemKey = remembered.itemKey,
             rememberedIndex = rememberedIndex,
         )
-        if (state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty()) {
-            listState.scrollToItem(rememberedIndex)
-            delay(180)
-            runCatching { channelRequester.requestFocus() }
+        val categoryRequest = categoryContentFocusRequest
+            ?.takeIf { it.categoryId == state.selectedCategoryId }
+        if (categoryRequest != null && visible.isEmpty()) {
+            if (
+                ContentType.LIVE !in state.loadingTypes &&
+                categoryContentFocusRequest?.requestId == categoryRequest.requestId
+            ) {
+                categoryContentFocusRequest = null
+            }
+            return@LaunchedEffect
+        }
+        val targetIndex = when {
+            categoryRequest?.focusFirstItem == true && visible.isNotEmpty() -> 0
+            categoryRequest != null && visible.isNotEmpty() -> rememberedIndex
+            state.searchQuery.isBlank() && remembered.itemKey.isNotBlank() && visible.isNotEmpty() -> rememberedIndex
+            else -> null
+        }
+        if (targetIndex != null) {
+            listState.scrollToItem(targetIndex)
+            snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
+                .first { it }
+            withFrameNanos { }
+            val focused = runCatching { channelRequester.requestFocus() }.getOrDefault(false)
+            if (focused && categoryRequest != null && categoryContentFocusRequest?.requestId == categoryRequest.requestId) {
+                categoryContentFocusRequest = null
+            }
         }
     }
 
@@ -2034,7 +2200,7 @@ private fun LiveCatalogScreen(
             CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
             if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(10.dp))
-            ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, onSelectCategory, isTv)
+            ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, selectCategoryAndEnterContent, isTv)
             LiveInteractionHints(isTv)
             Spacer(Modifier.height(8.dp))
         }
@@ -3095,9 +3261,15 @@ private fun HistoryGrid(
     destination: MainDestination,
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
+    focusFirstItemRequestId: Long = 0L,
+    focusContentRequestId: Long = 0L,
 ) {
     val remembered = navigationMemory.position(destination)
-    val targetIndex = remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0))
+    val targetIndex = if (focusFirstItemRequestId != 0L) {
+        0
+    } else {
+        remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0))
+    }
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
     LaunchedEffect(gridState, entries, destination) {
         snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
@@ -3105,10 +3277,13 @@ private fun HistoryGrid(
         }
     }
     val targetRequester = remember { FocusRequester() }
-    LaunchedEffect(entries, remembered.itemKey) {
-        if (remembered.itemKey.isNotBlank() && entries.isNotEmpty()) {
+    LaunchedEffect(entries, remembered.itemKey, focusFirstItemRequestId, focusContentRequestId) {
+        val shouldRestore = focusContentRequestId != 0L || remembered.itemKey.isNotBlank()
+        if (shouldRestore && entries.isNotEmpty()) {
             gridState.scrollToItem(targetIndex)
-            delay(180)
+            snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
+                .first { it }
+            withFrameNanos { }
             runCatching { targetRequester.requestFocus() }
         }
     }
@@ -3121,7 +3296,11 @@ private fun HistoryGrid(
         modifier = Modifier.fillMaxSize(),
     ) {
         itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
-            val restore = remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex)
+            val restore = if (focusFirstItemRequestId != 0L) {
+                index == 0
+            } else {
+                remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex)
+            }
             HistoryCard(
                 entry,
                 { onOpen(entry) },
@@ -3536,6 +3715,7 @@ private fun ReorderableCatalogCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val focusRestoreState = remember(type) { CategoryFocusRestoreState() }
     val allFocusRequester = remember(type) { FocusRequester() }
     val favoritesFocusRequester = remember(type) { FocusRequester() }
     val continueFocusRequester = remember(type) { FocusRequester() }
@@ -3566,6 +3746,7 @@ private fun ReorderableCatalogCategoryBar(
         } ?: return null
         return targetIndex to requester
     }
+    focusRestoreState.resolveTarget = { selectedFocusTarget() }
 
     LaunchedEffect(selectedId, ordered) {
         val targetIndex = selectedCategoryFocusIndex(
@@ -3600,7 +3781,13 @@ private fun ReorderableCatalogCategoryBar(
         modifier = Modifier
             .focusProperties {
                 onEnter = {
-                    if (isTv) selectedFocusTarget()?.second?.requestFocus()
+                    if (isTv) {
+                        restoreSelectedCategoryFocus(
+                            listState = listState,
+                            scope = scope,
+                            restoreState = focusRestoreState,
+                        )
+                    }
                 }
             }
             .focusGroup()
@@ -3710,6 +3897,7 @@ private fun ReorderableLiveCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val focusRestoreState = remember { CategoryFocusRestoreState() }
     val allFocusRequester = remember { FocusRequester() }
     val favoritesFocusRequester = remember { FocusRequester() }
     val stableCategoryIds = remember(categories) { categories.map(Category::id) }
@@ -3743,6 +3931,7 @@ private fun ReorderableLiveCategoryBar(
         } ?: return null
         return targetIndex to requester
     }
+    focusRestoreState.resolveTarget = { selectedFocusTarget() }
 
     LaunchedEffect(selectedId, ordered) {
         val targetIndex = selectedCategoryFocusIndex(
@@ -3777,7 +3966,13 @@ private fun ReorderableLiveCategoryBar(
         modifier = Modifier
             .focusProperties {
                 onEnter = {
-                    if (isTv) selectedFocusTarget()?.second?.requestFocus()
+                    if (isTv) {
+                        restoreSelectedCategoryFocus(
+                            listState = listState,
+                            scope = scope,
+                            restoreState = focusRestoreState,
+                        )
+                    }
                 }
             }
             .focusGroup()
