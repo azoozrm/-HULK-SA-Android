@@ -29,26 +29,23 @@ class ParentalCodeCredentialStoreInstrumentedTest {
     }
 
     @Test
-    fun parentalCodeDoesNotProtectAdultAndBothCredentialsChangeIndependently() = runBlocking {
+    fun adultProfilePinNeverCreatesParentalCredentialAndBothValuesStayIndependent() = runBlocking {
         val accountScope = AccountScopeStore(context)
         assertTrue(accountScope.bind(ACCOUNT_A))
         val profiles = ProfileStore(context)
         val profilePins = ProfilePinCredentialStore(context)
         val parentalCodes = ParentalCodeCredentialStore(context)
 
+        assertTrue(profilePins.setPin(ProfileStore.PRIMARY_PROFILE_ID, "5678"))
+        assertFalse(parentalCodes.hasCode())
+        assertFalse(parentalCodes.verifyCode("5678"))
+
         assertTrue(parentalCodes.setCode("1234"))
         requireNotNull(profiles.createProfile("أطفال", kind = ProfileKind.KIDS))
         assertTrue(parentalCodes.verifyCode("1234"))
-        assertFalse(parentalCodes.verifyCode("9999"))
-        assertFalse(profilePins.hasPin(ProfileStore.PRIMARY_PROFILE_ID))
-        val protectedProfileIds = profiles.profiles()
-            .filter { profilePins.hasPin(it.id) }
-            .mapTo(linkedSetOf()) { it.id }
-        assertFalse(ProfileStore.PRIMARY_PROFILE_ID in protectedProfileIds)
-
-        assertTrue(profilePins.setPin(ProfileStore.PRIMARY_PROFILE_ID, "5678"))
+        assertFalse(parentalCodes.verifyCode("5678"))
         assertTrue(profilePins.verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "5678"))
-        assertTrue(parentalCodes.verifyCode("1234"))
+        assertFalse(profilePins.verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "1234"))
 
         assertTrue(profilePins.setPin(ProfileStore.PRIMARY_PROFILE_ID, "2468"))
         assertTrue(parentalCodes.verifyCode("1234"))
@@ -58,7 +55,7 @@ class ParentalCodeCredentialStoreInstrumentedTest {
     }
 
     @Test
-    fun multipleKidsProfilesShareOneAccountCredentialWithoutProfileKeys() = runBlocking {
+    fun multipleKidsProfilesShareOneExplicitAccountCredentialWithoutProfileKeys() = runBlocking {
         val accountScope = AccountScopeStore(context)
         assertTrue(accountScope.bind(ACCOUNT_A))
         val profiles = ProfileStore(context)
@@ -71,14 +68,18 @@ class ParentalCodeCredentialStoreInstrumentedTest {
         assertEquals(ProfileKind.KIDS, profiles.profiles().first { it.id == firstKids.id }.kind)
         assertEquals(ProfileKind.KIDS, profiles.profiles().first { it.id == secondKids.id }.kind)
 
-        val storedKeys = context.getSharedPreferences(
+        val stored = context.getSharedPreferences(
             accountScopedPreferencesName(
                 ParentalCodeCredentialStore.PREFERENCES_NAME,
                 ACCOUNT_A,
             ),
             Context.MODE_PRIVATE,
-        ).all.keys
-        assertTrue(storedKeys.none { it.contains("profile:") })
+        ).all
+        assertTrue(stored.keys.none { it.contains("profile:") })
+        assertEquals(
+            ParentalCodeCredentialStore.EXPLICIT_USER_CREATED_PROVENANCE,
+            stored["credential_provenance"],
+        )
     }
 
     @Test
@@ -107,7 +108,7 @@ class ParentalCodeCredentialStoreInstrumentedTest {
     }
 
     @Test
-    fun legacyKidsMigrationCopiesVerifierWithoutClearingAdultProfilePin() = runBlocking {
+    fun legacyKidsAdultPinIsProofOnlyAndIsNeverCopiedIntoParentalStore() = runBlocking {
         val accountScope = AccountScopeStore(context)
         assertTrue(accountScope.bind(ACCOUNT_A))
         val profiles = ProfileStore(context)
@@ -117,7 +118,7 @@ class ParentalCodeCredentialStoreInstrumentedTest {
         assertTrue(profilePins.setPin(ProfileStore.PRIMARY_PROFILE_ID, "1357"))
 
         assertEquals(
-            LegacyParentalCodeMigrationResult.MIGRATED_LEGACY_PROFILE_PIN,
+            LegacyParentalCodeMigrationResult.LEGACY_PARENT_PROOF_REQUIRED,
             parentalCodes.ensureLegacyMigration(
                 accountId = ACCOUNT_A,
                 hadKidsProfiles = true,
@@ -125,12 +126,37 @@ class ParentalCodeCredentialStoreInstrumentedTest {
                 profilePinCredentialStore = profilePins,
             ),
         )
-        assertTrue(parentalCodes.verifyCode("1357"))
-        assertTrue(profilePins.hasPin(ProfileStore.PRIMARY_PROFILE_ID))
+        assertFalse(parentalCodes.hasCode())
+        assertFalse(parentalCodes.verifyCode("1357"))
         assertTrue(profilePins.verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "1357"))
 
-        assertTrue(profilePins.clearPin(ProfileStore.PRIMARY_PROFILE_ID))
-        assertTrue(parentalCodes.verifyCode("1357"))
+        assertTrue(parentalCodes.setCode("2468"))
+        assertTrue(parentalCodes.verifyCode("2468"))
+        assertFalse(parentalCodes.verifyCode("1357"))
+        assertTrue(profilePins.verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "1357"))
+        assertFalse(profilePins.verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "2468"))
+    }
+
+    @Test
+    fun legacyKidsWithoutUsableAdultProofRemainsFailClosed() = runBlocking {
+        val accountScope = AccountScopeStore(context)
+        assertTrue(accountScope.bind(ACCOUNT_A))
+        val profiles = ProfileStore(context)
+        requireNotNull(profiles.createProfile("أطفال", kind = ProfileKind.KIDS))
+        val profilePins = ProfilePinCredentialStore(context)
+        val parentalCodes = ParentalCodeCredentialStore(context)
+
+        assertEquals(
+            LegacyParentalCodeMigrationResult.FAIL_CLOSED_NO_USABLE_PARENT_PROOF,
+            parentalCodes.ensureLegacyMigration(
+                accountId = ACCOUNT_A,
+                hadKidsProfiles = true,
+                legacyPrimaryProfileId = ProfileStore.PRIMARY_PROFILE_ID,
+                profilePinCredentialStore = profilePins,
+            ),
+        )
+        assertFalse(parentalCodes.hasCode())
+        assertFalse(parentalCodes.verifyCode("0000"))
     }
 
     @Test
@@ -162,7 +188,57 @@ class ParentalCodeCredentialStoreInstrumentedTest {
             ),
         )
         assertFalse(parentalCodes.hasCode())
+        assertFalse(parentalCodes.verifyCode("8642"))
         assertTrue(profilePins.verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "8642"))
+    }
+
+    @Test
+    fun preReleaseV1QualificationCredentialIsIgnoredWithoutDestructiveGuessing() = runBlocking {
+        val accountScope = AccountScopeStore(context)
+        assertTrue(accountScope.bind(ACCOUNT_A))
+        val staleV1 = context.getSharedPreferences(
+            accountScopedPreferencesName(PRE_RELEASE_PARENTAL_CODE_PREFERENCES, ACCOUNT_A),
+            Context.MODE_PRIVATE,
+        )
+        assertTrue(
+            staleV1.edit()
+                .putInt("credential_version", 1)
+                .putInt("iterations", 120_000)
+                .putString("salt", "qualification-salt")
+                .putString("verifier", "qualification-verifier")
+                .putBoolean("legacy_profile_pin_migration_complete_v1", true)
+                .commit(),
+        )
+
+        val parentalCodes = ParentalCodeCredentialStore(context)
+        assertFalse(parentalCodes.hasCode())
+        assertFalse(parentalCodes.verifyCode("5678"))
+        assertTrue(staleV1.contains("verifier"))
+
+        assertTrue(parentalCodes.setCode("1234"))
+        assertTrue(parentalCodes.verifyCode("1234"))
+        assertTrue(staleV1.contains("verifier"))
+    }
+
+    @Test
+    fun parentalCredentialWithoutExplicitUserCreatedProvenanceFailsClosed() = runBlocking {
+        val accountScope = AccountScopeStore(context)
+        assertTrue(accountScope.bind(ACCOUNT_A))
+        val parentalCodes = ParentalCodeCredentialStore(context)
+        assertTrue(parentalCodes.setCode("9876"))
+        assertTrue(parentalCodes.hasCode())
+
+        val preferences = context.getSharedPreferences(
+            accountScopedPreferencesName(
+                ParentalCodeCredentialStore.PREFERENCES_NAME,
+                ACCOUNT_A,
+            ),
+            Context.MODE_PRIVATE,
+        )
+        assertTrue(preferences.edit().remove("credential_provenance").commit())
+
+        assertFalse(parentalCodes.hasCode())
+        assertFalse(parentalCodes.verifyCode("9876"))
     }
 
     private fun clearTestState() {
@@ -171,6 +247,7 @@ class ParentalCodeCredentialStoreInstrumentedTest {
             PROFILE_PREFERENCES,
             PROFILE_PIN_PREFERENCES,
             PROFILE_SECURITY_METADATA_PREFERENCES,
+            PRE_RELEASE_PARENTAL_CODE_PREFERENCES,
             ParentalCodeCredentialStore.PREFERENCES_NAME,
         )
         val preferenceNames = baseNames.toMutableSet()
@@ -191,5 +268,6 @@ class ParentalCodeCredentialStoreInstrumentedTest {
         const val PROFILE_PREFERENCES = "hulk_profiles_v1"
         const val PROFILE_PIN_PREFERENCES = "hulk_profile_pin_credentials_v1"
         const val PROFILE_SECURITY_METADATA_PREFERENCES = "hulk_profile_preferences_v1"
+        const val PRE_RELEASE_PARENTAL_CODE_PREFERENCES = "hulk_parental_code_credentials_v1"
     }
 }

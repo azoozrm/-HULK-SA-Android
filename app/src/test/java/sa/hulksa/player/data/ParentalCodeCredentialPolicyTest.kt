@@ -29,26 +29,34 @@ class ParentalCodeCredentialPolicyTest {
     }
 
     @Test
-    fun legacyVerifierIsCopiedOnlyForAnAccountThatAlreadyHadKids() {
+    fun legacyKidsWithAdultPinRequiresProofThenExplicitParentalSetup() {
         assertEquals(
-            LegacyParentalCodeMigrationDecision.COPY_EXISTING_PROFILE_PIN,
+            LegacyParentalCodeMigrationDecision.REQUIRE_LEGACY_PARENT_PROOF_THEN_EXPLICIT_SETUP,
             legacyParentalCodeMigrationDecision(
                 hadKidsProfiles = true,
                 legacyPrimaryProfilePinAvailable = true,
             ),
         )
+    }
+
+    @Test
+    fun legacyKidsWithoutUsableAdultPinFailsClosed() {
         assertEquals(
-            LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_COPY,
-            legacyParentalCodeMigrationDecision(
-                hadKidsProfiles = false,
-                legacyPrimaryProfilePinAvailable = true,
-            ),
-        )
-        assertEquals(
-            LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_COPY,
+            LegacyParentalCodeMigrationDecision.FAIL_CLOSED_NO_USABLE_PARENT_PROOF,
             legacyParentalCodeMigrationDecision(
                 hadKidsProfiles = true,
                 legacyPrimaryProfilePinAvailable = false,
+            ),
+        )
+    }
+
+    @Test
+    fun accountWithoutLegacyKidsNeverPromotesAdultPinToParentalCredential() {
+        assertEquals(
+            LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_PARENTAL_CODE,
+            legacyParentalCodeMigrationDecision(
+                hadKidsProfiles = false,
+                legacyPrimaryProfilePinAvailable = true,
             ),
         )
     }

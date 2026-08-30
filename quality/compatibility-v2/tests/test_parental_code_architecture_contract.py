@@ -18,13 +18,15 @@ class ParentalCodeArchitectureContractTest(unittest.TestCase):
             UI_ROOT / "screens/ParentalCodeSecurityScreen.kt"
         ).read_text()
         cls.switch_policy = (UI_ROOT / "ProfilePickerPolicy.kt").read_text()
+        cls.bootstrap_policy = (UI_ROOT / "ParentalCodeBootstrapPolicy.kt").read_text()
 
     def test_parental_credential_has_its_own_account_scoped_namespace(self):
         self.assertIn("class ParentalCodeCredentialStore", self.parent_store)
         self.assertIn(
-            'PREFERENCES_NAME = "hulk_parental_code_credentials_v1"',
+            'PREFERENCES_NAME = "hulk_parental_code_credentials_v2"',
             self.parent_store,
         )
+        self.assertNotIn('PREFERENCES_NAME = "hulk_parental_code_credentials_v1"', self.parent_store)
         self.assertIn("accountScopedPreferencesName(PREFERENCES_NAME, accountId)", self.parent_store)
         self.assertNotIn('"profile:$profileId', self.parent_store)
         self.assertNotIn('"hulk_profile_pin_credentials_v1"', self.parent_store)
@@ -39,6 +41,15 @@ class ParentalCodeArchitectureContractTest(unittest.TestCase):
         self.assertGreaterEqual(self.parent_store.count("withContext(ioDispatcher)"), 4)
         self.assertIn("putString(KEY_VERIFIER", self.parent_store)
         self.assertNotRegex(self.parent_store, r"putString\([^\n]*(?:code|pin)\b")
+
+    def test_explicit_user_created_provenance_is_required_for_has_code(self):
+        self.assertIn('EXPLICIT_USER_CREATED_PROVENANCE = "EXPLICIT_USER_CREATED"', self.parent_store)
+        self.assertIn("putString(KEY_PROVENANCE, EXPLICIT_USER_CREATED_PROVENANCE)", self.parent_store)
+        self.assertIn(
+            "getString(KEY_PROVENANCE, null) != EXPLICIT_USER_CREATED_PROVENANCE",
+            self.parent_store,
+        )
+        self.assertIn("CURRENT_CREDENTIAL_VERSION = 2", self.parent_store)
 
     def test_app_never_stores_parental_code_as_an_adult_profile_pin(self):
         self.assertIn("ParentalCodeCredentialStore(context)", self.app)
@@ -58,23 +69,17 @@ class ParentalCodeArchitectureContractTest(unittest.TestCase):
         self.assertIn("profilePinCredentialStore.hasPin", protected_ids.group("body"))
         self.assertNotIn("parentalCode", protected_ids.group("body"))
 
-    def test_parental_ui_contains_no_profile_identity_or_profile_pin_copy(self):
-        self.assertNotIn("UserProfile", self.parent_ui)
-        self.assertNotIn("ProfilePinProtectionScreen", self.parent_ui)
-        self.assertNotIn("ProfilePinUnlockScreen", self.parent_ui)
+    def test_legacy_profile_pin_is_one_time_proof_only_before_explicit_setup(self):
+        self.assertIn("ProfilePinCredentialStore(context)", self.parent_ui)
+        self.assertIn("profilePinCredentialStore.verifyPin", self.parent_ui)
+        self.assertIn('"تحقق ولي الأمر"', self.parent_ui)
         self.assertIn('"إنشاء رمز الوالدين"', self.parent_ui)
         self.assertIn('"تأكيد رمز الوالدين"', self.parent_ui)
-        self.assertIn('"رمز الوالدين غير صحيح"', self.parent_ui)
-        self.assertIn(
-            '"سيُستخدم رمز الوالدين للخروج من وضع الأطفال وإدارة الملفات الشخصية."',
-            self.parent_ui,
-        )
-        for forbidden_copy in (
-            "حماية الملف برمز PIN",
-            "رمز PIN للملف",
-            "حماية الملف الشخصي",
-        ):
-            self.assertNotIn(forbidden_copy, self.parent_ui)
+        self.assertIn("LegacyParentProofDecision.REQUIRE_PRIMARY_ADULT_PROFILE_PIN", self.parent_ui)
+        self.assertIn("LegacyParentProofDecision.DENY_FAIL_CLOSED", self.parent_ui)
+        self.assertNotIn("profilePinCredentialStore.setPin", self.parent_ui)
+        self.assertNotIn("credentialSnapshotForMigration", self.parent_ui)
+        self.assertNotIn("ProfilePinProtectionScreen", self.parent_ui)
 
     def test_kids_exit_checks_parental_code_before_an_optional_target_pin(self):
         parental_check = self.switch_policy.index("!parentalAuthorizationGranted")
@@ -97,14 +102,34 @@ class ParentalCodeArchitectureContractTest(unittest.TestCase):
         self.assertIn("pinSecurityProfileId = profile.id", manage_pin.group("body"))
         self.assertNotIn("parentalCode", manage_pin.group("body"))
 
-    def test_legacy_migration_copies_but_never_clears_the_profile_pin(self):
-        self.assertIn("COPY_EXISTING_PROFILE_PIN", self.parent_store)
-        self.assertIn("legacy_profile_pin_migration_complete_v1", self.parent_store)
-        self.assertIn("credentialSnapshotForMigration", self.parent_store)
+    def test_legacy_migration_never_copies_profile_verifier(self):
+        self.assertNotIn("COPY_EXISTING_PROFILE_PIN", self.parent_store)
+        self.assertNotIn("MIGRATED_LEGACY_PROFILE_PIN", self.parent_store)
+        self.assertNotIn("credentialSnapshotForMigration", self.parent_store)
+        self.assertNotIn("source.salt", self.parent_store)
+        self.assertNotIn("source.verifier", self.parent_store)
+        self.assertNotIn("persistCredential(", self.parent_store)
+        self.assertIn(
+            "REQUIRE_LEGACY_PARENT_PROOF_THEN_EXPLICIT_SETUP",
+            self.parent_store,
+        )
+        self.assertIn("FAIL_CLOSED_NO_USABLE_PARENT_PROOF", self.parent_store)
         self.assertNotIn("clearPin(", self.parent_store)
         self.assertNotIn("clearCredential(", self.parent_store)
-        self.assertIn("salt = source.salt.copyOf()", self.parent_store)
-        self.assertIn("verifier = source.verifier.copyOf()", self.parent_store)
+
+    def test_bootstrap_policy_requires_legacy_proof_or_fails_closed(self):
+        self.assertIn("legacyParentProofDecision", self.bootstrap_policy)
+        self.assertIn("REQUIRE_PRIMARY_ADULT_PROFILE_PIN", self.bootstrap_policy)
+        self.assertIn("DENY_FAIL_CLOSED", self.bootstrap_policy)
+        self.assertNotIn("ManualParentAuthProofRegistry", self.bootstrap_policy)
+        self.assertIn(
+            "currentProfileKind == ProfileKind.KIDS",
+            self.bootstrap_policy,
+        )
+        self.assertIn(
+            "ParentalCodeBootstrapDecision.REQUIRE_PARENTAL_CODE_SETUP",
+            self.bootstrap_policy,
+        )
 
     def test_raw_parental_digits_are_not_saved_in_compose_state(self):
         self.assertIn("var firstCode by remember(credentialScopeKey)", self.parent_ui)

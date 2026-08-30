@@ -22,22 +22,24 @@ internal fun deriveParentalCodeVerifier(
 ): ByteArray = deriveFourDigitCredentialVerifier(code, salt, iterations)
 
 internal enum class LegacyParentalCodeMigrationDecision {
-    COPY_EXISTING_PROFILE_PIN,
-    COMPLETE_WITHOUT_COPY,
+    REQUIRE_LEGACY_PARENT_PROOF_THEN_EXPLICIT_SETUP,
+    FAIL_CLOSED_NO_USABLE_PARENT_PROOF,
+    COMPLETE_WITHOUT_PARENTAL_CODE,
 }
 
 internal fun legacyParentalCodeMigrationDecision(
     hadKidsProfiles: Boolean,
     legacyPrimaryProfilePinAvailable: Boolean,
-): LegacyParentalCodeMigrationDecision =
-    if (hadKidsProfiles && legacyPrimaryProfilePinAvailable) {
-        LegacyParentalCodeMigrationDecision.COPY_EXISTING_PROFILE_PIN
-    } else {
-        LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_COPY
-    }
+): LegacyParentalCodeMigrationDecision = when {
+    hadKidsProfiles && legacyPrimaryProfilePinAvailable ->
+        LegacyParentalCodeMigrationDecision.REQUIRE_LEGACY_PARENT_PROOF_THEN_EXPLICIT_SETUP
+    hadKidsProfiles -> LegacyParentalCodeMigrationDecision.FAIL_CLOSED_NO_USABLE_PARENT_PROOF
+    else -> LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_PARENTAL_CODE
+}
 
 internal enum class LegacyParentalCodeMigrationResult {
-    MIGRATED_LEGACY_PROFILE_PIN,
+    LEGACY_PARENT_PROOF_REQUIRED,
+    FAIL_CLOSED_NO_USABLE_PARENT_PROOF,
     COMPLETED_WITHOUT_LEGACY_CREDENTIAL,
     ALREADY_COMPLETED,
     FAILED,
@@ -49,6 +51,9 @@ internal enum class LegacyParentalCodeMigrationResult {
  * This store deliberately has no profile-id key. A single salted PBKDF2 verifier belongs to the
  * active canonical account scope, so every Kids profile in that account shares the same parental
  * code while another account receives a completely different SharedPreferences namespace.
+ *
+ * Only [setCode] writes a credential and every persisted credential carries explicit user-created
+ * provenance. A Profile PIN verifier is never copied, promoted, or interpreted as a parental code.
  *
  * PBKDF2 work runs on [cpuDispatcher]. SharedPreferences reads and commits used by suspend APIs run
  * on [ioDispatcher]. Raw parental codes are never persisted.
@@ -92,7 +97,7 @@ class ParentalCodeCredentialStore(
                 if (accountScope.activeAccountId() != accountId) {
                     false
                 } else {
-                    val stored = persistCredential(targetPreferences, credential)
+                    val stored = persistExplicitCredential(targetPreferences, credential)
                     stored && accountScope.activeAccountId() == accountId
                 }
             }
@@ -134,14 +139,17 @@ class ParentalCodeCredentialStore(
     }
 
     /**
-     * One-time compatibility migration for accounts created by the previous architecture.
+     * Classifies one-time legacy state without migrating any Profile PIN material.
      *
-     * Existing Kids accounts used the Primary Adult profile verifier as their parental
-     * credential. Because no trustworthy metadata distinguishes a bootstrap-created PIN from a
-     * manually enabled Profile PIN, the verifier is copied into this dedicated namespace and the
-     * original Profile PIN is preserved. Accounts without Kids at first migration are marked
-     * complete without copying so a future manually-created Profile PIN can never be mistaken for
-     * a parental code.
+     * PR #240 previously wrote copied Profile PIN verifiers into a v1 parental namespace during
+     * signed qualification. That build was never merged or released, and it did not record
+     * trustworthy provenance. This corrected implementation therefore uses a new v2 namespace and
+     * leaves the pre-release v1 data untouched and inert instead of guessing whether it was copied
+     * or explicitly created.
+     *
+     * Legacy Kids accounts with a usable Primary Adult Profile PIN must prove that PIN once in the
+     * UI and then explicitly create a new parental code. Accounts without usable proof stay
+     * fail-closed. No credential bytes are read from ProfilePinCredentialStore here.
      */
     internal suspend fun ensureLegacyMigration(
         accountId: String,
@@ -158,7 +166,7 @@ class ParentalCodeCredentialStore(
 
         val migrationComplete = try {
             withContext(ioDispatcher) {
-                targetPreferences.getBoolean(KEY_LEGACY_MIGRATION_COMPLETE, false)
+                targetPreferences.getBoolean(KEY_LEGACY_CLASSIFICATION_COMPLETE, false)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -177,7 +185,7 @@ class ParentalCodeCredentialStore(
         if (existingCredential != null) {
             return try {
                 withContext(ioDispatcher) {
-                    if (markLegacyMigrationComplete(targetPreferences)) {
+                    if (markLegacyClassificationComplete(targetPreferences)) {
                         LegacyParentalCodeMigrationResult.ALREADY_COMPLETED
                     } else {
                         LegacyParentalCodeMigrationResult.FAILED
@@ -190,65 +198,52 @@ class ParentalCodeCredentialStore(
             }
         }
 
-        val legacyCredential = if (hadKidsProfiles && legacyPrimaryProfileId != null) {
+        val legacyPrimaryProfilePinAvailable = if (
+            hadKidsProfiles && legacyPrimaryProfileId != null
+        ) {
             try {
-                profilePinCredentialStore.credentialSnapshotForMigration(
-                    accountId = normalizedAccountId,
-                    profileId = legacyPrimaryProfileId,
-                )
+                withContext(ioDispatcher) {
+                    accountScope.activeAccountId() == normalizedAccountId &&
+                        profilePinCredentialStore.hasPin(legacyPrimaryProfileId)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 return LegacyParentalCodeMigrationResult.FAILED
             }
         } else {
-            null
+            false
         }
+
         val decision = legacyParentalCodeMigrationDecision(
             hadKidsProfiles = hadKidsProfiles,
-            legacyPrimaryProfilePinAvailable = legacyCredential != null,
+            legacyPrimaryProfilePinAvailable = legacyPrimaryProfilePinAvailable,
         )
 
         return try {
             withContext(ioDispatcher) {
                 synchronized(this@ParentalCodeCredentialStore) {
-                    if (targetPreferences.getBoolean(KEY_LEGACY_MIGRATION_COMPLETE, false)) {
+                    if (targetPreferences.getBoolean(KEY_LEGACY_CLASSIFICATION_COMPLETE, false)) {
                         return@synchronized LegacyParentalCodeMigrationResult.ALREADY_COMPLETED
                     }
                     if (load(targetPreferences) != null) {
-                        return@synchronized if (markLegacyMigrationComplete(targetPreferences)) {
+                        return@synchronized if (markLegacyClassificationComplete(targetPreferences)) {
                             LegacyParentalCodeMigrationResult.ALREADY_COMPLETED
                         } else {
                             LegacyParentalCodeMigrationResult.FAILED
                         }
                     }
+                    if (!markLegacyClassificationComplete(targetPreferences)) {
+                        return@synchronized LegacyParentalCodeMigrationResult.FAILED
+                    }
 
                     when (decision) {
-                        LegacyParentalCodeMigrationDecision.COPY_EXISTING_PROFILE_PIN -> {
-                            val source = legacyCredential
-                                ?: return@synchronized LegacyParentalCodeMigrationResult.FAILED
-                            val migrated = persistCredential(
-                                targetPreferences = targetPreferences,
-                                credential = StoredParentalCodeCredential(
-                                    salt = source.salt.copyOf(),
-                                    verifier = source.verifier.copyOf(),
-                                    iterations = source.iterations,
-                                ),
-                            )
-                            if (migrated) {
-                                LegacyParentalCodeMigrationResult.MIGRATED_LEGACY_PROFILE_PIN
-                            } else {
-                                LegacyParentalCodeMigrationResult.FAILED
-                            }
-                        }
-
-                        LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_COPY -> {
-                            if (markLegacyMigrationComplete(targetPreferences)) {
-                                LegacyParentalCodeMigrationResult.COMPLETED_WITHOUT_LEGACY_CREDENTIAL
-                            } else {
-                                LegacyParentalCodeMigrationResult.FAILED
-                            }
-                        }
+                        LegacyParentalCodeMigrationDecision.REQUIRE_LEGACY_PARENT_PROOF_THEN_EXPLICIT_SETUP ->
+                            LegacyParentalCodeMigrationResult.LEGACY_PARENT_PROOF_REQUIRED
+                        LegacyParentalCodeMigrationDecision.FAIL_CLOSED_NO_USABLE_PARENT_PROOF ->
+                            LegacyParentalCodeMigrationResult.FAIL_CLOSED_NO_USABLE_PARENT_PROOF
+                        LegacyParentalCodeMigrationDecision.COMPLETE_WITHOUT_PARENTAL_CODE ->
+                            LegacyParentalCodeMigrationResult.COMPLETED_WITHOUT_LEGACY_CREDENTIAL
                     }
                 }
             }
@@ -260,7 +255,7 @@ class ParentalCodeCredentialStore(
     }
 
     @Synchronized
-    private fun persistCredential(
+    private fun persistExplicitCredential(
         targetPreferences: SharedPreferences,
         credential: StoredParentalCodeCredential,
     ): Boolean = targetPreferences.edit()
@@ -268,18 +263,22 @@ class ParentalCodeCredentialStore(
         .putInt(KEY_ITERATIONS, credential.iterations)
         .putString(KEY_SALT, Base64.encodeToString(credential.salt, Base64.NO_WRAP))
         .putString(KEY_VERIFIER, Base64.encodeToString(credential.verifier, Base64.NO_WRAP))
-        .putBoolean(KEY_LEGACY_MIGRATION_COMPLETE, true)
+        .putString(KEY_PROVENANCE, EXPLICIT_USER_CREATED_PROVENANCE)
+        .putBoolean(KEY_LEGACY_CLASSIFICATION_COMPLETE, true)
         .commit()
 
     @Synchronized
-    private fun markLegacyMigrationComplete(targetPreferences: SharedPreferences): Boolean =
+    private fun markLegacyClassificationComplete(targetPreferences: SharedPreferences): Boolean =
         targetPreferences.edit()
-            .putBoolean(KEY_LEGACY_MIGRATION_COMPLETE, true)
+            .putBoolean(KEY_LEGACY_CLASSIFICATION_COMPLETE, true)
             .commit()
 
     private fun load(targetPreferences: SharedPreferences): StoredParentalCodeCredential? {
         val version = targetPreferences.getInt(KEY_VERSION, 0)
         if (version != CURRENT_CREDENTIAL_VERSION) return null
+        if (targetPreferences.getString(KEY_PROVENANCE, null) != EXPLICIT_USER_CREATED_PROVENANCE) {
+            return null
+        }
 
         val iterations = targetPreferences.getInt(KEY_ITERATIONS, 0)
         if (iterations <= 0) return null
@@ -313,15 +312,18 @@ class ParentalCodeCredentialStore(
     )
 
     companion object {
-        const val CURRENT_CREDENTIAL_VERSION = 1
+        const val CURRENT_CREDENTIAL_VERSION = 2
         const val DEFAULT_ITERATIONS = ProfilePinCredentialStore.DEFAULT_ITERATIONS
-        internal const val PREFERENCES_NAME = "hulk_parental_code_credentials_v1"
+        internal const val PREFERENCES_NAME = "hulk_parental_code_credentials_v2"
+        internal const val EXPLICIT_USER_CREATED_PROVENANCE = "EXPLICIT_USER_CREATED"
 
         private const val KEY_VERSION = "credential_version"
         private const val KEY_ITERATIONS = "iterations"
         private const val KEY_SALT = "salt"
         private const val KEY_VERIFIER = "verifier"
-        private const val KEY_LEGACY_MIGRATION_COMPLETE = "legacy_profile_pin_migration_complete_v1"
+        private const val KEY_PROVENANCE = "credential_provenance"
+        private const val KEY_LEGACY_CLASSIFICATION_COMPLETE =
+            "legacy_parental_setup_classification_complete_v2"
         private const val SALT_BYTES = 16
     }
 }
