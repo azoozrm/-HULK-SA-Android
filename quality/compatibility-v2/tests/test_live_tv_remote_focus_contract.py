@@ -72,19 +72,21 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         end = text.index("private fun LiveCategoryChip(", start)
         block = text[start:end]
         self.assertIn("selectedCategoryFocusIndex(", block)
-        self.assertIn("fun selectedFocusTarget(): Pair<Int, FocusRequester>?", block)
+        self.assertIn("fun selectedFocusTarget(): CategoryFocusTarget?", block)
         self.assertIn("onEnter = {", block)
         self.assertIn("restoreSelectedCategoryFocus(", block)
-        self.assertIn("focusRestoreState.resolveTarget = { selectedFocusTarget() }", block)
+        self.assertIn("focusRestoreController.resolveTarget = { selectedFocusTarget() }", block)
         self.assertIn("cancelDefaultEntry = { cancelFocusChange() }", block)
-        self.assertNotIn("selectedFocusTarget()?.second?.requestFocus()", block)
         self.assertIn("var categoryBarHasFocus by remember", block)
-        self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == null", block)
+        self.assertIn(".categoryChipFocus(", block)
+        self.assertIn("controller.pendingRequest != null", text)
         self.assertIn(
-            "canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID",
-            block,
+            "val focusedChannelIndex = remember(visible) { intArrayOf(rememberedIndex) }",
+            text,
         )
-        self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == category.id", block)
+        self.assertNotIn("var focusedChannelIndex by remember", text)
+        self.assertIn("focusedChannelIndex[0] == 0", text)
+        self.assertIn("categoryFocusRestoreController.requestFromSource()", text)
         self.assertIn("restoreSelectedCategoryFocus(", block)
 
 

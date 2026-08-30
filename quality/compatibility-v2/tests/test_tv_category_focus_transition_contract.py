@@ -5,6 +5,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+TV_GRID = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/TvCatalogGrid.kt"
 
 
 class TvCategoryFocusTransitionContractTest(unittest.TestCase):
@@ -88,34 +89,34 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertIn("focusContentRequestId = categoryContentFocusRequest", poster)
 
     def test_visible_category_restore_is_direct_and_offscreen_restore_scrolls_before_focus(self) -> None:
-        helper = self.section("private fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
-        visible_check = helper.index("isVisible(directTarget.first)")
-        direct_focus = helper.index("directTarget.second.requestFocus()", visible_check)
-        direct_return = helper.index("return", direct_focus)
-        cancel_default_entry = helper.index("cancelDefaultEntry()")
-        deferred_launch = helper.index("restoreState.job = scope.launch")
-        scroll = helper.index("listState.scrollToItem(targetIndex)")
-        composed = helper.index("snapshotFlow", scroll)
-        frame = helper.index("withFrameNanos { }", composed)
-        final_focus = helper.rindex("target.second.requestFocus()")
+        helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+
+        visible_check = helper.index("isVisible(directTarget.index)")
+        direct_focus = helper.index("directTarget.requester.requestFocus()", visible_check)
+        pending = helper.index("controller.begin(directTarget.categoryId)", direct_focus)
+        cancel_default_entry = helper.index("cancelDefaultEntry()", pending)
+        scroll = helper.index("listState.scrollToItem(target.index)")
+        scroll_complete = helper.index("controller.markScrollCompleted(request.requestId)", scroll)
         self.assertLess(visible_check, direct_focus)
-        self.assertLess(direct_focus, direct_return)
-        self.assertLess(direct_return, cancel_default_entry)
-        self.assertLess(cancel_default_entry, deferred_launch)
-        self.assertLess(deferred_launch, scroll)
-        self.assertLess(scroll, composed)
-        self.assertLess(composed, frame)
-        self.assertLess(frame, final_focus)
-        self.assertEqual(helper.count("requestFocus()"), 2)
-        self.assertNotIn("directTarget.second.requestFocus()", helper[cancel_default_entry:])
-        self.assertNotIn("visibleItemsInfo.first", helper)
-        self.assertNotIn("visibleItemsInfo.firstOrNull", helper)
+        self.assertLess(direct_focus, pending)
+        self.assertLess(pending, cancel_default_entry)
+        self.assertLess(cancel_default_entry, scroll)
+        self.assertLess(scroll, scroll_complete)
+        self.assertEqual(helper.count("listState.scrollToItem("), 1)
+        self.assertEqual(helper.count("requestFocus()"), 1)
+
+        self.assertIn("readyRequestId = controller.readyRequestId(categoryId)", target)
+        self.assertIn(".onGloballyPositioned { controller.markTargetPlaced(categoryId) }", target)
+        self.assertIn("controller.armBringIntoViewSuppression", target)
+        self.assertIn("controller.beginFocusDispatch(categoryId)", target)
+        self.assertIn("controller.endFocusDispatch()", target)
+        self.assertIn("requester.requestFocus()", target)
+        self.assertLess(target.index("readyRequestId == null"), target.index("requester.requestFocus()"))
+        self.assertNotIn("snapshotFlow", helper)
+        self.assertNotIn("withFrameNanos", helper)
         self.assertNotIn("delay(", helper)
-        self.assertNotIn("debounce", helper.lower())
-        self.assertNotIn("poll", helper.lower())
         self.assertNotIn("while (", helper)
-        self.assertIn("target = resolveTarget()", helper)
-        self.assertIn("Re-resolve from the selected category ID after layout", helper)
 
     def test_live_movies_series_restore_selected_category_by_current_id_after_reorder(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
@@ -124,10 +125,11 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
             self.assertIn("selectedCategoryFocusIndex(", block)
             self.assertIn("selectedId = selectedId", block)
             self.assertIn("orderedIds = ordered.map(Category::id)", block)
-            self.assertIn("focusRestoreState.resolveTarget = { selectedFocusTarget() }", block)
+            self.assertIn("focusRestoreController.resolveTarget = { selectedFocusTarget() }", block)
             self.assertIn("restoreSelectedCategoryFocus(", block)
             self.assertIn("cancelDefaultEntry = { cancelFocusChange() }", block)
-            self.assertNotIn("selectedFocusTarget()?.second?.requestFocus()", block)
+            self.assertIn("CategoryFocusTarget(selectedId, targetIndex, requester)", block)
+            self.assertIn("orderedIds = ordered.map(Category::id)", block)
 
     def test_special_categories_and_selected_only_entry_gate_remain_supported(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
@@ -137,9 +139,11 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertIn("listOf<String?>(null, FAVORITES_CATEGORY_ID)", live)
         self.assertIn("LIVE_TV_PRO_MAIN_RECENT_CATEGORY", live)
         for block in (catalog, live):
-            self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == null", block)
-            self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID", block)
-            self.assertIn("canFocus = !isTv || categoryBarHasFocus || selectedId == category.id", block)
+            self.assertIn(".categoryChipFocus(", block)
+            self.assertIn("focusRestoreController", block)
+        gate = self.section("internal fun canCategoryChipReceiveFocus(", "@Composable\ninternal fun Modifier.categoryFocusTarget(")
+        self.assertIn("selectedId == chipId", gate)
+        self.assertIn("categoryBarHasFocus && !restorePending", gate)
 
     def test_category_underlap_and_reorder_contracts_remain_intact(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
@@ -147,16 +151,51 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         for block in (catalog, live):
             self.assertIn("rememberCategorySidebarUnderlap", block)
             self.assertIn("extendCategoryViewportTowardStart", block)
-            self.assertIn("keepCategoryChipFullyVisibleOnFocus", block)
+            self.assertIn("categoryChipFocus", block)
             self.assertIn("fun move(id: String, direction: Int)", block)
             self.assertIn("prefs.edit().putString", block)
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+        self.assertIn("bringIntoViewRequester(bringIntoViewRequester)", target)
+        self.assertIn("bringIntoViewRequester.bringIntoView()", target)
+        self.assertIn("consumeBringIntoViewSuppression", target)
 
-    def test_new_focus_flow_adds_no_arbitrary_delay_polling_or_retry_loop(self) -> None:
-        helper = self.section("private fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+    def test_source_owned_handoffs_cover_search_live_and_catalog_content(self) -> None:
+        header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")
         poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
-        history = self.section("private fun HistoryGrid(", "private fun DiagnosticsCenter(")
-        for block in (helper, poster, live, history):
+        grid = TV_GRID.read_text(encoding="utf-8")
+
+        self.assertIn("onMoveToCategories: (() -> Boolean)?", header)
+        self.assertIn("event.key == Key.DirectionDown", header)
+        self.assertIn("categoryFocusRestoreController::requestFromSource", poster)
+        self.assertIn("onMoveToCategories = categoryFocusRestoreController::requestFromSource", poster)
+        self.assertIn("focusedChannelIndex[0] == 0", live)
+        self.assertIn("event.key == Key.DirectionUp", live)
+        self.assertIn("categoryFocusRestoreController.requestFromSource()", live)
+        self.assertIn("move == TvGridFocusMove.UP", grid)
+        self.assertIn("return@onPreviewKeyEvent onMoveToCategories()", grid)
+
+    def test_tv_restore_has_one_scroll_owner_and_manual_navigation_keeps_bring_into_view(self) -> None:
+        helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+        catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+
+        self.assertEqual(helper.count("listState.scrollToItem("), 1)
+        for block in (catalog, live):
+            self.assertIn("LaunchedEffect(isTv, selectedId, ordered)", block)
+            self.assertIn("if (isTv) return@LaunchedEffect", block)
+        self.assertIn("armBringIntoViewSuppression", target)
+        self.assertIn("!controller.consumeBringIntoViewSuppression(categoryId)", target)
+        self.assertLess(
+            helper.index("controller.isDispatchingFocusTo(directTarget.categoryId)"),
+            helper.index("controller.hasPendingTarget(directTarget.categoryId)"),
+        )
+
+    def test_new_focus_flow_adds_no_arbitrary_delay_polling_or_retry_loop(self) -> None:
+        helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+        for block in (helper, target):
             self.assertNotIn("delay(40", block)
             self.assertNotIn("delay(90", block)
             self.assertNotIn("delay(120", block)
@@ -164,6 +203,8 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
             self.assertNotIn("delay(300", block)
             self.assertNotIn("debounce", block.lower())
             self.assertNotIn("retry", block.lower())
+            self.assertNotIn("snapshotFlow", block)
+            self.assertNotIn("withFrameNanos", block)
 
 
 if __name__ == "__main__":

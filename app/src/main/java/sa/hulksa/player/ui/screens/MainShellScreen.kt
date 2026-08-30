@@ -69,6 +69,7 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -102,6 +103,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -244,74 +246,243 @@ private fun Modifier.extendCategoryViewportTowardStart(extraWidth: Dp): Modifier
     }
 }
 
-@Composable
-private fun Modifier.keepCategoryChipFullyVisibleOnFocus(isTv: Boolean): Modifier {
-    if (!isTv) return this
-    val requester = remember { BringIntoViewRequester() }
-    val scope = rememberCoroutineScope()
-    return bringIntoViewRequester(requester)
-        .onFocusChanged { focusState ->
-            if (focusState.isFocused) {
-                scope.launch { requester.bringIntoView() }
-            }
-        }
-}
-
 private data class CategoryContentFocusRequest(
     val categoryId: String?,
     val requestId: Long,
     val focusFirstItem: Boolean,
 )
 
-private class CategoryFocusRestoreState {
+internal data class CategoryFocusTarget(
+    val categoryId: String?,
+    val index: Int,
+    val requester: FocusRequester,
+)
+
+internal data class CategoryFocusRestoreRequest(
+    val categoryId: String?,
+    val requestId: Long,
+    val scrollCompleted: Boolean = false,
+    val targetPlaced: Boolean = false,
+)
+
+internal class CategoryFocusRestoreController {
     var job: Job? = null
-    var resolveTarget: (() -> Pair<Int, FocusRequester>?)? = null
+    var resolveTarget: (() -> CategoryFocusTarget?)? = null
+    var restore: ((() -> Unit) -> Boolean)? = null
+    var pendingRequest by mutableStateOf<CategoryFocusRestoreRequest?>(null)
+        private set
+
+    private var nextRequestId = 0L
+    private val placedTargets = mutableSetOf<String?>()
+    private var suppressBringIntoViewFor: Pair<Long, String?>? = null
+    private var focusDispatchActive = false
+    private var focusDispatchCategoryId: String? = null
+
+    fun requestFromSource(): Boolean = restore?.invoke({}) == true
+
+    fun hasPendingTarget(categoryId: String?): Boolean = pendingRequest?.categoryId == categoryId
+
+    fun begin(categoryId: String?): CategoryFocusRestoreRequest {
+        nextRequestId += 1L
+        return CategoryFocusRestoreRequest(
+            categoryId = categoryId,
+            requestId = nextRequestId,
+            targetPlaced = categoryId in placedTargets,
+        ).also { pendingRequest = it }
+    }
+
+    fun markTargetPlaced(categoryId: String?) {
+        placedTargets += categoryId
+        val request = pendingRequest
+        if (request?.categoryId == categoryId && !request.targetPlaced) {
+            pendingRequest = request.copy(targetPlaced = true)
+        }
+    }
+
+    fun markTargetDetached(categoryId: String?) {
+        placedTargets -= categoryId
+        val request = pendingRequest
+        if (request?.categoryId == categoryId && request.targetPlaced) {
+            pendingRequest = request.copy(targetPlaced = false)
+        }
+    }
+
+    fun markScrollCompleted(requestId: Long) {
+        val request = pendingRequest
+        if (request?.requestId == requestId && !request.scrollCompleted) {
+            pendingRequest = request.copy(scrollCompleted = true)
+        }
+    }
+
+    fun readyRequestId(categoryId: String?): Long? = pendingRequest
+        ?.takeIf { it.categoryId == categoryId && it.scrollCompleted && it.targetPlaced }
+        ?.requestId
+
+    fun isDispatchingFocusTo(categoryId: String?): Boolean =
+        focusDispatchActive && focusDispatchCategoryId == categoryId
+
+    fun beginFocusDispatch(categoryId: String?) {
+        focusDispatchActive = true
+        focusDispatchCategoryId = categoryId
+    }
+
+    fun endFocusDispatch() {
+        focusDispatchActive = false
+        focusDispatchCategoryId = null
+    }
+
+    fun armBringIntoViewSuppression(requestId: Long, categoryId: String?) {
+        suppressBringIntoViewFor = requestId to categoryId
+    }
+
+    fun consumeBringIntoViewSuppression(categoryId: String?): Boolean {
+        val armed = suppressBringIntoViewFor ?: return false
+        if (armed.second != categoryId) return false
+        suppressBringIntoViewFor = null
+        return true
+    }
+
+    fun clearBringIntoViewSuppression(requestId: Long) {
+        if (suppressBringIntoViewFor?.first == requestId) suppressBringIntoViewFor = null
+    }
+
+    fun complete(requestId: Long) {
+        if (pendingRequest?.requestId == requestId) pendingRequest = null
+    }
+
+    fun cancel() {
+        job?.cancel()
+        job = null
+        pendingRequest = null
+        suppressBringIntoViewFor = null
+        endFocusDispatch()
+    }
 }
 
-private fun restoreSelectedCategoryFocus(
+internal fun canCategoryChipReceiveFocus(
+    isTv: Boolean,
+    categoryBarHasFocus: Boolean,
+    restorePending: Boolean,
+    selectedId: String?,
+    chipId: String?,
+): Boolean = !isTv || selectedId == chipId || (categoryBarHasFocus && !restorePending)
+
+@Composable
+internal fun Modifier.categoryFocusTarget(
+    isTv: Boolean,
+    categoryId: String?,
+    requester: FocusRequester,
+    controller: CategoryFocusRestoreController,
+): Modifier {
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    val readyRequestId = controller.readyRequestId(categoryId)
+
+    DisposableEffect(controller, categoryId) {
+        onDispose { controller.markTargetDetached(categoryId) }
+    }
+    LaunchedEffect(isTv, categoryId, requester, readyRequestId) {
+        if (!isTv || readyRequestId == null) return@LaunchedEffect
+        val target = controller.resolveTarget?.invoke()
+        if (target?.categoryId != categoryId || target.requester !== requester) return@LaunchedEffect
+
+        controller.armBringIntoViewSuppression(readyRequestId, categoryId)
+        controller.beginFocusDispatch(categoryId)
+        val focused = try {
+            runCatching { requester.requestFocus() }.getOrDefault(false)
+        } finally {
+            controller.endFocusDispatch()
+        }
+        if (!focused) controller.clearBringIntoViewSuppression(readyRequestId)
+        controller.complete(readyRequestId)
+    }
+
+    return focusRequester(requester).then(
+        if (isTv) {
+            Modifier
+                .bringIntoViewRequester(bringIntoViewRequester)
+                .onGloballyPositioned { controller.markTargetPlaced(categoryId) }
+                .onFocusChanged { focusState ->
+                    if (focusState.isFocused && !controller.consumeBringIntoViewSuppression(categoryId)) {
+                        scope.launch { bringIntoViewRequester.bringIntoView() }
+                    }
+                }
+        } else {
+            Modifier
+        },
+    )
+}
+
+@Composable
+private fun Modifier.categoryChipFocus(
+    isTv: Boolean,
+    categoryId: String?,
+    selectedId: String?,
+    categoryBarHasFocus: Boolean,
+    requester: FocusRequester,
+    controller: CategoryFocusRestoreController,
+): Modifier = categoryFocusTarget(isTv, categoryId, requester, controller)
+    .focusProperties {
+        canFocus = canCategoryChipReceiveFocus(
+            isTv = isTv,
+            categoryBarHasFocus = categoryBarHasFocus,
+            restorePending = controller.pendingRequest != null,
+            selectedId = selectedId,
+            chipId = categoryId,
+        )
+    }
+
+internal fun restoreSelectedCategoryFocus(
     listState: LazyListState,
     scope: CoroutineScope,
-    restoreState: CategoryFocusRestoreState,
+    controller: CategoryFocusRestoreController,
     cancelDefaultEntry: () -> Unit,
-) {
-    fun resolveTarget(): Pair<Int, FocusRequester>? = restoreState.resolveTarget?.invoke()
+): Boolean {
+    fun resolveTarget(): CategoryFocusTarget? = controller.resolveTarget?.invoke()
     fun isVisible(index: Int): Boolean =
         listState.layoutInfo.visibleItemsInfo.any { it.index == index }
 
-    restoreState.job?.cancel()
-    restoreState.job = null
-
-    val directTarget = resolveTarget() ?: return
-    if (isVisible(directTarget.first)) {
-        runCatching { directTarget.second.requestFocus() }
-        return
+    val directTarget = resolveTarget() ?: return false
+    if (controller.isDispatchingFocusTo(directTarget.categoryId)) return true
+    if (controller.hasPendingTarget(directTarget.categoryId)) {
+        cancelDefaultEntry()
+        return true
     }
 
+    controller.cancel()
+    if (isVisible(directTarget.index)) {
+        controller.beginFocusDispatch(directTarget.categoryId)
+        val focused = try {
+            runCatching { directTarget.requester.requestFocus() }.getOrDefault(false)
+        } finally {
+            controller.endFocusDispatch()
+        }
+        if (focused) return true
+    }
+
+    val request = controller.begin(directTarget.categoryId)
     cancelDefaultEntry()
-    restoreState.job = scope.launch {
-        suspend fun scrollTargetIntoComposition(targetIndex: Int) {
-            listState.scrollToItem(targetIndex)
-            snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
-                .first { it }
-            withFrameNanos { }
+    if (isVisible(directTarget.index)) {
+        controller.markScrollCompleted(request.requestId)
+        return true
+    }
+
+    controller.job = scope.launch {
+        val target = resolveTarget()
+        if (target?.categoryId != request.categoryId) {
+            controller.complete(request.requestId)
+            return@launch
         }
 
-        var target = resolveTarget() ?: return@launch
-        if (!isVisible(target.first)) {
-            scrollTargetIntoComposition(target.first)
-        }
-
-        // Re-resolve from the selected category ID after layout so reorder never leaves a stale index.
-        target = resolveTarget() ?: return@launch
-        if (!isVisible(target.first)) {
-            scrollTargetIntoComposition(target.first)
-            target = resolveTarget() ?: return@launch
-        }
-
-        if (isVisible(target.first)) {
-            runCatching { target.second.requestFocus() }
+        listState.scrollToItem(target.index)
+        val resolvedAfterScroll = resolveTarget()
+        if (resolvedAfterScroll?.categoryId == request.categoryId) {
+            controller.markScrollCompleted(request.requestId)
+        } else {
+            controller.complete(request.requestId)
         }
     }
+    return true
 }
 
 private fun launchGrowthUrl(context: android.content.Context, url: String): Boolean = runCatching {
@@ -1934,6 +2105,7 @@ private fun PosterCatalogScreen(
     var nextCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
     var categoryContentFocusRequest by remember(destination) { mutableStateOf<CategoryContentFocusRequest?>(null) }
     var armedCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
+    val categoryFocusRestoreController = remember(destination) { CategoryFocusRestoreController() }
     val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
         if (isTv) {
             nextCategoryContentFocusRequestId += 1L
@@ -2009,10 +2181,25 @@ private fun PosterCatalogScreen(
                     },
                 ),
         ) {
-            CatalogHeader(title, resultCount, state.searchQuery, onSearch, onRefresh, isTv)
+            CatalogHeader(
+                title = title,
+                resultCount = resultCount,
+                query = state.searchQuery,
+                onSearch = onSearch,
+                onRefresh = onRefresh,
+                isTv = isTv,
+                onMoveToCategories = categoryFocusRestoreController::requestFromSource,
+            )
             if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(11.dp))
-            ReorderableCatalogCategoryBar(type, catalog?.categories.orEmpty(), state.selectedCategoryId, selectCategoryAndEnterContent, isTv)
+            ReorderableCatalogCategoryBar(
+                type = type,
+                categories = catalog?.categories.orEmpty(),
+                selectedId = state.selectedCategoryId,
+                onSelect = selectCategoryAndEnterContent,
+                isTv = isTv,
+                focusRestoreController = categoryFocusRestoreController,
+            )
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
         }
@@ -2034,6 +2221,7 @@ private fun PosterCatalogScreen(
                         ?.takeIf { categoryContentFocusReady }
                         ?.requestId
                         ?: 0L,
+                    onMoveToCategories = categoryFocusRestoreController::requestFromSource,
                 )
             } else if (showingContinue) {
                 EmptyState("لا توجد مشاهدة غير مكتملة في $title")
@@ -2054,6 +2242,7 @@ private fun PosterCatalogScreen(
                     restoreFocusedCard = categoryContentFocusRequest?.let { request ->
                         armedCategoryContentFocusRequestId == request.requestId
                     } ?: state.searchQuery.isBlank(),
+                    onMoveToCategories = categoryFocusRestoreController::requestFromSource,
                 )
             } else {
                 ContentGrid(
@@ -2110,7 +2299,9 @@ private fun LiveCatalogScreen(
     val channelRequester = remember { FocusRequester() }
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
+    val categoryFocusRestoreController = remember { CategoryFocusRestoreController() }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
+    val focusedChannelIndex = remember(visible) { intArrayOf(rememberedIndex) }
     var nextCategoryContentFocusRequestId by remember { mutableLongStateOf(0L) }
     var categoryContentFocusRequest by remember { mutableStateOf<CategoryContentFocusRequest?>(null) }
     val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
@@ -2199,10 +2390,25 @@ private fun LiveCatalogScreen(
                     },
                 ),
         ) {
-            CatalogHeader("البث المباشر", visible.size, state.searchQuery, onSearch, onRefresh, isTv)
+            CatalogHeader(
+                title = "البث المباشر",
+                resultCount = visible.size,
+                query = state.searchQuery,
+                onSearch = onSearch,
+                onRefresh = onRefresh,
+                isTv = isTv,
+                onMoveToCategories = categoryFocusRestoreController::requestFromSource,
+            )
             if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(10.dp))
-            ReorderableLiveCategoryBar(catalog?.categories.orEmpty(), catalog?.items.orEmpty(), state.selectedCategoryId, selectCategoryAndEnterContent, isTv)
+            ReorderableLiveCategoryBar(
+                categories = catalog?.categories.orEmpty(),
+                items = catalog?.items.orEmpty(),
+                selectedId = state.selectedCategoryId,
+                onSelect = selectCategoryAndEnterContent,
+                isTv = isTv,
+                focusRestoreController = categoryFocusRestoreController,
+            )
             LiveInteractionHints(isTv)
             Spacer(Modifier.height(8.dp))
         }
@@ -2226,7 +2432,14 @@ private fun LiveCatalogScreen(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .onPreviewKeyEvent { event ->
+                                    event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.DirectionUp &&
+                                        focusedChannelIndex[0] == 0 &&
+                                        categoryFocusRestoreController.requestFromSource()
+                                },
                             verticalArrangement = Arrangement.spacedBy(3.dp),
                             contentPadding = PaddingValues(bottom = 24.dp),
                         ) {
@@ -2240,6 +2453,7 @@ private fun LiveCatalogScreen(
                                     item = channel,
                                     selected = selected,
                                     onFocused = {
+                                        focusedChannelIndex[0] = index
                                         previewState.value = channel
                                         navigationMemory.save(MainDestination.LIVE, key, index)
                                     },
@@ -3265,6 +3479,7 @@ private fun HistoryGrid(
     onOpen: (HistoryEntry) -> Unit,
     focusFirstItemRequestId: Long = 0L,
     focusContentRequestId: Long = 0L,
+    onMoveToCategories: (() -> Boolean)? = null,
 ) {
     val remembered = navigationMemory.position(destination)
     val targetIndex = if (focusFirstItemRequestId != 0L) {
@@ -3306,7 +3521,24 @@ private fun HistoryGrid(
             HistoryCard(
                 entry,
                 { onOpen(entry) },
-                Modifier.fillMaxWidth().restoreFocus(restore, targetRequester),
+                Modifier
+                    .fillMaxWidth()
+                    .restoreFocus(restore, targetRequester)
+                    .then(
+                        if (isTv && onMoveToCategories != null) {
+                            Modifier.onPreviewKeyEvent { event ->
+                                val row = gridState.layoutInfo.visibleItemsInfo
+                                    .firstOrNull { it.index == index }
+                                    ?.row
+                                event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.DirectionUp &&
+                                    row == 0 &&
+                                    onMoveToCategories()
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 onFocused = { navigationMemory.save(destination, entry.key, index) },
             )
         }
@@ -3641,12 +3873,24 @@ private fun CatalogHeader(
     onSearch: (String) -> Unit,
     onRefresh: () -> Unit,
     isTv: Boolean,
+    onMoveToCategories: (() -> Boolean)? = null,
 ) {
     val colors = LocalHulkColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(end = if (isTv) TV_PAGE_GUTTER else 0.dp),
+            .padding(end = if (isTv) TV_PAGE_GUTTER else 0.dp)
+            .then(
+                if (isTv && onMoveToCategories != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        event.type == KeyEventType.KeyDown &&
+                            event.key == Key.DirectionDown &&
+                            onMoveToCategories()
+                    }
+                } else {
+                    Modifier
+                },
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
@@ -3708,6 +3952,7 @@ private fun ReorderableCatalogCategoryBar(
     selectedId: String?,
     onSelect: (String?) -> Unit,
     isTv: Boolean,
+    focusRestoreController: CategoryFocusRestoreController,
 ) {
     val context = LocalContext.current
     val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
@@ -3717,7 +3962,6 @@ private fun ReorderableCatalogCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val focusRestoreState = remember(type) { CategoryFocusRestoreState() }
     val allFocusRequester = remember(type) { FocusRequester() }
     val favoritesFocusRequester = remember(type) { FocusRequester() }
     val continueFocusRequester = remember(type) { FocusRequester() }
@@ -3734,7 +3978,7 @@ private fun ReorderableCatalogCategoryBar(
     val baseContentPadding = if (isTv) 8.dp else 24.dp
     val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
-    fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
+    fun selectedFocusTarget(): CategoryFocusTarget? {
         val targetIndex = selectedCategoryFocusIndex(
             selectedId = selectedId,
             leadingIds = leadingIds,
@@ -3746,11 +3990,27 @@ private fun ReorderableCatalogCategoryBar(
             CONTINUE_CATEGORY_ID -> continueFocusRequester
             else -> selectedId?.let(categoryFocusRequesters::get)
         } ?: return null
-        return targetIndex to requester
+        return CategoryFocusTarget(selectedId, targetIndex, requester)
     }
-    focusRestoreState.resolveTarget = { selectedFocusTarget() }
+    focusRestoreController.resolveTarget = { selectedFocusTarget() }
+    focusRestoreController.restore = { cancelDefaultEntry ->
+        restoreSelectedCategoryFocus(
+            listState = listState,
+            scope = scope,
+            controller = focusRestoreController,
+            cancelDefaultEntry = cancelDefaultEntry,
+        )
+    }
+    DisposableEffect(focusRestoreController) {
+        onDispose {
+            focusRestoreController.restore = null
+            focusRestoreController.resolveTarget = null
+            focusRestoreController.cancel()
+        }
+    }
 
-    LaunchedEffect(selectedId, ordered) {
+    LaunchedEffect(isTv, selectedId, ordered) {
+        if (isTv) return@LaunchedEffect
         val targetIndex = selectedCategoryFocusIndex(
             selectedId = selectedId,
             leadingIds = leadingIds,
@@ -3787,7 +4047,7 @@ private fun ReorderableCatalogCategoryBar(
                         restoreSelectedCategoryFocus(
                             listState = listState,
                             scope = scope,
-                            restoreState = focusRestoreState,
+                            controller = focusRestoreController,
                             cancelDefaultEntry = { cancelFocusChange() },
                         )
                     }
@@ -3811,11 +4071,10 @@ private fun ReorderableCatalogCategoryBar(
                 primary = selectedId == null,
                 compact = true,
                 modifier = Modifier
-                    .focusRequester(allFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
-                    .focusProperties {
-                        canFocus = !isTv || categoryBarHasFocus || selectedId == null
-                    },
+                    .categoryChipFocus(
+                        isTv, null, selectedId, categoryBarHasFocus,
+                        allFocusRequester, focusRestoreController,
+                    ),
             )
         }
         item {
@@ -3825,11 +4084,10 @@ private fun ReorderableCatalogCategoryBar(
                 primary = selectedId == FAVORITES_CATEGORY_ID,
                 compact = true,
                 modifier = Modifier
-                    .focusRequester(favoritesFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
-                    .focusProperties {
-                        canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
-                    },
+                    .categoryChipFocus(
+                        isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        favoritesFocusRequester, focusRestoreController,
+                    ),
             )
         }
         item {
@@ -3839,11 +4097,10 @@ private fun ReorderableCatalogCategoryBar(
                 primary = selectedId == CONTINUE_CATEGORY_ID,
                 compact = true,
                 modifier = Modifier
-                    .focusRequester(continueFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
-                    .focusProperties {
-                        canFocus = !isTv || categoryBarHasFocus || selectedId == CONTINUE_CATEGORY_ID
-                    },
+                    .categoryChipFocus(
+                        isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        continueFocusRequester, focusRestoreController,
+                    ),
             )
         }
         items(ordered, key = Category::id) { category ->
@@ -3857,11 +4114,10 @@ private fun ReorderableCatalogCategoryBar(
                 onMoveLeft = { move(category.id, 1) },
                 onMoveRight = { move(category.id, -1) },
                 modifier = Modifier
-                    .focusRequester(categoryFocusRequesters.getValue(category.id))
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
-                    .focusProperties {
-                        canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
-                    },
+                    .categoryChipFocus(
+                        isTv, category.id, selectedId, categoryBarHasFocus,
+                        categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                    ),
             )
         }
     }
@@ -3891,6 +4147,7 @@ private fun ReorderableLiveCategoryBar(
     selectedId: String?,
     onSelect: (String?) -> Unit,
     isTv: Boolean,
+    focusRestoreController: CategoryFocusRestoreController,
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("live_category_order", android.content.Context.MODE_PRIVATE) }
@@ -3900,7 +4157,6 @@ private fun ReorderableLiveCategoryBar(
     var moving by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val focusRestoreState = remember { CategoryFocusRestoreState() }
     val allFocusRequester = remember { FocusRequester() }
     val favoritesFocusRequester = remember { FocusRequester() }
     val stableCategoryIds = remember(categories) { categories.map(Category::id) }
@@ -3921,7 +4177,7 @@ private fun ReorderableLiveCategoryBar(
     val baseContentPadding = 8.dp
     val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
-    fun selectedFocusTarget(): Pair<Int, FocusRequester>? {
+    fun selectedFocusTarget(): CategoryFocusTarget? {
         val targetIndex = selectedCategoryFocusIndex(
             selectedId = selectedId,
             leadingIds = leadingIds,
@@ -3932,11 +4188,27 @@ private fun ReorderableLiveCategoryBar(
             FAVORITES_CATEGORY_ID -> favoritesFocusRequester
             else -> selectedId?.let(categoryFocusRequesters::get)
         } ?: return null
-        return targetIndex to requester
+        return CategoryFocusTarget(selectedId, targetIndex, requester)
     }
-    focusRestoreState.resolveTarget = { selectedFocusTarget() }
+    focusRestoreController.resolveTarget = { selectedFocusTarget() }
+    focusRestoreController.restore = { cancelDefaultEntry ->
+        restoreSelectedCategoryFocus(
+            listState = listState,
+            scope = scope,
+            controller = focusRestoreController,
+            cancelDefaultEntry = cancelDefaultEntry,
+        )
+    }
+    DisposableEffect(focusRestoreController) {
+        onDispose {
+            focusRestoreController.restore = null
+            focusRestoreController.resolveTarget = null
+            focusRestoreController.cancel()
+        }
+    }
 
-    LaunchedEffect(selectedId, ordered) {
+    LaunchedEffect(isTv, selectedId, ordered) {
+        if (isTv) return@LaunchedEffect
         val targetIndex = selectedCategoryFocusIndex(
             selectedId = selectedId,
             leadingIds = leadingIds,
@@ -3973,7 +4245,7 @@ private fun ReorderableLiveCategoryBar(
                         restoreSelectedCategoryFocus(
                             listState = listState,
                             scope = scope,
-                            restoreState = focusRestoreState,
+                            controller = focusRestoreController,
                             cancelDefaultEntry = { cancelFocusChange() },
                         )
                     }
@@ -3997,11 +4269,10 @@ private fun ReorderableLiveCategoryBar(
                 primary = selectedId == null,
                 compact = true,
                 modifier = Modifier
-                    .focusRequester(allFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
-                    .focusProperties {
-                        canFocus = !isTv || categoryBarHasFocus || selectedId == null
-                    },
+                    .categoryChipFocus(
+                        isTv, null, selectedId, categoryBarHasFocus,
+                        allFocusRequester, focusRestoreController,
+                    ),
             )
         }
         item {
@@ -4011,11 +4282,10 @@ private fun ReorderableLiveCategoryBar(
                 primary = selectedId == FAVORITES_CATEGORY_ID,
                 compact = true,
                 modifier = Modifier
-                    .focusRequester(favoritesFocusRequester)
-                    .keepCategoryChipFullyVisibleOnFocus(isTv)
-                    .focusProperties {
-                        canFocus = !isTv || categoryBarHasFocus || selectedId == FAVORITES_CATEGORY_ID
-                    },
+                    .categoryChipFocus(
+                        isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        favoritesFocusRequester, focusRestoreController,
+                    ),
             )
         }
         items(ordered, key = Category::id) { category ->
@@ -4026,11 +4296,10 @@ private fun ReorderableLiveCategoryBar(
                     primary = selectedId == category.id,
                     compact = true,
                     modifier = Modifier
-                        .focusRequester(categoryFocusRequesters.getValue(category.id))
-                        .keepCategoryChipFullyVisibleOnFocus(isTv)
-                        .focusProperties {
-                            canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
-                        },
+                        .categoryChipFocus(
+                            isTv, category.id, selectedId, categoryBarHasFocus,
+                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                        ),
                 )
             } else {
                 LiveCategoryChip(
@@ -4045,11 +4314,10 @@ private fun ReorderableLiveCategoryBar(
                     onMoveLeft = { move(category.id, 1) },
                     onMoveRight = { move(category.id, -1) },
                     modifier = Modifier
-                        .focusRequester(categoryFocusRequesters.getValue(category.id))
-                        .keepCategoryChipFullyVisibleOnFocus(isTv)
-                        .focusProperties {
-                            canFocus = !isTv || categoryBarHasFocus || selectedId == category.id
-                        },
+                        .categoryChipFocus(
+                            isTv, category.id, selectedId, categoryBarHasFocus,
+                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                        ),
                 )
             }
         }
