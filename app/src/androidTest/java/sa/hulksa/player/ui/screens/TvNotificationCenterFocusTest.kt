@@ -12,16 +12,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.fetchSemanticsNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import sa.hulksa.player.data.LocalEpisodeNotification
@@ -67,6 +72,128 @@ class TvNotificationCenterFocusTest {
             cardOneDelete,
             cardTarget(2, NotificationTvCardAction.OPEN),
         )
+    }
+
+    @Test
+    fun readAllDownHandsFocusToExactFirstCardOpenAction() {
+        val harness = setNotificationCenter(cardCount = 3)
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.Back,
+            NotificationTvFocusTarget.ReadAll,
+            Key.DirectionDown,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.ReadAll,
+            cardTarget(1, NotificationTvCardAction.OPEN),
+            Key.DirectionDown,
+        )
+    }
+
+    @Test
+    fun clearAllDownHandsFocusToExactFirstCardOpenAction() {
+        val harness = setNotificationCenter(cardCount = 3)
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.Back,
+            NotificationTvFocusTarget.ReadAll,
+            Key.DirectionDown,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.ReadAll,
+            NotificationTvFocusTarget.ClearAll,
+            Key.DirectionRight,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.ClearAll,
+            cardTarget(1, NotificationTvCardAction.OPEN),
+            Key.DirectionDown,
+        )
+    }
+
+    @Test
+    fun readAllDisabledUsesClearAllThenExactFirstCardOpenAction() {
+        val harness = setNotificationCenter(
+            cardCount = 3,
+            initiallyRead = true,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.Back,
+            NotificationTvFocusTarget.ClearAll,
+            Key.DirectionDown,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.ClearAll,
+            cardTarget(1, NotificationTvCardAction.OPEN),
+            Key.DirectionDown,
+        )
+    }
+
+    @Test
+    fun headerHandoffComposesInitiallyUnplacedFirstCardBeforeRequestingFocus() {
+        val harness = setNotificationCenter(
+            cardCount = 10,
+            initialFirstVisibleItemIndex = 9,
+        )
+        val cardOneOpen = cardTarget(1, NotificationTvCardAction.OPEN)
+        composeRule.onNodeWithTag(notificationTvFocusTag(cardOneOpen)).assertDoesNotExist()
+
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.Back,
+            NotificationTvFocusTarget.ReadAll,
+            Key.DirectionDown,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.ReadAll,
+            cardOneOpen,
+            Key.DirectionDown,
+        )
+        composeRule.runOnIdle {
+            assertEquals(0, harness.listState.firstVisibleItemIndex)
+        }
+    }
+
+    @Test
+    fun repeatedDownDuringOffscreenHeaderHandoffCannotLeaveFocusInHeader() {
+        val harness = setNotificationCenter(
+            cardCount = 10,
+            initialFirstVisibleItemIndex = 9,
+        )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.Back,
+            NotificationTvFocusTarget.ReadAll,
+            Key.DirectionDown,
+        )
+        moveAndAssert(
+            harness = harness,
+            source = NotificationTvFocusTarget.ReadAll,
+            target = cardTarget(1, NotificationTvCardAction.OPEN),
+            key = Key.DirectionDown,
+            keyPressCount = 4,
+        )
+    }
+
+    @Test
+    fun oneCardCenterOwnsFullAvailableHeight() {
+        verifyFullHeight(cardCount = 1)
+    }
+
+    @Test
+    fun twoCardCenterOwnsFullAvailableHeight() {
+        verifyFullHeight(cardCount = 2)
+    }
+
+    @Test
+    fun fiveCardCenterOwnsFullAvailableHeight() {
+        verifyFullHeight(cardCount = 5)
     }
 
     private fun verifyFullTraversal(cardCount: Int, repeatAtCard: Int? = null) {
@@ -204,28 +331,64 @@ class TvNotificationCenterFocusTest {
         }
     }
 
-    private fun setNotificationCenter(cardCount: Int): Harness {
+    private fun verifyFullHeight(cardCount: Int) {
+        val harness = setNotificationCenter(cardCount = cardCount)
+        composeRule.waitForIdle()
+
+        val containerBounds = composeRule.onNodeWithTag(TEST_CONTAINER_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val rootBounds = composeRule.onNodeWithTag(NOTIFICATION_TV_CENTER_ROOT_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val listBounds = composeRule.onNodeWithTag(NOTIFICATION_TV_CENTER_LIST_TAG)
+            .fetchSemanticsNode().boundsInRoot
+        val firstCardBounds = composeRule.onNodeWithTag(notificationTvCardContainerTag("card-1"))
+            .fetchSemanticsNode().boundsInRoot
+        val contentBottomPadding = with(composeRule.density) {
+            harness.metrics.topPaddingDp.dp.toPx()
+        }
+        val expectedCardHeight = with(composeRule.density) {
+            maxOf(harness.metrics.posterHeightDp + 20, 152).dp.toPx()
+        }
+
+        assertEquals(containerBounds.top, rootBounds.top, 0.5f)
+        assertEquals(containerBounds.bottom, rootBounds.bottom, 0.5f)
+        assertEquals(rootBounds.bottom - contentBottomPadding, listBounds.bottom, 1f)
+        assertTrue(listBounds.height > 0f)
+        assertEquals(expectedCardHeight, firstCardBounds.height, 1f)
+    }
+
+    private fun setNotificationCenter(
+        cardCount: Int,
+        initialFirstVisibleItemIndex: Int = 0,
+        initiallyRead: Boolean = false,
+        containerHeight: Dp = 420.dp,
+    ): Harness {
         val harness = Harness()
         composeRule.setContent {
             var notifications by remember(cardCount) {
-                mutableStateOf(episodeNotifications(cardCount))
+                mutableStateOf(episodeNotifications(cardCount, initiallyRead))
             }
-            val listState = rememberLazyListState()
+            val listState = rememberLazyListState(
+                initialFirstVisibleItemIndex = initialFirstVisibleItemIndex,
+            )
+            val metrics = localNotificationCenterMetrics(
+                widthDp = 720,
+                heightDp = containerHeight.value.toInt(),
+                isTv = true,
+            )
             harness.listState = listState
+            harness.metrics = metrics
             HulkTheme {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(420.dp),
+                        .height(containerHeight)
+                        .testTag(TEST_CONTAINER_TAG),
                 ) {
                     TvLocalNotificationCenter(
                         notifications = notifications,
                         unreadCount = notifications.count { !it.read },
-                        metrics = localNotificationCenterMetrics(
-                            widthDp = 720,
-                            heightDp = 420,
-                            isTv = true,
-                        ),
+                        metrics = metrics,
                         onBack = {},
                         onOpen = {},
                         onMarkRead = { target ->
@@ -269,7 +432,10 @@ class TvNotificationCenterFocusTest {
         harness.listState.firstVisibleItemIndex to harness.listState.firstVisibleItemScrollOffset
     }
 
-    private fun episodeNotifications(count: Int): List<LocalNotificationItem> =
+    private fun episodeNotifications(
+        count: Int,
+        read: Boolean = false,
+    ): List<LocalNotificationItem> =
         (1..count).map { index ->
             LocalNotificationItem.Episode(
                 LocalEpisodeNotification(
@@ -285,7 +451,7 @@ class TvNotificationCenterFocusTest {
                     posterUrl = null,
                     categoryId = "category",
                     createdAtEpochMs = 1_000L - index,
-                    read = false,
+                    read = read,
                     popupShown = false,
                     batchId = "batch",
                 ),
@@ -302,6 +468,11 @@ class TvNotificationCenterFocusTest {
 
     private class Harness {
         lateinit var listState: LazyListState
+        lateinit var metrics: LocalNotificationCenterMetrics
         val transitions = CopyOnWriteArrayList<NotificationTvFocusTarget>()
+    }
+
+    private companion object {
+        const val TEST_CONTAINER_TAG = "notification-tv-test-container"
     }
 }

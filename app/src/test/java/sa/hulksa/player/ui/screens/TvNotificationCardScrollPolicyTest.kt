@@ -3,6 +3,7 @@ package sa.hulksa.player.ui.screens
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TvNotificationCardScrollPolicyTest {
@@ -126,6 +127,14 @@ class TvNotificationCardScrollPolicyTest {
             notificationTvFocusMove(
                 graph,
                 cardTarget(1, NotificationTvCardAction.DELETE),
+                NotificationFocusDirection.DOWN,
+            ),
+        )
+        assertEquals(
+            NotificationTvFocusTarget.ClearAll,
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.Back,
                 NotificationFocusDirection.DOWN,
             ),
         )
@@ -334,6 +343,28 @@ class TvNotificationCardScrollPolicyTest {
                 NotificationFocusDirection.UP,
             ),
         )
+    }
+
+    @Test
+    fun customGraphBlocksOnlyDirectionsWithoutOwnedTargets() {
+        val graph = graph(3)
+
+        val readAllBlocked = notificationTvBlockedDirections(
+            graph = graph,
+            current = NotificationTvFocusTarget.ReadAll,
+        )
+        assertFalse(NotificationFocusDirection.DOWN in readAllBlocked)
+        assertFalse(NotificationFocusDirection.RIGHT in readAllBlocked)
+        assertTrue(NotificationFocusDirection.LEFT in readAllBlocked)
+
+        val firstOpenBlocked = notificationTvBlockedDirections(
+            graph = graph,
+            current = cardTarget(1, NotificationTvCardAction.OPEN),
+        )
+        assertFalse(NotificationFocusDirection.DOWN in firstOpenBlocked)
+        assertFalse(NotificationFocusDirection.UP in firstOpenBlocked)
+        assertTrue(NotificationFocusDirection.LEFT in firstOpenBlocked)
+        assertTrue(NotificationFocusDirection.RIGHT in firstOpenBlocked)
     }
 
     private fun graph(count: Int): NotificationTvFocusGraph = NotificationTvFocusGraph(

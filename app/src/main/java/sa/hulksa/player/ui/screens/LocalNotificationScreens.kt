@@ -180,6 +180,19 @@ internal fun notificationTvFocusTag(target: NotificationTvFocusTarget): String =
         "notification-card-${target.notificationId}-${target.action.name}"
 }
 
+internal const val NOTIFICATION_TV_CENTER_ROOT_TAG = "notification-tv-center-root"
+internal const val NOTIFICATION_TV_CENTER_LIST_TAG = "notification-tv-center-list"
+internal fun notificationTvCardContainerTag(notificationId: String): String =
+    "notification-card-$notificationId-container"
+
+internal fun notificationTvBlockedDirections(
+    graph: NotificationTvFocusGraph,
+    current: NotificationTvFocusTarget,
+): Set<NotificationFocusDirection> = NotificationFocusDirection.entries
+    .filterTo(mutableSetOf()) { direction ->
+        notificationTvFocusMove(graph, current, direction) == null
+    }
+
 internal fun requestNotificationTvFocusOnce(request: () -> Boolean): Boolean =
     runCatching { request() }.getOrDefault(false)
 
@@ -496,6 +509,8 @@ private fun NotificationActionButton(
     tvCenterCompact: Boolean = false,
     tvFocusHandle: NotificationFocusHandle? = null,
     tvFocusTag: String? = null,
+    tvFocusDestinations: Map<NotificationFocusDirection, FocusRequester>? = null,
+    tvBlockedDirections: Set<NotificationFocusDirection>? = null,
     onTvDirection: ((NotificationFocusDirection) -> Boolean)? = null,
     onFocused: (() -> Unit)? = null,
 ) {
@@ -538,9 +553,7 @@ private fun NotificationActionButton(
         modifier = modifier
             .then(
                 if (tvFocusHandle != null) {
-                    Modifier
-                        .focusRequester(tvFocusHandle.requester)
-                        .onGloballyPositioned { tvFocusHandle.onPlaced() }
+                    Modifier.focusRequester(tvFocusHandle.requester)
                 } else {
                     Modifier
                 },
@@ -553,10 +566,18 @@ private fun NotificationActionButton(
             .focusProperties {
                 canFocus = enabled
                 if (isTv) {
-                    up = FocusRequester.Cancel
-                    down = FocusRequester.Cancel
-                    left = FocusRequester.Cancel
-                    right = FocusRequester.Cancel
+                    fun destinationFor(direction: NotificationFocusDirection): FocusRequester =
+                        tvFocusDestinations?.get(direction)
+                            ?: if (tvBlockedDirections == null || direction in tvBlockedDirections) {
+                                FocusRequester.Cancel
+                            } else {
+                                FocusRequester.Default
+                            }
+
+                    up = destinationFor(NotificationFocusDirection.UP)
+                    down = destinationFor(NotificationFocusDirection.DOWN)
+                    left = destinationFor(NotificationFocusDirection.LEFT)
+                    right = destinationFor(NotificationFocusDirection.RIGHT)
                 }
             }
             .onFocusChanged { state ->
@@ -567,13 +588,20 @@ private fun NotificationActionButton(
                 if (isTv && onTvDirection != null) {
                     Modifier.onPreviewKeyEvent { event ->
                         val direction = keyToDirection(event.key) ?: return@onPreviewKeyEvent false
-                        if (event.type == KeyEventType.KeyDown) onTvDirection(direction) else true
+                        event.type == KeyEventType.KeyDown && onTvDirection(direction)
                     }
                 } else {
                     Modifier
                 },
             )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(
+                if (tvFocusHandle != null) {
+                    Modifier.onGloballyPositioned { tvFocusHandle.onPlaced() }
+                } else {
+                    Modifier
+                },
+            )
             .padding(
                 horizontal = when {
                     headerCompact -> 12.dp
@@ -618,21 +646,7 @@ fun LocalNotificationCenterScreen(
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .then(
-                if (isTv) {
-                    Modifier.background(
-                        Brush.verticalGradient(
-                            listOf(
-                                colors.background,
-                                colors.surface.copy(alpha = .44f),
-                                colors.background,
-                            ),
-                        ),
-                    )
-                } else {
-                    Modifier.background(colors.background)
-                },
-            )
+            .background(colors.background)
             .safeDrawingPadding(),
     ) {
         val metrics = localNotificationCenterMetrics(
@@ -736,6 +750,16 @@ internal fun TvLocalNotificationCenter(
         return requestNotificationTvFocusOnce { handle.requester.requestFocus() }
     }
 
+    fun focusDestinationsFor(
+        current: NotificationTvFocusTarget,
+    ): Map<NotificationFocusDirection, FocusRequester> = buildMap {
+        NotificationFocusDirection.entries.forEach { direction ->
+            val target = notificationTvFocusMove(graph, current, direction)
+            val requester = target?.let(::focusHandleFor)?.requester
+            if (requester != null) put(direction, requester)
+        }
+    }
+
     suspend fun requestFocusAfterTargetPlacement(
         target: NotificationTvFocusTarget,
         moveGraph: NotificationTvFocusGraph,
@@ -774,10 +798,14 @@ internal fun TvLocalNotificationCenter(
         moveGraph: NotificationTvFocusGraph,
         composeOffscreenCard: Boolean,
         onSettled: ((Boolean) -> Unit)? = null,
-    ) {
+    ): Boolean {
         if (focusTransaction.isActive) {
             onSettled?.invoke(false)
-            return
+            return false
+        }
+        if (focusHandleFor(target) == null) {
+            onSettled?.invoke(false)
+            return false
         }
         lateinit var launchedJob: Job
         launchedJob = focusScope.launch(start = CoroutineStart.LAZY) {
@@ -799,6 +827,7 @@ internal fun TvLocalNotificationCenter(
         focusTransaction.job = launchedJob
         focusTransaction.target = target
         launchedJob.start()
+        return true
     }
 
     fun requestFocusMove(
@@ -806,10 +835,15 @@ internal fun TvLocalNotificationCenter(
         target: NotificationTvFocusTarget,
         moveGraph: NotificationTvFocusGraph,
         onSettled: ((Boolean) -> Unit)? = null,
-    ) {
+    ): Boolean {
         if (focusTransaction.isActive) {
             onSettled?.invoke(false)
-            return
+            return false
+        }
+        val handle = focusHandleFor(target)
+        if (handle == null) {
+            onSettled?.invoke(false)
+            return false
         }
         val currentCard = current as? NotificationTvFocusTarget.CardAction
         val targetCard = target as? NotificationTvFocusTarget.CardAction
@@ -819,8 +853,9 @@ internal fun TvLocalNotificationCenter(
             currentCard.notificationId == targetCard.notificationId
         ) {
             // Action-to-action movement within one card never consults or moves the list.
-            onSettled?.invoke(requestAttachedFocus(target))
-            return
+            val focusRequested = requestAttachedFocus(target)
+            onSettled?.invoke(focusRequested)
+            return focusRequested
         }
 
         val needsOffscreenComposition = notificationTvTargetNeedsOffscreenComposition(
@@ -830,14 +865,12 @@ internal fun TvLocalNotificationCenter(
                 listState.layoutInfo.visibleItemsInfo.any { item -> item.key == notificationId }
             },
         )
-        if (!needsOffscreenComposition) {
+        if (!needsOffscreenComposition && handle.isPlaced) {
             val focusRequested = requestAttachedFocus(target)
-            if (focusRequested) {
-                onSettled?.invoke(true)
-                return
-            }
+            onSettled?.invoke(focusRequested)
+            return focusRequested
         }
-        startFocusTransaction(
+        return startFocusTransaction(
             target = target,
             moveGraph = moveGraph,
             composeOffscreenCard = needsOffscreenComposition,
@@ -850,11 +883,8 @@ internal fun TvLocalNotificationCenter(
         direction: NotificationFocusDirection,
     ): Boolean {
         if (focusTransaction.isActive) return true
-        val target = notificationTvFocusMove(graph, current, direction)
-        if (target != null) {
-            requestFocusMove(current, target, graph)
-        }
-        return true
+        val target = notificationTvFocusMove(graph, current, direction) ?: return false
+        return requestFocusMove(current, target, graph)
     }
 
     fun markReadWithFocusTransfer(notification: LocalNotificationItem) {
@@ -929,6 +959,17 @@ internal fun TvLocalNotificationCenter(
             .fillMaxHeight()
             .widthIn(max = metrics.maxContentWidthDp.dp)
             .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        colors.background,
+                        // Keep short lists visually owned through the bottom safe edge.
+                        colors.surface.copy(alpha = .44f),
+                        colors.surface.copy(alpha = .44f),
+                    ),
+                ),
+            )
+            .testTag(NOTIFICATION_TV_CENTER_ROOT_TAG)
             .padding(
                 horizontal = metrics.horizontalPaddingDp.dp,
                 vertical = metrics.topPaddingDp.dp,
@@ -969,6 +1010,8 @@ internal fun TvLocalNotificationCenter(
                 tvCenterCompact = true,
                 tvFocusHandle = backFocus,
                 tvFocusTag = notificationTvFocusTag(backTarget),
+                tvFocusDestinations = focusDestinationsFor(backTarget),
+                tvBlockedDirections = notificationTvBlockedDirections(graph, backTarget),
                 onTvDirection = { direction -> handleDirection(backTarget, direction) },
                 onFocused = { recordFocusedTarget(backTarget) },
                 modifier = Modifier
@@ -1003,6 +1046,8 @@ internal fun TvLocalNotificationCenter(
                     tvCenterCompact = true,
                     tvFocusHandle = clearAllFocus,
                     tvFocusTag = notificationTvFocusTag(clearAllTarget),
+                    tvFocusDestinations = focusDestinationsFor(clearAllTarget),
+                    tvBlockedDirections = notificationTvBlockedDirections(graph, clearAllTarget),
                     onTvDirection = { direction -> handleDirection(clearAllTarget, direction) },
                     onFocused = { recordFocusedTarget(clearAllTarget) },
                     modifier = Modifier
@@ -1020,6 +1065,8 @@ internal fun TvLocalNotificationCenter(
                     tvCenterCompact = true,
                     tvFocusHandle = readAllFocus,
                     tvFocusTag = notificationTvFocusTag(readAllTarget),
+                    tvFocusDestinations = focusDestinationsFor(readAllTarget),
+                    tvBlockedDirections = notificationTvBlockedDirections(graph, readAllTarget),
                     onTvDirection = { direction -> handleDirection(readAllTarget, direction) },
                     onFocused = { recordFocusedTarget(readAllTarget) },
                     modifier = Modifier
@@ -1040,7 +1087,8 @@ internal fun TvLocalNotificationCenter(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .testTag(NOTIFICATION_TV_CENTER_LIST_TAG),
                 contentPadding = PaddingValues(bottom = metrics.topPaddingDp.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1051,6 +1099,8 @@ internal fun TvLocalNotificationCenter(
                     TvLocalNotificationCard(
                         notification = notification,
                         metrics = metrics,
+                        graph = graph,
+                        focusDestinations = ::focusDestinationsFor,
                         focus = checkNotNull(cardFocusRegistry[notification.id]),
                         onDirection = ::handleDirection,
                         onFocused = ::recordFocusedTarget,
@@ -1214,6 +1264,10 @@ private fun NotificationCenterEmptyState(
 private fun TvLocalNotificationCard(
     notification: LocalNotificationItem,
     metrics: LocalNotificationCenterMetrics,
+    graph: NotificationTvFocusGraph,
+    focusDestinations: (
+        NotificationTvFocusTarget,
+    ) -> Map<NotificationFocusDirection, FocusRequester>,
     focus: NotificationCardFocus,
     onDirection: (NotificationTvFocusTarget, NotificationFocusDirection) -> Boolean,
     onFocused: (NotificationTvFocusTarget) -> Unit,
@@ -1248,6 +1302,7 @@ private fun TvLocalNotificationCard(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = minimumHeight.dp)
+            .testTag(notificationTvCardContainerTag(notification.id))
             .clip(shape)
             .background(if (notification.read) colors.surface.copy(alpha = .72f) else colors.surfaceRaised.copy(alpha = .94f))
             .border(
@@ -1335,6 +1390,8 @@ private fun TvLocalNotificationCard(
                 tvCenterCompact = true,
                 tvFocusHandle = focus.open,
                 tvFocusTag = notificationTvFocusTag(openTarget),
+                tvFocusDestinations = focusDestinations(openTarget),
+                tvBlockedDirections = notificationTvBlockedDirections(graph, openTarget),
                 onTvDirection = { direction -> onDirection(openTarget, direction) },
                 onFocused = { onFocused(openTarget) },
                 modifier = Modifier
@@ -1350,6 +1407,8 @@ private fun TvLocalNotificationCard(
                     tvCenterCompact = true,
                     tvFocusHandle = focus.read,
                     tvFocusTag = notificationTvFocusTag(markReadTarget),
+                    tvFocusDestinations = focusDestinations(markReadTarget),
+                    tvBlockedDirections = notificationTvBlockedDirections(graph, markReadTarget),
                     onTvDirection = { direction -> onDirection(markReadTarget, direction) },
                     onFocused = { onFocused(markReadTarget) },
                     modifier = Modifier
@@ -1365,6 +1424,8 @@ private fun TvLocalNotificationCard(
                 tvCenterCompact = true,
                 tvFocusHandle = focus.delete,
                 tvFocusTag = notificationTvFocusTag(deleteTarget),
+                tvFocusDestinations = focusDestinations(deleteTarget),
+                tvBlockedDirections = notificationTvBlockedDirections(graph, deleteTarget),
                 onTvDirection = { direction -> onDirection(deleteTarget, direction) },
                 onFocused = { onFocused(deleteTarget) },
                 modifier = Modifier
