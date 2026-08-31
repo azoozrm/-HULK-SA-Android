@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -44,7 +45,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,7 +60,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,7 +73,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.EpisodeNotificationPopup
@@ -156,35 +161,23 @@ internal data class NotificationTvFocusGraph(
     val readAllEnabled: Boolean get() = hasNotifications && unreadCount > 0
 }
 
-internal sealed interface NotificationTvCardRevealPlan {
-    data object NoScroll : NotificationTvCardRevealPlan
-    data object ComposeOffscreen : NotificationTvCardRevealPlan
-    data class MinimalScroll(val deltaPx: Int) : NotificationTvCardRevealPlan
+internal fun notificationTvTargetNeedsOffscreenComposition(
+    current: NotificationTvFocusTarget,
+    target: NotificationTvFocusTarget,
+    isTargetCardComposed: (notificationId: String) -> Boolean,
+): Boolean {
+    val targetCard = target as? NotificationTvFocusTarget.CardAction ?: return false
+    val currentCard = current as? NotificationTvFocusTarget.CardAction
+    if (currentCard?.notificationId == targetCard.notificationId) return false
+    return !isTargetCardComposed(targetCard.notificationId)
 }
 
-internal fun notificationTvCardRevealPlan(
-    itemOffset: Int?,
-    itemSize: Int?,
-    viewportStartOffset: Int,
-    viewportEndOffset: Int,
-): NotificationTvCardRevealPlan {
-    if (itemOffset == null || itemSize == null) {
-        return NotificationTvCardRevealPlan.ComposeOffscreen
-    }
-
-    val itemEndOffset = itemOffset + itemSize
-    val clippedAtStart = itemOffset < viewportStartOffset
-    val clippedAtEnd = itemEndOffset > viewportEndOffset
-    return when {
-        clippedAtStart && clippedAtEnd -> NotificationTvCardRevealPlan.NoScroll
-        clippedAtStart -> NotificationTvCardRevealPlan.MinimalScroll(
-            deltaPx = itemOffset - viewportStartOffset,
-        )
-        clippedAtEnd -> NotificationTvCardRevealPlan.MinimalScroll(
-            deltaPx = itemEndOffset - viewportEndOffset,
-        )
-        else -> NotificationTvCardRevealPlan.NoScroll
-    }
+internal fun notificationTvFocusTag(target: NotificationTvFocusTarget): String = when (target) {
+    NotificationTvFocusTarget.Back -> "notification-back"
+    NotificationTvFocusTarget.ReadAll -> "notification-read-all"
+    NotificationTvFocusTarget.ClearAll -> "notification-clear-all"
+    is NotificationTvFocusTarget.CardAction ->
+        "notification-card-${target.notificationId}-${target.action.name}"
 }
 
 internal fun requestNotificationTvFocusOnce(request: () -> Boolean): Boolean =
@@ -436,13 +429,46 @@ fun NotificationBellButton(
     }
 }
 
+private class NotificationFocusHandle {
+    val requester = FocusRequester()
+
+    private var placedSignal = CompletableDeferred<Unit>()
+    var isPlaced: Boolean = false
+        private set
+
+    fun onPlaced() {
+        isPlaced = true
+        placedSignal.complete(Unit)
+    }
+
+    fun onDisposed() {
+        val detachedSignal = placedSignal
+        isPlaced = false
+        placedSignal = CompletableDeferred()
+        detachedSignal.complete(Unit)
+    }
+
+    suspend fun awaitPlaced(): Boolean {
+        val expectedSignal = placedSignal
+        expectedSignal.await()
+        return isPlaced && placedSignal === expectedSignal
+    }
+}
+
 private data class NotificationCardFocus(
-    val open: FocusRequester = FocusRequester(),
-    val read: FocusRequester = FocusRequester(),
-    val delete: FocusRequester = FocusRequester(),
+    val open: NotificationFocusHandle = NotificationFocusHandle(),
+    val read: NotificationFocusHandle = NotificationFocusHandle(),
+    val delete: NotificationFocusHandle = NotificationFocusHandle(),
 )
 
-private class NotificationFocusMoveJob(var job: Job? = null)
+private class NotificationFocusMoveTransaction {
+    var job: Job? = null
+    var target: NotificationTvFocusTarget? = null
+
+    val isActive: Boolean
+        get() = job?.isActive == true
+}
+
 private class NotificationFocusHistory(var graph: NotificationTvFocusGraph)
 
 private fun requestFocusAndConsume(target: FocusRequester?): Boolean {
@@ -468,11 +494,18 @@ private fun NotificationActionButton(
     enabled: Boolean = true,
     headerCompact: Boolean = false,
     tvCenterCompact: Boolean = false,
+    tvFocusHandle: NotificationFocusHandle? = null,
+    tvFocusTag: String? = null,
     onTvDirection: ((NotificationFocusDirection) -> Boolean)? = null,
     onFocused: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
+    if (tvFocusHandle != null) {
+        DisposableEffect(tvFocusHandle) {
+            onDispose { tvFocusHandle.onDisposed() }
+        }
+    }
     val shape = RoundedCornerShape(
         when {
             headerCompact -> 9.dp
@@ -503,6 +536,16 @@ private fun NotificationActionButton(
     }
     Box(
         modifier = modifier
+            .then(
+                if (tvFocusHandle != null) {
+                    Modifier
+                        .focusRequester(tvFocusHandle.requester)
+                        .onGloballyPositioned { tvFocusHandle.onPlaced() }
+                } else {
+                    Modifier
+                },
+            )
+            .then(if (tvFocusTag != null) Modifier.testTag(tvFocusTag) else Modifier)
             .clip(shape)
             .background(background)
             .border(if (focused) 3.dp else 1.dp, borderColor, shape)
@@ -630,7 +673,7 @@ fun LocalNotificationCenterScreen(
 }
 
 @Composable
-private fun TvLocalNotificationCenter(
+internal fun TvLocalNotificationCenter(
     notifications: List<LocalNotificationItem>,
     unreadCount: Int,
     metrics: LocalNotificationCenterMetrics,
@@ -641,11 +684,13 @@ private fun TvLocalNotificationCenter(
     onDelete: (LocalNotificationItem) -> Unit,
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+    onFocusedTargetChanged: (NotificationTvFocusTarget) -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
-    val backRequester = remember { FocusRequester() }
-    val readAllRequester = remember { FocusRequester() }
-    val clearAllRequester = remember { FocusRequester() }
+    val backFocus = remember { NotificationFocusHandle() }
+    val readAllFocus = remember { NotificationFocusHandle() }
+    val clearAllFocus = remember { NotificationFocusHandle() }
     val cardFocusRegistry = remember { mutableMapOf<String, NotificationCardFocus>() }
     val notificationIds = remember(notifications) { notifications.map(LocalNotificationItem::id) }
     val notificationIdSet = remember(notificationIds) { notificationIds.toSet() }
@@ -667,16 +712,15 @@ private fun TvLocalNotificationCenter(
             unreadCount = unreadCount,
         )
     }
-    val listState = rememberLazyListState()
     val focusScope = rememberCoroutineScope()
     var focusedTarget by remember { mutableStateOf<NotificationTvFocusTarget?>(null) }
     val focusHistory = remember { NotificationFocusHistory(graph) }
-    val focusMoveJob = remember { NotificationFocusMoveJob() }
+    val focusTransaction = remember { NotificationFocusMoveTransaction() }
 
-    fun requesterFor(target: NotificationTvFocusTarget): FocusRequester? = when (target) {
-        NotificationTvFocusTarget.Back -> backRequester
-        NotificationTvFocusTarget.ReadAll -> readAllRequester
-        NotificationTvFocusTarget.ClearAll -> clearAllRequester
+    fun focusHandleFor(target: NotificationTvFocusTarget): NotificationFocusHandle? = when (target) {
+        NotificationTvFocusTarget.Back -> backFocus
+        NotificationTvFocusTarget.ReadAll -> readAllFocus
+        NotificationTvFocusTarget.ClearAll -> clearAllFocus
         is NotificationTvFocusTarget.CardAction -> cardFocusRegistry[target.notificationId]?.let { focus ->
             when (target.action) {
                 NotificationTvCardAction.OPEN -> focus.open
@@ -686,67 +730,198 @@ private fun TvLocalNotificationCenter(
         }
     }
 
-    suspend fun requestTargetFocus(target: NotificationTvFocusTarget) {
-        val requester = requesterFor(target) ?: return
-        val cardIndex = (target as? NotificationTvFocusTarget.CardAction)?.let { cardTarget ->
-            graph.cards.indexOfFirst { it.notificationId == cardTarget.notificationId }
-        } ?: -1
-        if (cardIndex >= 0) {
-            val layoutInfo = listState.layoutInfo
-            val visibleItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == cardIndex }
-            when (
-                val revealPlan = notificationTvCardRevealPlan(
-                    itemOffset = visibleItem?.offset,
-                    itemSize = visibleItem?.size,
-                    viewportStartOffset = layoutInfo.viewportStartOffset,
-                    viewportEndOffset = layoutInfo.viewportEndOffset,
-                )
-            ) {
-                NotificationTvCardRevealPlan.NoScroll -> Unit
-                NotificationTvCardRevealPlan.ComposeOffscreen -> {
-                    listState.scrollToItem(cardIndex)
-                    withFrameNanos { }
+    fun requestAttachedFocus(target: NotificationTvFocusTarget): Boolean {
+        val handle = focusHandleFor(target) ?: return false
+        if (!handle.isPlaced) return false
+        return requestNotificationTvFocusOnce { handle.requester.requestFocus() }
+    }
+
+    suspend fun requestFocusAfterTargetPlacement(
+        target: NotificationTvFocusTarget,
+        moveGraph: NotificationTvFocusGraph,
+        composeOffscreenCard: Boolean,
+    ): Boolean {
+        val handle = focusHandleFor(target) ?: return false
+        val cardTarget = target as? NotificationTvFocusTarget.CardAction
+        if (composeOffscreenCard && cardTarget != null) {
+            // Manual list movement is reserved for composing the exact offscreen ID.
+            val targetAlreadyComposed = listState.layoutInfo.visibleItemsInfo.any { item ->
+                item.key == cardTarget.notificationId
+            }
+            if (!targetAlreadyComposed) {
+                val cardIndex = moveGraph.cards.indexOfFirst { card ->
+                    card.notificationId == cardTarget.notificationId
                 }
-                is NotificationTvCardRevealPlan.MinimalScroll -> {
-                    listState.scrollBy(revealPlan.deltaPx.toFloat())
-                }
+                if (cardIndex < 0) return false
+                listState.scrollToItem(cardIndex)
             }
         }
-        requestNotificationTvFocusOnce { requester.requestFocus() }
+        if (!handle.isPlaced && !handle.awaitPlaced()) return false
+        if (cardTarget != null) {
+            val targetStillExists = moveGraph.cards.any { card ->
+                card.notificationId == cardTarget.notificationId
+            }
+            val targetIsVisible = listState.layoutInfo.visibleItemsInfo.any { item ->
+                item.key == cardTarget.notificationId
+            }
+            if (!targetStillExists || !targetIsVisible || !handle.isPlaced) return false
+        }
+        return requestNotificationTvFocusOnce { handle.requester.requestFocus() }
+    }
+
+    fun startFocusTransaction(
+        target: NotificationTvFocusTarget,
+        moveGraph: NotificationTvFocusGraph,
+        composeOffscreenCard: Boolean,
+        onSettled: ((Boolean) -> Unit)? = null,
+    ) {
+        if (focusTransaction.isActive) {
+            onSettled?.invoke(false)
+            return
+        }
+        lateinit var launchedJob: Job
+        launchedJob = focusScope.launch(start = CoroutineStart.LAZY) {
+            var focusRequested = false
+            try {
+                focusRequested = requestFocusAfterTargetPlacement(
+                    target = target,
+                    moveGraph = moveGraph,
+                    composeOffscreenCard = composeOffscreenCard,
+                )
+            } finally {
+                if (focusTransaction.job === launchedJob) {
+                    focusTransaction.job = null
+                    focusTransaction.target = null
+                }
+                onSettled?.invoke(focusRequested)
+            }
+        }
+        focusTransaction.job = launchedJob
+        focusTransaction.target = target
+        launchedJob.start()
+    }
+
+    fun requestFocusMove(
+        current: NotificationTvFocusTarget,
+        target: NotificationTvFocusTarget,
+        moveGraph: NotificationTvFocusGraph,
+        onSettled: ((Boolean) -> Unit)? = null,
+    ) {
+        if (focusTransaction.isActive) {
+            onSettled?.invoke(false)
+            return
+        }
+        val currentCard = current as? NotificationTvFocusTarget.CardAction
+        val targetCard = target as? NotificationTvFocusTarget.CardAction
+        if (
+            currentCard != null &&
+            targetCard != null &&
+            currentCard.notificationId == targetCard.notificationId
+        ) {
+            // Action-to-action movement within one card never consults or moves the list.
+            onSettled?.invoke(requestAttachedFocus(target))
+            return
+        }
+
+        val needsOffscreenComposition = notificationTvTargetNeedsOffscreenComposition(
+            current = current,
+            target = target,
+            isTargetCardComposed = { notificationId ->
+                listState.layoutInfo.visibleItemsInfo.any { item -> item.key == notificationId }
+            },
+        )
+        if (!needsOffscreenComposition) {
+            val focusRequested = requestAttachedFocus(target)
+            if (focusRequested) {
+                onSettled?.invoke(true)
+                return
+            }
+        }
+        startFocusTransaction(
+            target = target,
+            moveGraph = moveGraph,
+            composeOffscreenCard = needsOffscreenComposition,
+            onSettled = onSettled,
+        )
     }
 
     fun handleDirection(
         current: NotificationTvFocusTarget,
         direction: NotificationFocusDirection,
     ): Boolean {
+        if (focusTransaction.isActive) return true
         val target = notificationTvFocusMove(graph, current, direction)
         if (target != null) {
-            focusMoveJob.job?.cancel()
-            focusMoveJob.job = focusScope.launch { requestTargetFocus(target) }
+            requestFocusMove(current, target, graph)
         }
         return true
     }
 
-    LaunchedEffect(Unit) {
-        withFrameNanos { }
-        requestTargetFocus(NotificationTvFocusTarget.Back)
+    fun markReadWithFocusTransfer(notification: LocalNotificationItem) {
+        val current = NotificationTvFocusTarget.CardAction(
+            notification.id,
+            NotificationTvCardAction.MARK_READ,
+        )
+        val fallback = NotificationTvFocusTarget.CardAction(
+            notification.id,
+            NotificationTvCardAction.OPEN,
+        )
+        requestFocusMove(current, fallback, graph) {
+            onMarkRead(notification)
+        }
+    }
+
+    fun deleteWithFocusTransfer(notification: LocalNotificationItem) {
+        val current = NotificationTvFocusTarget.CardAction(
+            notification.id,
+            NotificationTvCardAction.DELETE,
+        )
+        val graphAfterDelete = graph.copy(
+            cards = graph.cards.filterNot { card -> card.notificationId == notification.id },
+            unreadCount = (graph.unreadCount - if (notification.read) 0 else 1).coerceAtLeast(0),
+        )
+        val fallback = notificationTvFocusFallback(
+            current = current,
+            previousGraph = graph,
+            currentGraph = graphAfterDelete,
+        )
+        requestFocusMove(current, fallback, graph) {
+            onDelete(notification)
+        }
+    }
+
+    fun recordFocusedTarget(target: NotificationTvFocusTarget) {
+        if (focusedTarget == target) return
+        focusedTarget = target
+        onFocusedTargetChanged(target)
+    }
+
+    LaunchedEffect(backFocus) {
+        if (backFocus.awaitPlaced()) {
+            requestNotificationTvFocusOnce { backFocus.requester.requestFocus() }
+        }
     }
 
     LaunchedEffect(graph) {
+        val runningTransaction = focusTransaction.job?.takeIf { it.isActive }
+        runningTransaction?.cancelAndJoin()
+        if (focusTransaction.job === runningTransaction) {
+            focusTransaction.job = null
+            focusTransaction.target = null
+        }
         val current = focusedTarget
+        val previousGraph = focusHistory.graph
+        focusHistory.graph = graph
         if (current != null) {
             val fallback = notificationTvFocusFallback(
                 current = current,
-                previousGraph = focusHistory.graph,
+                previousGraph = previousGraph,
                 currentGraph = graph,
             )
             if (fallback != current) {
-                focusMoveJob.job?.cancel()
-                withFrameNanos { }
-                requestTargetFocus(fallback)
+                requestFocusMove(current, fallback, graph)
             }
         }
-        focusHistory.graph = graph
     }
 
     Column(
@@ -792,13 +967,14 @@ private fun TvLocalNotificationCenter(
                 primary = false,
                 headerCompact = true,
                 tvCenterCompact = true,
+                tvFocusHandle = backFocus,
+                tvFocusTag = notificationTvFocusTag(backTarget),
                 onTvDirection = { direction -> handleDirection(backTarget, direction) },
-                onFocused = { focusedTarget = backTarget },
+                onFocused = { recordFocusedTarget(backTarget) },
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .width(82.dp)
-                    .height(38.dp)
-                    .focusRequester(backRequester),
+                    .height(38.dp),
             )
         }
 
@@ -825,12 +1001,13 @@ private fun TvLocalNotificationCenter(
                     primary = false,
                     headerCompact = true,
                     tvCenterCompact = true,
+                    tvFocusHandle = clearAllFocus,
+                    tvFocusTag = notificationTvFocusTag(clearAllTarget),
                     onTvDirection = { direction -> handleDirection(clearAllTarget, direction) },
-                    onFocused = { focusedTarget = clearAllTarget },
+                    onFocused = { recordFocusedTarget(clearAllTarget) },
                     modifier = Modifier
                         .width(96.dp)
-                        .height(38.dp)
-                        .focusRequester(clearAllRequester),
+                        .height(38.dp),
                 )
                 val readAllTarget = NotificationTvFocusTarget.ReadAll
                 NotificationActionButton(
@@ -841,12 +1018,13 @@ private fun TvLocalNotificationCenter(
                     primary = false,
                     headerCompact = true,
                     tvCenterCompact = true,
+                    tvFocusHandle = readAllFocus,
+                    tvFocusTag = notificationTvFocusTag(readAllTarget),
                     onTvDirection = { direction -> handleDirection(readAllTarget, direction) },
-                    onFocused = { focusedTarget = readAllTarget },
+                    onFocused = { recordFocusedTarget(readAllTarget) },
                     modifier = Modifier
                         .width(164.dp)
-                        .height(38.dp)
-                        .focusRequester(readAllRequester),
+                        .height(38.dp),
                 )
             }
         }
@@ -875,10 +1053,10 @@ private fun TvLocalNotificationCenter(
                         metrics = metrics,
                         focus = checkNotNull(cardFocusRegistry[notification.id]),
                         onDirection = ::handleDirection,
-                        onFocused = { focusedTarget = it },
+                        onFocused = ::recordFocusedTarget,
                         onOpen = { onOpen(notification) },
-                        onMarkRead = { onMarkRead(notification) },
-                        onDelete = { onDelete(notification) },
+                        onMarkRead = { markReadWithFocusTransfer(notification) },
+                        onDelete = { deleteWithFocusTransfer(notification) },
                     )
                 }
             }
@@ -1155,12 +1333,13 @@ private fun TvLocalNotificationCard(
                 onClick = onOpen,
                 isTv = true,
                 tvCenterCompact = true,
+                tvFocusHandle = focus.open,
+                tvFocusTag = notificationTvFocusTag(openTarget),
                 onTvDirection = { direction -> onDirection(openTarget, direction) },
                 onFocused = { onFocused(openTarget) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
-                    .focusRequester(focus.open),
+                    .height(40.dp),
             )
             if (episode != null && !notification.read) {
                 NotificationActionButton(
@@ -1169,12 +1348,13 @@ private fun TvLocalNotificationCard(
                     isTv = true,
                     primary = false,
                     tvCenterCompact = true,
+                    tvFocusHandle = focus.read,
+                    tvFocusTag = notificationTvFocusTag(markReadTarget),
                     onTvDirection = { direction -> onDirection(markReadTarget, direction) },
                     onFocused = { onFocused(markReadTarget) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(40.dp)
-                        .focusRequester(focus.read),
+                        .height(40.dp),
                 )
             }
             NotificationActionButton(
@@ -1183,12 +1363,13 @@ private fun TvLocalNotificationCard(
                 isTv = true,
                 primary = false,
                 tvCenterCompact = true,
+                tvFocusHandle = focus.delete,
+                tvFocusTag = notificationTvFocusTag(deleteTarget),
                 onTvDirection = { direction -> onDirection(deleteTarget, direction) },
                 onFocused = { onFocused(deleteTarget) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
-                    .focusRequester(focus.delete),
+                    .height(40.dp),
             )
         }
     }

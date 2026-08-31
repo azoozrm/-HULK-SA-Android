@@ -58,6 +58,80 @@ class TvNotificationCardScrollPolicyTest {
     }
 
     @Test
+    fun unreadCardMovesThroughEveryActionWithoutSkipping() {
+        val graph = graph(2)
+
+        assertEquals(
+            cardTarget(1, NotificationTvCardAction.MARK_READ),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.OPEN),
+                NotificationFocusDirection.DOWN,
+            ),
+        )
+        assertEquals(
+            cardTarget(1, NotificationTvCardAction.DELETE),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.MARK_READ),
+                NotificationFocusDirection.DOWN,
+            ),
+        )
+        assertEquals(
+            cardTarget(1, NotificationTvCardAction.MARK_READ),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.DELETE),
+                NotificationFocusDirection.UP,
+            ),
+        )
+        assertEquals(
+            cardTarget(1, NotificationTvCardAction.OPEN),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.MARK_READ),
+                NotificationFocusDirection.UP,
+            ),
+        )
+    }
+
+    @Test
+    fun readCardSkipsHiddenMarkReadInBothDirections() {
+        val graph = NotificationTvFocusGraph(
+            cards = listOf(
+                NotificationTvCardFocusSpec("card-1", markReadVisible = false),
+                NotificationTvCardFocusSpec("card-2", markReadVisible = false),
+            ),
+            unreadCount = 0,
+        )
+
+        assertEquals(
+            cardTarget(1, NotificationTvCardAction.DELETE),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.OPEN),
+                NotificationFocusDirection.DOWN,
+            ),
+        )
+        assertEquals(
+            cardTarget(1, NotificationTvCardAction.OPEN),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.DELETE),
+                NotificationFocusDirection.UP,
+            ),
+        )
+        assertEquals(
+            cardTarget(2, NotificationTvCardAction.OPEN),
+            notificationTvFocusMove(
+                graph,
+                cardTarget(1, NotificationTvCardAction.DELETE),
+                NotificationFocusDirection.DOWN,
+            ),
+        )
+    }
+
+    @Test
     fun threeFiveAndTenPlusNotificationsKeepEveryCardBoundaryStable() {
         listOf(3, 5, 10, 12).forEach { count ->
             val graph = graph(count)
@@ -83,68 +157,60 @@ class TvNotificationCardScrollPolicyTest {
     }
 
     @Test
-    fun partiallyVisibleNextCardUsesOnlyMinimalRevealDelta() {
-        assertEquals(
-            NotificationTvCardRevealPlan.MinimalScroll(deltaPx = 60),
-            notificationTvCardRevealPlan(
-                itemOffset = 240,
-                itemSize = 120,
-                viewportStartOffset = 0,
-                viewportEndOffset = 300,
+    fun sameCardMovementNeverQueriesListComposition() {
+        var compositionQueries = 0
+
+        val needsComposition = notificationTvTargetNeedsOffscreenComposition(
+            current = cardTarget(3, NotificationTvCardAction.OPEN),
+            target = cardTarget(3, NotificationTvCardAction.MARK_READ),
+            isTargetCardComposed = {
+                compositionQueries += 1
+                false
+            },
+        )
+
+        assertFalse(needsComposition)
+        assertEquals(0, compositionQueries)
+    }
+
+    @Test
+    fun partiallyOrFullyVisibleTargetUsesOnlyAttachedFocus() {
+        assertFalse(
+            notificationTvTargetNeedsOffscreenComposition(
+                current = cardTarget(2, NotificationTvCardAction.DELETE),
+                target = cardTarget(3, NotificationTvCardAction.OPEN),
+                isTargetCardComposed = { true },
             ),
         )
     }
 
     @Test
-    fun partiallyVisiblePreviousCardUsesOnlyMinimalRevealDelta() {
+    fun fullyOffscreenTargetUsesOneCompositionTransaction() {
         assertEquals(
-            NotificationTvCardRevealPlan.MinimalScroll(deltaPx = -36),
-            notificationTvCardRevealPlan(
-                itemOffset = -36,
-                itemSize = 120,
-                viewportStartOffset = 0,
-                viewportEndOffset = 300,
+            true,
+            notificationTvTargetNeedsOffscreenComposition(
+                current = cardTarget(2, NotificationTvCardAction.DELETE),
+                target = cardTarget(3, NotificationTvCardAction.OPEN),
+                isTargetCardComposed = { false },
             ),
         )
     }
 
     @Test
-    fun fullyVisibleCardDoesNotRequestAnyListScroll() {
-        assertEquals(
-            NotificationTvCardRevealPlan.NoScroll,
-            notificationTvCardRevealPlan(
-                itemOffset = 40,
-                itemSize = 120,
-                viewportStartOffset = 0,
-                viewportEndOffset = 300,
-            ),
-        )
-    }
+    fun headerMovementNeverQueriesListComposition() {
+        var compositionQueries = 0
 
-    @Test
-    fun fullyOffscreenTargetUsesDeterministicLazyCompositionReveal() {
-        assertEquals(
-            NotificationTvCardRevealPlan.ComposeOffscreen,
-            notificationTvCardRevealPlan(
-                itemOffset = null,
-                itemSize = null,
-                viewportStartOffset = 0,
-                viewportEndOffset = 300,
-            ),
+        val needsComposition = notificationTvTargetNeedsOffscreenComposition(
+            current = NotificationTvFocusTarget.Back,
+            target = NotificationTvFocusTarget.ReadAll,
+            isTargetCardComposed = {
+                compositionQueries += 1
+                false
+            },
         )
-    }
 
-    @Test
-    fun oversizedVisibleCardDoesNotThrashBetweenBothViewportEdges() {
-        assertEquals(
-            NotificationTvCardRevealPlan.NoScroll,
-            notificationTvCardRevealPlan(
-                itemOffset = -20,
-                itemSize = 360,
-                viewportStartOffset = 0,
-                viewportEndOffset = 300,
-            ),
-        )
+        assertFalse(needsComposition)
+        assertEquals(0, compositionQueries)
     }
 
     @Test
@@ -193,6 +259,39 @@ class TvNotificationCardScrollPolicyTest {
             cardTarget(3, NotificationTvCardAction.OPEN),
             notificationTvFocusFallback(
                 current = cardTarget(2, NotificationTvCardAction.DELETE),
+                previousGraph = previous,
+                currentGraph = current,
+            ),
+        )
+    }
+
+    @Test
+    fun deletingLastCardFallsBackToPreviousCardLastActionById() {
+        val previous = graph(3)
+        val current = previous.copy(
+            cards = previous.cards.filterNot { it.notificationId == "card-3" },
+            unreadCount = 2,
+        )
+
+        assertEquals(
+            cardTarget(2, NotificationTvCardAction.DELETE),
+            notificationTvFocusFallback(
+                current = cardTarget(3, NotificationTvCardAction.DELETE),
+                previousGraph = previous,
+                currentGraph = current,
+            ),
+        )
+    }
+
+    @Test
+    fun deletingOnlyCardFallsBackToBack() {
+        val previous = graph(1)
+        val current = NotificationTvFocusGraph(emptyList(), unreadCount = 0)
+
+        assertEquals(
+            NotificationTvFocusTarget.Back,
+            notificationTvFocusFallback(
+                current = cardTarget(1, NotificationTvCardAction.DELETE),
                 previousGraph = previous,
                 currentGraph = current,
             ),
