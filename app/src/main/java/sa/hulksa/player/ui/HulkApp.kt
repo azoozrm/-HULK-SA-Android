@@ -33,6 +33,7 @@ import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_ALL
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_FAVORITES
+import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
 import sa.hulksa.player.ui.screens.LoginScreen
 import sa.hulksa.player.ui.screens.MainShellScreen
 import sa.hulksa.player.ui.screens.MovieDetailsProPolishedScreen
@@ -68,7 +69,11 @@ fun HulkApp(
     val isPhoneHome =
         !isTv && state.screen == HulkScreen.MAIN && state.destination == MainDestination.HOME
     val applySafeDrawingInsets =
-        !isTv && !isPhoneHome && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN
+        !isTv &&
+            !isPhoneHome &&
+            state.screen != HulkScreen.PLAYER &&
+            state.screen != HulkScreen.LOGIN &&
+            state.screen != HulkScreen.NOTIFICATION_CENTER
     ApplyAdaptiveWindowPresentation(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
@@ -390,7 +395,21 @@ fun HulkApp(
                         }
                     }
 
-                    HulkScreen.NOTIFICATION_CENTER -> Unit
+                    HulkScreen.NOTIFICATION_CENTER -> LocalNotificationCenterScreen(
+                        notifications = state.localNotifications,
+                        unreadCount = state.unreadNotificationCount,
+                        isTv = isTv,
+                        onBack = viewModel::back,
+                        onOpen = { notification ->
+                            viewModel.openNotification(notification.id) { message ->
+                                message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                            }
+                        },
+                        onMarkRead = { notification -> viewModel.markNotificationRead(notification.id) },
+                        onReadAll = viewModel::markAllNotificationsRead,
+                        onDelete = { notification -> viewModel.deleteNotification(notification.id) },
+                        onClearAll = viewModel::clearNotifications,
+                    )
 
                     HulkScreen.PLAYER -> {
                         val playback = state.playback
