@@ -46,7 +46,13 @@ class MobileLiveUxQualificationTest(unittest.TestCase):
         app = self.read(HULK_APP)
         bottom_nav = self.read(BOTTOM_NAV)
         self.assertIn("val applySafeDrawingInsets =", app)
-        self.assertIn("!isTv && !isPhoneHome && state.screen != HulkScreen.PLAYER && state.screen != HulkScreen.LOGIN", app)
+        safe_policy = re.compile(
+            r"!isTv\s*&&\s*!isPhoneHome\s*&&\s*"
+            r"state\.screen != HulkScreen\.PLAYER\s*&&\s*"
+            r"state\.screen != HulkScreen\.LOGIN",
+            re.DOTALL,
+        )
+        self.assertRegex(app, safe_policy)
         self.assertIn("Modifier.windowInsetsPadding(WindowInsets.safeDrawing)", app)
         self.assertIn("adaptiveUi.navigationType != HulkNavigationType.RAIL", app)
         self.assertIn("StableMobileBottomNavigation(", app)
