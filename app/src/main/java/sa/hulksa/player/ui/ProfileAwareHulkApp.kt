@@ -42,7 +42,6 @@ import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.screens.AdaptiveProfileManagementScreen
-import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
 import sa.hulksa.player.ui.screens.MaintenanceScreen
 import sa.hulksa.player.ui.screens.NavigationMemoryStore
 import sa.hulksa.player.ui.screens.NewEpisodeAlertOverlay
@@ -776,22 +775,6 @@ fun ProfileAwareHulkApp(
                 onRetry = viewModel::retryOperations,
             )
 
-            state.screen == HulkScreen.NOTIFICATION_CENTER -> LocalNotificationCenterScreen(
-                notifications = state.localNotifications,
-                unreadCount = state.unreadNotificationCount,
-                isTv = isTelevisionDevice,
-                onBack = viewModel::back,
-                onOpen = { notification ->
-                    viewModel.openNotification(notification.id) { message ->
-                        message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-                    }
-                },
-                onMarkRead = { notification -> viewModel.markNotificationRead(notification.id) },
-                onReadAll = viewModel::markAllNotificationsRead,
-                onDelete = { notification -> viewModel.deleteNotification(notification.id) },
-                onClearAll = viewModel::clearNotifications,
-            )
-
             parentalCodeBootstrapAction != null && activeAccountId != null -> ParentalCodeBootstrapScreen(
             credentialScopeKey = activeAccountId,
             isTv = isTelevisionDevice,
@@ -970,7 +953,8 @@ fun ProfileAwareHulkApp(
             },
         )
 
-            activeProfile?.kind == ProfileKind.KIDS -> KidsProfileExperience(
+            activeProfile?.kind == ProfileKind.KIDS &&
+                state.screen != HulkScreen.NOTIFICATION_CENTER -> KidsProfileExperience(
             viewModel = viewModel,
             isTelevisionDevice = isTelevisionDevice,
             profile = activeProfile,

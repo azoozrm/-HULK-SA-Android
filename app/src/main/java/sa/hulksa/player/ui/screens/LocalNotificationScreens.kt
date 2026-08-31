@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -43,7 +45,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,7 +60,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -70,7 +73,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.EpisodeNotificationPopup
@@ -98,8 +104,8 @@ internal fun localNotificationCenterMetrics(
     return if (isTv) {
         val posterWidth = (width * .055f).roundToInt().coerceIn(68, 96)
         LocalNotificationCenterMetrics(
-            horizontalPaddingDp = (width * .042f).roundToInt().coerceIn(32, 96),
-            topPaddingDp = (height * .04f).roundToInt().coerceIn(22, 96),
+            horizontalPaddingDp = (width * .035f).roundToInt().coerceIn(32, 96),
+            topPaddingDp = (height * .025f).roundToInt().coerceIn(22, 48),
             maxContentWidthDp = (width * .90f).roundToInt().coerceIn(840, 3_200),
             posterWidthDp = posterWidth,
             posterHeightDp = (posterWidth * 1.5f).roundToInt(),
@@ -155,6 +161,44 @@ internal data class NotificationTvFocusGraph(
     val readAllEnabled: Boolean get() = hasNotifications && unreadCount > 0
 }
 
+internal fun notificationTvTargetNeedsOffscreenComposition(
+    current: NotificationTvFocusTarget,
+    target: NotificationTvFocusTarget,
+    isTargetCardComposed: (notificationId: String) -> Boolean,
+): Boolean {
+    val targetCard = target as? NotificationTvFocusTarget.CardAction ?: return false
+    val currentCard = current as? NotificationTvFocusTarget.CardAction
+    if (currentCard?.notificationId == targetCard.notificationId) return false
+    return !isTargetCardComposed(targetCard.notificationId)
+}
+
+internal fun notificationTvFocusTag(target: NotificationTvFocusTarget): String = when (target) {
+    NotificationTvFocusTarget.Back -> "notification-back"
+    NotificationTvFocusTarget.ReadAll -> "notification-read-all"
+    NotificationTvFocusTarget.ClearAll -> "notification-clear-all"
+    is NotificationTvFocusTarget.CardAction ->
+        "notification-card-${target.notificationId}-${target.action.name}"
+}
+
+internal const val NOTIFICATION_CENTER_SCREEN_ROOT_TAG = "notification-center-screen-root"
+internal const val NOTIFICATION_TV_BACKGROUND_TAG = "notification-tv-background"
+internal const val NOTIFICATION_TV_SAFE_CONTENT_TAG = "notification-tv-safe-content"
+internal const val NOTIFICATION_TV_CENTER_ROOT_TAG = "notification-tv-center-root"
+internal const val NOTIFICATION_TV_CENTER_LIST_TAG = "notification-tv-center-list"
+internal fun notificationTvCardContainerTag(notificationId: String): String =
+    "notification-card-$notificationId-container"
+
+internal fun notificationTvBlockedDirections(
+    graph: NotificationTvFocusGraph,
+    current: NotificationTvFocusTarget,
+): Set<NotificationFocusDirection> = NotificationFocusDirection.entries
+    .filterTo(mutableSetOf()) { direction ->
+        notificationTvFocusMove(graph, current, direction) == null
+    }
+
+internal fun requestNotificationTvFocusOnce(request: () -> Boolean): Boolean =
+    runCatching { request() }.getOrDefault(false)
+
 private fun NotificationTvCardFocusSpec.actions(): List<NotificationTvCardAction> = buildList {
     add(NotificationTvCardAction.OPEN)
     if (markReadVisible) add(NotificationTvCardAction.MARK_READ)
@@ -189,11 +233,15 @@ internal fun notificationTvFocusMove(
 ): NotificationTvFocusTarget? {
     return when (current) {
         NotificationTvFocusTarget.Back -> when (direction) {
-            NotificationFocusDirection.DOWN -> graph.bulkEntry()
+            NotificationFocusDirection.LEFT -> NotificationTvFocusTarget.ClearAll.takeIf {
+                graph.hasNotifications
+            }
+            NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
+                NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)
+            }
             else -> null
         }
         NotificationTvFocusTarget.ReadAll -> when (direction) {
-            NotificationFocusDirection.UP -> NotificationTvFocusTarget.Back
             NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
                 NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)
             }
@@ -201,7 +249,7 @@ internal fun notificationTvFocusMove(
             else -> null
         }
         NotificationTvFocusTarget.ClearAll -> when (direction) {
-            NotificationFocusDirection.UP -> NotificationTvFocusTarget.Back
+            NotificationFocusDirection.RIGHT -> NotificationTvFocusTarget.Back
             NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
                 NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)
             }
@@ -401,13 +449,46 @@ fun NotificationBellButton(
     }
 }
 
+private class NotificationFocusHandle {
+    val requester = FocusRequester()
+
+    private var placedSignal = CompletableDeferred<Unit>()
+    var isPlaced: Boolean = false
+        private set
+
+    fun onPlaced() {
+        isPlaced = true
+        placedSignal.complete(Unit)
+    }
+
+    fun onDisposed() {
+        val detachedSignal = placedSignal
+        isPlaced = false
+        placedSignal = CompletableDeferred()
+        detachedSignal.complete(Unit)
+    }
+
+    suspend fun awaitPlaced(): Boolean {
+        val expectedSignal = placedSignal
+        expectedSignal.await()
+        return isPlaced && placedSignal === expectedSignal
+    }
+}
+
 private data class NotificationCardFocus(
-    val open: FocusRequester = FocusRequester(),
-    val read: FocusRequester = FocusRequester(),
-    val delete: FocusRequester = FocusRequester(),
+    val open: NotificationFocusHandle = NotificationFocusHandle(),
+    val read: NotificationFocusHandle = NotificationFocusHandle(),
+    val delete: NotificationFocusHandle = NotificationFocusHandle(),
 )
 
-private class NotificationFocusMoveJob(var job: Job? = null)
+private class NotificationFocusMoveTransaction {
+    var job: Job? = null
+    var target: NotificationTvFocusTarget? = null
+
+    val isActive: Boolean
+        get() = job?.isActive == true
+}
+
 private class NotificationFocusHistory(var graph: NotificationTvFocusGraph)
 
 private fun requestFocusAndConsume(target: FocusRequester?): Boolean {
@@ -433,11 +514,20 @@ private fun NotificationActionButton(
     enabled: Boolean = true,
     headerCompact: Boolean = false,
     tvCenterCompact: Boolean = false,
+    tvFocusHandle: NotificationFocusHandle? = null,
+    tvFocusTag: String? = null,
+    tvFocusDestinations: Map<NotificationFocusDirection, FocusRequester>? = null,
+    tvBlockedDirections: Set<NotificationFocusDirection>? = null,
     onTvDirection: ((NotificationFocusDirection) -> Boolean)? = null,
     onFocused: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
+    if (tvFocusHandle != null) {
+        DisposableEffect(tvFocusHandle) {
+            onDispose { tvFocusHandle.onDisposed() }
+        }
+    }
     val shape = RoundedCornerShape(
         when {
             headerCompact -> 9.dp
@@ -468,6 +558,14 @@ private fun NotificationActionButton(
     }
     Box(
         modifier = modifier
+            .then(
+                if (tvFocusHandle != null) {
+                    Modifier.focusRequester(tvFocusHandle.requester)
+                } else {
+                    Modifier
+                },
+            )
+            .then(if (tvFocusTag != null) Modifier.testTag(tvFocusTag) else Modifier)
             .clip(shape)
             .background(background)
             .border(if (focused) 3.dp else 1.dp, borderColor, shape)
@@ -475,10 +573,18 @@ private fun NotificationActionButton(
             .focusProperties {
                 canFocus = enabled
                 if (isTv) {
-                    up = FocusRequester.Cancel
-                    down = FocusRequester.Cancel
-                    left = FocusRequester.Cancel
-                    right = FocusRequester.Cancel
+                    fun destinationFor(direction: NotificationFocusDirection): FocusRequester =
+                        tvFocusDestinations?.get(direction)
+                            ?: if (tvBlockedDirections == null || direction in tvBlockedDirections) {
+                                FocusRequester.Cancel
+                            } else {
+                                FocusRequester.Default
+                            }
+
+                    up = destinationFor(NotificationFocusDirection.UP)
+                    down = destinationFor(NotificationFocusDirection.DOWN)
+                    left = destinationFor(NotificationFocusDirection.LEFT)
+                    right = destinationFor(NotificationFocusDirection.RIGHT)
                 }
             }
             .onFocusChanged { state ->
@@ -489,13 +595,20 @@ private fun NotificationActionButton(
                 if (isTv && onTvDirection != null) {
                     Modifier.onPreviewKeyEvent { event ->
                         val direction = keyToDirection(event.key) ?: return@onPreviewKeyEvent false
-                        if (event.type == KeyEventType.KeyDown) onTvDirection(direction) else true
+                        event.type == KeyEventType.KeyDown && onTvDirection(direction)
                     }
                 } else {
                     Modifier
                 },
             )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(
+                if (tvFocusHandle != null) {
+                    Modifier.onGloballyPositioned { tvFocusHandle.onPlaced() }
+                } else {
+                    Modifier
+                },
+            )
             .padding(
                 horizontal = when {
                     headerCompact -> 12.dp
@@ -537,65 +650,87 @@ fun LocalNotificationCenterScreen(
     BackHandler(onBack = onBack)
     val colors = LocalHulkColors.current
 
-    BoxWithConstraints(
+    Box(
         Modifier
             .fillMaxSize()
-            .then(
-                if (isTv) {
-                    Modifier.background(
-                        Brush.verticalGradient(
-                            listOf(
-                                colors.background,
-                                colors.surface.copy(alpha = .44f),
-                                colors.background,
-                            ),
-                        ),
-                    )
-                } else {
-                    Modifier.background(colors.background)
-                },
-            )
-            .safeDrawingPadding(),
+            .testTag(NOTIFICATION_CENTER_SCREEN_ROOT_TAG),
     ) {
-        val metrics = localNotificationCenterMetrics(
-            widthDp = maxWidth.value.roundToInt(),
-            heightDp = maxHeight.value.roundToInt(),
-            isTv = isTv,
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(colors.background)
+                .then(
+                    if (isTv) {
+                        Modifier
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        colors.background,
+                                        colors.surface.copy(alpha = .44f),
+                                        colors.surface.copy(alpha = .44f),
+                                    ),
+                                ),
+                            )
+                            .testTag(NOTIFICATION_TV_BACKGROUND_TAG)
+                    } else {
+                        Modifier
+                    },
+                ),
         )
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            if (isTv) {
-                TvLocalNotificationCenter(
-                    notifications = notifications,
-                    unreadCount = unreadCount,
-                    metrics = metrics,
-                    onBack = onBack,
-                    onOpen = onOpen,
-                    onMarkRead = onMarkRead,
-                    onReadAll = onReadAll,
-                    onDelete = onDelete,
-                    onClearAll = onClearAll,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
-            } else {
-                MobileLocalNotificationCenter(
-                    notifications = notifications,
-                    unreadCount = unreadCount,
-                    metrics = metrics,
-                    onBack = onBack,
-                    onOpen = onOpen,
-                    onMarkRead = onMarkRead,
-                    onReadAll = onReadAll,
-                    onDelete = onDelete,
-                    onClearAll = onClearAll,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .safeDrawingPadding(),
+        ) {
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isTv) Modifier.testTag(NOTIFICATION_TV_SAFE_CONTENT_TAG) else Modifier,
+                    ),
+            ) {
+                val availableWidthDp = maxWidth.value.roundToInt().coerceAtLeast(1)
+                val metrics = localNotificationCenterMetrics(
+                    widthDp = availableWidthDp,
+                    heightDp = maxHeight.value.roundToInt(),
+                    isTv = isTv,
+                ).copy(maxContentWidthDp = availableWidthDp)
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    if (isTv) {
+                        TvLocalNotificationCenter(
+                            notifications = notifications,
+                            unreadCount = unreadCount,
+                            metrics = metrics,
+                            onBack = onBack,
+                            onOpen = onOpen,
+                            onMarkRead = onMarkRead,
+                            onReadAll = onReadAll,
+                            onDelete = onDelete,
+                            onClearAll = onClearAll,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        MobileLocalNotificationCenter(
+                            notifications = notifications,
+                            unreadCount = unreadCount,
+                            metrics = metrics,
+                            onBack = onBack,
+                            onOpen = onOpen,
+                            onMarkRead = onMarkRead,
+                            onReadAll = onReadAll,
+                            onDelete = onDelete,
+                            onClearAll = onClearAll,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TvLocalNotificationCenter(
+internal fun TvLocalNotificationCenter(
     notifications: List<LocalNotificationItem>,
     unreadCount: Int,
     metrics: LocalNotificationCenterMetrics,
@@ -606,11 +741,13 @@ private fun TvLocalNotificationCenter(
     onDelete: (LocalNotificationItem) -> Unit,
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+    onFocusedTargetChanged: (NotificationTvFocusTarget) -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
-    val backRequester = remember { FocusRequester() }
-    val readAllRequester = remember { FocusRequester() }
-    val clearAllRequester = remember { FocusRequester() }
+    val backFocus = remember { NotificationFocusHandle() }
+    val readAllFocus = remember { NotificationFocusHandle() }
+    val clearAllFocus = remember { NotificationFocusHandle() }
     val cardFocusRegistry = remember { mutableMapOf<String, NotificationCardFocus>() }
     val notificationIds = remember(notifications) { notifications.map(LocalNotificationItem::id) }
     val notificationIdSet = remember(notificationIds) { notificationIds.toSet() }
@@ -632,16 +769,15 @@ private fun TvLocalNotificationCenter(
             unreadCount = unreadCount,
         )
     }
-    val listState = rememberLazyListState()
     val focusScope = rememberCoroutineScope()
     var focusedTarget by remember { mutableStateOf<NotificationTvFocusTarget?>(null) }
     val focusHistory = remember { NotificationFocusHistory(graph) }
-    val focusMoveJob = remember { NotificationFocusMoveJob() }
+    val focusTransaction = remember { NotificationFocusMoveTransaction() }
 
-    fun requesterFor(target: NotificationTvFocusTarget): FocusRequester? = when (target) {
-        NotificationTvFocusTarget.Back -> backRequester
-        NotificationTvFocusTarget.ReadAll -> readAllRequester
-        NotificationTvFocusTarget.ClearAll -> clearAllRequester
+    fun focusHandleFor(target: NotificationTvFocusTarget): NotificationFocusHandle? = when (target) {
+        NotificationTvFocusTarget.Back -> backFocus
+        NotificationTvFocusTarget.ReadAll -> readAllFocus
+        NotificationTvFocusTarget.ClearAll -> clearAllFocus
         is NotificationTvFocusTarget.CardAction -> cardFocusRegistry[target.notificationId]?.let { focus ->
             when (target.action) {
                 NotificationTvCardAction.OPEN -> focus.open
@@ -651,61 +787,214 @@ private fun TvLocalNotificationCenter(
         }
     }
 
-    suspend fun requestTargetFocus(target: NotificationTvFocusTarget) {
-        val requester = requesterFor(target) ?: return
-        val cardIndex = (target as? NotificationTvFocusTarget.CardAction)?.let { cardTarget ->
-            graph.cards.indexOfFirst { it.notificationId == cardTarget.notificationId }
-        } ?: -1
-        if (cardIndex >= 0) {
-            val layoutInfo = listState.layoutInfo
-            val visibleItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == cardIndex }
-            val fullyVisible = visibleItem != null &&
-                visibleItem.offset >= layoutInfo.viewportStartOffset &&
-                visibleItem.offset + visibleItem.size <= layoutInfo.viewportEndOffset
-            if (!fullyVisible) {
+    fun requestAttachedFocus(target: NotificationTvFocusTarget): Boolean {
+        val handle = focusHandleFor(target) ?: return false
+        if (!handle.isPlaced) return false
+        return requestNotificationTvFocusOnce { handle.requester.requestFocus() }
+    }
+
+    fun focusDestinationsFor(
+        current: NotificationTvFocusTarget,
+    ): Map<NotificationFocusDirection, FocusRequester> = buildMap {
+        NotificationFocusDirection.entries.forEach { direction ->
+            val target = notificationTvFocusMove(graph, current, direction)
+            val requester = target?.let(::focusHandleFor)?.requester
+            if (requester != null) put(direction, requester)
+        }
+    }
+
+    suspend fun requestFocusAfterTargetPlacement(
+        target: NotificationTvFocusTarget,
+        moveGraph: NotificationTvFocusGraph,
+        composeOffscreenCard: Boolean,
+    ): Boolean {
+        val handle = focusHandleFor(target) ?: return false
+        val cardTarget = target as? NotificationTvFocusTarget.CardAction
+        if (composeOffscreenCard && cardTarget != null) {
+            // Manual list movement is reserved for composing the exact offscreen ID.
+            val targetAlreadyComposed = listState.layoutInfo.visibleItemsInfo.any { item ->
+                item.key == cardTarget.notificationId
+            }
+            if (!targetAlreadyComposed) {
+                val cardIndex = moveGraph.cards.indexOfFirst { card ->
+                    card.notificationId == cardTarget.notificationId
+                }
+                if (cardIndex < 0) return false
                 listState.scrollToItem(cardIndex)
-                withFrameNanos { }
             }
         }
-        repeat(3) {
-            val requested = runCatching { requester.requestFocus() }.getOrDefault(false)
-            if (requested) return
-            withFrameNanos { }
+        if (!handle.isPlaced && !handle.awaitPlaced()) return false
+        if (cardTarget != null) {
+            val targetStillExists = moveGraph.cards.any { card ->
+                card.notificationId == cardTarget.notificationId
+            }
+            val targetIsVisible = listState.layoutInfo.visibleItemsInfo.any { item ->
+                item.key == cardTarget.notificationId
+            }
+            if (!targetStillExists || !targetIsVisible || !handle.isPlaced) return false
         }
+        return requestNotificationTvFocusOnce { handle.requester.requestFocus() }
+    }
+
+    fun startFocusTransaction(
+        target: NotificationTvFocusTarget,
+        moveGraph: NotificationTvFocusGraph,
+        composeOffscreenCard: Boolean,
+        onSettled: ((Boolean) -> Unit)? = null,
+    ): Boolean {
+        if (focusTransaction.isActive) {
+            onSettled?.invoke(false)
+            return false
+        }
+        if (focusHandleFor(target) == null) {
+            onSettled?.invoke(false)
+            return false
+        }
+        lateinit var launchedJob: Job
+        launchedJob = focusScope.launch(start = CoroutineStart.LAZY) {
+            var focusRequested = false
+            try {
+                focusRequested = requestFocusAfterTargetPlacement(
+                    target = target,
+                    moveGraph = moveGraph,
+                    composeOffscreenCard = composeOffscreenCard,
+                )
+            } finally {
+                if (focusTransaction.job === launchedJob) {
+                    focusTransaction.job = null
+                    focusTransaction.target = null
+                }
+                onSettled?.invoke(focusRequested)
+            }
+        }
+        focusTransaction.job = launchedJob
+        focusTransaction.target = target
+        launchedJob.start()
+        return true
+    }
+
+    fun requestFocusMove(
+        current: NotificationTvFocusTarget,
+        target: NotificationTvFocusTarget,
+        moveGraph: NotificationTvFocusGraph,
+        onSettled: ((Boolean) -> Unit)? = null,
+    ): Boolean {
+        if (focusTransaction.isActive) {
+            onSettled?.invoke(false)
+            return false
+        }
+        val handle = focusHandleFor(target)
+        if (handle == null) {
+            onSettled?.invoke(false)
+            return false
+        }
+        val currentCard = current as? NotificationTvFocusTarget.CardAction
+        val targetCard = target as? NotificationTvFocusTarget.CardAction
+        if (
+            currentCard != null &&
+            targetCard != null &&
+            currentCard.notificationId == targetCard.notificationId
+        ) {
+            // Action-to-action movement within one card never consults or moves the list.
+            val focusRequested = requestAttachedFocus(target)
+            onSettled?.invoke(focusRequested)
+            return focusRequested
+        }
+
+        val needsOffscreenComposition = notificationTvTargetNeedsOffscreenComposition(
+            current = current,
+            target = target,
+            isTargetCardComposed = { notificationId ->
+                listState.layoutInfo.visibleItemsInfo.any { item -> item.key == notificationId }
+            },
+        )
+        if (!needsOffscreenComposition && handle.isPlaced) {
+            val focusRequested = requestAttachedFocus(target)
+            onSettled?.invoke(focusRequested)
+            return focusRequested
+        }
+        return startFocusTransaction(
+            target = target,
+            moveGraph = moveGraph,
+            composeOffscreenCard = needsOffscreenComposition,
+            onSettled = onSettled,
+        )
     }
 
     fun handleDirection(
         current: NotificationTvFocusTarget,
         direction: NotificationFocusDirection,
     ): Boolean {
-        val target = notificationTvFocusMove(graph, current, direction)
-        if (target != null) {
-            focusMoveJob.job?.cancel()
-            focusMoveJob.job = focusScope.launch { requestTargetFocus(target) }
-        }
-        return true
+        if (focusTransaction.isActive) return true
+        val target = notificationTvFocusMove(graph, current, direction) ?: return false
+        return requestFocusMove(current, target, graph)
     }
 
-    LaunchedEffect(Unit) {
-        withFrameNanos { }
-        requestTargetFocus(NotificationTvFocusTarget.Back)
+    fun markReadWithFocusTransfer(notification: LocalNotificationItem) {
+        val current = NotificationTvFocusTarget.CardAction(
+            notification.id,
+            NotificationTvCardAction.MARK_READ,
+        )
+        val fallback = NotificationTvFocusTarget.CardAction(
+            notification.id,
+            NotificationTvCardAction.OPEN,
+        )
+        requestFocusMove(current, fallback, graph) {
+            onMarkRead(notification)
+        }
+    }
+
+    fun deleteWithFocusTransfer(notification: LocalNotificationItem) {
+        val current = NotificationTvFocusTarget.CardAction(
+            notification.id,
+            NotificationTvCardAction.DELETE,
+        )
+        val graphAfterDelete = graph.copy(
+            cards = graph.cards.filterNot { card -> card.notificationId == notification.id },
+            unreadCount = (graph.unreadCount - if (notification.read) 0 else 1).coerceAtLeast(0),
+        )
+        val fallback = notificationTvFocusFallback(
+            current = current,
+            previousGraph = graph,
+            currentGraph = graphAfterDelete,
+        )
+        requestFocusMove(current, fallback, graph) {
+            onDelete(notification)
+        }
+    }
+
+    fun recordFocusedTarget(target: NotificationTvFocusTarget) {
+        if (focusedTarget == target) return
+        focusedTarget = target
+        onFocusedTargetChanged(target)
+    }
+
+    LaunchedEffect(backFocus) {
+        if (backFocus.awaitPlaced()) {
+            requestNotificationTvFocusOnce { backFocus.requester.requestFocus() }
+        }
     }
 
     LaunchedEffect(graph) {
+        val runningTransaction = focusTransaction.job?.takeIf { it.isActive }
+        runningTransaction?.cancelAndJoin()
+        if (focusTransaction.job === runningTransaction) {
+            focusTransaction.job = null
+            focusTransaction.target = null
+        }
         val current = focusedTarget
+        val previousGraph = focusHistory.graph
+        focusHistory.graph = graph
         if (current != null) {
             val fallback = notificationTvFocusFallback(
                 current = current,
-                previousGraph = focusHistory.graph,
+                previousGraph = previousGraph,
                 currentGraph = graph,
             )
             if (fallback != current) {
-                focusMoveJob.job?.cancel()
-                withFrameNanos { }
-                requestTargetFocus(fallback)
+                requestFocusMove(current, fallback, graph)
             }
         }
-        focusHistory.graph = graph
     }
 
     Column(
@@ -713,116 +1002,100 @@ private fun TvLocalNotificationCenter(
             .fillMaxHeight()
             .widthIn(max = metrics.maxContentWidthDp.dp)
             .fillMaxWidth()
+            .testTag(NOTIFICATION_TV_CENTER_ROOT_TAG)
             .padding(
                 horizontal = metrics.horizontalPaddingDp.dp,
                 vertical = metrics.topPaddingDp.dp,
             ),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 52.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 100.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(42.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(colors.goldBright),
-                )
-                NotificationCenterTitle(
-                    unreadCount = unreadCount,
+        AdaptiveNotificationCenterHeader(
+            unreadCount = unreadCount,
+            isTv = true,
+            showActions = notifications.isNotEmpty(),
+            wideLayout = true,
+            backAction = {
+                val backTarget = NotificationTvFocusTarget.Back
+                NotificationActionButton(
+                    text = "رجوع",
+                    onClick = onBack,
                     isTv = true,
+                    primary = false,
+                    headerCompact = true,
+                    tvCenterCompact = true,
+                    tvFocusHandle = backFocus,
+                    tvFocusTag = notificationTvFocusTag(backTarget),
+                    tvFocusDestinations = focusDestinationsFor(backTarget),
+                    tvBlockedDirections = notificationTvBlockedDirections(graph, backTarget),
+                    onTvDirection = { direction -> handleDirection(backTarget, direction) },
+                    onFocused = { recordFocusedTarget(backTarget) },
+                    modifier = Modifier
+                        .width(82.dp)
+                        .height(40.dp),
                 )
-            }
-
-            val backTarget = NotificationTvFocusTarget.Back
-            NotificationActionButton(
-                text = "رجوع",
-                onClick = onBack,
-                isTv = true,
-                primary = false,
-                headerCompact = true,
-                tvCenterCompact = true,
-                onTvDirection = { direction -> handleDirection(backTarget, direction) },
-                onFocused = { focusedTarget = backTarget },
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(82.dp)
-                    .height(38.dp)
-                    .focusRequester(backRequester),
-            )
-        }
-
-        Spacer(Modifier.height(13.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(colors.line.copy(alpha = .58f)),
+            },
+            actions = { actionsModifier ->
+                Row(
+                    modifier = actionsModifier,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val clearAllTarget = NotificationTvFocusTarget.ClearAll
+                    NotificationActionButton(
+                        text = "مسح الكل",
+                        onClick = onClearAll,
+                        isTv = true,
+                        primary = false,
+                        headerCompact = true,
+                        tvCenterCompact = true,
+                        tvFocusHandle = clearAllFocus,
+                        tvFocusTag = notificationTvFocusTag(clearAllTarget),
+                        tvFocusDestinations = focusDestinationsFor(clearAllTarget),
+                        tvBlockedDirections = notificationTvBlockedDirections(graph, clearAllTarget),
+                        onTvDirection = { direction -> handleDirection(clearAllTarget, direction) },
+                        onFocused = { recordFocusedTarget(clearAllTarget) },
+                        modifier = Modifier
+                            .width(96.dp)
+                            .height(40.dp),
+                    )
+                    val readAllTarget = NotificationTvFocusTarget.ReadAll
+                    NotificationActionButton(
+                        text = "تعليم الكل كمقروء",
+                        onClick = onReadAll,
+                        isTv = true,
+                        enabled = unreadCount > 0,
+                        primary = false,
+                        headerCompact = true,
+                        tvCenterCompact = true,
+                        tvFocusHandle = readAllFocus,
+                        tvFocusTag = notificationTvFocusTag(readAllTarget),
+                        tvFocusDestinations = focusDestinationsFor(readAllTarget),
+                        tvBlockedDirections = notificationTvBlockedDirections(graph, readAllTarget),
+                        onTvDirection = { direction -> handleDirection(readAllTarget, direction) },
+                        onFocused = { recordFocusedTarget(readAllTarget) },
+                        modifier = Modifier
+                            .width(164.dp)
+                            .height(40.dp),
+                    )
+                }
+            },
         )
 
-        if (notifications.isNotEmpty()) {
-            Spacer(Modifier.height(11.dp))
-            Row(
-                modifier = Modifier.align(Alignment.Start),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val clearAllTarget = NotificationTvFocusTarget.ClearAll
-                NotificationActionButton(
-                    text = "مسح الكل",
-                    onClick = onClearAll,
-                    isTv = true,
-                    primary = false,
-                    headerCompact = true,
-                    tvCenterCompact = true,
-                    onTvDirection = { direction -> handleDirection(clearAllTarget, direction) },
-                    onFocused = { focusedTarget = clearAllTarget },
-                    modifier = Modifier
-                        .width(96.dp)
-                        .height(38.dp)
-                        .focusRequester(clearAllRequester),
-                )
-                val readAllTarget = NotificationTvFocusTarget.ReadAll
-                NotificationActionButton(
-                    text = "تعليم الكل كمقروء",
-                    onClick = onReadAll,
-                    isTv = true,
-                    enabled = unreadCount > 0,
-                    primary = false,
-                    headerCompact = true,
-                    tvCenterCompact = true,
-                    onTvDirection = { direction -> handleDirection(readAllTarget, direction) },
-                    onFocused = { focusedTarget = readAllTarget },
-                    modifier = Modifier
-                        .width(164.dp)
-                        .height(38.dp)
-                        .focusRequester(readAllRequester),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(if (notifications.isEmpty()) 18.dp else 11.dp))
+        Spacer(Modifier.height(10.dp))
         if (notifications.isEmpty()) {
             NotificationCenterEmptyState(
                 isTv = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             )
         } else {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(bottom = metrics.topPaddingDp.dp),
+                    .fillMaxWidth()
+                    .testTag(NOTIFICATION_TV_CENTER_LIST_TAG),
+                contentPadding = PaddingValues(bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 itemsIndexed(
@@ -832,12 +1105,14 @@ private fun TvLocalNotificationCenter(
                     TvLocalNotificationCard(
                         notification = notification,
                         metrics = metrics,
+                        graph = graph,
+                        focusDestinations = ::focusDestinationsFor,
                         focus = checkNotNull(cardFocusRegistry[notification.id]),
                         onDirection = ::handleDirection,
-                        onFocused = { focusedTarget = it },
+                        onFocused = ::recordFocusedTarget,
                         onOpen = { onOpen(notification) },
-                        onMarkRead = { onMarkRead(notification) },
-                        onDelete = { onDelete(notification) },
+                        onMarkRead = { markReadWithFocusTransfer(notification) },
+                        onDelete = { deleteWithFocusTransfer(notification) },
                     )
                 }
             }
@@ -845,6 +1120,90 @@ private fun TvLocalNotificationCenter(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AdaptiveNotificationCenterHeader(
+    unreadCount: Int,
+    isTv: Boolean,
+    showActions: Boolean,
+    wideLayout: Boolean,
+    backAction: @Composable () -> Unit,
+    actions: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (wideLayout && showActions) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = if (isTv) 54.dp else 52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 16.dp),
+            ) {
+                NotificationCenterHeaderIdentity(
+                    unreadCount = unreadCount,
+                    isTv = isTv,
+                    backAction = backAction,
+                    modifier = Modifier.weight(1f),
+                )
+                actions(Modifier)
+            }
+        } else {
+            NotificationCenterHeaderIdentity(
+                unreadCount = unreadCount,
+                isTv = isTv,
+                backAction = backAction,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = if (isTv) 54.dp else 52.dp),
+            )
+            if (showActions) {
+                Spacer(Modifier.height(10.dp))
+                actions(Modifier.fillMaxWidth())
+            }
+        }
+
+        Spacer(Modifier.height(if (isTv) 12.dp else 10.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colors.line.copy(alpha = .58f)),
+        )
+    }
+}
+
+@Composable
+private fun NotificationCenterHeaderIdentity(
+    unreadCount: Int,
+    isTv: Boolean,
+    backAction: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
+    ) {
+        backAction()
+        Box(
+            Modifier
+                .width(3.dp)
+                .height(if (isTv) 42.dp else 36.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(colors.goldBright),
+        )
+        NotificationCenterTitle(
+            unreadCount = unreadCount,
+            isTv = isTv,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MobileLocalNotificationCenter(
     notifications: List<LocalNotificationItem>,
@@ -858,83 +1217,121 @@ private fun MobileLocalNotificationCenter(
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .fillMaxWidth()
-            .widthIn(max = metrics.maxContentWidthDp.dp)
-            .padding(
-                horizontal = metrics.horizontalPaddingDp.dp,
-                vertical = metrics.topPaddingDp.dp,
-            ),
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize(),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        val availableWidthDp = maxWidth.value.roundToInt().coerceAtLeast(1)
+        val horizontalPadding = when {
+            availableWidthDp >= 840 -> (availableWidthDp * .035f).roundToInt().coerceIn(30, 48)
+            availableWidthDp >= 600 -> (availableWidthDp * .04f).roundToInt().coerceIn(24, 32)
+            else -> (availableWidthDp * .045f).roundToInt().coerceIn(14, 20)
+        }.dp
+        val verticalPadding = when {
+            availableWidthDp >= 840 -> 22.dp
+            availableWidthDp >= 600 -> 18.dp
+            else -> 12.dp
+        }
+        val wideHeader = maxWidth - horizontalPadding - horizontalPadding >= 680.dp
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = horizontalPadding,
+                    vertical = verticalPadding,
+                ),
         ) {
-            NotificationActionButton(
-                text = "رجوع",
-                onClick = onBack,
-                isTv = false,
-                primary = false,
-                modifier = Modifier.heightIn(min = 48.dp),
-            )
-            NotificationCenterTitle(
+            AdaptiveNotificationCenterHeader(
                 unreadCount = unreadCount,
                 isTv = false,
-                modifier = Modifier.weight(1f),
+                showActions = notifications.isNotEmpty(),
+                wideLayout = wideHeader,
+                backAction = {
+                    NotificationActionButton(
+                        text = "رجوع",
+                        onClick = onBack,
+                        isTv = false,
+                        primary = false,
+                        headerCompact = true,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
+                },
+                actions = { actionsModifier ->
+                    if (wideHeader) {
+                        Row(
+                            modifier = actionsModifier,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            NotificationActionButton(
+                                text = "مسح الكل",
+                                onClick = onClearAll,
+                                isTv = false,
+                                primary = false,
+                                headerCompact = true,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                            NotificationActionButton(
+                                text = "تعليم الكل كمقروء",
+                                onClick = onReadAll,
+                                isTv = false,
+                                enabled = unreadCount > 0,
+                                primary = false,
+                                headerCompact = true,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                        }
+                    } else {
+                        FlowRow(
+                            modifier = actionsModifier,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            maxItemsInEachRow = 2,
+                        ) {
+                            NotificationActionButton(
+                                text = "مسح الكل",
+                                onClick = onClearAll,
+                                isTv = false,
+                                primary = false,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                            NotificationActionButton(
+                                text = "تعليم الكل كمقروء",
+                                onClick = onReadAll,
+                                isTv = false,
+                                enabled = unreadCount > 0,
+                                primary = false,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                        }
+                    }
+                },
             )
-        }
-        if (notifications.isNotEmpty()) {
-            Spacer(Modifier.height(9.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                NotificationActionButton(
-                    text = "تعليم الكل كمقروء",
-                    onClick = onReadAll,
+
+            Spacer(Modifier.height(10.dp))
+            if (notifications.isEmpty()) {
+                NotificationCenterEmptyState(
                     isTv = false,
-                    enabled = unreadCount > 0,
-                    primary = false,
                     modifier = Modifier
-                        .weight(1.35f)
-                        .heightIn(min = 48.dp),
+                        .fillMaxWidth()
+                        .weight(1f),
                 )
-                NotificationActionButton(
-                    text = "مسح الكل",
-                    onClick = onClearAll,
-                    isTv = false,
-                    primary = false,
+            } else {
+                LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        if (notifications.isEmpty()) {
-            NotificationCenterEmptyState(
-                isTv = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(bottom = 22.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
-            ) {
-                items(notifications, key = LocalNotificationItem::id) { notification ->
-                    MobileLocalNotificationCard(
-                        notification = notification,
-                        metrics = metrics,
-                        onOpen = { onOpen(notification) },
-                        onMarkRead = { onMarkRead(notification) },
-                        onDelete = { onDelete(notification) },
-                    )
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    items(notifications, key = LocalNotificationItem::id) { notification ->
+                        MobileLocalNotificationCard(
+                            notification = notification,
+                            metrics = metrics,
+                            onOpen = { onOpen(notification) },
+                            onMarkRead = { onMarkRead(notification) },
+                            onDelete = { onDelete(notification) },
+                        )
+                    }
                 }
             }
         }
@@ -950,12 +1347,14 @@ private fun NotificationCenterTitle(
     val colors = LocalHulkColors.current
     Column(modifier = modifier) {
         Text(
-            text = "الاشعارات",
+            text = "مركز الإشعارات",
             color = colors.text,
             fontSize = if (isTv) 28.sp else 22.sp,
             lineHeight = if (isTv) 32.sp else 26.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Start,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = if (unreadCount > 0) "$unreadCount غير مقروء" else "كل الاشعارات مقروءة",
@@ -963,6 +1362,8 @@ private fun NotificationCenterTitle(
             fontSize = if (isTv) 12.sp else 10.sp,
             lineHeight = if (isTv) 16.sp else 13.sp,
             textAlign = TextAlign.Start,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -995,6 +1396,10 @@ private fun NotificationCenterEmptyState(
 private fun TvLocalNotificationCard(
     notification: LocalNotificationItem,
     metrics: LocalNotificationCenterMetrics,
+    graph: NotificationTvFocusGraph,
+    focusDestinations: (
+        NotificationTvFocusTarget,
+    ) -> Map<NotificationFocusDirection, FocusRequester>,
     focus: NotificationCardFocus,
     onDirection: (NotificationTvFocusTarget, NotificationFocusDirection) -> Boolean,
     onFocused: (NotificationTvFocusTarget) -> Unit,
@@ -1029,6 +1434,7 @@ private fun TvLocalNotificationCard(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = minimumHeight.dp)
+            .testTag(notificationTvCardContainerTag(notification.id))
             .clip(shape)
             .background(if (notification.read) colors.surface.copy(alpha = .72f) else colors.surfaceRaised.copy(alpha = .94f))
             .border(
@@ -1114,12 +1520,15 @@ private fun TvLocalNotificationCard(
                 onClick = onOpen,
                 isTv = true,
                 tvCenterCompact = true,
+                tvFocusHandle = focus.open,
+                tvFocusTag = notificationTvFocusTag(openTarget),
+                tvFocusDestinations = focusDestinations(openTarget),
+                tvBlockedDirections = notificationTvBlockedDirections(graph, openTarget),
                 onTvDirection = { direction -> onDirection(openTarget, direction) },
                 onFocused = { onFocused(openTarget) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
-                    .focusRequester(focus.open),
+                    .height(40.dp),
             )
             if (episode != null && !notification.read) {
                 NotificationActionButton(
@@ -1128,12 +1537,15 @@ private fun TvLocalNotificationCard(
                     isTv = true,
                     primary = false,
                     tvCenterCompact = true,
+                    tvFocusHandle = focus.read,
+                    tvFocusTag = notificationTvFocusTag(markReadTarget),
+                    tvFocusDestinations = focusDestinations(markReadTarget),
+                    tvBlockedDirections = notificationTvBlockedDirections(graph, markReadTarget),
                     onTvDirection = { direction -> onDirection(markReadTarget, direction) },
                     onFocused = { onFocused(markReadTarget) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(40.dp)
-                        .focusRequester(focus.read),
+                        .height(40.dp),
                 )
             }
             NotificationActionButton(
@@ -1142,12 +1554,15 @@ private fun TvLocalNotificationCard(
                 isTv = true,
                 primary = false,
                 tvCenterCompact = true,
+                tvFocusHandle = focus.delete,
+                tvFocusTag = notificationTvFocusTag(deleteTarget),
+                tvFocusDestinations = focusDestinations(deleteTarget),
+                tvBlockedDirections = notificationTvBlockedDirections(graph, deleteTarget),
                 onTvDirection = { direction -> onDirection(deleteTarget, direction) },
                 onFocused = { onFocused(deleteTarget) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
-                    .focusRequester(focus.delete),
+                    .height(40.dp),
             )
         }
     }

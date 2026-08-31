@@ -12,6 +12,7 @@ import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
 import sa.hulksa.player.ui.ProfileAwareHulkApp
 import sa.hulksa.player.ui.VoiceSearchAppLayer
 import sa.hulksa.player.ui.VoiceSearchDelegate
@@ -27,6 +28,7 @@ class TvMainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         dispatchDeepLink(intent)
         subscriptionResumeEnforcer = SubscriptionResumeEnforcer(this, viewModel)
         voiceSearchDelegate = VoiceSearchDelegate(
