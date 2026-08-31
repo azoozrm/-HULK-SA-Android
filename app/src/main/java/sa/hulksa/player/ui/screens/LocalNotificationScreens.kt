@@ -104,8 +104,8 @@ internal fun localNotificationCenterMetrics(
     return if (isTv) {
         val posterWidth = (width * .055f).roundToInt().coerceIn(68, 96)
         LocalNotificationCenterMetrics(
-            horizontalPaddingDp = (width * .042f).roundToInt().coerceIn(32, 96),
-            topPaddingDp = (height * .04f).roundToInt().coerceIn(22, 96),
+            horizontalPaddingDp = (width * .035f).roundToInt().coerceIn(32, 96),
+            topPaddingDp = (height * .025f).roundToInt().coerceIn(22, 48),
             maxContentWidthDp = (width * .90f).roundToInt().coerceIn(840, 3_200),
             posterWidthDp = posterWidth,
             posterHeightDp = (posterWidth * 1.5f).roundToInt(),
@@ -646,42 +646,53 @@ fun LocalNotificationCenterScreen(
     BackHandler(onBack = onBack)
     val colors = LocalHulkColors.current
 
-    if (isTv) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .testTag(NOTIFICATION_CENTER_SCREEN_ROOT_TAG),
+    ) {
         Box(
             Modifier
                 .fillMaxSize()
-                .testTag(NOTIFICATION_CENTER_SCREEN_ROOT_TAG),
+                .background(colors.background)
+                .then(
+                    if (isTv) {
+                        Modifier
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        colors.background,
+                                        colors.surface.copy(alpha = .44f),
+                                        colors.surface.copy(alpha = .44f),
+                                    ),
+                                ),
+                            )
+                            .testTag(NOTIFICATION_TV_BACKGROUND_TAG)
+                    } else {
+                        Modifier
+                    },
+                ),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .safeDrawingPadding(),
         ) {
-            Box(
+            BoxWithConstraints(
                 Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                colors.background,
-                                colors.surface.copy(alpha = .44f),
-                                colors.surface.copy(alpha = .44f),
-                            ),
-                        ),
-                    )
-                    .testTag(NOTIFICATION_TV_BACKGROUND_TAG),
-            )
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .safeDrawingPadding(),
+                    .then(
+                        if (isTv) Modifier.testTag(NOTIFICATION_TV_SAFE_CONTENT_TAG) else Modifier,
+                    ),
             ) {
-                BoxWithConstraints(
-                    Modifier
-                        .fillMaxSize()
-                        .testTag(NOTIFICATION_TV_SAFE_CONTENT_TAG),
-                ) {
-                    val metrics = localNotificationCenterMetrics(
-                        widthDp = maxWidth.value.roundToInt(),
-                        heightDp = maxHeight.value.roundToInt(),
-                        isTv = true,
-                    )
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                val availableWidthDp = maxWidth.value.roundToInt().coerceAtLeast(1)
+                val metrics = localNotificationCenterMetrics(
+                    widthDp = availableWidthDp,
+                    heightDp = maxHeight.value.roundToInt(),
+                    isTv = isTv,
+                ).copy(maxContentWidthDp = availableWidthDp)
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    if (isTv) {
                         TvLocalNotificationCenter(
                             notifications = notifications,
                             unreadCount = unreadCount,
@@ -692,37 +703,23 @@ fun LocalNotificationCenterScreen(
                             onReadAll = onReadAll,
                             onDelete = onDelete,
                             onClearAll = onClearAll,
-                            modifier = Modifier.align(Alignment.TopCenter),
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        MobileLocalNotificationCenter(
+                            notifications = notifications,
+                            unreadCount = unreadCount,
+                            metrics = metrics,
+                            onBack = onBack,
+                            onOpen = onOpen,
+                            onMarkRead = onMarkRead,
+                            onReadAll = onReadAll,
+                            onDelete = onDelete,
+                            onClearAll = onClearAll,
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
-            }
-        }
-    } else {
-        BoxWithConstraints(
-            Modifier
-                .fillMaxSize()
-                .background(colors.background)
-                .safeDrawingPadding(),
-        ) {
-            val metrics = localNotificationCenterMetrics(
-                widthDp = maxWidth.value.roundToInt(),
-                heightDp = maxHeight.value.roundToInt(),
-                isTv = false,
-            )
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                MobileLocalNotificationCenter(
-                    notifications = notifications,
-                    unreadCount = unreadCount,
-                    metrics = metrics,
-                    onBack = onBack,
-                    onOpen = onOpen,
-                    onMarkRead = onMarkRead,
-                    onReadAll = onReadAll,
-                    onDelete = onDelete,
-                    onClearAll = onClearAll,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
             }
         }
     }
@@ -1007,112 +1004,85 @@ internal fun TvLocalNotificationCenter(
                 vertical = metrics.topPaddingDp.dp,
             ),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 52.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 100.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(42.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(colors.goldBright),
-                )
-                NotificationCenterTitle(
-                    unreadCount = unreadCount,
+        AdaptiveNotificationCenterHeader(
+            unreadCount = unreadCount,
+            isTv = true,
+            showActions = notifications.isNotEmpty(),
+            wideLayout = true,
+            backAction = {
+                val backTarget = NotificationTvFocusTarget.Back
+                NotificationActionButton(
+                    text = "رجوع",
+                    onClick = onBack,
                     isTv = true,
+                    primary = false,
+                    headerCompact = true,
+                    tvCenterCompact = true,
+                    tvFocusHandle = backFocus,
+                    tvFocusTag = notificationTvFocusTag(backTarget),
+                    tvFocusDestinations = focusDestinationsFor(backTarget),
+                    tvBlockedDirections = notificationTvBlockedDirections(graph, backTarget),
+                    onTvDirection = { direction -> handleDirection(backTarget, direction) },
+                    onFocused = { recordFocusedTarget(backTarget) },
+                    modifier = Modifier
+                        .width(82.dp)
+                        .height(40.dp),
                 )
-            }
-
-            val backTarget = NotificationTvFocusTarget.Back
-            NotificationActionButton(
-                text = "رجوع",
-                onClick = onBack,
-                isTv = true,
-                primary = false,
-                headerCompact = true,
-                tvCenterCompact = true,
-                tvFocusHandle = backFocus,
-                tvFocusTag = notificationTvFocusTag(backTarget),
-                tvFocusDestinations = focusDestinationsFor(backTarget),
-                tvBlockedDirections = notificationTvBlockedDirections(graph, backTarget),
-                onTvDirection = { direction -> handleDirection(backTarget, direction) },
-                onFocused = { recordFocusedTarget(backTarget) },
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(82.dp)
-                    .height(38.dp),
-            )
-        }
-
-        Spacer(Modifier.height(13.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(colors.line.copy(alpha = .58f)),
+            },
+            actions = { actionsModifier ->
+                Row(
+                    modifier = actionsModifier,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val clearAllTarget = NotificationTvFocusTarget.ClearAll
+                    NotificationActionButton(
+                        text = "مسح الكل",
+                        onClick = onClearAll,
+                        isTv = true,
+                        primary = false,
+                        headerCompact = true,
+                        tvCenterCompact = true,
+                        tvFocusHandle = clearAllFocus,
+                        tvFocusTag = notificationTvFocusTag(clearAllTarget),
+                        tvFocusDestinations = focusDestinationsFor(clearAllTarget),
+                        tvBlockedDirections = notificationTvBlockedDirections(graph, clearAllTarget),
+                        onTvDirection = { direction -> handleDirection(clearAllTarget, direction) },
+                        onFocused = { recordFocusedTarget(clearAllTarget) },
+                        modifier = Modifier
+                            .width(96.dp)
+                            .height(40.dp),
+                    )
+                    val readAllTarget = NotificationTvFocusTarget.ReadAll
+                    NotificationActionButton(
+                        text = "تعليم الكل كمقروء",
+                        onClick = onReadAll,
+                        isTv = true,
+                        enabled = unreadCount > 0,
+                        primary = false,
+                        headerCompact = true,
+                        tvCenterCompact = true,
+                        tvFocusHandle = readAllFocus,
+                        tvFocusTag = notificationTvFocusTag(readAllTarget),
+                        tvFocusDestinations = focusDestinationsFor(readAllTarget),
+                        tvBlockedDirections = notificationTvBlockedDirections(graph, readAllTarget),
+                        onTvDirection = { direction -> handleDirection(readAllTarget, direction) },
+                        onFocused = { recordFocusedTarget(readAllTarget) },
+                        modifier = Modifier
+                            .width(164.dp)
+                            .height(40.dp),
+                    )
+                }
+            },
         )
 
-        if (notifications.isNotEmpty()) {
-            Spacer(Modifier.height(11.dp))
-            Row(
-                modifier = Modifier.align(Alignment.Start),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val clearAllTarget = NotificationTvFocusTarget.ClearAll
-                NotificationActionButton(
-                    text = "مسح الكل",
-                    onClick = onClearAll,
-                    isTv = true,
-                    primary = false,
-                    headerCompact = true,
-                    tvCenterCompact = true,
-                    tvFocusHandle = clearAllFocus,
-                    tvFocusTag = notificationTvFocusTag(clearAllTarget),
-                    tvFocusDestinations = focusDestinationsFor(clearAllTarget),
-                    tvBlockedDirections = notificationTvBlockedDirections(graph, clearAllTarget),
-                    onTvDirection = { direction -> handleDirection(clearAllTarget, direction) },
-                    onFocused = { recordFocusedTarget(clearAllTarget) },
-                    modifier = Modifier
-                        .width(96.dp)
-                        .height(38.dp),
-                )
-                val readAllTarget = NotificationTvFocusTarget.ReadAll
-                NotificationActionButton(
-                    text = "تعليم الكل كمقروء",
-                    onClick = onReadAll,
-                    isTv = true,
-                    enabled = unreadCount > 0,
-                    primary = false,
-                    headerCompact = true,
-                    tvCenterCompact = true,
-                    tvFocusHandle = readAllFocus,
-                    tvFocusTag = notificationTvFocusTag(readAllTarget),
-                    tvFocusDestinations = focusDestinationsFor(readAllTarget),
-                    tvBlockedDirections = notificationTvBlockedDirections(graph, readAllTarget),
-                    onTvDirection = { direction -> handleDirection(readAllTarget, direction) },
-                    onFocused = { recordFocusedTarget(readAllTarget) },
-                    modifier = Modifier
-                        .width(164.dp)
-                        .height(38.dp),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(if (notifications.isEmpty()) 18.dp else 11.dp))
+        Spacer(Modifier.height(10.dp))
         if (notifications.isEmpty()) {
             NotificationCenterEmptyState(
                 isTv = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             )
         } else {
             LazyColumn(
@@ -1121,7 +1091,7 @@ internal fun TvLocalNotificationCenter(
                     .weight(1f)
                     .fillMaxWidth()
                     .testTag(NOTIFICATION_TV_CENTER_LIST_TAG),
-                contentPadding = PaddingValues(bottom = metrics.topPaddingDp.dp),
+                contentPadding = PaddingValues(bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 itemsIndexed(
@@ -1146,6 +1116,90 @@ internal fun TvLocalNotificationCenter(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AdaptiveNotificationCenterHeader(
+    unreadCount: Int,
+    isTv: Boolean,
+    showActions: Boolean,
+    wideLayout: Boolean,
+    backAction: @Composable () -> Unit,
+    actions: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (wideLayout && showActions) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = if (isTv) 54.dp else 52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 16.dp),
+            ) {
+                NotificationCenterHeaderIdentity(
+                    unreadCount = unreadCount,
+                    isTv = isTv,
+                    backAction = backAction,
+                    modifier = Modifier.weight(1f),
+                )
+                actions(Modifier)
+            }
+        } else {
+            NotificationCenterHeaderIdentity(
+                unreadCount = unreadCount,
+                isTv = isTv,
+                backAction = backAction,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = if (isTv) 54.dp else 52.dp),
+            )
+            if (showActions) {
+                Spacer(Modifier.height(10.dp))
+                actions(Modifier.fillMaxWidth())
+            }
+        }
+
+        Spacer(Modifier.height(if (isTv) 12.dp else 10.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colors.line.copy(alpha = .58f)),
+        )
+    }
+}
+
+@Composable
+private fun NotificationCenterHeaderIdentity(
+    unreadCount: Int,
+    isTv: Boolean,
+    backAction: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
+    ) {
+        backAction()
+        Box(
+            Modifier
+                .width(3.dp)
+                .height(if (isTv) 42.dp else 36.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(colors.goldBright),
+        )
+        NotificationCenterTitle(
+            unreadCount = unreadCount,
+            isTv = isTv,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MobileLocalNotificationCenter(
     notifications: List<LocalNotificationItem>,
@@ -1159,83 +1213,121 @@ private fun MobileLocalNotificationCenter(
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .fillMaxWidth()
-            .widthIn(max = metrics.maxContentWidthDp.dp)
-            .padding(
-                horizontal = metrics.horizontalPaddingDp.dp,
-                vertical = metrics.topPaddingDp.dp,
-            ),
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize(),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        val availableWidthDp = maxWidth.value.roundToInt().coerceAtLeast(1)
+        val horizontalPadding = when {
+            availableWidthDp >= 840 -> (availableWidthDp * .035f).roundToInt().coerceIn(30, 48)
+            availableWidthDp >= 600 -> (availableWidthDp * .04f).roundToInt().coerceIn(24, 32)
+            else -> (availableWidthDp * .045f).roundToInt().coerceIn(14, 20)
+        }.dp
+        val verticalPadding = when {
+            availableWidthDp >= 840 -> 22.dp
+            availableWidthDp >= 600 -> 18.dp
+            else -> 12.dp
+        }
+        val wideHeader = maxWidth - horizontalPadding - horizontalPadding >= 680.dp
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = horizontalPadding,
+                    vertical = verticalPadding,
+                ),
         ) {
-            NotificationActionButton(
-                text = "رجوع",
-                onClick = onBack,
-                isTv = false,
-                primary = false,
-                modifier = Modifier.heightIn(min = 48.dp),
-            )
-            NotificationCenterTitle(
+            AdaptiveNotificationCenterHeader(
                 unreadCount = unreadCount,
                 isTv = false,
-                modifier = Modifier.weight(1f),
+                showActions = notifications.isNotEmpty(),
+                wideLayout = wideHeader,
+                backAction = {
+                    NotificationActionButton(
+                        text = "رجوع",
+                        onClick = onBack,
+                        isTv = false,
+                        primary = false,
+                        headerCompact = true,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
+                },
+                actions = { actionsModifier ->
+                    if (wideHeader) {
+                        Row(
+                            modifier = actionsModifier,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            NotificationActionButton(
+                                text = "مسح الكل",
+                                onClick = onClearAll,
+                                isTv = false,
+                                primary = false,
+                                headerCompact = true,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                            NotificationActionButton(
+                                text = "تعليم الكل كمقروء",
+                                onClick = onReadAll,
+                                isTv = false,
+                                enabled = unreadCount > 0,
+                                primary = false,
+                                headerCompact = true,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                        }
+                    } else {
+                        FlowRow(
+                            modifier = actionsModifier,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            maxItemsInEachRow = 2,
+                        ) {
+                            NotificationActionButton(
+                                text = "مسح الكل",
+                                onClick = onClearAll,
+                                isTv = false,
+                                primary = false,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                            NotificationActionButton(
+                                text = "تعليم الكل كمقروء",
+                                onClick = onReadAll,
+                                isTv = false,
+                                enabled = unreadCount > 0,
+                                primary = false,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                        }
+                    }
+                },
             )
-        }
-        if (notifications.isNotEmpty()) {
-            Spacer(Modifier.height(9.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                NotificationActionButton(
-                    text = "تعليم الكل كمقروء",
-                    onClick = onReadAll,
+
+            Spacer(Modifier.height(10.dp))
+            if (notifications.isEmpty()) {
+                NotificationCenterEmptyState(
                     isTv = false,
-                    enabled = unreadCount > 0,
-                    primary = false,
                     modifier = Modifier
-                        .weight(1.35f)
-                        .heightIn(min = 48.dp),
+                        .fillMaxWidth()
+                        .weight(1f),
                 )
-                NotificationActionButton(
-                    text = "مسح الكل",
-                    onClick = onClearAll,
-                    isTv = false,
-                    primary = false,
+            } else {
+                LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        if (notifications.isEmpty()) {
-            NotificationCenterEmptyState(
-                isTv = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(bottom = 22.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
-            ) {
-                items(notifications, key = LocalNotificationItem::id) { notification ->
-                    MobileLocalNotificationCard(
-                        notification = notification,
-                        metrics = metrics,
-                        onOpen = { onOpen(notification) },
-                        onMarkRead = { onMarkRead(notification) },
-                        onDelete = { onDelete(notification) },
-                    )
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    items(notifications, key = LocalNotificationItem::id) { notification ->
+                        MobileLocalNotificationCard(
+                            notification = notification,
+                            metrics = metrics,
+                            onOpen = { onOpen(notification) },
+                            onMarkRead = { onMarkRead(notification) },
+                            onDelete = { onDelete(notification) },
+                        )
+                    }
                 }
             }
         }
@@ -1251,12 +1343,14 @@ private fun NotificationCenterTitle(
     val colors = LocalHulkColors.current
     Column(modifier = modifier) {
         Text(
-            text = "الاشعارات",
+            text = "مركز الإشعارات",
             color = colors.text,
             fontSize = if (isTv) 28.sp else 22.sp,
             lineHeight = if (isTv) 32.sp else 26.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Start,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = if (unreadCount > 0) "$unreadCount غير مقروء" else "كل الاشعارات مقروءة",
@@ -1264,6 +1358,8 @@ private fun NotificationCenterTitle(
             fontSize = if (isTv) 12.sp else 10.sp,
             lineHeight = if (isTv) 16.sp else 13.sp,
             textAlign = TextAlign.Start,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
