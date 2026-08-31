@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
+TV_GRID = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/TvCatalogGrid.kt"
+
+
+class TvCategoryFocusTransitionContractTest(unittest.TestCase):
+    @staticmethod
+    def source() -> str:
+        return MAIN_SHELL.read_text(encoding="utf-8")
+
+    @classmethod
+    def section(cls, start: str, end: str) -> str:
+        text = cls.source()
+        start_index = text.index(start)
+        return text[start_index : text.index(end, start_index)]
+
+    def test_movies_and_series_category_ok_request_first_content_without_same_selection_churn(self) -> None:
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        self.assertIn("val selectCategoryAndEnterContent: (String?) -> Unit", poster)
+        self.assertIn("nextCategoryContentFocusRequestId += 1L", poster)
+        self.assertIn("val categoryChanged = state.selectedCategoryId != categoryId", poster)
+        self.assertIn("focusFirstItem = categoryChanged", poster)
+        self.assertIn("if (categoryChanged) {", poster)
+        self.assertIn('navigationMemory.save(destination, itemKey = "", itemIndex = 0)', poster)
+        self.assertIn("onSelectCategory(categoryId)", poster)
+        self.assertIn("ReorderableCatalogCategoryBar(", poster)
+        self.assertIn("selectCategoryAndEnterContent", poster)
+        self.assertIn("destination = destination", poster)
+        self.assertLess(
+            poster.index("if (categoryChanged) {"),
+            poster.index('navigationMemory.save(destination, itemKey = "", itemIndex = 0)'),
+        )
+
+    def test_new_catalog_category_waits_for_exact_model_and_nonempty_content_before_handoff(self) -> None:
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        self.assertIn("request.categoryId == state.selectedCategoryId", poster)
+        self.assertIn("keyedModel?.input == modelInput", poster)
+        self.assertIn("if (showingContinue) continueWatching.isNotEmpty() else visible.isNotEmpty()", poster)
+        self.assertIn("withFrameNanos { }", poster)
+        self.assertIn("armedCategoryContentFocusRequestId = request.requestId", poster)
+        self.assertIn("restoreFocusedCard = categoryContentFocusRequest?.let { request ->", poster)
+        self.assertIn("armedCategoryContentFocusRequestId == request.requestId", poster)
+        self.assertIn("} ?: state.searchQuery.isBlank()", poster)
+
+    def test_live_category_ok_hands_focus_to_first_channel_only_after_it_is_composed(self) -> None:
+        live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
+        self.assertIn("val selectCategoryAndEnterContent: (String?) -> Unit", live)
+        self.assertIn("val categoryChanged = state.selectedCategoryId != categoryId", live)
+        self.assertIn("focusFirstItem = categoryChanged", live)
+        self.assertIn('navigationMemory.save(MainDestination.LIVE, itemKey = "", itemIndex = 0)', live)
+        self.assertIn("categoryRequest?.focusFirstItem == true && visible.isNotEmpty() -> 0", live)
+        self.assertIn("categoryRequest != null && visible.isNotEmpty() -> rememberedIndex", live)
+        self.assertIn("listState.scrollToItem(targetIndex)", live)
+        self.assertIn("listState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex }", live)
+        self.assertIn("withFrameNanos { }", live)
+        self.assertIn("channelRequester.requestFocus()", live)
+        self.assertNotIn("delay(180)", live)
+
+    def test_empty_or_loading_category_never_requests_unbound_content_focus(self) -> None:
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
+        self.assertIn("continueWatching.isNotEmpty()", poster)
+        self.assertIn("visible.isNotEmpty()", poster)
+        self.assertIn("categoryRequest?.focusFirstItem == true && visible.isNotEmpty() -> 0", live)
+        self.assertIn("else -> null", live)
+        self.assertIn("if (targetIndex != null)", live)
+        self.assertIn("resultCount == 0", poster)
+        self.assertIn("type !in state.loadingTypes", poster)
+        self.assertIn("ContentType.LIVE !in state.loadingTypes", live)
+
+    def test_continue_category_handoff_uses_first_history_item_without_delay(self) -> None:
+        history = self.section("private fun HistoryGrid(", "private fun DiagnosticsCenter(")
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        self.assertIn("focusFirstItemRequestId: Long = 0L", history)
+        self.assertIn("focusContentRequestId: Long = 0L", history)
+        self.assertIn("if (focusFirstItemRequestId != 0L) {\n        0", history)
+        self.assertIn("gridState.scrollToItem(targetIndex)", history)
+        self.assertIn("gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex }", history)
+        self.assertIn("withFrameNanos { }", history)
+        self.assertIn("index == 0", history)
+        self.assertNotIn("delay(", history)
+        self.assertIn("focusFirstItemRequestId = categoryContentFocusRequest", poster)
+        self.assertIn("categoryContentFocusReady && it.focusFirstItem", poster)
+        self.assertIn("focusContentRequestId = categoryContentFocusRequest", poster)
+
+    def test_visible_category_restore_is_direct_and_offscreen_restore_scrolls_before_focus(self) -> None:
+        helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+
+        visible_check = helper.index("isVisible(directTarget.index)")
+        direct_focus = helper.index("directTarget.requester.requestFocus()", visible_check)
+        pending = helper.index("controller.begin(directTarget.categoryId)", direct_focus)
+        cancel_default_entry = helper.index("cancelDefaultEntry()", pending)
+        scroll = helper.index("listState.scrollToItem(target.index)")
+        scroll_complete = helper.index("controller.markScrollCompleted(request.requestId)", scroll)
+        self.assertLess(visible_check, direct_focus)
+        self.assertLess(direct_focus, pending)
+        self.assertLess(pending, cancel_default_entry)
+        self.assertLess(cancel_default_entry, scroll)
+        self.assertLess(scroll, scroll_complete)
+        self.assertEqual(helper.count("listState.scrollToItem("), 1)
+        self.assertEqual(helper.count("requestFocus()"), 1)
+
+        self.assertIn("readyRequestId = controller.readyRequestId(categoryId)", target)
+        self.assertIn(".onGloballyPositioned { controller.markTargetPlaced(categoryId) }", target)
+        self.assertIn("controller.armBringIntoViewSuppression", target)
+        self.assertIn("controller.beginFocusDispatch(categoryId)", target)
+        self.assertIn("controller.endFocusDispatch()", target)
+        self.assertIn("requester.requestFocus()", target)
+        self.assertLess(target.index("readyRequestId == null"), target.index("requester.requestFocus()"))
+        self.assertNotIn("snapshotFlow", helper)
+        self.assertNotIn("withFrameNanos", helper)
+        self.assertNotIn("delay(", helper)
+        self.assertNotIn("while (", helper)
+
+    def test_live_movies_series_restore_selected_category_by_current_id_after_reorder(self) -> None:
+        catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        for block in (catalog, live):
+            self.assertIn("selectedCategoryFocusIndex(", block)
+            self.assertIn("selectedId = selectedId", block)
+            self.assertIn("orderedIds = ordered.map(Category::id)", block)
+            self.assertIn("focusRestoreController.resolveTarget = { selectedFocusTarget() }", block)
+            self.assertIn("restoreSelectedCategoryFocus(", block)
+            self.assertIn("cancelDefaultEntry = { cancelFocusChange() }", block)
+            self.assertIn("CategoryFocusTarget(selectedId, targetIndex, requester)", block)
+            self.assertIn("orderedIds = ordered.map(Category::id)", block)
+
+    def test_special_categories_and_selected_only_entry_gate_remain_supported(self) -> None:
+        catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        controller = self.section(
+            "internal class CategoryFocusRestoreController",
+            "internal fun canCategoryChipReceiveFocus(",
+        )
+        self.assertIn("listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID)", catalog)
+        self.assertIn("CONTINUE_CATEGORY_ID -> continueFocusRequester", catalog)
+        self.assertIn("listOf<String?>(null, FAVORITES_CATEGORY_ID)", live)
+        self.assertIn("LIVE_TV_PRO_MAIN_RECENT_CATEGORY", live)
+        self.assertIn("pendingRequest?.let { it.categoryId == categoryId } == true", controller)
+        for block in (catalog, live):
+            self.assertIn(".categoryChipFocus(", block)
+            self.assertIn("focusRestoreController", block)
+        gate = self.section("internal fun canCategoryChipReceiveFocus(", "@Composable\ninternal fun Modifier.categoryFocusTarget(")
+        self.assertIn("selectedId == chipId", gate)
+        self.assertIn("categoryBarHasFocus && !restorePending", gate)
+
+    def test_category_underlap_and_reorder_contracts_remain_intact(self) -> None:
+        catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        for block in (catalog, live):
+            self.assertIn("rememberCategorySidebarUnderlap", block)
+            self.assertIn("extendCategoryViewportTowardStart", block)
+            self.assertIn("categoryChipFocus", block)
+            self.assertIn("fun move(id: String, direction: Int)", block)
+            self.assertIn("prefs.edit().putString", block)
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+        self.assertIn("bringIntoViewRequester(bringIntoViewRequester)", target)
+        self.assertIn("bringIntoViewRequester.bringIntoView()", target)
+        self.assertIn("consumeBringIntoViewSuppression", target)
+
+    def test_source_owned_handoffs_cover_search_live_and_catalog_content(self) -> None:
+        header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
+        grid = TV_GRID.read_text(encoding="utf-8")
+
+        self.assertIn("onMoveToCategories: (() -> Boolean)?", header)
+        self.assertIn("event.key == Key.DirectionDown", header)
+        self.assertIn("categoryFocusRestoreController::requestFromSource", poster)
+        self.assertIn("onMoveToCategories = categoryFocusRestoreController::requestFromSource", poster)
+        self.assertIn("focusedChannelIndex[0] == 0", live)
+        self.assertIn("event.key == Key.DirectionUp", live)
+        self.assertIn("categoryFocusRestoreController.requestFromSource()", live)
+        self.assertIn("move == TvGridFocusMove.UP", grid)
+        self.assertIn("return@onPreviewKeyEvent onMoveToCategories()", grid)
+
+    def test_tv_restore_has_one_scroll_owner_and_manual_navigation_keeps_bring_into_view(self) -> None:
+        helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+        catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+
+        self.assertEqual(helper.count("listState.scrollToItem("), 1)
+        for block in (catalog, live):
+            self.assertIn("LaunchedEffect(isTv, selectedId, ordered)", block)
+            self.assertIn("if (isTv) return@LaunchedEffect", block)
+        self.assertIn("armBringIntoViewSuppression", target)
+        self.assertIn("!controller.consumeBringIntoViewSuppression(categoryId)", target)
+        self.assertLess(
+            helper.index("controller.isDispatchingFocusTo(directTarget.categoryId)"),
+            helper.index("controller.hasPendingTarget(directTarget.categoryId)"),
+        )
+
+    def test_tv_destination_initial_entry_targets_all_without_changing_selection(self) -> None:
+        shell = self.section("fun MainShellScreen(", "@Composable\nprivate fun CinematicNavigationRail(")
+        destination = self.section("private fun DestinationContent(", "@Composable\nprivate fun CinemaHomeScreen(")
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
+        catalog_bar = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
+        live_bar = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")
+
+        self.assertIn("val tvCatalogAllFocusRequesters = remember", shell)
+        for target in ("MainDestination.LIVE", "MainDestination.MOVIES", "MainDestination.SERIES"):
+            self.assertIn(f"{target} to FocusRequester()", shell)
+        self.assertIn(
+            "tvCatalogAllFocusRequesters[state.destination] ?: currentTvContentFocusRequester",
+            shell,
+        )
+        self.assertIn("currentTvDestinationFocusRequester.requestFocus()", shell)
+        self.assertNotIn("currentTvContentFocusRequester.requestFocus()", shell)
+        self.assertIn("initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination]", shell)
+        self.assertIn("initialAllFocusPending = currentTvCatalogInitialFocusPending", shell)
+        self.assertIn("initialAllFocusRequester: FocusRequester? = null", destination)
+        self.assertIn("initialAllFocusPending: Boolean = false", destination)
+        for block in (poster, live):
+            self.assertIn("initialAllFocusRequester", block)
+            self.assertIn("initialAllFocusPending", block)
+        for block in (catalog_bar, live_bar):
+            self.assertIn("val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester", block)
+            self.assertIn("allowInitialEntry = initialAllFocusPending", block)
+            self.assertIn("selectedFocusTarget()", block)
+        self.assertIn("RoundAction(Icons.Rounded.Refresh, \"تحديث\", onRefresh)", header)
+        self.assertNotIn("canFocus = false", header)
+        self.assertNotIn("onSelectCategory(null)", shell)
+
+    def test_new_focus_flow_adds_no_arbitrary_delay_polling_or_retry_loop(self) -> None:
+        helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
+        target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
+        for block in (helper, target):
+            self.assertNotIn("delay(40", block)
+            self.assertNotIn("delay(90", block)
+            self.assertNotIn("delay(120", block)
+            self.assertNotIn("delay(180", block)
+            self.assertNotIn("delay(300", block)
+            self.assertNotIn("debounce", block.lower())
+            self.assertNotIn("retry", block.lower())
+            self.assertNotIn("snapshotFlow", block)
+            self.assertNotIn("withFrameNanos", block)
+
+
+if __name__ == "__main__":
+    unittest.main()

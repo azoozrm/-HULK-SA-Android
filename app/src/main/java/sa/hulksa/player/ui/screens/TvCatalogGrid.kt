@@ -140,6 +140,7 @@ internal fun TvCatalogGrid(
     onOpen: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     restoreFocusedCard: Boolean,
+    onMoveToCategories: (() -> Boolean)? = null,
 ) {
     require(destination == MainDestination.MOVIES || destination == MainDestination.SERIES)
     require(contentKeys.size == content.size)
@@ -283,6 +284,9 @@ internal fun TvCatalogGrid(
                         )
 
                         if (nextIndex == null) {
+                            if (move == TvGridFocusMove.UP && onMoveToCategories != null) {
+                                return@onPreviewKeyEvent onMoveToCategories()
+                            }
                             // RTL catalog policy:
                             // - Physical RIGHT from the row's right-most card is allowed to
                             //   escape to the navigation rail.

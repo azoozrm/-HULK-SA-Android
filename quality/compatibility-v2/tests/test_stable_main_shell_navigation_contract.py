@@ -137,7 +137,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertIn("onSelect = selectTvDestination", shell)
         self.assertIn("handoff.destination != state.destination", handoff)
         self.assertIn("withFrameNanos { }", handoff)
-        self.assertIn("currentTvContentFocusRequester.requestFocus()", handoff)
+        self.assertIn("currentTvDestinationFocusRequester.requestFocus()", handoff)
         self.assertIn("pendingTvContentFocusHandoff = null", handoff)
         self.assertNotIn("delay(", handoff)
         self.assertNotIn("debounce", handoff.lower())
