@@ -246,6 +246,7 @@ internal fun notificationTvFocusMove(
         }
         NotificationTvFocusTarget.ClearAll -> when (direction) {
             NotificationFocusDirection.UP -> NotificationTvFocusTarget.Back
+            NotificationFocusDirection.RIGHT -> NotificationTvFocusTarget.Back
             NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
                 NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)
             }

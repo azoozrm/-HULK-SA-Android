@@ -71,7 +71,8 @@ class LocalNotificationUiPolicyTest {
             NotificationTvFocusTarget.ReadAll,
             notificationTvFocusMove(graph, NotificationTvFocusTarget.ClearAll, NotificationFocusDirection.LEFT),
         )
-        assertNull(
+        assertEquals(
+            NotificationTvFocusTarget.Back,
             notificationTvFocusMove(graph, NotificationTvFocusTarget.ClearAll, NotificationFocusDirection.RIGHT),
         )
         assertEquals(
