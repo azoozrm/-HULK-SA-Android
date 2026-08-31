@@ -129,10 +129,15 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         self.assertIn("movies = input.movieCatalog?.items.orEmpty()", initial)
         self.assertIn("series = input.seriesCatalog?.items.orEmpty()", initial)
         self.assertIn("featuredCandidates = emptyList()", initial)
-        self.assertIn(
-            "featuredCandidates.getOrNull(featuredIndex) ?: movies.firstOrNull() ?: series.firstOrNull()",
-            home,
-        )
+        self.assertIn('internal fun homeHeroIdentity(item: ContentItem): String = "${item.type}:${item.id}"', source)
+        self.assertIn("internal fun resolvePresentedHomeHero(", source)
+        self.assertIn("internal fun nextHomeHeroIdentity(", source)
+        self.assertIn("var featuredIdentity by remember(navigationMemory) { mutableStateOf<String?>(null) }", home)
+        self.assertIn("resolvePresentedHomeHero(", home)
+        self.assertIn("currentHeroIdentity = featuredIdentity", home)
+        self.assertIn("val resolvedFeaturedIdentity = featured?.let(::homeHeroIdentity)", home)
+        self.assertNotIn("remember(featuredCandidates) { mutableStateOf(0) }", home)
+        self.assertNotIn("featuredCandidates.getOrNull(featuredIndex)", home)
 
     def test_home_handoff_keeps_defensive_gate_off_normal_path_without_workarounds(self) -> None:
         source = self.read(MAIN_SHELL)

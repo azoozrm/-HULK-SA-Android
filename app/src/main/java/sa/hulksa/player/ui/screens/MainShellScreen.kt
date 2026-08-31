@@ -563,6 +563,40 @@ internal data class HomeContentSnapshot(
     val featuredCandidates: List<ContentItem>,
 )
 
+internal fun homeHeroIdentity(item: ContentItem): String = "${item.type}:${item.id}"
+
+private fun HomeContentSnapshot.hasHomeHeroSource(): Boolean =
+    featuredCandidates.isNotEmpty() || movies.isNotEmpty() || series.isNotEmpty()
+
+internal fun resolvePresentedHomeHero(
+    currentHeroIdentity: String?,
+    featuredCandidates: List<ContentItem>,
+    movies: List<ContentItem>,
+    series: List<ContentItem>,
+): ContentItem? {
+    if (currentHeroIdentity != null) {
+        featuredCandidates.firstOrNull { homeHeroIdentity(it) == currentHeroIdentity }?.let { return it }
+        movies.firstOrNull { homeHeroIdentity(it) == currentHeroIdentity }?.let { return it }
+        series.firstOrNull { homeHeroIdentity(it) == currentHeroIdentity }?.let { return it }
+    }
+    return featuredCandidates.firstOrNull()
+        ?: movies.firstOrNull()
+        ?: series.firstOrNull()
+}
+
+internal fun nextHomeHeroIdentity(
+    currentHeroIdentity: String?,
+    featuredCandidates: List<ContentItem>,
+): String? {
+    if (featuredCandidates.isEmpty()) return currentHeroIdentity
+    val currentIndex = featuredCandidates.indexOfFirst {
+        homeHeroIdentity(it) == currentHeroIdentity
+    }
+    if (currentIndex < 0) return homeHeroIdentity(featuredCandidates.first())
+    if (featuredCandidates.size == 1) return currentHeroIdentity
+    return homeHeroIdentity(featuredCandidates[(currentIndex + 1) % featuredCandidates.size])
+}
+
 class NavigationMemoryStore {
     private val positions = mutableMapOf<MainDestination, NavigationPosition>()
     private val screenEntryModels = CatalogScreenEntryModelStore()
@@ -625,8 +659,10 @@ private fun rememberHomeModelForPresentation(
             presented = exact
             return@LaunchedEffect
         }
-        navigationMemory.lastGoodHomeModel()?.let { lastGood ->
-            presented = lastGood
+        if (presented?.model?.hasHomeHeroSource() != true) {
+            navigationMemory.lastGoodHomeModel()?.let { lastGood ->
+                presented = lastGood
+            }
         }
         val exact = navigationMemory.homeModel(input)
         if (exact.input == input) presented = exact
@@ -1582,14 +1618,30 @@ private fun CinemaHomeScreen(
                 it.status == OfflineStatus.WAITING_STORAGE
         }.take(4)
     }
-    var featuredIndex by remember(featuredCandidates) { mutableStateOf(0) }
+    var featuredIdentity by remember(navigationMemory) { mutableStateOf<String?>(null) }
+    val featured = remember(featuredIdentity, featuredCandidates, movies, series) {
+        resolvePresentedHomeHero(
+            currentHeroIdentity = featuredIdentity,
+            featuredCandidates = featuredCandidates,
+            movies = movies,
+            series = series,
+        )
+    }
+    val resolvedFeaturedIdentity = featured?.let(::homeHeroIdentity)
+    LaunchedEffect(resolvedFeaturedIdentity) {
+        if (resolvedFeaturedIdentity != featuredIdentity) {
+            featuredIdentity = resolvedFeaturedIdentity
+        }
+    }
     LaunchedEffect(featuredCandidates) {
         while (featuredCandidates.size > 1) {
             delay(9_000L)
-            featuredIndex = (featuredIndex + 1) % featuredCandidates.size
+            featuredIdentity = nextHomeHeroIdentity(
+                currentHeroIdentity = featuredIdentity,
+                featuredCandidates = featuredCandidates,
+            )
         }
     }
-    val featured = featuredCandidates.getOrNull(featuredIndex) ?: movies.firstOrNull() ?: series.firstOrNull()
     val homeMovies = remember(movies, featured) {
         movies.asSequence()
             .filterNot { it.type == featured?.type && it.id == featured.id }
