@@ -233,11 +233,15 @@ internal fun notificationTvFocusMove(
 ): NotificationTvFocusTarget? {
     return when (current) {
         NotificationTvFocusTarget.Back -> when (direction) {
-            NotificationFocusDirection.DOWN -> graph.bulkEntry()
+            NotificationFocusDirection.LEFT -> NotificationTvFocusTarget.ClearAll.takeIf {
+                graph.hasNotifications
+            }
+            NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
+                NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)
+            }
             else -> null
         }
         NotificationTvFocusTarget.ReadAll -> when (direction) {
-            NotificationFocusDirection.UP -> NotificationTvFocusTarget.Back
             NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
                 NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)
             }
@@ -245,7 +249,6 @@ internal fun notificationTvFocusMove(
             else -> null
         }
         NotificationTvFocusTarget.ClearAll -> when (direction) {
-            NotificationFocusDirection.UP -> NotificationTvFocusTarget.Back
             NotificationFocusDirection.RIGHT -> NotificationTvFocusTarget.Back
             NotificationFocusDirection.DOWN -> graph.cards.firstOrNull()?.let { card ->
                 NotificationTvFocusTarget.CardAction(card.notificationId, NotificationTvCardAction.OPEN)

@@ -12,7 +12,7 @@ class TvNotificationCardScrollPolicyTest {
         val graph = graph(1)
 
         assertEquals(
-            NotificationTvFocusTarget.ReadAll,
+            cardTarget(1, NotificationTvCardAction.OPEN),
             notificationTvFocusMove(
                 graph,
                 NotificationTvFocusTarget.Back,
@@ -131,7 +131,7 @@ class TvNotificationCardScrollPolicyTest {
             ),
         )
         assertEquals(
-            NotificationTvFocusTarget.ClearAll,
+            cardTarget(1, NotificationTvCardAction.OPEN),
             notificationTvFocusMove(
                 graph,
                 NotificationTvFocusTarget.Back,
@@ -211,7 +211,7 @@ class TvNotificationCardScrollPolicyTest {
 
         val needsComposition = notificationTvTargetNeedsOffscreenComposition(
             current = NotificationTvFocusTarget.Back,
-            target = NotificationTvFocusTarget.ReadAll,
+            target = NotificationTvFocusTarget.ClearAll,
             isTargetCardComposed = {
                 compositionQueries += 1
                 false
@@ -308,7 +308,7 @@ class TvNotificationCardScrollPolicyTest {
     }
 
     @Test
-    fun headerReadAllClearAllAndBackNavigationRemainsUnchanged() {
+    fun headerReadAllClearAllAndBackNavigationFollowsGeometry() {
         val graph = graph(3)
 
         assertEquals(
@@ -327,16 +327,14 @@ class TvNotificationCardScrollPolicyTest {
                 NotificationFocusDirection.LEFT,
             ),
         )
-        assertEquals(
-            NotificationTvFocusTarget.Back,
+        assertNull(
             notificationTvFocusMove(
                 graph,
                 NotificationTvFocusTarget.ReadAll,
                 NotificationFocusDirection.UP,
             ),
         )
-        assertEquals(
-            NotificationTvFocusTarget.Back,
+        assertNull(
             notificationTvFocusMove(
                 graph,
                 NotificationTvFocusTarget.ClearAll,
@@ -356,6 +354,7 @@ class TvNotificationCardScrollPolicyTest {
         assertFalse(NotificationFocusDirection.DOWN in readAllBlocked)
         assertFalse(NotificationFocusDirection.RIGHT in readAllBlocked)
         assertTrue(NotificationFocusDirection.LEFT in readAllBlocked)
+        assertTrue(NotificationFocusDirection.UP in readAllBlocked)
 
         val firstOpenBlocked = notificationTvBlockedDirections(
             graph = graph,

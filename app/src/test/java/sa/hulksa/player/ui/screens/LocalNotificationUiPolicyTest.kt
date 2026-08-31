@@ -30,11 +30,12 @@ class LocalNotificationUiPolicyTest {
     }
 
     @Test
-    fun notificationHeaderNavigationEntersBulkActionsAndStopsAtOuterEdges() {
+    fun notificationHeaderBackFollowsRtlGeometryAndReachesFirstCard() {
         val graph = focusGraph()
+        val firstOpen = cardTarget("first", NotificationTvCardAction.OPEN)
 
         assertEquals(
-            NotificationTvFocusTarget.ReadAll,
+            firstOpen,
             notificationTvFocusMove(
                 graph,
                 NotificationTvFocusTarget.Back,
@@ -42,7 +43,10 @@ class LocalNotificationUiPolicyTest {
             ),
         )
         assertNull(notificationTvFocusMove(graph, NotificationTvFocusTarget.Back, NotificationFocusDirection.UP))
-        assertNull(notificationTvFocusMove(graph, NotificationTvFocusTarget.Back, NotificationFocusDirection.LEFT))
+        assertEquals(
+            NotificationTvFocusTarget.ClearAll,
+            notificationTvFocusMove(graph, NotificationTvFocusTarget.Back, NotificationFocusDirection.LEFT),
+        )
         assertNull(notificationTvFocusMove(graph, NotificationTvFocusTarget.Back, NotificationFocusDirection.RIGHT))
     }
 
@@ -51,8 +55,7 @@ class LocalNotificationUiPolicyTest {
         val graph = focusGraph()
         val firstOpen = cardTarget("first", NotificationTvCardAction.OPEN)
 
-        assertEquals(
-            NotificationTvFocusTarget.Back,
+        assertNull(
             notificationTvFocusMove(graph, NotificationTvFocusTarget.ReadAll, NotificationFocusDirection.UP),
         )
         assertEquals(
@@ -75,8 +78,7 @@ class LocalNotificationUiPolicyTest {
             NotificationTvFocusTarget.Back,
             notificationTvFocusMove(graph, NotificationTvFocusTarget.ClearAll, NotificationFocusDirection.RIGHT),
         )
-        assertEquals(
-            NotificationTvFocusTarget.Back,
+        assertNull(
             notificationTvFocusMove(graph, NotificationTvFocusTarget.ClearAll, NotificationFocusDirection.UP),
         )
         assertEquals(
@@ -160,7 +162,6 @@ class LocalNotificationUiPolicyTest {
         val graph = focusGraph()
         val expectedDownPath = listOf(
             NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
             cardTarget("first", NotificationTvCardAction.OPEN),
             cardTarget("first", NotificationTvCardAction.MARK_READ),
             cardTarget("first", NotificationTvCardAction.DELETE),
@@ -181,27 +182,67 @@ class LocalNotificationUiPolicyTest {
         assertNull(current)
         assertEquals(expectedDownPath, actualDownPath)
 
+        val expectedUpPath = expectedDownPath.drop(1).reversed() + NotificationTvFocusTarget.ReadAll
         val actualUpPath = mutableListOf<NotificationTvFocusTarget>()
         current = expectedDownPath.last()
-        repeat(expectedDownPath.size) {
+        repeat(expectedUpPath.size) {
             val node = checkNotNull(current)
             actualUpPath += node
             current = notificationTvFocusMove(graph, node, NotificationFocusDirection.UP)
         }
         assertNull(current)
-        assertEquals(expectedDownPath.reversed(), actualUpPath)
+        assertEquals(expectedUpPath, actualUpPath)
     }
 
     @Test
     fun disabledReadAllIsRemovedFromFocusGraph() {
         val graph = focusGraph(unreadCount = 0, markReadVisible = false)
+        val firstOpen = cardTarget("first", NotificationTvCardAction.OPEN)
 
         assertTrue(NotificationTvFocusTarget.ReadAll !in notificationTvFocusableTargets(graph))
+        assertEquals(
+            firstOpen,
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.Back,
+                NotificationFocusDirection.DOWN,
+            ),
+        )
         assertEquals(
             NotificationTvFocusTarget.ClearAll,
             notificationTvFocusMove(
                 graph,
                 NotificationTvFocusTarget.Back,
+                NotificationFocusDirection.LEFT,
+            ),
+        )
+        assertNull(
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.Back,
+                NotificationFocusDirection.UP,
+            ),
+        )
+        assertNull(
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.Back,
+                NotificationFocusDirection.RIGHT,
+            ),
+        )
+        assertEquals(
+            NotificationTvFocusTarget.Back,
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.ClearAll,
+                NotificationFocusDirection.RIGHT,
+            ),
+        )
+        assertEquals(
+            firstOpen,
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.ClearAll,
                 NotificationFocusDirection.DOWN,
             ),
         )
@@ -211,6 +252,17 @@ class LocalNotificationUiPolicyTest {
                 NotificationTvFocusTarget.ClearAll,
                 NotificationFocusDirection.LEFT,
             ),
+        )
+        assertNull(
+            notificationTvFocusMove(
+                graph,
+                NotificationTvFocusTarget.ClearAll,
+                NotificationFocusDirection.UP,
+            ),
+        )
+        assertEquals(
+            NotificationTvFocusTarget.ClearAll,
+            notificationTvFocusMove(graph, firstOpen, NotificationFocusDirection.UP),
         )
     }
 
