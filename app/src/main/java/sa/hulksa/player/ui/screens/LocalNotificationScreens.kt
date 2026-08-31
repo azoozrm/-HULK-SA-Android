@@ -180,6 +180,9 @@ internal fun notificationTvFocusTag(target: NotificationTvFocusTarget): String =
         "notification-card-${target.notificationId}-${target.action.name}"
 }
 
+internal const val NOTIFICATION_CENTER_SCREEN_ROOT_TAG = "notification-center-screen-root"
+internal const val NOTIFICATION_TV_BACKGROUND_TAG = "notification-tv-background"
+internal const val NOTIFICATION_TV_SAFE_CONTENT_TAG = "notification-tv-safe-content"
 internal const val NOTIFICATION_TV_CENTER_ROOT_TAG = "notification-tv-center-root"
 internal const val NOTIFICATION_TV_CENTER_LIST_TAG = "notification-tv-center-list"
 internal fun notificationTvCardContainerTag(notificationId: String): String =
@@ -643,32 +646,71 @@ fun LocalNotificationCenterScreen(
     BackHandler(onBack = onBack)
     val colors = LocalHulkColors.current
 
-    BoxWithConstraints(
-        Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .safeDrawingPadding(),
-    ) {
-        val metrics = localNotificationCenterMetrics(
-            widthDp = maxWidth.value.roundToInt(),
-            heightDp = maxHeight.value.roundToInt(),
-            isTv = isTv,
-        )
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            if (isTv) {
-                TvLocalNotificationCenter(
-                    notifications = notifications,
-                    unreadCount = unreadCount,
-                    metrics = metrics,
-                    onBack = onBack,
-                    onOpen = onOpen,
-                    onMarkRead = onMarkRead,
-                    onReadAll = onReadAll,
-                    onDelete = onDelete,
-                    onClearAll = onClearAll,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
-            } else {
+    if (isTv) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .testTag(NOTIFICATION_CENTER_SCREEN_ROOT_TAG),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                colors.background,
+                                colors.surface.copy(alpha = .44f),
+                                colors.surface.copy(alpha = .44f),
+                            ),
+                        ),
+                    )
+                    .testTag(NOTIFICATION_TV_BACKGROUND_TAG),
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding(),
+            ) {
+                BoxWithConstraints(
+                    Modifier
+                        .fillMaxSize()
+                        .testTag(NOTIFICATION_TV_SAFE_CONTENT_TAG),
+                ) {
+                    val metrics = localNotificationCenterMetrics(
+                        widthDp = maxWidth.value.roundToInt(),
+                        heightDp = maxHeight.value.roundToInt(),
+                        isTv = true,
+                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                        TvLocalNotificationCenter(
+                            notifications = notifications,
+                            unreadCount = unreadCount,
+                            metrics = metrics,
+                            onBack = onBack,
+                            onOpen = onOpen,
+                            onMarkRead = onMarkRead,
+                            onReadAll = onReadAll,
+                            onDelete = onDelete,
+                            onClearAll = onClearAll,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    }
+                }
+            }
+        }
+    } else {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .background(colors.background)
+                .safeDrawingPadding(),
+        ) {
+            val metrics = localNotificationCenterMetrics(
+                widthDp = maxWidth.value.roundToInt(),
+                heightDp = maxHeight.value.roundToInt(),
+                isTv = false,
+            )
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 MobileLocalNotificationCenter(
                     notifications = notifications,
                     unreadCount = unreadCount,
@@ -959,16 +1001,6 @@ internal fun TvLocalNotificationCenter(
             .fillMaxHeight()
             .widthIn(max = metrics.maxContentWidthDp.dp)
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        colors.background,
-                        // Keep short lists visually owned through the bottom safe edge.
-                        colors.surface.copy(alpha = .44f),
-                        colors.surface.copy(alpha = .44f),
-                    ),
-                ),
-            )
             .testTag(NOTIFICATION_TV_CENTER_ROOT_TAG)
             .padding(
                 horizontal = metrics.horizontalPaddingDp.dp,
