@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -154,6 +155,40 @@ internal data class NotificationTvFocusGraph(
     val hasNotifications: Boolean get() = cards.isNotEmpty()
     val readAllEnabled: Boolean get() = hasNotifications && unreadCount > 0
 }
+
+internal sealed interface NotificationTvCardRevealPlan {
+    data object NoScroll : NotificationTvCardRevealPlan
+    data object ComposeOffscreen : NotificationTvCardRevealPlan
+    data class MinimalScroll(val deltaPx: Int) : NotificationTvCardRevealPlan
+}
+
+internal fun notificationTvCardRevealPlan(
+    itemOffset: Int?,
+    itemSize: Int?,
+    viewportStartOffset: Int,
+    viewportEndOffset: Int,
+): NotificationTvCardRevealPlan {
+    if (itemOffset == null || itemSize == null) {
+        return NotificationTvCardRevealPlan.ComposeOffscreen
+    }
+
+    val itemEndOffset = itemOffset + itemSize
+    val clippedAtStart = itemOffset < viewportStartOffset
+    val clippedAtEnd = itemEndOffset > viewportEndOffset
+    return when {
+        clippedAtStart && clippedAtEnd -> NotificationTvCardRevealPlan.NoScroll
+        clippedAtStart -> NotificationTvCardRevealPlan.MinimalScroll(
+            deltaPx = itemOffset - viewportStartOffset,
+        )
+        clippedAtEnd -> NotificationTvCardRevealPlan.MinimalScroll(
+            deltaPx = itemEndOffset - viewportEndOffset,
+        )
+        else -> NotificationTvCardRevealPlan.NoScroll
+    }
+}
+
+internal fun requestNotificationTvFocusOnce(request: () -> Boolean): Boolean =
+    runCatching { request() }.getOrDefault(false)
 
 private fun NotificationTvCardFocusSpec.actions(): List<NotificationTvCardAction> = buildList {
     add(NotificationTvCardAction.OPEN)
@@ -659,19 +694,25 @@ private fun TvLocalNotificationCenter(
         if (cardIndex >= 0) {
             val layoutInfo = listState.layoutInfo
             val visibleItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == cardIndex }
-            val fullyVisible = visibleItem != null &&
-                visibleItem.offset >= layoutInfo.viewportStartOffset &&
-                visibleItem.offset + visibleItem.size <= layoutInfo.viewportEndOffset
-            if (!fullyVisible) {
-                listState.scrollToItem(cardIndex)
-                withFrameNanos { }
+            when (
+                val revealPlan = notificationTvCardRevealPlan(
+                    itemOffset = visibleItem?.offset,
+                    itemSize = visibleItem?.size,
+                    viewportStartOffset = layoutInfo.viewportStartOffset,
+                    viewportEndOffset = layoutInfo.viewportEndOffset,
+                )
+            ) {
+                NotificationTvCardRevealPlan.NoScroll -> Unit
+                NotificationTvCardRevealPlan.ComposeOffscreen -> {
+                    listState.scrollToItem(cardIndex)
+                    withFrameNanos { }
+                }
+                is NotificationTvCardRevealPlan.MinimalScroll -> {
+                    listState.scrollBy(revealPlan.deltaPx.toFloat())
+                }
             }
         }
-        repeat(3) {
-            val requested = runCatching { requester.requestFocus() }.getOrDefault(false)
-            if (requested) return
-            withFrameNanos { }
-        }
+        requestNotificationTvFocusOnce { requester.requestFocus() }
     }
 
     fun handleDirection(
