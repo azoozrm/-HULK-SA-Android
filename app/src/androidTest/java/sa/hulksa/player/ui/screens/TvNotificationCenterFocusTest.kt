@@ -78,9 +78,16 @@ class TvNotificationCenterFocusTest {
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionDown,
+            NotificationTvFocusTarget.ClearAll,
+            Key.DirectionLeft,
         )
+        moveAndAssert(
+            harness,
+            NotificationTvFocusTarget.ClearAll,
+            NotificationTvFocusTarget.ReadAll,
+            Key.DirectionLeft,
+        )
+        moveAndAssertStops(harness, NotificationTvFocusTarget.ReadAll, Key.DirectionUp)
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.ReadAll,
@@ -95,15 +102,10 @@ class TvNotificationCenterFocusTest {
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionDown,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.ReadAll,
             NotificationTvFocusTarget.ClearAll,
-            Key.DirectionRight,
+            Key.DirectionLeft,
         )
+        moveAndAssertStops(harness, NotificationTvFocusTarget.ClearAll, Key.DirectionUp)
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.ClearAll,
@@ -122,8 +124,9 @@ class TvNotificationCenterFocusTest {
             harness,
             NotificationTvFocusTarget.Back,
             NotificationTvFocusTarget.ClearAll,
-            Key.DirectionDown,
+            Key.DirectionLeft,
         )
+        moveAndAssertStops(harness, NotificationTvFocusTarget.ClearAll, Key.DirectionLeft)
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.ClearAll,
@@ -144,12 +147,6 @@ class TvNotificationCenterFocusTest {
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionDown,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.ReadAll,
             cardOneOpen,
             Key.DirectionDown,
         )
@@ -165,14 +162,8 @@ class TvNotificationCenterFocusTest {
             initialFirstVisibleItemIndex = 9,
         )
         moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionDown,
-        )
-        moveAndAssert(
             harness = harness,
-            source = NotificationTvFocusTarget.ReadAll,
+            source = NotificationTvFocusTarget.Back,
             target = cardTarget(1, NotificationTvCardAction.OPEN),
             key = Key.DirectionDown,
             keyPressCount = 4,
@@ -243,36 +234,6 @@ class TvNotificationCenterFocusTest {
         moveAndAssert(
             harness,
             NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionDown,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.ReadAll,
-            NotificationTvFocusTarget.ClearAll,
-            Key.DirectionRight,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.ClearAll,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionLeft,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.ReadAll,
-            NotificationTvFocusTarget.Back,
-            Key.DirectionUp,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.Back,
-            NotificationTvFocusTarget.ReadAll,
-            Key.DirectionDown,
-        )
-        moveAndAssert(
-            harness,
-            NotificationTvFocusTarget.ReadAll,
             cardTarget(1, NotificationTvCardAction.OPEN),
             Key.DirectionDown,
         )
@@ -299,6 +260,22 @@ class TvNotificationCenterFocusTest {
             assertEquals(listOf(target), harness.transitions.toList())
         }
         assertHeadersAreNotFocusedUnless(target)
+    }
+
+    private fun moveAndAssertStops(
+        harness: Harness,
+        source: NotificationTvFocusTarget,
+        key: Key,
+    ) {
+        harness.transitions.clear()
+        composeRule.onNodeWithTag(notificationTvFocusTag(source))
+            .assertIsFocused()
+            .performKeyInput { pressKey(key) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(notificationTvFocusTag(source)).assertIsFocused()
+        composeRule.runOnIdle {
+            assertTrue(harness.transitions.isEmpty())
+        }
     }
 
     private fun activateAndAssert(
