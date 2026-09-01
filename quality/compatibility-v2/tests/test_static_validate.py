@@ -40,6 +40,12 @@ class StaticValidationTest(unittest.TestCase):
         (root / "app/src/main/java/sa/hulksa/player/model").mkdir(parents=True)
         (root / "app/src/main/java/sa/hulksa/player/ui/screens").mkdir(parents=True)
         (root / ".github/workflows").mkdir(parents=True)
+        (root / ".github/workflows/build-apk.yml").write_text(
+            "find app/src/main/res -type f\n"
+            "-name 'hulk_sa_adaptive_*'\n"
+            "test ! -e project/app/src/main/res/drawable/ic_stat_hulk.xml\n",
+            encoding="utf-8",
+        )
         logo = b"approved-test-logo"
         logo_sha = hashlib.sha256(logo).hexdigest()
         (root / "app/src/main/res/drawable-nodpi/hulk_sa_logo.png").write_bytes(logo)
@@ -153,6 +159,17 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             )
             self.assertEqual("FAIL", result.status)
 
+    def test_missing_adaptive_foreground_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logo_sha = self.fixture(root)
+            (root / "app/src/main/res/drawable-nodpi/hulk_sa_adaptive_foreground.png").unlink()
+            result = next(
+                check for check in MODULE.validate_repo(root, logo_sha)
+                if check.id == "android-icon-density-matrix"
+            )
+            self.assertEqual("FAIL", result.status)
+
     def test_tv_launcher_must_be_distinct_from_phone_launcher(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -179,6 +196,26 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             result = next(
                 check for check in MODULE.validate_repo(root, expected)
                 if check.id == "approved-logo-sha256"
+            )
+            self.assertEqual("FAIL", result.status)
+
+    def test_legacy_build_logo_restore_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logo_sha = self.fixture(root)
+            payload = root / ".payload/assets/logo.part-00"
+            payload.parent.mkdir(parents=True)
+            payload.write_text("legacy-logo", encoding="utf-8")
+            workflow = root / ".github/workflows/build-apk.yml"
+            workflow.write_text(
+                'curl "https://hulksa.com/assets/hulk-official-logo.webp"\n'
+                "cat .payload/assets/logo.part-*\n"
+                "text.replace('@mipmap/ic_launcher', '@drawable/hulk_sa_logo')\n",
+                encoding="utf-8",
+            )
+            result = next(
+                check for check in MODULE.validate_repo(root, logo_sha)
+                if check.id == "build-workflow-current-icon-package"
             )
             self.assertEqual("FAIL", result.status)
 

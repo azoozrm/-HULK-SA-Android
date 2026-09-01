@@ -49,12 +49,11 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Restore HULK SA branding and Arabic fonts
+      - name: Restore current HULK SA icon package and Arabic fonts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p project/app/src/main/res/font
-          mkdir -p project/app/src/main/res/drawable-nodpi
 
           FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -62,24 +61,25 @@ jobs:
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-SemiBold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Bold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
 
-          if ! curl -fL --retry 5 --retry-delay 2 "https://hulksa.com/assets/hulk-official-logo.webp" -o /tmp/hulk-logo.webp; then
-            cat .payload/assets/logo.part-* | base64 --decode > /tmp/hulk-logo.webp
-          fi
-          test -s /tmp/hulk-logo.webp
-          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
-          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          find project/app/src/main/res -type f \
+            \( -name 'ic_launcher*' -o -name 'tv_banner*' -o -name 'ic_stat_hulk*' \
+               -o -name 'hulk_sa_logo*' -o -name 'hulk_sa_adaptive_*' -o -name 'ic_banner*' \) \
+            -delete
 
-          python3 - <<'PY'
-          from pathlib import Path
-          manifest = Path('project/app/src/main/AndroidManifest.xml')
-          text = manifest.read_text()
-          text = text.replace('@mipmap/ic_launcher_round', '@drawable/hulk_sa_logo')
-          text = text.replace('@mipmap/ic_launcher', '@drawable/hulk_sa_logo')
-          manifest.write_text(text)
-          PY
+          find app/src/main/res -type f \
+            \( -name 'ic_launcher*' -o -name 'tv_banner.png' -o -name 'ic_stat_hulk.png' \
+               -o -name 'hulk_sa_logo.png' -o -name 'hulk_sa_adaptive_*' \) \
+            -print0 | while IFS= read -r -d '' asset; do
+              target="project/$asset"
+              mkdir -p "$(dirname "$target")"
+              cp "$asset" "$target"
+            done
 
-          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
-          test -s project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_foreground.png
+          test -s project/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          test -s project/app/src/main/res/mipmap-xxxhdpi/tv_banner.png
+          test ! -e project/app/src/main/res/drawable/ic_stat_hulk.xml
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
 
       - name: Build debug APK

@@ -17,11 +17,11 @@ from xml.etree import ElementTree
 
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
-DEFAULT_LOGO_SHA256 = "1fd9ccde4a86b03bde02b0618747b063496f8637ef624683b309ed77d36d7c45"
+DEFAULT_LOGO_SHA256 = "66d36879be8806348fe8eaa394aca52f240716b4ab1b0eddd236dbb63aee3f28"
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
-    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "80945e5ae70c8b672a448283d58e14487f264fe03d684dd1d1c689a320953b08",
-    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "acce7d7a2968b4cb9db7d8bdac8b57e2cad4ef44b1577c00b7f63f28f2aac234",
+    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "510f8bc19eb8f8cddc52baa9965fce79df887615fb28cf4e6147c11c8dabf20b",
+    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "c79dfcd259804e35fd57c79f495ed41644e51c766c106f2795cf6dd1f53a5e3a",
 }
 ICON_DENSITY_SPECS = {
     "mdpi": {"launcher": 48, "tv_launcher": 80, "banner": (160, 90), "notification": 24},
@@ -46,6 +46,13 @@ for density, sizes in ICON_DENSITY_SPECS.items():
             f"app/src/main/res/drawable-{density}/ic_stat_hulk.png": (notification, notification),
         }
     )
+ICON_ASSET_DIMENSIONS.update(
+    {
+        "app/src/main/res/drawable-nodpi/hulk_sa_adaptive_background.png": (432, 432),
+        "app/src/main/res/drawable-nodpi/hulk_sa_adaptive_foreground.png": (432, 432),
+        "app/src/main/res/drawable-nodpi/hulk_sa_adaptive_monochrome.png": (432, 432),
+    }
+)
 FORBIDDEN_PRODUCTION_MARKERS = (
     "qaMarker",
     "qaTvPageContent",
@@ -360,7 +367,7 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
     add(
         "android-icon-density-matrix",
         not icon_dimension_failures,
-        "Phone, round, TV, banner, and notification assets cover every required density at exact dimensions",
+        "Phone, round, TV, banner, notification, and adaptive assets have the required exact dimensions",
         "Android icon density matrix is incomplete or dimensionally invalid: " + "; ".join(icon_dimension_failures),
         icon_dimension_failures or list(ICON_ASSET_DIMENSIONS),
     )
@@ -458,6 +465,27 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         "V2 workflows contain no continue-on-error or automatic baseline update",
         "Unsafe V2 workflow policy found: " + ", ".join(workflow_policy_hits),
         workflow_policy_hits or [".github/workflows"],
+    )
+
+    build_apk_workflow = workflow_root / "build-apk.yml"
+    build_apk_text = _read(build_apk_workflow) if build_apk_workflow.is_file() else ""
+    legacy_logo_payload = repo_root / ".payload/assets/logo.part-00"
+    current_icon_restore_markers = (
+        "find app/src/main/res -type f",
+        "-name 'hulk_sa_adaptive_*'",
+        "test ! -e project/app/src/main/res/drawable/ic_stat_hulk.xml",
+    )
+    add(
+        "build-workflow-current-icon-package",
+        build_apk_workflow.is_file()
+        and all(marker in build_apk_text for marker in current_icon_restore_markers)
+        and "hulk-official-logo.webp" not in build_apk_text
+        and "logo.part-*" not in build_apk_text
+        and "text.replace('@mipmap/ic_launcher" not in build_apk_text
+        and not legacy_logo_payload.exists(),
+        "Legacy branding restore is removed and APK builds restore the current complete icon package",
+        "APK build can restore the legacy logo or does not prove current icon-package restoration",
+        [str(build_apk_workflow), str(legacy_logo_payload)],
     )
 
     return checks
