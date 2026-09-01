@@ -55,6 +55,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
@@ -67,6 +68,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -751,7 +753,14 @@ private sealed interface DownloadTvFocusTarget {
     data class CardAction(val downloadId: Long, val slot: DownloadFocusSlot) : DownloadTvFocusTarget
 }
 
-private data class DownloadTvFocusGraph(val downloadIds: List<Long>) {
+private data class DownloadTvFocusGraph(
+    val downloadIds: List<Long>,
+    val columns: Int,
+) {
+    init {
+        require(columns > 0)
+    }
+
     val indexById: Map<Long, Int> = downloadIds.withIndex().associate { (index, id) -> id to index }
 }
 
@@ -773,14 +782,54 @@ private fun keyToDownloadFocusMove(key: Key): DownloadFocusMove? = when (key) {
     else -> null
 }
 
-private fun downloadTargetFor(
+private fun downloadCardTargetAt(
     graph: DownloadTvFocusGraph,
-    location: DownloadFocusLocation,
-): DownloadTvFocusTarget? = when (location.zone) {
-    DownloadFocusZone.TOOLBAR -> DownloadTvFocusTarget.Toolbar(location.slot)
-    DownloadFocusZone.CARD -> graph.downloadIds.getOrNull(location.row)?.let { downloadId ->
-        DownloadTvFocusTarget.CardAction(downloadId, location.slot)
+    index: Int,
+    slot: DownloadFocusSlot,
+): DownloadTvFocusTarget? = graph.downloadIds.getOrNull(index)?.let { downloadId ->
+    DownloadTvFocusTarget.CardAction(downloadId, slot)
+}
+
+private fun downloadToolbarTargetBelow(
+    graph: DownloadTvFocusGraph,
+    slot: DownloadFocusSlot,
+): DownloadTvFocusTarget? {
+    val firstRowCount = minOf(graph.columns, graph.downloadIds.size)
+    if (firstRowCount == 0) return null
+    val column = when (slot) {
+        DownloadFocusSlot.WIFI -> 0
+        DownloadFocusSlot.SCHEDULE -> (firstRowCount - 1) / 2
+        DownloadFocusSlot.CONCURRENT -> firstRowCount - 1
+        else -> return null
     }
+    val actionSlot = when (slot) {
+        DownloadFocusSlot.WIFI -> DownloadFocusSlot.PRIMARY
+        DownloadFocusSlot.SCHEDULE -> DownloadFocusSlot.PRIORITY
+        DownloadFocusSlot.CONCURRENT -> DownloadFocusSlot.CANCEL
+        else -> return null
+    }
+    return downloadCardTargetAt(graph, column, actionSlot)
+}
+
+private fun downloadToolbarTargetAbove(
+    graph: DownloadTvFocusGraph,
+    cardIndex: Int,
+    cardSlot: DownloadFocusSlot,
+): DownloadTvFocusTarget {
+    val column = cardIndex % graph.columns
+    val actionOffset = when (cardSlot) {
+        DownloadFocusSlot.PRIMARY -> .17f
+        DownloadFocusSlot.PRIORITY -> .50f
+        DownloadFocusSlot.CANCEL -> .83f
+        else -> .50f
+    }
+    val horizontalPositionFromRight = (column + actionOffset) / graph.columns
+    val toolbarSlot = when {
+        horizontalPositionFromRight < 1f / 3f -> DownloadFocusSlot.WIFI
+        horizontalPositionFromRight < 2f / 3f -> DownloadFocusSlot.SCHEDULE
+        else -> DownloadFocusSlot.CONCURRENT
+    }
+    return DownloadTvFocusTarget.Toolbar(toolbarSlot)
 }
 
 private fun nextDownloadTvFocus(
@@ -788,15 +837,68 @@ private fun nextDownloadTvFocus(
     current: DownloadTvFocusTarget,
     move: DownloadFocusMove,
 ): DownloadTvFocusTarget? {
-    val currentLocation = when (current) {
-        is DownloadTvFocusTarget.Toolbar -> DownloadFocusLocation.toolbar(current.slot)
+    return when (current) {
+        is DownloadTvFocusTarget.Toolbar -> when (move) {
+            DownloadFocusMove.LEFT -> when (current.slot) {
+                DownloadFocusSlot.WIFI -> DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.SCHEDULE)
+                DownloadFocusSlot.SCHEDULE -> DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.CONCURRENT)
+                else -> null
+            }
+            DownloadFocusMove.RIGHT -> when (current.slot) {
+                DownloadFocusSlot.CONCURRENT -> DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.SCHEDULE)
+                DownloadFocusSlot.SCHEDULE -> DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.WIFI)
+                else -> null
+            }
+            DownloadFocusMove.DOWN -> downloadToolbarTargetBelow(graph, current.slot)
+            DownloadFocusMove.UP -> null
+        }
         is DownloadTvFocusTarget.CardAction -> {
-            val row = graph.indexById[current.downloadId] ?: return null
-            DownloadFocusLocation.card(row, current.slot)
+            val index = graph.indexById[current.downloadId] ?: return null
+            // Grid indices increase leftward in RTL; remote arrow meaning stays physical.
+            val column = index % graph.columns
+            val row = index / graph.columns
+            when (move) {
+                DownloadFocusMove.LEFT -> when (current.slot) {
+                    DownloadFocusSlot.PRIMARY -> current.copy(slot = DownloadFocusSlot.PRIORITY)
+                    DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.CANCEL)
+                    DownloadFocusSlot.CANCEL -> {
+                        val targetIndex = index + 1
+                        if (column + 1 < graph.columns && targetIndex / graph.columns == row) {
+                            downloadCardTargetAt(graph, targetIndex, DownloadFocusSlot.PRIMARY)
+                        } else {
+                            null
+                        }
+                    }
+                    else -> null
+                }
+                DownloadFocusMove.RIGHT -> when (current.slot) {
+                    DownloadFocusSlot.CANCEL -> current.copy(slot = DownloadFocusSlot.PRIORITY)
+                    DownloadFocusSlot.PRIORITY -> current.copy(slot = DownloadFocusSlot.PRIMARY)
+                    DownloadFocusSlot.PRIMARY -> {
+                        if (column > 0) {
+                            downloadCardTargetAt(graph, index - 1, DownloadFocusSlot.CANCEL)
+                        } else {
+                            null
+                        }
+                    }
+                    else -> null
+                }
+                DownloadFocusMove.UP -> {
+                    val targetIndex = index - graph.columns
+                    if (targetIndex >= 0) {
+                        downloadCardTargetAt(graph, targetIndex, current.slot)
+                    } else {
+                        downloadToolbarTargetAbove(graph, index, current.slot)
+                    }
+                }
+                DownloadFocusMove.DOWN -> downloadCardTargetAt(
+                    graph,
+                    index + graph.columns,
+                    current.slot,
+                )
+            }
         }
     }
-    return nextDownloadFocus(graph.downloadIds.size, currentLocation, move)
-        ?.let { location -> downloadTargetFor(graph, location) }
 }
 
 private fun downloadFocusFallback(
@@ -3129,7 +3231,6 @@ private fun DownloadsScreen(
     onCyclePriority: (OfflineDownload) -> Unit,
     exitFocusRequester: FocusRequester?,
 ) {
-    val colors = LocalHulkColors.current
     val completed = downloads.count { it.status == OfflineStatus.COMPLETED }
     val active = downloads.count {
         it.status == OfflineStatus.QUEUED ||
@@ -3145,12 +3246,13 @@ private fun DownloadsScreen(
         .sumOf { it.totalBytes.coerceAtLeast(it.bytesDownloaded).coerceAtLeast(0L) }
     val downloadIds = remember(downloads) { downloads.map(OfflineDownload::downloadId) }
     val downloadIdSet = remember(downloadIds) { downloadIds.toSet() }
-    val graph = remember(downloadIds) { DownloadTvFocusGraph(downloadIds) }
+    val downloadIndexById = remember(downloadIds) {
+        downloadIds.withIndex().associate { (index, id) -> id to index }
+    }
     val remembered = navigationMemory.position(MainDestination.DOWNLOADS)
     val rememberedIndex = (
-        remembered.itemKey.toLongOrNull()?.let(graph.indexById::get) ?: remembered.itemIndex
+        remembered.itemKey.toLongOrNull()?.let(downloadIndexById::get) ?: remembered.itemIndex
     ).coerceIn(0, downloads.lastIndex.coerceAtLeast(0))
-    val downloadsState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val downloadsFocusScope = rememberCoroutineScope()
     val toolbarFocus = remember { DownloadToolbarFocusRequesters() }
     val toolbarFocusHandles = remember(toolbarFocus) {
@@ -3166,184 +3268,6 @@ private fun DownloadsScreen(
     }
     SideEffect {
         cardFocusRegistry.keys.retainAll(downloadIdSet)
-    }
-    val focusTransaction = remember { DownloadFocusMoveTransaction() }
-    val focusHistory = remember { DownloadFocusHistory(graph) }
-    var focusedTarget by remember { mutableStateOf<DownloadTvFocusTarget?>(null) }
-
-    fun focusHandleFor(target: DownloadTvFocusTarget): DownloadFocusHandle? = when (target) {
-        is DownloadTvFocusTarget.Toolbar -> when (target.slot) {
-            DownloadFocusSlot.WIFI -> toolbarFocusHandles.wifi
-            DownloadFocusSlot.SCHEDULE -> toolbarFocusHandles.schedule
-            DownloadFocusSlot.CONCURRENT -> toolbarFocusHandles.concurrent
-            else -> null
-        }
-        is DownloadTvFocusTarget.CardAction -> cardFocusRegistry[target.downloadId]?.let { requesters ->
-            when (target.slot) {
-                DownloadFocusSlot.PRIMARY -> requesters.primary
-                DownloadFocusSlot.PRIORITY -> requesters.priority
-                DownloadFocusSlot.CANCEL -> requesters.cancel
-                else -> null
-            }
-        }
-    }
-
-    fun requestAttachedFocus(target: DownloadTvFocusTarget): Boolean {
-        val handle = focusHandleFor(target) ?: return false
-        if (!handle.isPlaced) return false
-        return runCatching { handle.requester.requestFocus() }.getOrDefault(false)
-    }
-
-    suspend fun requestFocusAfterTargetPlacement(
-        target: DownloadTvFocusTarget,
-        moveGraph: DownloadTvFocusGraph,
-        composeOffscreenCard: Boolean,
-    ): Boolean {
-        val handle = focusHandleFor(target) ?: return false
-        val cardTarget = target as? DownloadTvFocusTarget.CardAction
-        if (composeOffscreenCard && cardTarget != null) {
-            val cardIndex = moveGraph.indexById[cardTarget.downloadId] ?: return false
-            downloadsState.scrollToItem(cardIndex)
-        }
-        if (!handle.isPlaced && !handle.awaitPlaced()) return false
-        if (cardTarget != null) {
-            val targetStillExists = cardTarget.downloadId in moveGraph.indexById
-            val targetIsVisible = downloadsState.layoutInfo.visibleItemsInfo.any { item ->
-                item.key == cardTarget.downloadId
-            }
-            if (!targetStillExists || !targetIsVisible || !handle.isPlaced) return false
-        }
-        return runCatching { handle.requester.requestFocus() }.getOrDefault(false)
-    }
-
-    fun startFocusTransaction(
-        target: DownloadTvFocusTarget,
-        moveGraph: DownloadTvFocusGraph,
-        composeOffscreenCard: Boolean,
-        onSettled: ((Boolean) -> Unit)? = null,
-    ): Boolean {
-        if (focusTransaction.isActive || focusHandleFor(target) == null) {
-            onSettled?.invoke(false)
-            return false
-        }
-        lateinit var launchedJob: Job
-        launchedJob = downloadsFocusScope.launch(start = CoroutineStart.LAZY) {
-            var focusRequested = false
-            try {
-                focusRequested = requestFocusAfterTargetPlacement(
-                    target = target,
-                    moveGraph = moveGraph,
-                    composeOffscreenCard = composeOffscreenCard,
-                )
-            } finally {
-                if (focusTransaction.job === launchedJob) {
-                    focusTransaction.job = null
-                    focusTransaction.target = null
-                }
-                onSettled?.invoke(focusRequested)
-            }
-        }
-        focusTransaction.job = launchedJob
-        focusTransaction.target = target
-        launchedJob.start()
-        return true
-    }
-
-    fun requestFocusMove(
-        current: DownloadTvFocusTarget,
-        target: DownloadTvFocusTarget,
-        moveGraph: DownloadTvFocusGraph,
-        onSettled: ((Boolean) -> Unit)? = null,
-    ): Boolean {
-        if (focusTransaction.isActive) {
-            onSettled?.invoke(false)
-            return false
-        }
-        val handle = focusHandleFor(target)
-        if (handle == null) {
-            onSettled?.invoke(false)
-            return false
-        }
-        val currentCard = current as? DownloadTvFocusTarget.CardAction
-        val targetCard = target as? DownloadTvFocusTarget.CardAction
-        val sameCard = currentCard != null && targetCard != null &&
-            currentCard.downloadId == targetCard.downloadId
-        if (sameCard && handle.isPlaced) {
-            val focusRequested = requestAttachedFocus(target)
-            onSettled?.invoke(focusRequested)
-            return focusRequested
-        }
-        val targetCardVisible = targetCard == null || downloadsState.layoutInfo.visibleItemsInfo.any { item ->
-            item.key == targetCard.downloadId
-        }
-        if (targetCardVisible && handle.isPlaced) {
-            val focusRequested = requestAttachedFocus(target)
-            onSettled?.invoke(focusRequested)
-            return focusRequested
-        }
-        return startFocusTransaction(
-            target = target,
-            moveGraph = moveGraph,
-            composeOffscreenCard = targetCard != null && !targetCardVisible,
-            onSettled = onSettled,
-        )
-    }
-
-    fun handleDirection(current: DownloadTvFocusTarget, move: DownloadFocusMove): Boolean {
-        if (focusTransaction.isActive) return true
-        val target = nextDownloadTvFocus(graph, current, move)
-        if (target == null) {
-            val exitsTowardSidebar = move == DownloadFocusMove.RIGHT && when (current) {
-                is DownloadTvFocusTarget.Toolbar -> current.slot == DownloadFocusSlot.WIFI
-                is DownloadTvFocusTarget.CardAction -> current.slot == DownloadFocusSlot.PRIMARY
-            }
-            if (exitsTowardSidebar && exitFocusRequester != null) {
-                runCatching { exitFocusRequester.requestFocus() }
-            }
-            return true
-        }
-        requestFocusMove(current, target, graph)
-        return true
-    }
-
-    fun recordFocusedTarget(target: DownloadTvFocusTarget) {
-        if (focusedTarget == target) return
-        focusedTarget = target
-        if (target is DownloadTvFocusTarget.CardAction) {
-            graph.indexById[target.downloadId]?.let { index ->
-                navigationMemory.save(
-                    MainDestination.DOWNLOADS,
-                    target.downloadId.toString(),
-                    index,
-                )
-            }
-        }
-    }
-
-    fun deleteWithFocusTransfer(item: OfflineDownload) {
-        if (!isTv) {
-            onDelete(item)
-            return
-        }
-        val current = DownloadTvFocusTarget.CardAction(item.downloadId, DownloadFocusSlot.CANCEL)
-        val graphAfterDelete = DownloadTvFocusGraph(graph.downloadIds.filterNot { it == item.downloadId })
-        val fallback = downloadFocusFallback(current, graph, graphAfterDelete)
-        requestFocusMove(current, fallback, graph) { onDelete(item) }
-    }
-
-    LaunchedEffect(graph) {
-        val runningTransaction = focusTransaction.job?.takeIf { it.isActive }
-        runningTransaction?.cancelAndJoin()
-        if (focusTransaction.job === runningTransaction) {
-            focusTransaction.job = null
-            focusTransaction.target = null
-        }
-        val previousGraph = focusHistory.graph
-        focusHistory.graph = graph
-        focusedTarget?.let { current ->
-            val fallback = downloadFocusFallback(current, previousGraph, graph)
-            if (fallback != current) requestFocusMove(current, fallback, graph)
-        }
     }
 
     TrackDownloadFocusHandle(toolbarFocusHandles.wifi, isTv)
@@ -3361,11 +3285,11 @@ private fun DownloadsScreen(
             screenHeightDp = adaptiveUi.screenHeightDp,
         )
     }
-
-    val initialTarget = downloadIds.getOrNull(rememberedIndex)
-        ?.let { DownloadTvFocusTarget.CardAction(it, DownloadFocusSlot.PRIMARY) }
-        ?: DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.WIFI)
-    val initialFocusHandle = focusHandleFor(initialTarget) ?: toolbarFocusHandles.wifi
+    val initialDownloadId = downloadIds.getOrNull(rememberedIndex)
+    val initialFocusHandle = initialDownloadId
+        ?.let(cardFocusRegistry::get)
+        ?.primary
+        ?: toolbarFocusHandles.wifi
 
     BoxWithConstraints(
         Modifier
@@ -3382,16 +3306,221 @@ private fun DownloadsScreen(
             ),
     ) {
         val compactHeight = maxHeight < if (isTv) 560.dp else 520.dp
-        val headerMaxWidth = (maxWidth * .94f).coerceAtMost(if (isTv) 940.dp else 820.dp)
-        val cardMaxWidth = if (isTv) {
-            (maxWidth * .74f).coerceIn(520.dp, 680.dp)
-        } else {
-            maxWidth.coerceAtMost(640.dp)
-        }
         val horizontalInset = if (isTv) tvSafeInsets.horizontalDp.dp else 0.dp
         val verticalInset = if (isTv) tvSafeInsets.verticalDp.dp else 0.dp
-        val sectionGap = if (compactHeight) 8.dp else 12.dp
-        val headerShape = RoundedCornerShape(if (isTv) 18.dp else 16.dp)
+        val availableContentWidth = (maxWidth - horizontalInset - horizontalInset).coerceAtLeast(1.dp)
+        val gridGap = if (isTv) 14.dp else 10.dp
+        val preferredCardWidth = when {
+            isTv && compactHeight -> 218.dp
+            isTv -> 236.dp
+            availableContentWidth < 480.dp -> 170.dp
+            availableContentWidth < 600.dp -> 184.dp
+            availableContentWidth < 840.dp -> 205.dp
+            else -> 218.dp
+        }
+        val columnCount = (
+            (availableContentWidth.value + gridGap.value) /
+                (preferredCardWidth.value + gridGap.value)
+        ).toInt().coerceAtLeast(1)
+        val graph = remember(downloadIds, columnCount) {
+            DownloadTvFocusGraph(downloadIds, columnCount)
+        }
+        val downloadsState = rememberLazyGridState(
+            initialFirstVisibleItemIndex = rememberedIndex,
+        )
+        val focusTransaction = remember { DownloadFocusMoveTransaction() }
+        val focusHistory = remember { DownloadFocusHistory(graph) }
+        var focusedTarget by remember { mutableStateOf<DownloadTvFocusTarget?>(null) }
+
+        fun focusHandleFor(target: DownloadTvFocusTarget): DownloadFocusHandle? = when (target) {
+            is DownloadTvFocusTarget.Toolbar -> when (target.slot) {
+                DownloadFocusSlot.WIFI -> toolbarFocusHandles.wifi
+                DownloadFocusSlot.SCHEDULE -> toolbarFocusHandles.schedule
+                DownloadFocusSlot.CONCURRENT -> toolbarFocusHandles.concurrent
+                else -> null
+            }
+            is DownloadTvFocusTarget.CardAction -> {
+                cardFocusRegistry[target.downloadId]?.let { requesters ->
+                    when (target.slot) {
+                        DownloadFocusSlot.PRIMARY -> requesters.primary
+                        DownloadFocusSlot.PRIORITY -> requesters.priority
+                        DownloadFocusSlot.CANCEL -> requesters.cancel
+                        else -> null
+                    }
+                }
+            }
+        }
+
+        fun requestAttachedFocus(target: DownloadTvFocusTarget): Boolean {
+            val handle = focusHandleFor(target) ?: return false
+            if (!handle.isPlaced) return false
+            return runCatching { handle.requester.requestFocus() }.getOrDefault(false)
+        }
+
+        fun isCardFullyVisible(downloadId: Long): Boolean {
+            val layoutInfo = downloadsState.layoutInfo
+            val item = layoutInfo.visibleItemsInfo.firstOrNull { it.key == downloadId }
+                ?: return false
+            return item.offset.y >= layoutInfo.viewportStartOffset &&
+                item.offset.y + item.size.height <= layoutInfo.viewportEndOffset
+        }
+
+        suspend fun requestFocusAfterTargetPlacement(
+            target: DownloadTvFocusTarget,
+            moveGraph: DownloadTvFocusGraph,
+            composeOffscreenCard: Boolean,
+        ): Boolean {
+            val handle = focusHandleFor(target) ?: return false
+            val cardTarget = target as? DownloadTvFocusTarget.CardAction
+            if (composeOffscreenCard && cardTarget != null) {
+                val cardIndex = moveGraph.indexById[cardTarget.downloadId] ?: return false
+                downloadsState.scrollToItem(cardIndex)
+            }
+            if (!handle.isPlaced && !handle.awaitPlaced()) return false
+            if (cardTarget != null) {
+                val targetStillExists = cardTarget.downloadId in moveGraph.indexById
+                val targetIsVisible = isCardFullyVisible(cardTarget.downloadId)
+                if (!targetStillExists || !targetIsVisible || !handle.isPlaced) return false
+            }
+            return runCatching { handle.requester.requestFocus() }.getOrDefault(false)
+        }
+
+        fun startFocusTransaction(
+            target: DownloadTvFocusTarget,
+            moveGraph: DownloadTvFocusGraph,
+            composeOffscreenCard: Boolean,
+            onSettled: ((Boolean) -> Unit)? = null,
+        ): Boolean {
+            if (focusTransaction.isActive || focusHandleFor(target) == null) {
+                onSettled?.invoke(false)
+                return false
+            }
+            lateinit var launchedJob: Job
+            launchedJob = downloadsFocusScope.launch(start = CoroutineStart.LAZY) {
+                var focusRequested = false
+                try {
+                    focusRequested = requestFocusAfterTargetPlacement(
+                        target = target,
+                        moveGraph = moveGraph,
+                        composeOffscreenCard = composeOffscreenCard,
+                    )
+                } finally {
+                    if (focusTransaction.job === launchedJob) {
+                        focusTransaction.job = null
+                        focusTransaction.target = null
+                    }
+                    onSettled?.invoke(focusRequested)
+                }
+            }
+            focusTransaction.job = launchedJob
+            focusTransaction.target = target
+            launchedJob.start()
+            return true
+        }
+
+        fun requestFocusMove(
+            current: DownloadTvFocusTarget,
+            target: DownloadTvFocusTarget,
+            moveGraph: DownloadTvFocusGraph,
+            onSettled: ((Boolean) -> Unit)? = null,
+        ): Boolean {
+            if (focusTransaction.isActive) {
+                onSettled?.invoke(false)
+                return false
+            }
+            val handle = focusHandleFor(target)
+            if (handle == null) {
+                onSettled?.invoke(false)
+                return false
+            }
+            val currentCard = current as? DownloadTvFocusTarget.CardAction
+            val targetCard = target as? DownloadTvFocusTarget.CardAction
+            val sameCard = currentCard != null && targetCard != null &&
+                currentCard.downloadId == targetCard.downloadId
+            if (sameCard && handle.isPlaced) {
+                val focusRequested = requestAttachedFocus(target)
+                onSettled?.invoke(focusRequested)
+                return focusRequested
+            }
+            val targetCardVisible = targetCard == null || isCardFullyVisible(targetCard.downloadId)
+            if (targetCardVisible && handle.isPlaced) {
+                val focusRequested = requestAttachedFocus(target)
+                onSettled?.invoke(focusRequested)
+                return focusRequested
+            }
+            return startFocusTransaction(
+                target = target,
+                moveGraph = moveGraph,
+                composeOffscreenCard = targetCard != null && !targetCardVisible,
+                onSettled = onSettled,
+            )
+        }
+
+        fun handleDirection(
+            current: DownloadTvFocusTarget,
+            move: DownloadFocusMove,
+        ): Boolean {
+            if (focusTransaction.isActive) return true
+            val target = nextDownloadTvFocus(graph, current, move)
+            if (target == null) {
+                val exitsTowardSidebar = move == DownloadFocusMove.RIGHT && when (current) {
+                    is DownloadTvFocusTarget.Toolbar -> current.slot == DownloadFocusSlot.WIFI
+                    is DownloadTvFocusTarget.CardAction -> current.slot == DownloadFocusSlot.PRIMARY
+                }
+                if (exitsTowardSidebar && exitFocusRequester != null) {
+                    runCatching { exitFocusRequester.requestFocus() }
+                }
+                return true
+            }
+            requestFocusMove(current, target, graph)
+            return true
+        }
+
+        fun recordFocusedTarget(target: DownloadTvFocusTarget) {
+            if (focusedTarget == target) return
+            focusedTarget = target
+            if (target is DownloadTvFocusTarget.CardAction) {
+                graph.indexById[target.downloadId]?.let { index ->
+                    navigationMemory.save(
+                        MainDestination.DOWNLOADS,
+                        target.downloadId.toString(),
+                        index,
+                    )
+                }
+            }
+        }
+
+        fun deleteWithFocusTransfer(item: OfflineDownload) {
+            if (!isTv) {
+                onDelete(item)
+                return
+            }
+            val current = DownloadTvFocusTarget.CardAction(
+                item.downloadId,
+                DownloadFocusSlot.CANCEL,
+            )
+            val graphAfterDelete = DownloadTvFocusGraph(
+                graph.downloadIds.filterNot { it == item.downloadId },
+                graph.columns,
+            )
+            val fallback = downloadFocusFallback(current, graph, graphAfterDelete)
+            requestFocusMove(current, fallback, graph) { onDelete(item) }
+        }
+
+        LaunchedEffect(graph) {
+            val runningTransaction = focusTransaction.job?.takeIf { it.isActive }
+            runningTransaction?.cancelAndJoin()
+            if (focusTransaction.job === runningTransaction) {
+                focusTransaction.job = null
+                focusTransaction.target = null
+            }
+            val previousGraph = focusHistory.graph
+            focusHistory.graph = graph
+            focusedTarget?.let { current ->
+                val fallback = downloadFocusFallback(current, previousGraph, graph)
+                if (fallback != current) requestFocusMove(current, fallback, graph)
+            }
+        }
 
         Column(
             modifier = Modifier
@@ -3402,174 +3531,51 @@ private fun DownloadsScreen(
                     top = verticalInset,
                     bottom = if (isTv) verticalInset else 6.dp,
                 ),
-            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(max = headerMaxWidth)
-                    .fillMaxWidth()
-                    .clip(headerShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                colors.surfaceRaised.copy(alpha = .78f),
-                                colors.surface.copy(alpha = .58f),
-                            ),
-                        ),
-                    )
-                    .border(1.dp, colors.line.copy(alpha = .48f), headerShape)
-                    .padding(
-                        horizontal = if (isTv) 16.dp else 13.dp,
-                        vertical = if (compactHeight) 10.dp else 13.dp,
-                    ),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(11.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(if (isTv) 42.dp else 38.dp)
-                            .clip(RoundedCornerShape(13.dp))
-                            .background(colors.gold.copy(alpha = .14f))
-                            .border(1.dp, colors.gold.copy(alpha = .34f), RoundedCornerShape(13.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Rounded.Download,
-                            contentDescription = "التنزيلات",
-                            tint = colors.goldBright,
-                            modifier = Modifier.size(if (isTv) 22.dp else 20.dp),
-                        )
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "التنزيلات",
-                            color = colors.text,
-                            fontSize = if (isTv) 25.sp else 20.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            if (downloads.isEmpty()) {
-                                "احتفظ بالمحتوى للمشاهدة بدون انترنت"
-                            } else {
-                                "${downloads.size} عنصر محفوظ وجاهز للادارة"
-                            },
-                            color = colors.textMuted,
-                            fontSize = if (isTv) 11.sp else 10.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(if (compactHeight) 7.dp else 10.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    InfoPill("مكتمل  $completed")
-                    if (active > 0) InfoPill("نشط ومجدول  $active")
-                    if (storedBytes > 0L) InfoPill("المحفوظ  ${formatBytes(storedBytes)}")
-                    InfoPill("المتاح  ${formatBytes(availableBytes)}")
-                }
-                Spacer(Modifier.height(if (compactHeight) 7.dp else 10.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = if (isTv) Modifier.focusGroup() else Modifier,
-                ) {
-                    val controlWidth = if (isTv) 126.dp else 112.dp
-                    val controlHeight = if (isTv) 42.dp else 48.dp
-                    val wifiTarget = DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.WIFI)
-                    FocusButton(
-                        if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
-                        onToggleWifiOnly,
-                        primary = settings.wifiOnly,
-                        compact = true,
-                        outlined = !settings.wifiOnly,
-                        scaleOnFocus = false,
-                        onFocused = { recordFocusedTarget(wifiTarget) },
-                        modifier = Modifier
-                            .focusRequester(toolbarFocus.wifi)
-                            .widthIn(min = controlWidth)
-                            .heightIn(min = controlHeight)
-                            .applyDownloadTvFocusNode(
-                                isTv = isTv,
-                                handle = toolbarFocusHandles.wifi,
-                                attachRequester = false,
-                            ) { move ->
-                                handleDirection(wifiTarget, move)
-                            },
-                    )
-                    val scheduleTarget = DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.SCHEDULE)
-                    FocusButton(
-                        if (settings.scheduleMode == DownloadScheduleMode.NIGHT) "الجدولة 02:00" else "الجدولة الان",
-                        onToggleSchedule,
-                        primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
-                        compact = true,
-                        outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
-                        scaleOnFocus = false,
-                        onFocused = { recordFocusedTarget(scheduleTarget) },
-                        modifier = Modifier
-                            .focusRequester(toolbarFocus.schedule)
-                            .widthIn(min = controlWidth)
-                            .heightIn(min = controlHeight)
-                            .applyDownloadTvFocusNode(
-                                isTv = isTv,
-                                handle = toolbarFocusHandles.schedule,
-                                attachRequester = false,
-                            ) { move ->
-                                handleDirection(scheduleTarget, move)
-                            },
-                    )
-                    val concurrentTarget = DownloadTvFocusTarget.Toolbar(DownloadFocusSlot.CONCURRENT)
-                    FocusButton(
-                        "متزامنة  ${settings.concurrentDownloads}",
-                        onCycleConcurrent,
-                        primary = false,
-                        compact = true,
-                        outlined = true,
-                        scaleOnFocus = false,
-                        onFocused = { recordFocusedTarget(concurrentTarget) },
-                        modifier = Modifier
-                            .focusRequester(toolbarFocus.concurrent)
-                            .widthIn(min = controlWidth)
-                            .heightIn(min = controlHeight)
-                            .applyDownloadTvFocusNode(
-                                isTv = isTv,
-                                handle = toolbarFocusHandles.concurrent,
-                                attachRequester = false,
-                            ) { move ->
-                                handleDirection(concurrentTarget, move)
-                            },
-                    )
-                }
-            }
-            Spacer(Modifier.height(sectionGap))
+            DownloadsHeader(
+                settings = settings,
+                isTv = isTv,
+                compactHeight = compactHeight,
+                itemCount = downloads.size,
+                completedCount = completed,
+                activeCount = active,
+                storedBytes = storedBytes,
+                availableBytes = availableBytes,
+                wifiFocusModifier = Modifier.focusRequester(toolbarFocus.wifi),
+                scheduleFocusModifier = Modifier.focusRequester(toolbarFocus.schedule),
+                concurrentFocusModifier = Modifier.focusRequester(toolbarFocus.concurrent),
+                focusHandles = toolbarFocusHandles,
+                onFocused = { slot ->
+                    recordFocusedTarget(DownloadTvFocusTarget.Toolbar(slot))
+                },
+                onDirection = { slot, move ->
+                    handleDirection(DownloadTvFocusTarget.Toolbar(slot), move)
+                },
+                onToggleWifiOnly = onToggleWifiOnly,
+                onToggleSchedule = onToggleSchedule,
+                onCycleConcurrent = onCycleConcurrent,
+            )
+            Spacer(Modifier.height(if (compactHeight) 8.dp else 12.dp))
             if (downloads.isEmpty()) {
                 DownloadsEmptyState(
                     isTv = isTv,
-                    modifier = Modifier
-                        .weight(1f)
-                        .widthIn(max = cardMaxWidth)
-                        .fillMaxWidth(),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
             } else {
-                LazyColumn(
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(graph.columns),
                     state = downloadsState,
-                    verticalArrangement = Arrangement.spacedBy(if (compactHeight) 8.dp else 11.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    contentPadding = PaddingValues(bottom = if (isTv) 10.dp else 18.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .widthIn(max = cardMaxWidth)
-                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gridGap),
+                    verticalArrangement = Arrangement.spacedBy(gridGap),
+                    contentPadding = PaddingValues(bottom = if (isTv) 12.dp else 20.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                 ) {
                     itemsIndexed(downloads, key = { _, item -> item.downloadId }) { _, item ->
                         val requesters = checkNotNull(cardFocusRegistry[item.downloadId])
                         DownloadCard(
                             item = item,
                             isTv = isTv,
+                            compactHeight = compactHeight,
                             focusRequesters = requesters,
                             onFocused = { slot ->
                                 recordFocusedTarget(
@@ -3595,6 +3601,148 @@ private fun DownloadsScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadsHeader(
+    settings: DownloadSettings,
+    isTv: Boolean,
+    compactHeight: Boolean,
+    itemCount: Int,
+    completedCount: Int,
+    activeCount: Int,
+    storedBytes: Long,
+    availableBytes: Long,
+    wifiFocusModifier: Modifier,
+    scheduleFocusModifier: Modifier,
+    concurrentFocusModifier: Modifier,
+    focusHandles: DownloadToolbarFocusHandles,
+    onFocused: (DownloadFocusSlot) -> Unit,
+    onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
+    onToggleWifiOnly: () -> Unit,
+    onToggleSchedule: () -> Unit,
+    onCycleConcurrent: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val summary = buildList {
+        add(if (itemCount == 0) "لا توجد عناصر محفوظة" else "$itemCount عنصر")
+        if (completedCount > 0) add("$completedCount مكتمل")
+        if (activeCount > 0) add("$activeCount نشط")
+        if (storedBytes > 0L) add("${formatBytes(storedBytes)} محفوظ")
+        add("${formatBytes(availableBytes)} متاح")
+    }.joinToString("  •  ")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = if (isTv) 4.dp else 2.dp,
+                vertical = if (compactHeight) 4.dp else 7.dp,
+            ),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Download,
+                contentDescription = null,
+                tint = colors.goldBright,
+                modifier = Modifier.size(if (isTv) 27.dp else 23.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "التنزيلات",
+                    color = colors.text,
+                    fontSize = if (isTv) 24.sp else 20.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    summary,
+                    color = colors.textMuted,
+                    fontSize = if (isTv) 11.sp else 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(if (compactHeight) 7.dp else 10.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = if (isTv) Modifier.focusGroup() else Modifier,
+        ) {
+            val controlWidth = if (isTv) 112.dp else 98.dp
+            val controlHeight = if (isTv) 38.dp else 48.dp
+            FocusButton(
+                if (settings.wifiOnly) "WiFi فقط  ✓" else "كل الشبكات",
+                onToggleWifiOnly,
+                primary = settings.wifiOnly,
+                compact = true,
+                outlined = !settings.wifiOnly,
+                scaleOnFocus = false,
+                textSizeSp = if (isTv) 11 else 10,
+                onFocused = { onFocused(DownloadFocusSlot.WIFI) },
+                modifier = wifiFocusModifier
+                    .widthIn(min = controlWidth)
+                    .heightIn(min = controlHeight)
+                    .applyDownloadTvFocusNode(
+                        isTv = isTv,
+                        handle = focusHandles.wifi,
+                        attachRequester = false,
+                    ) { move ->
+                        onDirection(DownloadFocusSlot.WIFI, move)
+                    },
+            )
+            FocusButton(
+                if (settings.scheduleMode == DownloadScheduleMode.NIGHT) "الجدولة 02:00" else "الجدولة الان",
+                onToggleSchedule,
+                primary = settings.scheduleMode == DownloadScheduleMode.NIGHT,
+                compact = true,
+                outlined = settings.scheduleMode != DownloadScheduleMode.NIGHT,
+                scaleOnFocus = false,
+                textSizeSp = if (isTv) 11 else 10,
+                onFocused = { onFocused(DownloadFocusSlot.SCHEDULE) },
+                modifier = scheduleFocusModifier
+                    .widthIn(min = controlWidth)
+                    .heightIn(min = controlHeight)
+                    .applyDownloadTvFocusNode(
+                        isTv = isTv,
+                        handle = focusHandles.schedule,
+                        attachRequester = false,
+                    ) { move ->
+                        onDirection(DownloadFocusSlot.SCHEDULE, move)
+                    },
+            )
+            FocusButton(
+                "متزامنة  ${settings.concurrentDownloads}",
+                onCycleConcurrent,
+                primary = false,
+                compact = true,
+                outlined = true,
+                scaleOnFocus = false,
+                textSizeSp = if (isTv) 11 else 10,
+                onFocused = { onFocused(DownloadFocusSlot.CONCURRENT) },
+                modifier = concurrentFocusModifier
+                    .widthIn(min = controlWidth)
+                    .heightIn(min = controlHeight)
+                    .applyDownloadTvFocusNode(
+                        isTv = isTv,
+                        handle = focusHandles.concurrent,
+                        attachRequester = false,
+                    ) { move ->
+                        onDirection(DownloadFocusSlot.CONCURRENT, move)
+                    },
+            )
+        }
+        Spacer(Modifier.height(if (compactHeight) 7.dp else 10.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colors.line.copy(alpha = .38f)),
+        )
+    }
+}
+
 @Composable
 private fun DownloadsEmptyState(
     isTv: Boolean,
@@ -3602,42 +3750,35 @@ private fun DownloadsEmptyState(
 ) {
     val colors = LocalHulkColors.current
     Box(modifier, contentAlignment = Alignment.Center) {
-        val shape = RoundedCornerShape(if (isTv) 20.dp else 18.dp)
         Column(
-            modifier = Modifier
-                .widthIn(max = 460.dp)
-                .fillMaxWidth()
-                .clip(shape)
-                .background(colors.surface.copy(alpha = .72f))
-                .border(1.dp, colors.line.copy(alpha = .42f), shape)
-                .padding(horizontal = 24.dp, vertical = if (isTv) 26.dp else 22.dp),
+            modifier = Modifier.widthIn(max = 420.dp).padding(horizontal = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
                 modifier = Modifier
-                    .size(if (isTv) 68.dp else 60.dp)
+                    .size(if (isTv) 60.dp else 54.dp)
                     .clip(CircleShape)
-                    .background(colors.gold.copy(alpha = .12f))
-                    .border(1.dp, colors.gold.copy(alpha = .32f), CircleShape),
+                    .background(colors.gold.copy(alpha = .10f))
+                    .border(1.dp, colors.gold.copy(alpha = .28f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.Rounded.Download,
                     contentDescription = null,
                     tint = colors.goldBright,
-                    modifier = Modifier.size(if (isTv) 31.dp else 27.dp),
+                    modifier = Modifier.size(if (isTv) 28.dp else 25.dp),
                 )
             }
-            Spacer(Modifier.height(13.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
-                "لا توجد تنزيلات حاليا",
+                "مكتبتك جاهزة للتنزيلات",
                 color = colors.text,
-                fontSize = if (isTv) 19.sp else 17.sp,
+                fontSize = if (isTv) 18.sp else 16.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(5.dp))
             Text(
-                "ستظهر هنا الافلام والحلقات التي تختار حفظها للمشاهدة بدون انترنت",
+                "ستظهر هنا الافلام والحلقات المحفوظة للمشاهدة بدون انترنت",
                 color = colors.textMuted,
                 fontSize = if (isTv) 12.sp else 11.sp,
                 lineHeight = if (isTv) 18.sp else 16.sp,
@@ -3652,6 +3793,7 @@ private fun DownloadsEmptyState(
 private fun DownloadCard(
     item: OfflineDownload,
     isTv: Boolean,
+    compactHeight: Boolean,
     focusRequesters: DownloadCardFocusRequesters,
     onFocused: (DownloadFocusSlot) -> Unit,
     onDirection: (DownloadFocusSlot, DownloadFocusMove) -> Boolean,
@@ -3667,14 +3809,14 @@ private fun DownloadCard(
     TrackDownloadFocusHandle(focusRequesters.priority, isTv)
     TrackDownloadFocusHandle(focusRequesters.cancel, isTv)
     val shape = RoundedCornerShape(if (isTv) 15.dp else 14.dp)
-    BoxWithConstraints(
+    Column(
         modifier = modifier
             .clip(shape)
             .background(
                 if (focused) {
-                    colors.gold.copy(alpha = .11f)
+                    colors.gold.copy(alpha = .10f)
                 } else {
-                    colors.surface.copy(alpha = .90f)
+                    colors.surface.copy(alpha = .92f)
                 },
             )
             .border(
@@ -3682,75 +3824,49 @@ private fun DownloadCard(
                 if (focused) colors.goldBright else colors.line.copy(alpha = .46f),
                 shape,
             )
-            .onFocusChanged {
-                focused = it.hasFocus
-            }
-            .padding(if (isTv) 10.dp else 11.dp),
+            .onFocusChanged { focused = it.hasFocus }
+            .then(if (isTv) Modifier.focusGroup() else Modifier)
+            .padding(if (isTv) 9.dp else 8.dp),
     ) {
-        val stackedActions = !isTv && maxWidth < 400.dp
-        val posterWidth = when {
-            isTv -> 70.dp
-            stackedActions -> 62.dp
-            else -> 68.dp
-        }
-        if (stackedActions) {
-            Column(Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    DownloadArtwork(item, posterWidth)
-                    DownloadDetails(item, isTv, Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(9.dp))
-                DownloadCardActions(
-                    item = item,
-                    isTv = isTv,
-                    focusRequesters = focusRequesters,
-                    onFocused = onFocused,
-                    onDirection = onDirection,
-                    onPlay = onPlay,
-                    onDelete = onDelete,
-                    onRetry = onRetry,
-                    onCyclePriority = onCyclePriority,
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(if (isTv) 11.dp else 10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                DownloadArtwork(item, posterWidth)
-                Column(Modifier.weight(1f)) {
-                    DownloadDetails(item, isTv, Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(7.dp))
-                    DownloadCardActions(
-                        item = item,
-                        isTv = isTv,
-                        focusRequesters = focusRequesters,
-                        onFocused = onFocused,
-                        onDirection = onDirection,
-                        onPlay = onPlay,
-                        onDelete = onDelete,
-                        onRetry = onRetry,
-                        onCyclePriority = onCyclePriority,
-                    )
-                }
-            }
-        }
+        DownloadArtwork(
+            item = item,
+            isTv = isTv,
+            compactHeight = compactHeight,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(if (compactHeight) 7.dp else 9.dp))
+        DownloadDetails(
+            item = item,
+            isTv = isTv,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(if (compactHeight) 7.dp else 9.dp))
+        DownloadCardActions(
+            item = item,
+            isTv = isTv,
+            focusRequesters = focusRequesters,
+            onFocused = onFocused,
+            onDirection = onDirection,
+            onPlay = onPlay,
+            onDelete = onDelete,
+            onRetry = onRetry,
+            onCyclePriority = onCyclePriority,
+        )
     }
 }
 
 @Composable
-private fun DownloadArtwork(item: OfflineDownload, width: Dp) {
+private fun DownloadArtwork(
+    item: OfflineDownload,
+    isTv: Boolean,
+    compactHeight: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalHulkColors.current
-    val shape = RoundedCornerShape(11.dp)
+    val shape = RoundedCornerShape(if (isTv) 12.dp else 11.dp)
     Box(
-        modifier = Modifier
-            .width(width)
-            .aspectRatio(2f / 3f)
+        modifier = modifier
+            .aspectRatio(if (compactHeight) 2f else 16f / 9f)
             .clip(shape)
             .background(colors.surfaceRaised),
         contentAlignment = Alignment.Center,
@@ -3763,19 +3879,33 @@ private fun DownloadArtwork(item: OfflineDownload, width: Dp) {
                 contentScale = ContentScale.Crop,
             )
         } else {
-            BrandLogo(Modifier.fillMaxWidth().padding(8.dp).graphicsLayer { alpha = .58f })
-        }
-        if (item.status == OfflineStatus.COMPLETED) {
-            Box(
+            BrandLogo(
                 Modifier
-                    .align(Alignment.TopStart)
-                    .padding(5.dp)
-                    .clip(CircleShape)
-                    .background(colors.gold)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            ) {
-                Text("جاهز", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-            }
+                    .fillMaxHeight(.58f)
+                    .aspectRatio(1f)
+                    .graphicsLayer { alpha = .56f },
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(6.dp)
+                .clip(CircleShape)
+                .background(colors.background.copy(alpha = .86f))
+                .border(1.dp, colors.gold.copy(alpha = .38f), CircleShape)
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+        ) {
+            Text(
+                downloadCompactStatusLabel(item.status),
+                color = if (item.status == OfflineStatus.COMPLETED) {
+                    colors.goldBright
+                } else {
+                    colors.text
+                },
+                fontSize = if (isTv) 9.sp else 8.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -3787,41 +3917,38 @@ private fun DownloadDetails(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val cleanDownloadTitle = if (item.seriesTitle != null && item.episodeNumber != null) {
-        "الحلقة ${item.episodeNumber}"
-    } else {
-        item.title
-    }
-    val downloadMeta = buildList {
-        item.season?.let { add("الموسم $it") }
-        add("الاولوية ${priorityLabel(item.priority)}")
+    val displayTitle = item.seriesTitle ?: item.title
+    val metadata = buildList {
+        if (item.streamKind == "movie") {
+            add("فيلم")
+        } else {
+            item.season?.let { add("الموسم $it") }
+            item.episodeNumber?.let { add("الحلقة $it") }
+            if (item.season == null && item.episodeNumber == null && item.title != displayTitle) {
+                add(item.title)
+            }
+        }
+        add("أولوية ${priorityLabel(item.priority)}")
     }.joinToString("  •  ")
     Column(modifier) {
         Text(
-            item.seriesTitle ?: if (item.streamKind == "movie") "فيلم" else "حلقة",
-            color = colors.goldBright,
-            fontSize = if (isTv) 10.sp else 9.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            cleanDownloadTitle,
+            displayTitle,
             color = colors.text,
-            fontSize = if (isTv) 15.sp else 13.sp,
+            fontSize = if (isTv) 14.sp else 13.sp,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
+            lineHeight = if (isTv) 18.sp else 17.sp,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            lineHeight = if (isTv) 18.sp else 16.sp,
+            modifier = Modifier.heightIn(min = if (isTv) 36.dp else 34.dp),
         )
         Text(
-            downloadMeta,
-            color = if (item.priority == 1) colors.goldBright else colors.textMuted,
+            metadata,
+            color = colors.textMuted,
             fontSize = if (isTv) 9.sp else 8.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(6.dp))
         DownloadProgress(item, isTv)
     }
 }
@@ -3840,7 +3967,7 @@ private fun DownloadCardActions(
 ) {
     val primaryLabel = when (item.status) {
         OfflineStatus.COMPLETED -> "تشغيل"
-        OfflineStatus.FAILED -> "اعادة المحاولة"
+        OfflineStatus.FAILED -> "إعادة"
         OfflineStatus.PAUSED,
         OfflineStatus.WAITING_SCHEDULE,
         OfflineStatus.WAITING_NETWORK,
@@ -3849,62 +3976,53 @@ private fun DownloadCardActions(
         OfflineStatus.QUEUED,
         OfflineStatus.CHECKING,
         OfflineStatus.DOWNLOADING,
-        -> "ايقاف مؤقت"
+        -> "إيقاف"
     }
     val primaryAction = when (item.status) {
         OfflineStatus.COMPLETED -> onPlay
         else -> onRetry
     }
-    val actionHeight = if (isTv) 40.dp else 48.dp
+    val actionHeight = if (isTv) 38.dp else 48.dp
     Row(
-        modifier = Modifier.fillMaxWidth().height(actionHeight),
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        modifier = Modifier.fillMaxWidth().height(actionHeight).focusGroup(),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        FocusButton(
-            primaryLabel,
-            { primaryAction(item) },
-            primary = item.status == OfflineStatus.QUEUED ||
-                item.status == OfflineStatus.CHECKING ||
-                item.status == OfflineStatus.DOWNLOADING,
-            compact = true,
-            scaleOnFocus = false,
-            textSizeSp = if (isTv) 12 else 11,
+        DownloadActionButton(
+            label = primaryLabel,
+            text = primaryLabel,
+            emphasized = true,
+            isTv = isTv,
+            onClick = { primaryAction(item) },
             onFocused = { onFocused(DownloadFocusSlot.PRIMARY) },
             modifier = Modifier
-                .weight(1.35f)
+                .weight(1f)
                 .fillMaxHeight()
                 .applyDownloadTvFocusNode(isTv, focusRequesters.primary) { move ->
                     onDirection(DownloadFocusSlot.PRIMARY, move)
                 },
         )
-        FocusButton(
-            priorityShortLabel(item.priority),
-            { onCyclePriority(item) },
-            primary = item.priority == 1,
-            compact = true,
-            outlined = item.priority != 1,
-            scaleOnFocus = false,
-            textSizeSp = if (isTv) 12 else 11,
+        DownloadActionButton(
+            label = "الأولوية ${priorityLabel(item.priority)}",
+            icon = Icons.Rounded.Tune,
+            selected = item.priority != 0,
+            isTv = isTv,
+            onClick = { onCyclePriority(item) },
             onFocused = { onFocused(DownloadFocusSlot.PRIORITY) },
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
+                .size(actionHeight)
                 .applyDownloadTvFocusNode(isTv, focusRequesters.priority) { move ->
                     onDirection(DownloadFocusSlot.PRIORITY, move)
                 },
         )
-        FocusButton(
-            if (item.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
-            { onDelete(item) },
-            primary = false,
-            compact = true,
-            outlined = true,
-            scaleOnFocus = false,
-            textSizeSp = if (isTv) 12 else 11,
+        DownloadActionButton(
+            label = if (item.status == OfflineStatus.COMPLETED) "حذف التنزيل" else "إلغاء التنزيل",
+            icon = Icons.Rounded.DeleteOutline,
+            danger = true,
+            isTv = isTv,
+            onClick = { onDelete(item) },
             onFocused = { onFocused(DownloadFocusSlot.CANCEL) },
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
+                .size(actionHeight)
                 .applyDownloadTvFocusNode(isTv, focusRequesters.cancel) { move ->
                     onDirection(DownloadFocusSlot.CANCEL, move)
                 },
@@ -3913,63 +4031,156 @@ private fun DownloadCardActions(
 }
 
 @Composable
+private fun DownloadActionButton(
+    label: String,
+    isTv: Boolean,
+    onClick: () -> Unit,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+    text: String? = null,
+    icon: ImageVector? = null,
+    emphasized: Boolean = false,
+    selected: Boolean = false,
+    danger: Boolean = false,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(10.dp)
+    val background = when {
+        focused -> colors.gold.copy(alpha = .20f)
+        emphasized -> colors.gold.copy(alpha = .11f)
+        selected -> colors.gold.copy(alpha = .08f)
+        else -> colors.surfaceRaised.copy(alpha = .92f)
+    }
+    val foreground = when {
+        danger -> Color(0xFFFF9B8E)
+        emphasized || selected || focused -> colors.goldBright
+        else -> colors.text
+    }
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(background)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) colors.goldBright else colors.line.copy(alpha = .48f),
+                shape,
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = if (icon == null) 6.dp else 0.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = foreground,
+                modifier = Modifier.size(if (isTv) 18.dp else 20.dp),
+            )
+        } else {
+            Text(
+                text = text.orEmpty(),
+                color = foreground,
+                fontSize = if (isTv) 11.sp else 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
 private fun DownloadProgress(item: OfflineDownload, isTv: Boolean) {
     val colors = LocalHulkColors.current
-    val targetProgress = if (item.status == OfflineStatus.COMPLETED) 1f else item.progress
+    val targetProgress = (
+        if (item.status == OfflineStatus.COMPLETED) 1f else item.progress
+    ).coerceIn(0f, 1f)
     val progress by animateFloatAsState(targetProgress, label = "downloadProgress")
     val percent = (targetProgress * 100).toInt()
     val sizeLine = when {
         item.status == OfflineStatus.COMPLETED ->
             "${formatBytes(item.totalBytes.coerceAtLeast(item.bytesDownloaded))}  •  ${item.storageLabel}"
         item.totalBytes > 0L ->
-            "$percent%  •  ${formatBytes(item.bytesDownloaded)} / ${formatBytes(item.totalBytes)}"
+            "${formatBytes(item.bytesDownloaded)} / ${formatBytes(item.totalBytes)}"
         item.bytesDownloaded > 0L -> formatBytes(item.bytesDownloaded)
+        else -> item.storageLabel
+    }
+    val detailLine = when {
+        item.status == OfflineStatus.DOWNLOADING && item.bytesPerSecond > 0L ->
+            "${formatTransferRate(item.bytesPerSecond)}  •  المتبقي ${formatEta(item.etaSeconds)}"
+        item.status == OfflineStatus.WAITING_SCHEDULE && item.scheduledAtEpochMs > 0L ->
+            "سيبدا ${formatScheduledTime(item.scheduledAtEpochMs)}"
+        !item.errorMessage.isNullOrBlank() -> item.errorMessage
         else -> downloadStatusLabel(item.status)
     }
-    val detailTextSize = if (isTv) 10.sp else 9.sp
-    Text(
-        "\u200E$sizeLine",
-        color = colors.textMuted,
-        fontSize = detailTextSize,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
-    Spacer(Modifier.height(3.dp))
-    when {
-        item.status == OfflineStatus.DOWNLOADING && item.bytesPerSecond > 0L -> Text(
-            "\u200E${formatTransferRate(item.bytesPerSecond)}  •  المتبقي ${formatEta(item.etaSeconds)}",
-            color = colors.goldBright,
-            fontSize = detailTextSize,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        item.status == OfflineStatus.WAITING_SCHEDULE && item.scheduledAtEpochMs > 0L -> Text(
-            "سيبدا ${formatScheduledTime(item.scheduledAtEpochMs)}",
-            color = colors.goldBright,
-            fontSize = detailTextSize,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        !item.errorMessage.isNullOrBlank() -> Text(
-            item.errorMessage,
-            color = if (item.status == OfflineStatus.FAILED) Color(0xFFFF9B8E) else colors.textMuted,
-            fontSize = detailTextSize,
-            lineHeight = if (isTv) 13.sp else 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        else -> Text(
-            "${downloadStatusLabel(item.status)}  •  ${item.storageLabel}",
+    val detailTextSize = if (isTv) 9.sp else 8.sp
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            "\u200E$sizeLine",
             color = colors.textMuted,
             fontSize = detailTextSize,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (item.totalBytes > 0L || item.status == OfflineStatus.COMPLETED) {
+            Text(
+                "\u200E$percent%",
+                color = colors.goldBright,
+                fontSize = detailTextSize,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = .13f)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(progress)
+                .fillMaxHeight()
+                .background(colors.goldBright),
         )
     }
     Spacer(Modifier.height(5.dp))
-    Box(Modifier.fillMaxWidth().height(5.dp).clip(CircleShape).background(Color.White.copy(alpha = .14f))) {
-        Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(colors.goldBright))
-    }
+    Text(
+        detailLine,
+        color = if (item.status == OfflineStatus.FAILED) {
+            Color(0xFFFF9B8E)
+        } else {
+            colors.textMuted
+        },
+        fontSize = detailTextSize,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+private fun downloadCompactStatusLabel(status: OfflineStatus): String = when (status) {
+    OfflineStatus.QUEUED -> "قيد الانتظار"
+    OfflineStatus.CHECKING -> "فحص"
+    OfflineStatus.DOWNLOADING -> "جار التحميل"
+    OfflineStatus.PAUSED -> "متوقف"
+    OfflineStatus.WAITING_SCHEDULE -> "مجدول"
+    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
+    OfflineStatus.WAITING_STORAGE -> "بانتظار التخزين"
+    OfflineStatus.COMPLETED -> "جاهز"
+    OfflineStatus.FAILED -> "فشل"
 }
 
 private fun downloadStatusLabel(status: OfflineStatus): String = when (status) {
@@ -3985,12 +4196,6 @@ private fun downloadStatusLabel(status: OfflineStatus): String = when (status) {
 }
 
 private fun priorityLabel(priority: Int): String = when (priority) {
-    1 -> "عالية"
-    -1 -> "منخفضة"
-    else -> "عادية"
-}
-
-private fun priorityShortLabel(priority: Int): String = when (priority) {
     1 -> "عالية"
     -1 -> "منخفضة"
     else -> "عادية"
