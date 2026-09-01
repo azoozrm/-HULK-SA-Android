@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +78,7 @@ import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -125,7 +128,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -711,27 +713,15 @@ private fun Modifier.restoreFocus(enabled: Boolean, requester: FocusRequester): 
     then(if (enabled) Modifier.focusRequester(requester) else Modifier)
 
 private class DownloadFocusHandle(val requester: FocusRequester = FocusRequester()) {
-
-    private var placedSignal = CompletableDeferred<Unit>()
     var isPlaced: Boolean = false
         private set
 
     fun onPlaced() {
         isPlaced = true
-        placedSignal.complete(Unit)
     }
 
     fun onDisposed() {
-        val detachedSignal = placedSignal
         isPlaced = false
-        placedSignal = CompletableDeferred()
-        detachedSignal.complete(Unit)
-    }
-
-    suspend fun awaitPlaced(): Boolean {
-        val expectedSignal = placedSignal
-        expectedSignal.await()
-        return isPlaced && placedSignal === expectedSignal
     }
 }
 
@@ -771,7 +761,6 @@ private data class DownloadTvFocusGraph(
 
 private class DownloadFocusMoveTransaction {
     var job: Job? = null
-    var target: DownloadTvFocusTarget? = null
 
     val isActive: Boolean
         get() = job?.isActive == true
@@ -793,6 +782,22 @@ private fun downloadCardTargetAt(
     slot: DownloadFocusSlot,
 ): DownloadTvFocusTarget? = graph.downloadIds.getOrNull(index)?.let { downloadId ->
     DownloadTvFocusTarget.CardAction(downloadId, slot)
+}
+
+private fun downloadVerticalCardTarget(
+    graph: DownloadTvFocusGraph,
+    currentIndex: Int,
+    rowDelta: Int,
+    slot: DownloadFocusSlot,
+): DownloadTvFocusTarget? {
+    val targetRow = currentIndex / graph.columns + rowDelta
+    if (targetRow < 0) return null
+    val targetRowStart = targetRow * graph.columns
+    if (targetRowStart >= graph.downloadIds.size) return null
+    val targetRowEnd = minOf(targetRowStart + graph.columns, graph.downloadIds.size)
+    val requestedColumn = currentIndex % graph.columns
+    val targetIndex = minOf(targetRowStart + requestedColumn, targetRowEnd - 1)
+    return downloadCardTargetAt(graph, targetIndex, slot)
 }
 
 private fun downloadToolbarTargetBelow(
@@ -889,17 +894,17 @@ private fun nextDownloadTvFocus(
                     else -> null
                 }
                 DownloadFocusMove.UP -> {
-                    val targetIndex = index - graph.columns
-                    if (targetIndex >= 0) {
-                        downloadCardTargetAt(graph, targetIndex, current.slot)
+                    if (row > 0) {
+                        downloadVerticalCardTarget(graph, index, -1, current.slot)
                     } else {
                         downloadToolbarTargetAbove(graph, index, current.slot)
                     }
                 }
-                DownloadFocusMove.DOWN -> downloadCardTargetAt(
-                    graph,
-                    index + graph.columns,
-                    current.slot,
+                DownloadFocusMove.DOWN -> downloadVerticalCardTarget(
+                    graph = graph,
+                    currentIndex = index,
+                    rowDelta = 1,
+                    slot = current.slot,
                 )
             }
         }
@@ -3335,6 +3340,22 @@ private fun DownloadsScreen(
         val downloadsState = rememberLazyGridState(
             initialFirstVisibleItemIndex = initialGridIndex,
         )
+        val inheritedBringIntoViewSpec = LocalBringIntoViewSpec.current
+        val downloadsBringIntoViewSpec = remember {
+            // The Downloads D-pad transaction is the sole vertical scroll owner on TV.
+            object : BringIntoViewSpec {
+                override fun calculateScrollDistance(
+                    offset: Float,
+                    size: Float,
+                    containerSize: Float,
+                ): Float = 0f
+            }
+        }
+        val gridBringIntoViewSpec = if (isTv) {
+            downloadsBringIntoViewSpec
+        } else {
+            inheritedBringIntoViewSpec
+        }
         val focusTransaction = remember { DownloadFocusMoveTransaction() }
         val focusHistory = remember { DownloadFocusHistory(graph) }
         var focusedTarget by remember { mutableStateOf<DownloadTvFocusTarget?>(null) }
@@ -3391,7 +3412,8 @@ private fun DownloadsScreen(
                 val targetRowStart = cardIndex - (cardIndex % moveGraph.columns)
                 downloadsState.scrollToItem(targetRowStart, scrollOffset = 0)
             }
-            if (!handle.isPlaced && !handle.awaitPlaced()) return false
+            if (!handle.isPlaced) withFrameNanos { }
+            if (!handle.isPlaced) return false
             if (cardTarget != null) {
                 val targetStillExists = cardTarget.downloadId in moveGraph.indexById
                 val targetIsVisible = isCardFullyVisible(cardTarget.downloadId)
@@ -3422,19 +3444,16 @@ private fun DownloadsScreen(
                 } finally {
                     if (focusTransaction.job === launchedJob) {
                         focusTransaction.job = null
-                        focusTransaction.target = null
                     }
                     onSettled?.invoke(focusRequested)
                 }
             }
             focusTransaction.job = launchedJob
-            focusTransaction.target = target
             launchedJob.start()
             return true
         }
 
         fun requestFocusMove(
-            current: DownloadTvFocusTarget,
             target: DownloadTvFocusTarget,
             moveGraph: DownloadTvFocusGraph,
             onSettled: ((Boolean) -> Unit)? = null,
@@ -3448,15 +3467,7 @@ private fun DownloadsScreen(
                 onSettled?.invoke(false)
                 return false
             }
-            val currentCard = current as? DownloadTvFocusTarget.CardAction
             val targetCard = target as? DownloadTvFocusTarget.CardAction
-            val sameCard = currentCard != null && targetCard != null &&
-                currentCard.downloadId == targetCard.downloadId
-            if (sameCard && handle.isPlaced) {
-                val focusRequested = requestAttachedFocus(target)
-                onSettled?.invoke(focusRequested)
-                return focusRequested
-            }
             val targetCardVisible = targetCard == null || isCardFullyVisible(targetCard.downloadId)
             if (targetCardVisible && handle.isPlaced) {
                 val focusRequested = requestAttachedFocus(target)
@@ -3487,7 +3498,7 @@ private fun DownloadsScreen(
                 }
                 return true
             }
-            requestFocusMove(current, target, graph)
+            requestFocusMove(target, graph)
             return true
         }
 
@@ -3519,7 +3530,7 @@ private fun DownloadsScreen(
                 graph.columns,
             )
             val fallback = downloadFocusFallback(current, graph, graphAfterDelete)
-            requestFocusMove(current, fallback, graph) { onDelete(item) }
+            requestFocusMove(fallback, graph) { onDelete(item) }
         }
 
         LaunchedEffect(graph) {
@@ -3527,13 +3538,12 @@ private fun DownloadsScreen(
             runningTransaction?.cancelAndJoin()
             if (focusTransaction.job === runningTransaction) {
                 focusTransaction.job = null
-                focusTransaction.target = null
             }
             val previousGraph = focusHistory.graph
             focusHistory.graph = graph
             focusedTarget?.let { current ->
                 val fallback = downloadFocusFallback(current, previousGraph, graph)
-                if (fallback != current) requestFocusMove(current, fallback, graph)
+                if (fallback != current) requestFocusMove(fallback, graph)
             }
         }
 
@@ -3585,38 +3595,42 @@ private fun DownloadsScreen(
                         // Keep lazy rows inside the grid viewport owned below the fixed header.
                         .clipToBounds(),
                 ) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(graph.columns),
-                        state = downloadsState,
-                        horizontalArrangement = Arrangement.spacedBy(gridGap),
-                        verticalArrangement = Arrangement.spacedBy(gridGap),
-                        contentPadding = PaddingValues(bottom = if (isTv) 12.dp else 20.dp),
-                        modifier = Modifier.fillMaxSize().clipToBounds(),
+                    CompositionLocalProvider(
+                        LocalBringIntoViewSpec provides gridBringIntoViewSpec,
                     ) {
-                        itemsIndexed(downloads, key = { _, item -> item.downloadId }) { _, item ->
-                            val requesters = checkNotNull(cardFocusRegistry[item.downloadId])
-                            DownloadCard(
-                                item = item,
-                                isTv = isTv,
-                                compactHeight = compactHeight,
-                                focusRequesters = requesters,
-                                onFocused = { slot ->
-                                    recordFocusedTarget(
-                                        DownloadTvFocusTarget.CardAction(item.downloadId, slot),
-                                    )
-                                },
-                                onDirection = { slot, move ->
-                                    handleDirection(
-                                        DownloadTvFocusTarget.CardAction(item.downloadId, slot),
-                                        move,
-                                    )
-                                },
-                                onPlay = onPlay,
-                                onDelete = ::deleteWithFocusTransfer,
-                                onRetry = onRetry,
-                                onCyclePriority = onCyclePriority,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(graph.columns),
+                            state = downloadsState,
+                            horizontalArrangement = Arrangement.spacedBy(gridGap),
+                            verticalArrangement = Arrangement.spacedBy(gridGap),
+                            contentPadding = PaddingValues(bottom = if (isTv) 12.dp else 20.dp),
+                            modifier = Modifier.fillMaxSize().clipToBounds(),
+                        ) {
+                            itemsIndexed(downloads, key = { _, item -> item.downloadId }) { _, item ->
+                                val requesters = checkNotNull(cardFocusRegistry[item.downloadId])
+                                DownloadCard(
+                                    item = item,
+                                    isTv = isTv,
+                                    compactHeight = compactHeight,
+                                    focusRequesters = requesters,
+                                    onFocused = { slot ->
+                                        recordFocusedTarget(
+                                            DownloadTvFocusTarget.CardAction(item.downloadId, slot),
+                                        )
+                                    },
+                                    onDirection = { slot, move ->
+                                        handleDirection(
+                                            DownloadTvFocusTarget.CardAction(item.downloadId, slot),
+                                            move,
+                                        )
+                                    },
+                                    onPlay = onPlay,
+                                    onDelete = ::deleteWithFocusTransfer,
+                                    onRetry = onRetry,
+                                    onCyclePriority = onCyclePriority,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
                     }
                 }
@@ -3657,13 +3671,11 @@ private fun DownloadsHeader(
             val inlineSummary = maxWidth >= if (isTv) 720.dp else 640.dp
             if (inlineSummary) {
                 Row(
+                    modifier = Modifier.align(Alignment.TopStart),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    DownloadsHeaderTitle(
-                        isTv = isTv,
-                        modifier = Modifier.weight(1f),
-                    )
+                    DownloadsHeaderTitle(isTv = isTv)
                     DownloadsSummaryChips(
                         isTv = isTv,
                         itemCount = itemCount,
