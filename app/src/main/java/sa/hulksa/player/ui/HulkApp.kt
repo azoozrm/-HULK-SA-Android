@@ -47,6 +47,11 @@ import sa.hulksa.player.ui.screens.playerProEpisodeNeighbors
 import sa.hulksa.player.ui.screens.saveLiveTvProLaunchContext
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
+internal fun detailsEntryShouldBlock(
+    remoteLoading: Boolean,
+    immediateShellAvailable: Boolean,
+): Boolean = remoteLoading && !immediateShellAvailable
+
 @Composable
 fun HulkApp(
     viewModel: HulkViewModel,
@@ -274,7 +279,10 @@ fun HulkApp(
                             MovieDetailsProPolishedScreen(
                                 item = item,
                                 details = state.selectedDetails,
-                                isLoading = state.isLoading,
+                                isLoading = detailsEntryShouldBlock(
+                                    remoteLoading = state.isLoading,
+                                    immediateShellAvailable = state.selectedDetails != null,
+                                ),
                                 errorMessage = state.errorMessage,
                                 isTv = isTv,
                                 isFavorite = viewModel.isFavorite(item),
@@ -329,7 +337,10 @@ fun HulkApp(
                                 series = series,
                                 details = state.selectedDetails,
                                 episodes = state.episodes,
-                                isLoading = state.isLoading,
+                                isLoading = detailsEntryShouldBlock(
+                                    remoteLoading = state.isLoading,
+                                    immediateShellAvailable = state.selectedDetails != null,
+                                ),
                                 errorMessage = state.errorMessage,
                                 isTv = isTv,
                                 isFavorite = viewModel.isFavorite(series),
