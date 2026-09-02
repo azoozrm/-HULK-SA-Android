@@ -83,6 +83,7 @@ jobs:
             drawable-xxhdpi
             drawable-xxxhdpi
             drawable-nodpi
+            drawable-anydpi
             drawable-television
             mipmap-anydpi-v26
             mipmap-anydpi-v33
@@ -152,7 +153,7 @@ jobs:
           test ! -e project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
           test ! -e project/app/src/main/res/drawable-nodpi/ic_banner.webp
 
-          # Required canonical final assets and TV qualifier overrides.
+          # Required canonical raster fallbacks, vector-grade runtime assets and TV qualifier overrides.
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_mark.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_mark_monochrome.png
@@ -161,6 +162,16 @@ jobs:
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_monochrome.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_tv_channel_logo.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_content_fallback_wide.png
+
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_logo.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_mark.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_mark_monochrome.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_adaptive_background.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_adaptive_foreground.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_adaptive_monochrome.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_tv_channel_logo.xml
+          test -s project/app/src/main/res/drawable-anydpi/hulk_sa_content_fallback_wide.xml
+
           test -s project/app/src/main/res/drawable-television/hulk_sa_logo.xml
           test -s project/app/src/main/res/drawable-television/hulk_sa_mark.xml
           test -s project/app/src/main/res/drawable-television/hulk_sa_adaptive_background.xml
