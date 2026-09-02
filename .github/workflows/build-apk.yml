@@ -70,7 +70,9 @@ jobs:
             project/app/src/main/res/drawable-v33/ic_launcher_monochrome.xml \
             project/app/src/main/res/drawable/ic_stat_hulk.xml \
             project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp \
-            project/app/src/main/res/drawable-nodpi/ic_banner.webp
+            project/app/src/main/res/drawable-nodpi/ic_banner.webp \
+            project/app/src/main/res/drawable-television/hulk_sa_logo.xml \
+            project/app/src/main/res/mipmap-television/tv_banner.xml
 
           # Overlay the canonical Android icon / brand package from this branch.
           BRAND_RES_DIRS=(
@@ -83,7 +85,6 @@ jobs:
             drawable-television
             mipmap-anydpi-v26
             mipmap-anydpi-v33
-            mipmap-television
             mipmap-mdpi
             mipmap-hdpi
             mipmap-xhdpi
@@ -104,6 +105,10 @@ jobs:
           cp \
             app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt \
             project/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
+
+          cp \
+            app/src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt \
+            project/app/src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt
 
           cp \
             app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt \
@@ -129,6 +134,10 @@ jobs:
             project/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
 
           cmp -s \
+            app/src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt \
+            project/app/src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt
+
+          cmp -s \
             app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt \
             project/app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt
 
@@ -140,6 +149,8 @@ jobs:
           test ! -e project/app/src/main/res/drawable/ic_stat_hulk.xml
           test ! -e project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
           test ! -e project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          test ! -e project/app/src/main/res/drawable-television/hulk_sa_logo.xml
+          test ! -e project/app/src/main/res/mipmap-television/tv_banner.xml
 
           # Required canonical final assets.
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
@@ -150,9 +161,7 @@ jobs:
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_monochrome.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_tv_channel_logo.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_content_fallback_wide.png
-          test -s project/app/src/main/res/drawable-television/hulk_sa_logo.xml
           test -s project/app/src/main/res/drawable-television/hulk_sa_mark.xml
-          test -s project/app/src/main/res/mipmap-television/tv_banner.xml
 
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf
