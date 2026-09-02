@@ -99,9 +99,38 @@ private data class VerifiedMovieCardMetadata(
 )
 
 enum class HulkArtworkSurface {
+    /** Channel logos, live stage, square tiles. */
     SQUARE,
+    /** Compact category chips / rows (28-32dp). Needs more breathing room than a channel tile. */
+    CATEGORY,
+    /** Portrait movie / series posters. */
     POSTER,
+    /** 16:9 continue-watching and landscape tiles. */
     WIDE,
+}
+
+/**
+ * Safe-padding contract for the HULK SA shield fallback, expressed as fractions of the
+ * fallback surface so the same `hulk_sa_mark` asset renders at a balanced visual size on a
+ * 28dp category chip and on a 145dp live stage alike. Horizontal fractions apply to the
+ * surface width, vertical fractions to the surface height. The mark is always drawn with
+ * ContentScale.Fit inside the padded area: no crop, no stretch, centered.
+ */
+data class HulkFallbackInsets(
+    val horizontalFraction: Float,
+    val verticalFraction: Float,
+    val minimumDp: Float = 2f,
+)
+
+fun hulkFallbackInsets(surface: HulkArtworkSurface): HulkFallbackInsets = when (surface) {
+    // Medium padding: shield ~58% of the tile height.
+    HulkArtworkSurface.SQUARE -> HulkFallbackInsets(horizontalFraction = .14f, verticalFraction = .14f)
+    // Larger padding: shield ~49% of the chip height so it never dominates the category row.
+    HulkArtworkSurface.CATEGORY -> HulkFallbackInsets(horizontalFraction = .20f, verticalFraction = .20f)
+    // Portrait: the shield sits in the middle third of the poster with generous top/bottom air.
+    HulkArtworkSurface.POSTER -> HulkFallbackInsets(horizontalFraction = .18f, verticalFraction = .26f)
+    // Landscape: wide horizontal air, the shield height is governed by the vertical inset.
+    HulkArtworkSurface.WIDE -> HulkFallbackInsets(horizontalFraction = .30f, verticalFraction = .18f)
 }
 
 private fun Context.verifiedMovieCardMetadata(item: ContentItem): VerifiedMovieCardMetadata {
@@ -216,11 +245,13 @@ fun HulkFallbackArtwork(
     val shape = RoundedCornerShape(
         when (surface) {
             HulkArtworkSurface.SQUARE -> 10.dp
+            HulkArtworkSurface.CATEGORY -> 8.dp
             HulkArtworkSurface.POSTER -> 12.dp
             HulkArtworkSurface.WIDE -> 14.dp
         },
     )
-    Box(
+    val insets = hulkFallbackInsets(surface)
+    BoxWithConstraints(
         modifier = modifier
             .clip(shape)
             .background(
@@ -231,20 +262,20 @@ fun HulkFallbackArtwork(
             .border(1.dp, colors.gold.copy(alpha = .24f), shape),
         contentAlignment = Alignment.Center,
     ) {
-        when (surface) {
-            HulkArtworkSurface.SQUARE -> AsyncImage(
-                model = R.drawable.hulk_sa_mark,
-                contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-            HulkArtworkSurface.POSTER -> BrandLogo(
-                Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 34.dp),
-            )
-            HulkArtworkSurface.WIDE -> BrandLogo(
-                Modifier.fillMaxSize().padding(horizontal = 44.dp, vertical = 14.dp),
-            )
-        }
+        // Surface-specific safe padding: the shield mark never touches the tile edges and
+        // scales with the surface instead of a single blind dp value.
+        val horizontalInset = (maxWidth.value * insets.horizontalFraction)
+            .coerceAtLeast(insets.minimumDp).dp
+        val verticalInset = (maxHeight.value * insets.verticalFraction)
+            .coerceAtLeast(insets.minimumDp).dp
+        Image(
+            painter = painterResource(R.drawable.hulk_sa_mark),
+            contentDescription = "HULK SA",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = horizontalInset, vertical = verticalInset),
+            contentScale = ContentScale.Fit,
+        )
     }
 }
 
@@ -1025,6 +1056,7 @@ fun ChannelListItem(
 fun ChannelLogo(
     item: ContentItem,
     modifier: Modifier = Modifier,
+    fallbackSurface: HulkArtworkSurface = HulkArtworkSurface.SQUARE,
 ) {
     var imageFailed by remember(item.posterUrl) { mutableStateOf(false) }
     Box(
@@ -1044,7 +1076,7 @@ fun ChannelLogo(
                 onError = { imageFailed = true },
             )
         } else {
-            HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.SQUARE)
+            HulkFallbackArtwork(Modifier.fillMaxSize(), fallbackSurface)
         }
     }
 }
