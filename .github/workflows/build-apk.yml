@@ -49,12 +49,12 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Restore HULK SA branding and Arabic fonts
+      - name: Restore Arabic fonts and canonical HULK SA branding
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p project/app/src/main/res/font
-          mkdir -p project/app/src/main/res/drawable-nodpi
 
           FONT_BASE="https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic"
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Regular.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
@@ -62,25 +62,97 @@ jobs:
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-SemiBold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Bold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
 
-          if ! curl -fL --retry 5 --retry-delay 2 "https://hulksa.com/assets/hulk-official-logo.webp" -o /tmp/hulk-logo.webp; then
-            cat .payload/assets/logo.part-* | base64 --decode > /tmp/hulk-logo.webp
-          fi
-          test -s /tmp/hulk-logo.webp
-          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
-          cp /tmp/hulk-logo.webp project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          # Remove obsolete launcher / brand overrides from the extracted lean project.
+          rm -f \
+            project/app/src/main/res/drawable/ic_launcher_background.xml \
+            project/app/src/main/res/drawable/ic_launcher_foreground.xml \
+            project/app/src/main/res/drawable/ic_launcher_tv_foreground.xml \
+            project/app/src/main/res/drawable-v33/ic_launcher_monochrome.xml \
+            project/app/src/main/res/drawable/ic_stat_hulk.xml \
+            project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp \
+            project/app/src/main/res/drawable-nodpi/ic_banner.webp
 
-          python3 - <<'PY'
-          from pathlib import Path
-          manifest = Path('project/app/src/main/AndroidManifest.xml')
-          text = manifest.read_text()
-          text = text.replace('@mipmap/ic_launcher_round', '@drawable/hulk_sa_logo')
-          text = text.replace('@mipmap/ic_launcher', '@drawable/hulk_sa_logo')
-          manifest.write_text(text)
-          PY
+          # Overlay the canonical Android icon / brand package from this branch.
+          BRAND_RES_DIRS=(
+            drawable-mdpi
+            drawable-hdpi
+            drawable-xhdpi
+            drawable-xxhdpi
+            drawable-xxxhdpi
+            drawable-nodpi
+            mipmap-anydpi-v26
+            mipmap-anydpi-v33
+            mipmap-mdpi
+            mipmap-hdpi
+            mipmap-xhdpi
+            mipmap-xxhdpi
+            mipmap-xxxhdpi
+          )
 
-          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
-          test -s project/app/src/main/res/drawable-nodpi/ic_banner.webp
+          for dir in "${BRAND_RES_DIRS[@]}"; do
+            test -d "app/src/main/res/$dir"
+            mkdir -p "project/app/src/main/res/$dir"
+            cp -R "app/src/main/res/$dir/." "project/app/src/main/res/$dir/"
+          done
+
+          # Overlay canonical runtime source ownership.
+          mkdir -p project/app/src/main/java/sa/hulksa/player/ui/components
+          mkdir -p project/app/src/main/java/sa/hulksa/player/tv
+
+          cp \
+            app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt \
+            project/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
+
+          cp \
+            app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt \
+            project/app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt
+
+          # Verify every canonical brand resource reached the actual Gradle project unchanged.
+          for dir in "${BRAND_RES_DIRS[@]}"; do
+            while IFS= read -r -d '' src; do
+              rel="${src#app/src/main/res/}"
+              dst="project/app/src/main/res/$rel"
+
+              test -f "$dst"
+              cmp -s "$src" "$dst" || {
+                echo "Brand resource overlay mismatch: $rel"
+                exit 1
+              }
+            done < <(find "app/src/main/res/$dir" -type f -print0)
+          done
+
+          # Verify runtime source ownership also reached the actual Gradle project unchanged.
+          cmp -s \
+            app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt \
+            project/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt
+
+          cmp -s \
+            app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt \
+            project/app/src/main/java/sa/hulksa/player/tv/TvHomeChannelManager.kt
+
+          # Legacy brand contract must not survive in the actual build tree.
+          test ! -e project/app/src/main/res/drawable/ic_launcher_background.xml
+          test ! -e project/app/src/main/res/drawable/ic_launcher_foreground.xml
+          test ! -e project/app/src/main/res/drawable/ic_launcher_tv_foreground.xml
+          test ! -e project/app/src/main/res/drawable-v33/ic_launcher_monochrome.xml
+          test ! -e project/app/src/main/res/drawable/ic_stat_hulk.xml
+          test ! -e project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
+          test ! -e project/app/src/main/res/drawable-nodpi/ic_banner.webp
+
+          # Required canonical final assets.
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_mark.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_mark_monochrome.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_background.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_foreground.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_monochrome.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_tv_channel_logo.png
+          test -s project/app/src/main/res/drawable-nodpi/hulk_sa_content_fallback_wide.png
+
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
+          test -s project/app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf
+          test -s project/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf
+          test -s project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
 
       - name: Build debug APK
         working-directory: project
