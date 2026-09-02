@@ -18,13 +18,13 @@ from xml.etree import ElementTree
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 
-DEFAULT_LOGO_SHA256 = "78df93a7ad0d70826e5e2fdc610c948c0854be9fc8d32fa193e10ee8440174ec"
+DEFAULT_LOGO_SHA256 = "bf5c3927eb765ac715c986a792a96368c08b912f69ce76212c09cb965cc79b3d"
 
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png":
         DEFAULT_LOGO_SHA256,
     "app/src/main/res/mipmap-xhdpi/tv_banner.png":
-        "91b52b15dc718eda36f8156cbb4a43be3c3bd787c95edf988743362d176f4a38",
+        "d8d50858eb0456756142e30df12eb8ee7381ba2812e5ac780dded93d0eb8a37f",
     "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png":
         "dc824e126a4633e741e10bce62d1e4c8e2e2e171ce9a57e153ad8219d8ff19b8",
 }
