@@ -80,8 +80,10 @@ jobs:
             drawable-xxhdpi
             drawable-xxxhdpi
             drawable-nodpi
+            drawable-television
             mipmap-anydpi-v26
             mipmap-anydpi-v33
+            mipmap-television
             mipmap-mdpi
             mipmap-hdpi
             mipmap-xhdpi
@@ -148,6 +150,9 @@ jobs:
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_monochrome.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_tv_channel_logo.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_content_fallback_wide.png
+          test -s project/app/src/main/res/drawable-television/hulk_sa_logo.xml
+          test -s project/app/src/main/res/drawable-television/hulk_sa_mark.xml
+          test -s project/app/src/main/res/mipmap-television/tv_banner.xml
 
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf
