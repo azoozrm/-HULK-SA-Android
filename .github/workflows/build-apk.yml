@@ -63,6 +63,7 @@ jobs:
           curl -fL --retry 5 --retry-delay 2 "$FONT_BASE/IBMPlexSansArabic-Bold.ttf" -o project/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf
 
           # Remove obsolete launcher / brand overrides from the extracted lean project.
+          # Canonical TV qualifier overrides are overlaid immediately afterwards from this branch.
           rm -f \
             project/app/src/main/res/drawable/ic_launcher_background.xml \
             project/app/src/main/res/drawable/ic_launcher_foreground.xml \
@@ -85,6 +86,7 @@ jobs:
             drawable-television
             mipmap-anydpi-v26
             mipmap-anydpi-v33
+            mipmap-television
             mipmap-mdpi
             mipmap-hdpi
             mipmap-xhdpi
@@ -149,10 +151,8 @@ jobs:
           test ! -e project/app/src/main/res/drawable/ic_stat_hulk.xml
           test ! -e project/app/src/main/res/drawable-nodpi/hulk_sa_logo.webp
           test ! -e project/app/src/main/res/drawable-nodpi/ic_banner.webp
-          test ! -e project/app/src/main/res/drawable-television/hulk_sa_logo.xml
-          test ! -e project/app/src/main/res/mipmap-television/tv_banner.xml
 
-          # Required canonical final assets.
+          # Required canonical final assets and TV qualifier overrides.
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_logo.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_mark.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_mark_monochrome.png
@@ -161,7 +161,12 @@ jobs:
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_adaptive_monochrome.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_tv_channel_logo.png
           test -s project/app/src/main/res/drawable-nodpi/hulk_sa_content_fallback_wide.png
+          test -s project/app/src/main/res/drawable-television/hulk_sa_logo.xml
           test -s project/app/src/main/res/drawable-television/hulk_sa_mark.xml
+          test -s project/app/src/main/res/drawable-television/hulk_sa_adaptive_background.xml
+          test -s project/app/src/main/res/drawable-television/hulk_sa_adaptive_foreground.xml
+          test -s project/app/src/main/res/drawable-television/hulk_sa_adaptive_monochrome.xml
+          test -s project/app/src/main/res/mipmap-television/tv_banner.xml
 
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_regular.ttf
           test -s project/app/src/main/res/font/ibm_plex_sans_arabic_medium.ttf

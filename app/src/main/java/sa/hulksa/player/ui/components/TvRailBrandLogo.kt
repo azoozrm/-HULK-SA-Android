@@ -22,9 +22,9 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.abs
 
 /**
- * One-argument BrandLogo overload that owns compact TV brand presentation.
- * Small TV surfaces and the navigation rail render the shield-only mark so
- * the wordmark is never clipped or reduced to an unreadable size.
+ * Owns compact TV brand presentation without changing non-TV BrandLogo behavior.
+ * The rail shows the complete HULK SA lockup inside a protected frame, while tiny
+ * TV surfaces keep the shield-only mark for legibility.
  */
 @Composable
 fun BrandLogo(modifier: Modifier) {
@@ -75,7 +75,7 @@ fun BrandLogo(modifier: Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             Image(
-                painter = painterResource(R.drawable.hulk_sa_mark),
+                painter = painterResource(R.drawable.hulk_sa_logo),
                 contentDescription = "HULK SA",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
