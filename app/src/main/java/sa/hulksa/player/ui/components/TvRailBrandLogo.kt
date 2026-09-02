@@ -38,7 +38,8 @@ fun BrandLogo(modifier: Modifier) {
             adaptiveUi.navigationType == HulkNavigationType.RAIL &&
             abs(maxWidth.value - expectedRailLogoSizeDp) <= 0.5f &&
             abs(maxHeight.value - expectedRailLogoSizeDp) <= 0.5f
-        val isCompactTvBrand = adaptiveUi.isTelevision && minOf(maxWidth, maxHeight) <= 56.dp
+        val compactEdge = minOf(maxWidth, maxHeight)
+        val isCompactTvBrand = adaptiveUi.isTelevision && compactEdge <= 56.dp
 
         if (!isTvRailLogo && !isCompactTvBrand) {
             BrandLogo(
@@ -49,12 +50,13 @@ fun BrandLogo(modifier: Modifier) {
         }
 
         if (isCompactTvBrand && !isTvRailLogo) {
+            val compactPadding = if (compactEdge <= 32.dp) 6.dp else 7.dp
             Image(
                 painter = painterResource(R.drawable.hulk_sa_mark),
                 contentDescription = "HULK SA",
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(1.dp),
+                    .padding(compactPadding),
                 contentScale = ContentScale.Fit,
             )
             return@BoxWithConstraints
@@ -71,7 +73,7 @@ fun BrandLogo(modifier: Modifier) {
                 .padding(1.dp)
                 .background(Color(0xFF11120E).copy(alpha = 0.96f), shape)
                 .border(1.dp, colors.goldBright.copy(alpha = 0.56f), shape)
-                .padding(4.dp),
+                .padding(5.dp),
             contentAlignment = Alignment.Center,
         ) {
             Image(
