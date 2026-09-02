@@ -177,7 +177,7 @@ class TvHomeChannelManager(context: Context) {
             helper.updatePreviewChannel(channelId, metadata)
             return channelId
         }
-        val logo = ContextCompat.getDrawable(appContext, R.mipmap.ic_launcher_tv)?.toBitmap()
+        val logo = ContextCompat.getDrawable(appContext, R.drawable.hulk_sa_tv_channel_logo)?.toBitmap()
             ?: throw IOException("HULK SA TV channel logo is unavailable")
         val channel = PreviewChannel.Builder()
             .setDisplayName(CHANNEL_NAME)
@@ -377,7 +377,7 @@ class TvHomeChannelManager(context: Context) {
             ?: contentId?.takeIf { it.startsWith(TV_PROGRAM_PROVIDER_PREFIX) }
 
     private fun TvContinueWatchingItem.safeArtworkUri(): Uri {
-        val fallback = Uri.parse("android.resource://${appContext.packageName}/${R.mipmap.ic_launcher_tv}")
+        val fallback = Uri.parse("android.resource://${appContext.packageName}/${R.drawable.hulk_sa_content_fallback_wide}")
         val raw = landscapeImageUrl?.takeIf(::isSafeTvProgramArtworkUrl) ?: return fallback
         return Uri.parse(raw)
     }

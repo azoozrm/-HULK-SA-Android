@@ -195,10 +195,10 @@ fun BrandLogo(
     contentScale: ContentScale = ContentScale.Fit,
 ) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
-        val compactFallback = maxWidth <= 24.dp && maxHeight <= 24.dp
+        val compactMark = maxWidth <= 96.dp || maxHeight <= 96.dp
         Image(
             painter = painterResource(
-                if (compactFallback) R.drawable.ic_launcher_foreground else R.drawable.hulk_sa_logo,
+                if (compactMark) R.drawable.hulk_sa_mark else R.drawable.hulk_sa_logo,
             ),
             contentDescription = "HULK SA",
             modifier = Modifier.fillMaxSize(),
@@ -232,11 +232,11 @@ fun HulkFallbackArtwork(
         contentAlignment = Alignment.Center,
     ) {
         when (surface) {
-            HulkArtworkSurface.SQUARE -> AsyncImage(
-                model = R.mipmap.ic_launcher_tv,
+            HulkArtworkSurface.SQUARE -> Image(
+                painter = painterResource(R.drawable.hulk_sa_mark),
                 contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().padding(7.dp),
+                contentScale = ContentScale.Fit,
             )
             HulkArtworkSurface.POSTER -> BrandLogo(
                 Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 34.dp),
@@ -261,7 +261,7 @@ fun BrandBadge(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            painter = painterResource(R.drawable.ic_launcher_foreground),
+            painter = painterResource(R.drawable.hulk_sa_mark_monochrome),
             contentDescription = "HULK SA",
             tint = Color(0xFF171912),
             modifier = Modifier.fillMaxSize().padding(2.dp),
@@ -617,7 +617,7 @@ fun CompactPosterCard(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                placeholder = painterResource(R.drawable.hulk_sa_mark),
                 onError = { artworkFailed = true },
             )
         } else {
@@ -1040,7 +1040,7 @@ fun ChannelLogo(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize().padding(4.dp),
                 contentScale = ContentScale.Fit,
-                placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                placeholder = painterResource(R.drawable.hulk_sa_mark),
                 onError = { imageFailed = true },
             )
         } else {
