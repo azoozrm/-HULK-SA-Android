@@ -45,12 +45,12 @@ fun BrandLogo(modifier: Modifier) {
         if (!isTvRailLogo) {
             val compactCategoryMark = maxWidth <= 24.dp && maxHeight <= 24.dp
             Image(
-                painter = painterResource(R.drawable.ic_launcher_foreground),
+                painter = painterResource(R.drawable.hulk_sa_mark_reference),
                 contentDescription = "HULK SA",
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val compactScale = if (compactCategoryMark) 1.80f else 1f
+                        val compactScale = if (compactCategoryMark) 1.00f else 1f
                         scaleX = compactScale
                         scaleY = compactScale
                     },
@@ -74,7 +74,7 @@ fun BrandLogo(modifier: Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             Image(
-                painter = painterResource(R.drawable.ic_launcher_foreground),
+                painter = painterResource(R.drawable.hulk_sa_mark_reference),
                 contentDescription = "HULK SA",
                 modifier = Modifier
                     .fillMaxSize()
