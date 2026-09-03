@@ -79,8 +79,8 @@ fun BrandLogo(modifier: Modifier) {
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = 1.30f
-                        scaleY = 1.30f
+                        scaleX = 1.12f
+                        scaleY = 1.12f
                     },
                 contentScale = ContentScale.Fit,
             )
