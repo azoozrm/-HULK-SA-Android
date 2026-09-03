@@ -269,23 +269,6 @@ fun ProfilePickerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Image(
-                    painter = painterResource(R.drawable.hulk_sa_logo),
-                    contentDescription = "HULK SA",
-                    modifier = Modifier
-                        .width(
-                            if (isTv) tvMetrics.logoWidthDp.dp
-                            else if (compactMobile) 88.dp else 104.dp,
-                        )
-                        .height(
-                            if (isTv) tvMetrics.logoHeightDp.dp
-                            else if (compactMobile) 52.dp else 62.dp,
-                        ),
-                    contentScale = ContentScale.Fit,
-                )
-
-                Spacer(Modifier.height(if (isTv) 13.dp else if (compactMobile) 6.dp else 10.dp))
-
                 Text(
                     text = "من يشاهد الان ؟",
                     color = colors.text,
