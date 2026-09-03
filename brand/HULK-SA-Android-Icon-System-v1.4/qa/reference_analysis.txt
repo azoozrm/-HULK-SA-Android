@@ -1,0 +1,1 @@
+Square and horizontal official references were traced into vector paths. v1.3 restores the original composition for the badge and banner and removes the previous crop/regression.

@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -10,19 +11,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import sa.hulksa.player.R
 import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.abs
 
 /**
- * One-argument BrandLogo overload used to give only the Android TV navigation-rail logo a
- * premium static frame. All other BrandLogo usages delegate to the canonical two-argument
- * implementation unchanged.
+ * One-argument BrandLogo overload used by TV rail and fallback artwork surfaces.
+ *
+ * The TV rail owns one black framed tile with a large shield-only mark. Non-rail
+ * one-argument usages stay transparent so poster fallbacks never inherit the rail frame.
  */
 @Composable
 fun BrandLogo(modifier: Modifier) {
@@ -38,35 +43,44 @@ fun BrandLogo(modifier: Modifier) {
             abs(maxHeight.value - expectedRailLogoSizeDp) <= 0.5f
 
         if (!isTvRailLogo) {
-            BrandLogo(
-                modifier = Modifier.fillMaxSize(),
+            val compactCategoryMark = maxWidth <= 24.dp && maxHeight <= 24.dp
+            Image(
+                painter = painterResource(R.drawable.hulk_sa_mark_reference),
+                contentDescription = "HULK SA",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val compactScale = if (compactCategoryMark) 1.00f else 1f
+                        scaleX = compactScale
+                        scaleY = compactScale
+                    },
                 contentScale = ContentScale.Fit,
             )
             return@BoxWithConstraints
         }
 
         val colors = LocalHulkColors.current
-        val cornerRadiusDp = (expectedRailLogoSizeDp * 0.18f).coerceIn(10f, 14f)
-        val logoPaddingDp = (expectedRailLogoSizeDp * 0.055f).coerceIn(3f, 4.5f)
-        val shape = RoundedCornerShape(cornerRadiusDp.dp)
+        val shape = RoundedCornerShape(
+            (expectedRailLogoSizeDp * 0.18f).coerceIn(10f, 14f).dp,
+        )
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // Extremely restrained gold halo: visible as polish, never as a focus state.
-                .border(2.dp, colors.goldBright.copy(alpha = 0.07f), shape)
-                .padding(1.dp)
-                .background(Color(0xFF11120E).copy(alpha = 0.96f), shape)
-                .border(1.dp, colors.goldBright.copy(alpha = 0.56f), shape)
-                .padding(logoPaddingDp.dp),
+                .clip(shape)
+                .background(Color.Black)
+                .border(1.5.dp, colors.goldBright.copy(alpha = .72f), shape)
+                .padding(3.dp),
             contentAlignment = Alignment.Center,
         ) {
-            BrandLogo(
+            Image(
+                painter = painterResource(R.drawable.hulk_sa_mark_reference),
+                contentDescription = "HULK SA",
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = 1.18f
-                        scaleY = 1.18f
+                        scaleX = 1.12f
+                        scaleY = 1.12f
                     },
                 contentScale = ContentScale.Fit,
             )

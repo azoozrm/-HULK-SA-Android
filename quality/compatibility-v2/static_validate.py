@@ -17,11 +17,11 @@ from xml.etree import ElementTree
 
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
-DEFAULT_LOGO_SHA256 = "1fd9ccde4a86b03bde02b0618747b063496f8637ef624683b309ed77d36d7c45"
+DEFAULT_LOGO_SHA256 = "26081030134aa7987a772765f7d6a714e05828c1b44c35e37fe363b413725fac"
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
-    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "80945e5ae70c8b672a448283d58e14487f264fe03d684dd1d1c689a320953b08",
-    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "acce7d7a2968b4cb9db7d8bdac8b57e2cad4ef44b1577c00b7f63f28f2aac234",
+    "app/src/main/res/mipmap-xhdpi/tv_banner.png": "1e303a68a7d7811a20e0fd7804953fdf447a7ccf52f8d6b76d5011fb702db786",
+    "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png": "8f0eef91260fdf74cad020cdc48a1f17ff432dcc14783e7f79e591ee3f79a16b",
 }
 ICON_DENSITY_SPECS = {
     "mdpi": {"launcher": 48, "tv_launcher": 80, "banner": (160, 90), "notification": 24},

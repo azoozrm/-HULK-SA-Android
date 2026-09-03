@@ -1027,24 +1027,51 @@ fun ChannelLogo(
     modifier: Modifier = Modifier,
 ) {
     var imageFailed by remember(item.posterUrl) { mutableStateOf(false) }
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFFF0EEE7))
             .border(1.dp, Color.White.copy(alpha = .18f), RoundedCornerShape(10.dp)),
         contentAlignment = Alignment.Center,
     ) {
+        val compactCategoryFallback = maxWidth <= 24.dp && maxHeight <= 24.dp
+
         if (!item.posterUrl.isNullOrBlank() && !imageFailed) {
             AsyncImage(
                 model = item.posterUrl,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize().padding(4.dp),
                 contentScale = ContentScale.Fit,
-                placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                placeholder = painterResource(
+                    if (compactCategoryFallback) {
+                        R.drawable.hulk_sa_mark_reference
+                    } else {
+                        R.drawable.hulk_sa_channel_placeholder
+                    },
+                ),
                 onError = { imageFailed = true },
             )
+        } else if (compactCategoryFallback) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF10110D)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.hulk_sa_mark_reference),
+                    contentDescription = "HULK SA",
+                    modifier = Modifier.fillMaxSize().padding(4.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            }
         } else {
-            HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.SQUARE)
+            Image(
+                painter = painterResource(R.drawable.hulk_sa_channel_placeholder),
+                contentDescription = "HULK SA",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
         }
     }
 }

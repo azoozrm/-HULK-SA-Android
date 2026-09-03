@@ -755,20 +755,13 @@ private fun LoginBrandRegion(
                     clip = false,
                 )
                 .clip(frameShape)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xE612140F),
-                            Color(0xF0080A07),
-                        ),
-                    ),
-                )
+                .background(Color.Black)
                 .border(
                     width = 1.5.dp,
                     color = colors.gold.copy(alpha = .72f),
                     shape = frameShape,
                 )
-                .padding(20.dp)
+                .padding(8.dp)
                 .clearAndSetSemantics { },
             contentAlignment = Alignment.Center,
         ) {
