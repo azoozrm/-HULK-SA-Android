@@ -2923,7 +2923,7 @@ private fun LiveStage(
         ) {
             if (item == null) Text("اختر قناة", color = colors.textMuted, modifier = Modifier.align(Alignment.Center))
             else {
-                ChannelLogo(item, Modifier.align(Alignment.Center).size(145.dp))
+                ChannelLogo(item, Modifier.align(Alignment.Center).size(104.dp))
                 Box(Modifier.align(Alignment.TopStart).padding(17.dp).clip(CircleShape).background(Color(0xFFD3262E)).padding(horizontal = 10.dp, vertical = 5.dp)) {
                     Text("LIVE", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
@@ -5467,17 +5467,17 @@ private fun LiveCategoryChip(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         if (representative != null) {
-            ChannelLogo(representative, Modifier.size(28.dp))
+            ChannelLogo(representative, Modifier.size(24.dp))
         } else {
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(24.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color(0xFF10110D))
                     .border(1.dp, colors.line.copy(alpha = .35f), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                BrandLogo(Modifier.fillMaxSize().padding(4.dp))
+                BrandLogo(Modifier.fillMaxSize().padding(2.dp))
             }
         }
         Text(

@@ -43,10 +43,17 @@ fun BrandLogo(modifier: Modifier) {
             abs(maxHeight.value - expectedRailLogoSizeDp) <= 0.5f
 
         if (!isTvRailLogo) {
+            val compactCategoryMark = maxWidth <= 24.dp && maxHeight <= 24.dp
             Image(
                 painter = painterResource(R.drawable.ic_launcher_foreground),
                 contentDescription = "HULK SA",
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val compactScale = if (compactCategoryMark) 1.80f else 1f
+                        scaleX = compactScale
+                        scaleY = compactScale
+                    },
                 contentScale = ContentScale.Fit,
             )
             return@BoxWithConstraints
