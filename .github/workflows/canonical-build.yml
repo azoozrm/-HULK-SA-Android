@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: hulk-sa-build-${{ github.workflow }}-${{ github.ref }}
@@ -53,6 +53,81 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
+      - name: Apply PR250 final physical-TV visual corrections
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/hulk-sa-icon-system-v1-4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin fix/hulk-sa-icon-system-v1-4
+          git checkout -B fix/hulk-sa-icon-system-v1-4 origin/fix/hulk-sa-icon-system-v1-4
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          shell = Path('app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt')
+          text = shell.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  'ChannelLogo(item, Modifier.align(Alignment.Center).size(145.dp))',
+                  'ChannelLogo(item, Modifier.align(Alignment.Center).size(104.dp))',
+                  'live preview artwork size',
+              ),
+              (
+                  'ChannelLogo(representative, Modifier.size(28.dp))',
+                  'ChannelLogo(representative, Modifier.size(24.dp))',
+                  'live category artwork size',
+              ),
+              (
+                  '''                modifier = Modifier\n                    .size(28.dp)\n                    .clip(RoundedCornerShape(10.dp))\n                    .background(Color(0xFF10110D))''',
+                  '''                modifier = Modifier\n                    .size(24.dp)\n                    .clip(RoundedCornerShape(10.dp))\n                    .background(Color(0xFF10110D))''',
+                  'category fallback tile size',
+              ),
+              (
+                  'BrandLogo(Modifier.fillMaxSize().padding(4.dp))',
+                  'BrandLogo(Modifier.fillMaxSize().padding(2.dp))',
+                  'category fallback mark padding',
+              ),
+          ]
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              text = text.replace(old, new, 1)
+          shell.write_text(text, encoding='utf-8')
+
+          rail = Path('app/src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt')
+          text = rail.read_text(encoding='utf-8')
+          old = '''        if (!isTvRailLogo) {\n            Image(\n                painter = painterResource(R.drawable.ic_launcher_foreground),\n                contentDescription = "HULK SA",\n                modifier = Modifier.fillMaxSize(),\n                contentScale = ContentScale.Fit,\n            )\n            return@BoxWithConstraints\n        }'''
+          new = '''        if (!isTvRailLogo) {\n            val compactCategoryMark = maxWidth <= 24.dp && maxHeight <= 24.dp\n            Image(\n                painter = painterResource(R.drawable.ic_launcher_foreground),\n                contentDescription = "HULK SA",\n                modifier = Modifier\n                    .fillMaxSize()\n                    .graphicsLayer {\n                        val compactScale = if (compactCategoryMark) 1.80f else 1f\n                        scaleX = compactScale\n                        scaleY = compactScale\n                    },\n                contentScale = ContentScale.Fit,\n            )\n            return@BoxWithConstraints\n        }'''
+          if text.count(old) != 1:
+              raise SystemExit('TvRailBrandLogo compact mark block did not match exactly once')
+          rail.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          login = Path('app/src/main/res/drawable-television/hulk_sa_logo.xml')
+          text = login.read_text(encoding='utf-8')
+          marker = '    android:viewportHeight="1254">\n'
+          black = '    <path\n        android:fillColor="#000000"\n        android:pathData="M0,0 H1254 V1254 H0 Z" />\n'
+          if black in text:
+              raise SystemExit('TV login logo already has black background unexpectedly')
+          if marker not in text:
+              raise SystemExit('TV login logo vector marker missing')
+          login.write_text(text.replace(marker, marker + black, 1), encoding='utf-8')
+
+          aliases = Path('app/src/main/res/values-television/hulk_tv_launcher_aliases.xml')
+          aliases.parent.mkdir(parents=True, exist_ok=True)
+          aliases.write_text('''<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <item name="ic_launcher" type="mipmap">@mipmap/ic_launcher_tv</item>\n    <item name="ic_launcher_round" type="mipmap">@mipmap/ic_launcher_tv</item>\n</resources>\n''', encoding='utf-8')
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt \
+                  app/src/main/java/sa/hulksa/player/ui/components/TvRailBrandLogo.kt \
+                  app/src/main/res/drawable-television/hulk_sa_logo.xml \
+                  app/src/main/res/values-television/hulk_tv_launcher_aliases.xml
+          git diff --cached --check
+          git commit -m 'fix: normalize TV artwork and launcher presentation'
+          git push origin HEAD:fix/hulk-sa-icon-system-v1-4
 
       - uses: actions/setup-java@v5
         with:
