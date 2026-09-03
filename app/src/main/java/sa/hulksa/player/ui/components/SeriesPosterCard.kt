@@ -144,7 +144,7 @@ fun SeriesPosterCard(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                placeholder = painterResource(R.drawable.hulk_sa_logo),
+                placeholder = painterResource(R.drawable.ic_launcher_foreground),
                 onError = { artworkFailed = true },
             )
         } else {
