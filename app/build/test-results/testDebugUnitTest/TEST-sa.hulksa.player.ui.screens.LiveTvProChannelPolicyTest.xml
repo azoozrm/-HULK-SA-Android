@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:10.008Z" hostname="runnervmgx7h7" time="0.004">
+  <properties/>
+  <testcase name="singletonCategoryFallsBackToWholeCatalogInsteadOfZappingToItself" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="lastChannelSkipsCurrentAndUnavailableHistoryEntries" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="offscreenCategoryReturnRequiresExactlyOneRevealPath" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.003"/>
+  <testcase name="categoryReturnGateRejectsKeyRepeatUntilCurrentTransitionFinishes" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.001"/>
+  <testcase name="zappingStaysInsideCurrentCategoryWhenThereAreAlternatives" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="recentHistoryIsDeduplicatedAndKeepsNewestFirst" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="visibleCategoryReturnDoesNotRequireRevealScroll" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="queuedZappingWrapsAndIgnoresPendingTargetOutsideCurrentSequence" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="queuedZappingAdvancesFromPendingTargetBeforePlaybackRecreates" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <testcase name="relativeChannelWrapsInBothDirections" classname="sa.hulksa.player.ui.screens.LiveTvProChannelPolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.766Z" hostname="runnervmgx7h7" time="0.006">
+  <properties/>
+  <testcase name="bundled diagnostics are credential safe by construction" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.002"/>
+  <testcase name="unsupported mp2 routes to software recovery with bundled fallback exposed" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.002"/>
+  <testcase name="alternate supported audio track is attempted before software and bundled path" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="stale generation cannot enter software or bundled recovery" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="platform supported mp2 stays on platform and does not use bundled decoder" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="vod replacement state preservation remains unchanged" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="live replacement behavior remains unchanged" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="bundled mp2 unavailable falls through to final audio error budget" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="no audio track never routes through bundled mp2" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.001"/>
+  <testcase name="software and bundled exposure is attempted once per playback generation" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="source fallback behavior remains independent of bundled mp2" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="software pcm unsupported mp2 selects bundled decoder path" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="source network failure never routes through bundled mp2" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <testcase name="successful software pcm path never needs a second bundled recovery command" classname="sa.hulksa.player.playback.BundledMp2FallbackPolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

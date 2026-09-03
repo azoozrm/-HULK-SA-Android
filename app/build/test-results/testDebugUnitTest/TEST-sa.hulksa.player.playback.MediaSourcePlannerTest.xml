@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.playback.MediaSourcePlannerTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.774Z" hostname="runnervmgx7h7" time="0.002">
+  <properties/>
+  <testcase name="HLS query parameters do not defeat routing hint" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.0"/>
+  <testcase name="malformed and unsupported schemes are rejected before playback" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.001"/>
+  <testcase name="automatic source plan is capped even when input is unexpectedly large" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.0"/>
+  <testcase name="live TS and HLS retain provider order with explicit source types" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.001"/>
+  <testcase name="VOD source plan preserves every provider candidate" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.0"/>
+  <testcase name="planner never invents a TS or HLS alternate" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.0"/>
+  <testcase name="new playback request owns a new generation even with same identity" classname="sa.hulksa.player.playback.MediaSourcePlannerTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

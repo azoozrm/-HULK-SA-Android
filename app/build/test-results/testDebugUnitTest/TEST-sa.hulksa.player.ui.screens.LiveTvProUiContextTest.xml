@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:10.013Z" hostname="runnervmgx7h7" time="0.001">
+  <properties/>
+  <testcase name="browserRestoresFavoritesOnlyWhenCurrentChannelIsStillFavorite" classname="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" time="0.0"/>
+  <testcase name="browserRestoresRecentAndAllContextsDeterministically" classname="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" time="0.0"/>
+  <testcase name="recentOverlayKeepsFirstCanonicalProviderDuplicate" classname="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" time="0.001"/>
+  <testcase name="recentOverlayHasOneStableIdentityAndPreservesRecentOrder" classname="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" time="0.0"/>
+  <testcase name="staleCategoryContextFallsBackToCurrentChannelsRealCategory" classname="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" time="0.0"/>
+  <testcase name="mainFavoritesAndRecentMapToPlayerContexts" classname="sa.hulksa.player.ui.screens.LiveTvProUiContextTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

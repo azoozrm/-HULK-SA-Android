@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.GrowthPolicyTest" tests="36" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.554Z" hostname="runnervmgx7h7" time="0.047">
+  <properties/>
+  <testcase name="renewalDisabledHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="invalidWhatsAppUrlsAreRejected" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="renewalAllowsTrustedSubdomain" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="tvSupportActionOpensQr" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.003"/>
+  <testcase name="expiryTodayShowsTodayCopy" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="expiredEarlierOnSameLocalDayShowsExpiredCopy" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="whatsappDotComSendUrlIsAccepted" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="malformedGrowthDoesNotBreakOperationsConfig" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="missingExpiryHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.002"/>
+  <testcase name="remainingTenDaysHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="tvRenewalActionOpensQr" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="renewalEnabledWithTrustedUrl" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.015"/>
+  <testcase name="invalidUrlProducesNoAction" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="bannerFlagDisabledHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="supportEnabledWithOfficialWhatsAppUrl" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.003"/>
+  <testcase name="httpRenewalUrlIsRejected" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="renewalCredentialsAndQueryAreRejected" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="growthDisabledHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="remainingSevenDaysShowsBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.002"/>
+  <testcase name="dangerousSchemesAreRejected" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="autoQrModeIsParsed" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="daysBeforeExpiryUpperBoundIsClamped" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="remainingEightDaysHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="expiredAccountShowsRenewalCopy" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="invalidCustomQrHostIsIgnored" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.002"/>
+  <testcase name="failedCustomImageFallsBackToGenerated" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.004"/>
+  <testcase name="remainingOneDayShowsTomorrowCopy" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="missingCustomQrFallsBackToGenerated" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="growthDisabledIsPreserved" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="daysBeforeExpiryLowerBoundIsClamped" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="remainingThreeDaysShowsBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="implausibleExpiryHidesBanner" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="mobileSupportActionOpensUrl" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <testcase name="growthMissingUsesDisabledSafeDefault" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="customQrModeAndTrustedImageAreParsed" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.001"/>
+  <testcase name="mobileRenewalActionOpensUrl" classname="sa.hulksa.player.data.GrowthPolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

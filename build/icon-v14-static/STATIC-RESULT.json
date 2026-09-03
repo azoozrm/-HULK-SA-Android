@@ -1,0 +1,254 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-09-03T02:52:51.119468+00:00",
+  "summary": {
+    "PASS": 27,
+    "FAIL": 0,
+    "BLOCKED": 0,
+    "SKIPPED": 0
+  },
+  "checks": [
+    {
+      "id": "package-identity",
+      "status": "PASS",
+      "message": "Application ID is sa.hulksa.player",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts"
+      ]
+    },
+    {
+      "id": "namespace-identity",
+      "status": "PASS",
+      "message": "Namespace is sa.hulksa.player",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts"
+      ]
+    },
+    {
+      "id": "version-name",
+      "status": "PASS",
+      "message": "versionName is 0.9.3.20",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts"
+      ]
+    },
+    {
+      "id": "version-code",
+      "status": "PASS",
+      "message": "versionCode is 64",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts"
+      ]
+    },
+    {
+      "id": "reseller-api-runtime-config",
+      "status": "PASS",
+      "message": "Production uses only the configurable HTTPS reseller API",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts"
+      ]
+    },
+    {
+      "id": "abi-policy",
+      "status": "PASS",
+      "message": "Qualified ABI set is present",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts"
+      ]
+    },
+    {
+      "id": "reseller-access-login-order",
+      "status": "PASS",
+      "message": "Login fields are ordered access code, username, then password",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt"
+      ]
+    },
+    {
+      "id": "reseller-access-resolution",
+      "status": "PASS",
+      "message": "Android resolves the access code through the HULK API before IPTV login",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/data/PortalResolver.kt",
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/model/Models.kt"
+      ]
+    },
+    {
+      "id": "legacy-iptv-host-absent",
+      "status": "PASS",
+      "message": "Legacy IPTV host is absent from Android production source",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/build.gradle.kts",
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/data/PortalResolver.kt"
+      ]
+    },
+    {
+      "id": "manifest-leanback-optional",
+      "status": "PASS",
+      "message": "Leanback is optional",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/AndroidManifest.xml"
+      ]
+    },
+    {
+      "id": "manifest-touch-optional",
+      "status": "PASS",
+      "message": "Touchscreen is optional",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/AndroidManifest.xml"
+      ]
+    },
+    {
+      "id": "manifest-launchers",
+      "status": "PASS",
+      "message": "Phone and TV launchers are declared",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/AndroidManifest.xml"
+      ]
+    },
+    {
+      "id": "manifest-rtl",
+      "status": "PASS",
+      "message": "RTL support is enabled",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/AndroidManifest.xml"
+      ]
+    },
+    {
+      "id": "manifest-tv-banner",
+      "status": "PASS",
+      "message": "Phone and TV use distinct launcher resources and the density-aware TV banner",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/AndroidManifest.xml"
+      ]
+    },
+    {
+      "id": "approved-logo-sha256",
+      "status": "PASS",
+      "message": "Approved brand asset bytes are unchanged: app/src/main/res/drawable-nodpi/hulk_sa_logo.png",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/res/drawable-nodpi/hulk_sa_logo.png"
+      ]
+    },
+    {
+      "id": "approved-banner-sha256",
+      "status": "PASS",
+      "message": "Approved brand asset bytes are unchanged: app/src/main/res/mipmap-xhdpi/tv_banner.png",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/res/mipmap-xhdpi/tv_banner.png"
+      ]
+    },
+    {
+      "id": "approved-tv-launcher-sha256",
+      "status": "PASS",
+      "message": "Approved brand asset bytes are unchanged: app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png"
+      ]
+    },
+    {
+      "id": "android-icon-density-matrix",
+      "status": "PASS",
+      "message": "Phone, round, TV, banner, and notification assets cover every required density at exact dimensions",
+      "evidence": [
+        "app/src/main/res/mipmap-mdpi/ic_launcher.png",
+        "app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+        "app/src/main/res/mipmap-mdpi/ic_launcher_tv.png",
+        "app/src/main/res/mipmap-mdpi/tv_banner.png",
+        "app/src/main/res/drawable-mdpi/ic_stat_hulk.png",
+        "app/src/main/res/mipmap-hdpi/ic_launcher.png",
+        "app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+        "app/src/main/res/mipmap-hdpi/ic_launcher_tv.png",
+        "app/src/main/res/mipmap-hdpi/tv_banner.png",
+        "app/src/main/res/drawable-hdpi/ic_stat_hulk.png",
+        "app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+        "app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+        "app/src/main/res/mipmap-xhdpi/ic_launcher_tv.png",
+        "app/src/main/res/mipmap-xhdpi/tv_banner.png",
+        "app/src/main/res/drawable-xhdpi/ic_stat_hulk.png",
+        "app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+        "app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+        "app/src/main/res/mipmap-xxhdpi/ic_launcher_tv.png",
+        "app/src/main/res/mipmap-xxhdpi/tv_banner.png",
+        "app/src/main/res/drawable-xxhdpi/ic_stat_hulk.png",
+        "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+        "app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+        "app/src/main/res/mipmap-xxxhdpi/ic_launcher_tv.png",
+        "app/src/main/res/mipmap-xxxhdpi/tv_banner.png",
+        "app/src/main/res/drawable-xxxhdpi/ic_stat_hulk.png"
+      ]
+    },
+    {
+      "id": "legacy-tv-banner-resource-absent",
+      "status": "PASS",
+      "message": "The obsolete single-density TV banner resource is absent",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/res/drawable-xhdpi/tv_banner.png"
+      ]
+    },
+    {
+      "id": "logo-content-scale",
+      "status": "PASS",
+      "message": "Logo rendering uses ContentScale.Fit",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt"
+      ]
+    },
+    {
+      "id": "legacy-lab-removed",
+      "status": "PASS",
+      "message": "Legacy compatibility/quality lab paths are absent",
+      "evidence": [
+        "repository tree"
+      ]
+    },
+    {
+      "id": "production-test-hooks-absent",
+      "status": "PASS",
+      "message": "No legacy QA marker or overlay is present in production sources",
+      "evidence": [
+        "app/src/main"
+      ]
+    },
+    {
+      "id": "hardcoded-pixel-layout-absent",
+      "status": "PASS",
+      "message": "No fixed 720p/1080p pixel layout literals were found",
+      "evidence": [
+        "app/src/main"
+      ]
+    },
+    {
+      "id": "player-surface-dpad-seek-direction",
+      "status": "PASS",
+      "message": "TV/remote player surface maps RTL D-pad Left to forward and Right to rewind while preserving non-TV mapping",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
+      ]
+    },
+    {
+      "id": "player-seekbar-dpad-direction",
+      "status": "PASS",
+      "message": "TV/remote seek bar maps RTL D-pad Left to forward and Right to rewind while preserving non-TV mapping",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
+      ]
+    },
+    {
+      "id": "player-focus-race-policy",
+      "status": "PASS",
+      "message": "Player focus ownership contains no timing retries",
+      "evidence": [
+        "/home/runner/work/-HULK-SA-Android/-HULK-SA-Android/app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
+      ]
+    },
+    {
+      "id": "v2-workflow-fail-closed",
+      "status": "PASS",
+      "message": "V2 workflows contain no continue-on-error or automatic baseline update",
+      "evidence": [
+        ".github/workflows"
+      ]
+    }
+  ]
+}

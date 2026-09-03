@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.DurableDownloadSchedulerTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.523Z" hostname="runnervmgx7h7" time="0.009">
+  <properties/>
+  <testcase name="elapsedScheduleNeverCreatesNegativeDelay" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.005"/>
+  <testcase name="expiredSessionMetadataIsNeverRestoredForBackgroundDownload" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.0"/>
+  <testcase name="missingProcessSessionIsRestoredOnlyForCurrentValidAccount" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.001"/>
+  <testcase name="immediateDownloadUsesConnectedNetworkAndNoDelay" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.001"/>
+  <testcase name="futureNightScheduleBecomesInitialDelay" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.0"/>
+  <testcase name="wifiOnlyDownloadUsesUnmeteredConstraint" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.0"/>
+  <testcase name="invalidDownloadIdIsRejected" classname="sa.hulksa.player.data.DurableDownloadSchedulerTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

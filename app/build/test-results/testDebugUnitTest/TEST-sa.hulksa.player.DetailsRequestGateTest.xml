@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.DetailsRequestGateTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.283Z" hostname="runnervmgx7h7" time="0.005">
+  <properties/>
+  <testcase name="actual account replacement makes request stale" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.001"/>
+  <testcase name="reauthenticated session for same logical account keeps request current" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.001"/>
+  <testcase name="profile identity is part of request ownership" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.0"/>
+  <testcase name="same content restarted still owns a new generation" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.0"/>
+  <testcase name="logout makes request context stale even before late completion" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.0"/>
+  <testcase name="explicit navigation invalidation rejects a late completion" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.0"/>
+  <testcase name="opening a new item makes the previous request stale" classname="sa.hulksa.player.DetailsRequestGateTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

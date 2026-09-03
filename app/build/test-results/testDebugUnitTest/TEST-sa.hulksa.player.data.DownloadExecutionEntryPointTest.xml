@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.DownloadExecutionEntryPointTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.459Z" hostname="runnervmgx7h7" time="0.003">
+  <properties/>
+  <testcase name="terminal states finish worker deterministically" classname="sa.hulksa.player.data.DownloadExecutionEntryPointTest" time="0.001"/>
+  <testcase name="download id must be positive" classname="sa.hulksa.player.data.DownloadExecutionEntryPointTest" time="0.001"/>
+  <testcase name="blocked states request durable retry" classname="sa.hulksa.player.data.DownloadExecutionEntryPointTest" time="0.0"/>
+  <testcase name="active transport states keep worker alive" classname="sa.hulksa.player.data.DownloadExecutionEntryPointTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

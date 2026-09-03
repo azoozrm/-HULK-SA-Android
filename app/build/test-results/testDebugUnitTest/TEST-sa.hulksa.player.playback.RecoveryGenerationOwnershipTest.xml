@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.802Z" hostname="runnervmgx7h7" time="0.009">
+  <properties/>
+  <testcase name="stale source retry restores P1-010 same-source retry budget" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.006"/>
+  <testcase name="current generation recovery command is owned by current attachment" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="delayed generation A command cannot affect generation B" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="terminal command from detached player is not owned by replacement attachment" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="stale software dispatch cannot cascade into final error" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="applied P1-010 retry still advances to provider fallback" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="sequential MP2 generations each receive one independent software attempt" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="single flight remains enforced while current command is pending" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="source recovery remains independent after stale audio dispatch" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="new MP2 generation keeps software recovery available after stale old command" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.001"/>
+  <testcase name="legitimate current software rejection remains deterministically bounded" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.001"/>
+  <testcase name="detached old player attachment cannot own command for replacement player" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="stale generation command is ignored by current attachment" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <testcase name="stale software command does not consume software recovery budget" classname="sa.hulksa.player.playback.RecoveryGenerationOwnershipTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

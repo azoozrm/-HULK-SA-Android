@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" tests="22" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.797Z" hostname="runnervmgx7h7" time="0.003">
+  <properties/>
+  <testcase name="audio health cannot steal an active source recovery" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="sink failure without alternate uses software audio once" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.001"/>
+  <testcase name="source command blocks concurrent audio recovery" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="audio command blocks concurrent source recovery" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="source stabilization defers audio recovery until source is healthy" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="source first failure retries same candidate" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="VOD transient failure skips live same-source retry" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="all candidates exhaust without an infinite retry" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="manual retry explicitly refreshes bounded budgets" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="source evidence serially takes ownership after applied audio recovery" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="audio budget exhausts deterministically" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="non-retriable failure on only candidate reports final error immediately" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="successful audio recovery keeps source candidate" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.001"/>
+  <testcase name="stale generation cannot recover or report error" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="decoder failure uses alternate track before software player" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="unsupported audio capability enters the software decoder path" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="rejected same-source retry advances to provider fallback" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="channel switch invalidation stops old recovery" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.001"/>
+  <testcase name="source second failure advances to second provider candidate" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="rejected alternate track advances to software audio" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="source fallback resets audio strategy for the new candidate" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <testcase name="malformed source skips meaningless same-candidate retry" classname="sa.hulksa.player.playback.PlayerRecoveryCoordinatorTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

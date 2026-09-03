@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.DownloadTransportPolicyTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.467Z" hostname="runnervmgx7h7" time="0.015">
+  <properties/>
+  <testcase name="range capable download resumes with the next bounded chunk" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.004"/>
+  <testcase name="active download context permits the next network read" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.001"/>
+  <testcase name="range capable download requests a bounded first chunk" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.005"/>
+  <testcase name="non range transport sends a normal full request" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.001"/>
+  <testcase name="range transport never emits an open ended request" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.0"/>
+  <testcase name="download transport cannot wait forever for the next byte" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.0"/>
+  <testcase name="last range is clamped to the declared file size" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.0"/>
+  <testcase name="cancelled download context stops before the next network read" classname="sa.hulksa.player.data.DownloadTransportPolicyTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

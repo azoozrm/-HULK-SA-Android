@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:10.072Z" hostname="runnervmgx7h7" time="0.037">
+  <properties/>
+  <testcase name="cinemaHeroAvoidsRecentlyWatchedWhenEightAlternativesExist" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.002"/>
+  <testcase name="continueWatchingKeepsOnlyLatestEpisodePerSeries" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.001"/>
+  <testcase name="heroPrefersCinematicMetadataOverBareHighRatedArtwork" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.0"/>
+  <testcase name="favoriteSignalsRemainDeterministicAndInvalidateTowardMatchingCategory" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.001"/>
+  <testcase name="coldStartFallsBackToStrongCatalogSuggestionsAndHeroCandidates" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.0"/>
+  <testcase name="refreshRotationChangesSuggestedContentWithoutLosingDeterminismPerSeed" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.024"/>
+  <testcase name="cinemaHeroPrefersBackdropPoolWhenEnoughBackdropsExist" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.001"/>
+  <testcase name="cinemaHeroDiversifiesCategoriesWhenAlternativesExist" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.001"/>
+  <testcase name="recentWatchSignalsRankRelatedUnwatchedContent" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.001"/>
+  <testcase name="suggestedAndHeroKeepMoviesVisibleWhenSeriesScoresDominate" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.004"/>
+  <testcase name="becauseYouWatchedAvoidsSingleCategorySaturationWhenAlternativesExist" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.002"/>
+  <testcase name="parentSeriesIdSeedsSeriesRecommendationsReliably" classname="sa.hulksa.player.ui.screens.SmartHomeRecommendationEngineTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

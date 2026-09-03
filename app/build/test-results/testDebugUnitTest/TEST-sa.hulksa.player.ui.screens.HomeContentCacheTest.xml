@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.screens.HomeContentCacheTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:10Z" hostname="runnervmgx7h7" time="0.003">
+  <properties/>
+  <testcase name="changingFavoritesInvalidatesPersonalizedHomeSnapshot" classname="sa.hulksa.player.ui.screens.HomeContentCacheTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

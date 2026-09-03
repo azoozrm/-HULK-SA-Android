@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.DetailsEntryPresentationTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.845Z" hostname="runnervmgx7h7" time="0.024">
+  <properties/>
+  <testcase name="series entry does not block an immediate shell while bundle loads" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.002"/>
+  <testcase name="movie and series selections are published before remote work starts" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.012"/>
+  <testcase name="failed remote hydration keeps the existing details screen non blocking" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.007"/>
+  <testcase name="missing immediate shell keeps the blocking fallback" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.0"/>
+  <testcase name="stale details result cannot own a newer selection" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.0"/>
+  <testcase name="remote completion hydrates only after current request verification" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.003"/>
+  <testcase name="movie entry does not block an immediate shell while remote details load" classname="sa.hulksa.player.ui.DetailsEntryPresentationTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

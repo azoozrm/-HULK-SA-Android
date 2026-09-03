@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.DurableDownloadExecutionOwnershipTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.487Z" hostname="runnervmgx7h7" time="0.014">
+  <properties/>
+  <testcase name="delete cleanup is verified and idempotent" classname="sa.hulksa.player.data.DurableDownloadExecutionOwnershipTest" time="0.008"/>
+  <testcase name="completed file requires readable exact nonempty bytes" classname="sa.hulksa.player.data.DurableDownloadExecutionOwnershipTest" time="0.001"/>
+  <testcase name="worker interruption only recovers active transport states to queued" classname="sa.hulksa.player.data.DurableDownloadExecutionOwnershipTest" time="0.0"/>
+  <testcase name="durable execution lease prevents duplicate ownership" classname="sa.hulksa.player.data.DurableDownloadExecutionOwnershipTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

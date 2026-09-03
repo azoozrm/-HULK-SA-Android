@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.MaintenancePolicyTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.661Z" hostname="runnervmgx7h7" time="0.001">
+  <properties/>
+  <testcase name="degradedRemainsNonBlockingBannerState" classname="sa.hulksa.player.data.MaintenancePolicyTest" time="0.001"/>
+  <testcase name="operationalDoesNotBlock" classname="sa.hulksa.player.data.MaintenancePolicyTest" time="0.0"/>
+  <testcase name="unavailableApiMustNotForceCachedMaintenance" classname="sa.hulksa.player.data.MaintenancePolicyTest" time="0.0"/>
+  <testcase name="freshNetworkMaintenanceCanBlock" classname="sa.hulksa.player.data.MaintenancePolicyTest" time="0.0"/>
+  <testcase name="scheduledMaintenanceDoesNotStartEarly" classname="sa.hulksa.player.data.MaintenancePolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

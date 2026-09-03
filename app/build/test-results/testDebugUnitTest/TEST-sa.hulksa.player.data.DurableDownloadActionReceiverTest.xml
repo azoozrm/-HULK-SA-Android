@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.DurableDownloadActionReceiverTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.485Z" hostname="runnervmgx7h7" time="0.0">
+  <properties/>
+  <testcase name="pause notification action is recognized" classname="sa.hulksa.player.data.DurableDownloadActionReceiverTest" time="0.0"/>
+  <testcase name="unknown notification action is ignored" classname="sa.hulksa.player.data.DurableDownloadActionReceiverTest" time="0.0"/>
+  <testcase name="resume notification action is recognized" classname="sa.hulksa.player.data.DurableDownloadActionReceiverTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

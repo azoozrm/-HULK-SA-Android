@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.tv.TvPlatformIntegrationTest" tests="33" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.818Z" hostname="runnervmgx7h7" time="0.026">
+  <properties/>
+  <testcase name="seriesDeepLinkParsing" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.002"/>
+  <testcase name="twelveSecondMeaningfulProgressTriggersSync" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="invalidOrMissingBackdropFallsBackToSafePoster" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.006"/>
+  <testcase name="deepLinkWaitsForSessionRestoration" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="movieDeepLinkParsing" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="missingEpisodeMetadataFailsSafelyWithoutPlaceholderText" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.005"/>
+  <testcase name="progressAndRemainingUseCompactHourFormatting" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="existingSessionDeepLinkDoesNotGoToLogin" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="missingContentDoesNotCrash" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="movieProgramUsesClearConciseDescription" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="episodeDeepLinkParsing" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="logoutClearsAllHulkPrograms" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="episodeProgramUsesClearConciseDescription" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="completionAtNinetyTwoPercentRemovesProgram" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="invalidSessionUsesClearOnlyPlan" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="unsupportedTvProviderFailsSafely" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="redundantEpisodeTitlesAreIgnored" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="channelMetadataUsesBrandOnlyDisplayName" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="profileAProgramsDoNotRemainAfterSwitchToProfileB" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="firstPlaybackProgressTriggersSyncQuickly" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="tinyProgressChangesDoNotSyncRepeatedly" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="kidsPendingDoesNotPublish" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="usefulEpisodeTitleKeepsOnlyTheRealTitle" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="previewProgramUsesLandscapeAspectRatioAndLocalBackdrop" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="providerIdsDifferBetweenProfilesForSameContent" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="invalidDeepLinkFailsSafely" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="continueWatchingSortsByUpdatedAtDescending" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="duplicateSyncRemainsIdempotent" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="staleProfileProgramDeepLinkFailsSafely" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="historyMappingIsCappedAtTwenty" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.002"/>
+  <testcase name="profileSwitchClearsPreviousThenPublishesNew" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <testcase name="deepLinkCannotBypassKidsRestrictions" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.0"/>
+  <testcase name="movieAndEpisodeMixedHistoryRemainsCorrect" classname="sa.hulksa.player.tv.TvPlatformIntegrationTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

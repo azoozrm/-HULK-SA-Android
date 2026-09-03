@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.884Z" hostname="runnervmgx7h7" time="0.025">
+  <properties/>
+  <testcase name="fastNormalizerPreservesArabicAndDigitEquivalence" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.024"/>
+  <testcase name="sameScriptDoesNotUseCrossScriptFallback" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <testcase name="arabicTransliterationMatchesPrisonBreak" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <testcase name="unrelatedCrossScriptTextDoesNotMatch" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.001"/>
+  <testcase name="partialArabicTransliterationMatchesEnglishTitlePrefix" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <testcase name="tolerantPhoneticMatchingHandlesCommonSpellingDifferences" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <testcase name="commonArabicTransliterationsMatchAcrossScripts" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <testcase name="taaMarbutaAndHaSearchFormsAreEquivalent" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <testcase name="mixedScriptTitleStillUsesEnglishPhoneticMatch" classname="sa.hulksa.player.ui.ProfileSmartSearchPhoneticTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.ProfileLibraryMigrationTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.684Z" hostname="runnervmgx7h7" time="0.001">
+  <properties/>
+  <testcase name="existingScopedDataIsNeverOverwrittenByLegacyData" classname="sa.hulksa.player.data.ProfileLibraryMigrationTest" time="0.001"/>
+  <testcase name="legacyDataCopiesIntoEmptyPrimaryProfile" classname="sa.hulksa.player.data.ProfileLibraryMigrationTest" time="0.0"/>
+  <testcase name="completedMigrationIsIdempotent" classname="sa.hulksa.player.data.ProfileLibraryMigrationTest" time="0.0"/>
+  <testcase name="freshInstallMarksMigrationWithoutCopyingLegacyData" classname="sa.hulksa.player.data.ProfileLibraryMigrationTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

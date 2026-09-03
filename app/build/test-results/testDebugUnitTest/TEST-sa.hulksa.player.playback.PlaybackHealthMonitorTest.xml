@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.playback.PlaybackHealthMonitorTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.782Z" hostname="runnervmgx7h7" time="0.013">
+  <properties/>
+  <testcase name="invalidated watchdog cannot affect replacement generation" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.008"/>
+  <testcase name="short buffering does not recover" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.001"/>
+  <testcase name="ready live output without position progress also triggers stall recovery" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="background suspends watchdog deadlines" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="prolonged buffering without progress triggers stall recovery" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="no audio track never triggers silent recovery" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="ready without useful output reaches startup timeout" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="silent audio requires continuous video and pipeline evidence" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.001"/>
+  <testcase name="audio focus suppression pauses watchdog deadlines" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="mute and zero volume never trigger silent recovery" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="buffering progress restarts stall deadline" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="first frame and progress cancel startup watchdog" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <testcase name="audio output advancement proves recovery health" classname="sa.hulksa.player.playback.PlaybackHealthMonitorTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

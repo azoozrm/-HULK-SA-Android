@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.screens.TvSearchFocusPolicyTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:10.118Z" hostname="runnervmgx7h7" time="0.004">
+  <properties/>
+  <testcase name="downMovesToResultsOnlyOnTvWithResults" classname="sa.hulksa.player.ui.screens.TvSearchFocusPolicyTest" time="0.004"/>
+  <testcase name="backDismissesOnlyVisibleTvKeyboard" classname="sa.hulksa.player.ui.screens.TvSearchFocusPolicyTest" time="0.0"/>
+  <testcase name="keyUpNeverChangesFocus" classname="sa.hulksa.player.ui.screens.TvSearchFocusPolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

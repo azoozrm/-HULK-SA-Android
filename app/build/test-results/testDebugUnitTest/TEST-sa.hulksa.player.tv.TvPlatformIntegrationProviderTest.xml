@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.tv.TvPlatformIntegrationProviderTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.814Z" hostname="runnervmgx7h7" time="0.002">
+  <properties/>
+  <testcase name="login startup probe does not initialize tv platform integration" classname="sa.hulksa.player.tv.TvPlatformIntegrationProviderTest" time="0.002"/>
+  <testcase name="first platform operation creates one stable instance" classname="sa.hulksa.player.tv.TvPlatformIntegrationProviderTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

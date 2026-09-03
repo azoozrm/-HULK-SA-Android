@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" tests="17" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.916Z" hostname="runnervmgx7h7" time="0.002">
+  <properties/>
+  <testcase name="compactTvWindowGetsExtraSafeAreaAndQualifiedRailMetrics" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.001"/>
+  <testcase name="standardTvWindowPreservesQualifiedShellProportions" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="trueRemoteSourceStaysRemoteEvenForNonNavigationKeys" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="touchSuppressesFocusChromeButKeyboardRestoresIt" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="landscapePhoneDoesNotBecomeTabletOrRail" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="adaptiveStateExposesTheSameTvPremiumPolicyForScreens" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.001"/>
+  <testcase name="resizedCompactContainerDoesNotKeepThePhysicalDisplayLayout" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="keyboardAndRemoteSourcesAreClassifiedWithoutBitmaskOverlap" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="nonTvKeyboardKeepsKeyboardInteractionModelForArrowKeys" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="windowWidthBreakpointsUseContainerDimensions" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="expandedTouchTabletUsesRailWithoutTelevisionInteractionModel" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="televisionTreatsKeyboardReportedDpadKeysAsRemoteNavigation" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="compactPhoneUsesMobileTopNavigation" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="portraitTabletUsesTabletLayoutWithoutTelevisionSizing" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="expandedTabletUsesRailNavigation" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="largeTvWindowCapsRailIdentityAndSpacing" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <testcase name="televisionAlwaysUsesRailAndFocusHighlights" classname="sa.hulksa.player.ui.adaptive.AdaptiveUiClassifierTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

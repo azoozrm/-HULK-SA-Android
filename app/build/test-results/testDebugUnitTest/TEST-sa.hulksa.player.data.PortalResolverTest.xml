@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sa.hulksa.player.data.PortalResolverTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:08.377Z" hostname="runnervmgx7h7" time="1.306">
+  <properties/>
+  <testcase name="legacyGeneratedCodeRemainsSupportedWithoutReformatting" classname="sa.hulksa.player.data.PortalResolverTest" time="0.277"/>
+  <testcase name="accessCodeCharactersAndWhitespaceAreNotModified" classname="sa.hulksa.player.data.PortalResolverTest" time="0.106"/>
+  <testcase name="inactiveResellerReturnsClearFailure" classname="sa.hulksa.player.data.PortalResolverTest" time="0.119"/>
+  <testcase name="invalidCodeReturnsClearFailureFromApi" classname="sa.hulksa.player.data.PortalResolverTest" time="0.082"/>
+  <testcase name="generatedCaseSensitiveCodeIsSentExactlyAsEntered" classname="sa.hulksa.player.data.PortalResolverTest" time="0.159"/>
+  <testcase name="changedHostIsUsedWithoutAnAppUpdate" classname="sa.hulksa.player.data.PortalResolverTest" time="0.151"/>
+  <testcase name="publicApiConfigurationMustUseHttps" classname="sa.hulksa.player.data.PortalResolverTest" time="0.012"/>
+  <testcase name="customAdminCodeOutsideLegacyFormatIsForwardedToApi" classname="sa.hulksa.player.data.PortalResolverTest" time="0.105"/>
+  <testcase name="blankAccessCodeIsRejectedBeforeNetworkRequest" classname="sa.hulksa.player.data.PortalResolverTest" time="0.012"/>
+  <testcase name="mixedCaseCodeRemainsCaseSensitiveEndToEnd" classname="sa.hulksa.player.data.PortalResolverTest" time="0.064"/>
+  <testcase name="rotatedCodeInvalidatesOldCodeAndAcceptsNewCode" classname="sa.hulksa.player.data.PortalResolverTest" time="0.152"/>
+  <testcase name="invalidHostIsRejectedEvenWhenApiReturnsSuccess" classname="sa.hulksa.player.data.PortalResolverTest" time="0.066"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
