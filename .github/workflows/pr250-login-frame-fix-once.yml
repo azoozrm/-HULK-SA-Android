@@ -11,7 +11,7 @@ permissions:
 # Deterministic one-shot source correction; removes itself after the production commit.
 jobs:
   apply:
-    if: github.event.head_commit.message == 'chore: apply PR250 login frame fill fix'
+    if: "github.event.head_commit.message == 'chore: apply PR250 login frame fill fix'"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR branch
