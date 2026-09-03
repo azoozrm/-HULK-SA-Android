@@ -17,7 +17,7 @@ from xml.etree import ElementTree
 
 STATUSES = ("PASS", "FAIL", "BLOCKED", "SKIPPED")
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
-DEFAULT_LOGO_SHA256 = "013326d5a7989d173626fe020d99a0e26394d1f8329360c18fc7f9103619c584"
+DEFAULT_LOGO_SHA256 = "26081030134aa7987a772765f7d6a714e05828c1b44c35e37fe363b413725fac"
 APPROVED_BRAND_ASSETS = {
     "app/src/main/res/drawable-nodpi/hulk_sa_logo.png": DEFAULT_LOGO_SHA256,
     "app/src/main/res/mipmap-xhdpi/tv_banner.png": "1e303a68a7d7811a20e0fd7804953fdf447a7ccf52f8d6b76d5011fb702db786",
