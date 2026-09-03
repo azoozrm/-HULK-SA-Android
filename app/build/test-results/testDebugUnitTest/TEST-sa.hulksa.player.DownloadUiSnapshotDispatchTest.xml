@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="sa.hulksa.player.DownloadUiSnapshotDispatchTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.298Z" hostname="runnervmgx7h7" time="0.014">
-  <properties/>
-  <testcase name="ui snapshot loader runs exactly once away from caller thread" classname="sa.hulksa.player.DownloadUiSnapshotDispatchTest" time="0.014"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

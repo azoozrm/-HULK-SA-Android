@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="sa.hulksa.player.data.KidsServerCatalogPolicyTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:07.613Z" hostname="runnervmgx7h7" time="0.004">
-  <properties/>
-  <testcase name="explicitKidsCategoriesAreAcceptedAcrossArabicAndEnglish" classname="sa.hulksa.player.data.KidsServerCatalogPolicyTest" time="0.002"/>
-  <testcase name="serverCategoryFilterMustEchoRequestedCategoryForEveryItem" classname="sa.hulksa.player.data.KidsServerCatalogPolicyTest" time="0.0"/>
-  <testcase name="broadOrAmbiguousCategoriesAreRejectedFailClosed" classname="sa.hulksa.player.data.KidsServerCatalogPolicyTest" time="0.001"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

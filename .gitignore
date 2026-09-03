@@ -1,0 +1,8 @@
+# Local / CI build outputs
+.gradle/
+**/build/
+
+# Android local state
+local.properties
+*.iml
+.idea/

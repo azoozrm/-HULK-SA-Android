@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="sa.hulksa.player.ui.screens.ProfilePinOperationGuardTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:10.060Z" hostname="runnervmgx7h7" time="0.0">
-  <properties/>
-  <testcase name="cancelledTokenCannotBecomeCurrentAfterNewOperationStarts" classname="sa.hulksa.player.ui.screens.ProfilePinOperationGuardTest" time="0.0"/>
-  <testcase name="duplicateSubmissionIsRejectedUntilCurrentOperationFinishes" classname="sa.hulksa.player.ui.screens.ProfilePinOperationGuardTest" time="0.0"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

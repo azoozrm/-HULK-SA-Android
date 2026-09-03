@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="sa.hulksa.player.playback.PlayerReplacementPolicyTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-09-03T02:58:09.801Z" hostname="runnervmgx7h7" time="0.0">
-  <properties/>
-  <testcase name="live replacement starts at live edge and clears stale source overrides" classname="sa.hulksa.player.playback.PlayerReplacementPolicyTest" time="0.0"/>
-  <testcase name="VOD replacement preserves position without clearing same-source selections" classname="sa.hulksa.player.playback.PlayerReplacementPolicyTest" time="0.0"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>
