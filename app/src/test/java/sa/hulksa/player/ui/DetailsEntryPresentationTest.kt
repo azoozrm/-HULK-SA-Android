@@ -145,7 +145,8 @@ class DetailsEntryPresentationTest {
         val failureEnd = source.indexOf("companion object", startIndex = failureStart)
         val failureBody = source.substring(failureStart, failureEnd)
 
-        assertTrue(failureBody.contains("screen = if (invalidSession) HulkScreen.LOGIN else it.screen"))
+        assertTrue(failureBody.contains("startSessionPersistenceLogout {"))
+        assertTrue(failureBody.contains("screen = HulkScreen.LOGIN"))
         assertTrue(failureBody.contains("isLoading = false"))
         assertFalse(
             detailsEntryShouldBlock(

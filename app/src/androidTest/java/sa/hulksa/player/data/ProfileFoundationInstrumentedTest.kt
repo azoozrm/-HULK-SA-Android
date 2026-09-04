@@ -3,8 +3,10 @@ package sa.hulksa.player.data
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -17,6 +19,7 @@ import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Credentials
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.PortalConfig
+import sa.hulksa.player.security.CredentialVault
 
 @RunWith(AndroidJUnit4::class)
 class ProfileFoundationInstrumentedTest {
@@ -130,6 +133,29 @@ class ProfileFoundationInstrumentedTest {
         assertEquals("MOVIE:7", restoredLibrary.history().single().key)
     }
 
+    @Test
+    fun repositoryLogoutPersistsCredentialAndSessionClearBeforeReturn() = runBlocking {
+        val authenticated = session(host = HOST_A, accessCode = FIRST_ACCESS_CODE)
+        val vault = CredentialVault(context)
+        val sessionStore = AccountSessionStore(context)
+
+        vault.save(authenticated.credentials)
+        sessionStore.recordAuthenticated(authenticated)
+        AuthenticatedSessionRegistry.update(authenticated)
+
+        assertNotNull(vault.load())
+        assertNotNull(sessionStore.metadata())
+        assertNotNull(AccountScopeStore(context).activeAccountId())
+        assertNotNull(AuthenticatedSessionRegistry.current())
+
+        HulkRepository(context).logout()
+
+        assertNull(CredentialVault(context).load())
+        assertNull(AccountSessionStore(context).metadata())
+        assertNull(AccountScopeStore(context).activeAccountId())
+        assertNull(AuthenticatedSessionRegistry.current())
+    }
+
     private fun session(
         host: String,
         accessCode: String,
@@ -152,6 +178,8 @@ class ProfileFoundationInstrumentedTest {
     )
 
     private fun clearTestState() {
+        CredentialVault(context).clear()
+        AuthenticatedSessionRegistry.clear()
         val accountIds = setOf(
             stableAccountId(HOST_A, USERNAME),
             stableAccountId(HOST_B, USERNAME),

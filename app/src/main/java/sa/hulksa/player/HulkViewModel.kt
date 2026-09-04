@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -2206,6 +2207,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
+        if (logoutJob?.isActive == true) return
         authenticationAttemptGate.invalidate()
         invalidateAccountRefresh()
         loginJob?.cancel()
@@ -2214,9 +2216,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val operationsState = mutableState.value.operations
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
-        mutableState.update { it.copy(downloads = emptyList()) }
+        mutableState.update {
+            it.copy(
+                downloads = emptyList(),
+                isLoading = true,
+                isAccountRefreshing = false,
+                errorMessage = null,
+            )
+        }
         downloadRepository.suspendActiveAccountForLogout()
-        startSessionPersistenceLogout()
         session = null
         sessionRestorationComplete = true
         notificationScanJob?.cancel()
@@ -2226,26 +2234,40 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         diagnosticsJob?.cancel()
         catalogJobs.values.forEach(Job::cancel)
         catalogJobs.clear()
-        mutableState.value = HulkUiState(
-            isStarting = false,
-            favorites = userLibrary.favorites(),
-            history = userLibrary.history(),
-            downloads = emptyList(),
-            downloadSettings = downloadRepository.settings(),
-            notificationSubscribedSeriesIds = emptySet(),
-            localNotifications = emptyList(),
-            unreadNotificationCount = 0,
-            episodeNotificationsEnabled = true,
-            notificationPopup = null,
-            operations = operationsState,
-        )
+        startSessionPersistenceLogout {
+            mutableState.value = HulkUiState(
+                isStarting = false,
+                favorites = userLibrary.favorites(),
+                history = userLibrary.history(),
+                downloads = emptyList(),
+                downloadSettings = downloadRepository.settings(),
+                notificationSubscribedSeriesIds = emptySet(),
+                localNotifications = emptyList(),
+                unreadNotificationCount = 0,
+                episodeNotificationsEnabled = true,
+                notificationPopup = null,
+                operations = operationsState,
+            )
+        }
     }
 
-    private fun startSessionPersistenceLogout() {
+    private fun startSessionPersistenceLogout(onPersisted: () -> Unit) {
         if (logoutJob?.isActive == true) return
-        logoutJob = viewModelScope.launch {
+        logoutJob = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 repository.logout()
+                onPersisted()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                mutableState.update {
+                    it.copy(
+                        isStarting = false,
+                        isLoading = false,
+                        isAccountRefreshing = false,
+                        errorMessage = "تعذر إكمال تسجيل الخروج بأمان. حاول مرة أخرى.",
+                    )
+                }
             } finally {
                 logoutJob = null
             }
@@ -2694,28 +2716,47 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             error is XtreamException.SubscriptionInactive ||
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
+        val errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى."
         if (invalidSession) {
             invalidateAccountRefresh()
             invalidateDetailsRequest()
             sessionRestorationComplete = true
             beginTvPlatformProfileTransition(resetPublishedScope = true)
-            mutableState.update { it.copy(downloads = emptyList()) }
+            mutableState.update {
+                it.copy(
+                    downloads = emptyList(),
+                    isLoading = true,
+                    isAccountRefreshing = false,
+                    notificationPopup = null,
+                    errorMessage = null,
+                )
+            }
             downloadRepository.suspendActiveAccountForLogout()
-            startSessionPersistenceLogout()
             session = null
             notificationScanJob?.cancel()
             notificationScanJob = null
             notificationUiReady = false
             clearCatalogMemory()
+            startSessionPersistenceLogout {
+                mutableState.update {
+                    it.copy(
+                        screen = HulkScreen.LOGIN,
+                        isStarting = false,
+                        isLoading = false,
+                        isAccountRefreshing = false,
+                        notificationPopup = null,
+                        errorMessage = errorMessage,
+                    )
+                }
+            }
+            return
         }
         mutableState.update {
             it.copy(
-                screen = if (invalidSession) HulkScreen.LOGIN else it.screen,
                 isStarting = false,
                 isLoading = false,
                 isAccountRefreshing = false,
-                notificationPopup = if (invalidSession) null else it.notificationPopup,
-                errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
+                errorMessage = errorMessage,
             )
         }
     }

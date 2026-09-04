@@ -3,6 +3,7 @@ package sa.hulksa.player.data
 import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -26,6 +27,14 @@ private data class AccountSessionOwner(
     val accountId: String,
     val sessionId: String,
 )
+
+internal suspend fun <T> runSessionPersistenceTransaction(block: () -> T): T =
+    withContext(Dispatchers.IO) {
+        ensureActive()
+        withContext(NonCancellable) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) { block() }
+        }
+    }
 
 class HulkRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -51,18 +60,12 @@ class HulkRepository(context: Context) {
         }
 
         try {
-            val metadata = withContext(Dispatchers.IO) {
-                ensureActive()
-                synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                    ensureActive()
-                    suspendExistingDownloadOwner()
-                    ensureActive()
-                    val recorded = accountSessionStore.recordAuthenticated(session)
-                    ensureActive()
-                    AuthenticatedSessionRegistry.update(session)
-                    if (remember) vault.save(credentials) else vault.clear()
-                    recorded
-                }
+            val metadata = runSessionPersistenceTransaction {
+                suspendExistingDownloadOwner()
+                val recorded = accountSessionStore.recordAuthenticated(session)
+                if (remember) vault.save(credentials) else vault.clear()
+                AuthenticatedSessionRegistry.update(session)
+                recorded
             }
             // The gate marks an attempt as manual only when it originated from HulkViewModel.login().
             // Startup restore reaches authenticate() directly, so this call records current ownership
@@ -72,11 +75,12 @@ class HulkRepository(context: Context) {
                 sessionId = metadata.sessionId,
             )
         } catch (cancelled: CancellationException) {
-            AuthenticatedSessionRegistry.clear()
+            // Once durable session persistence starts it completes as one non-cancellable transaction.
+            // A concurrent logout owns cleanup; clearing only the registry here would split ownership.
             throw cancelled
         } catch (error: Throwable) {
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
-            withContext(Dispatchers.IO) {
+            withContext(NonCancellable + Dispatchers.IO) {
                 synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                     vault.clear()
                     accountSessionStore.clearActiveSession()
@@ -104,16 +108,11 @@ class HulkRepository(context: Context) {
             throw error
         }
 
-        val metadata = withContext(Dispatchers.IO) {
-            ensureActive()
-            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                ensureActive()
-                if (!matchesCurrentSessionOwner(owner)) throw staleReauthentication()
-                val recorded = accountSessionStore.recordAuthenticated(refreshed)
-                ensureActive()
-                AuthenticatedSessionRegistry.update(refreshed)
-                recorded
-            }
+        val metadata = runSessionPersistenceTransaction {
+            if (!matchesCurrentSessionOwner(owner)) throw staleReauthentication()
+            val recorded = accountSessionStore.recordAuthenticated(refreshed)
+            AuthenticatedSessionRegistry.update(refreshed)
+            recorded
         }
         ManualParentAuthProofRegistry.onSessionReplacement(
             accountId = metadata.accountId,
@@ -122,18 +121,17 @@ class HulkRepository(context: Context) {
         return refreshed
     }
 
-    suspend fun savedCredentials(): Credentials? = withContext(Dispatchers.IO) {
-        val credentials = vault.load()
+    suspend fun savedCredentials(): Credentials? {
+        val credentials = withContext(Dispatchers.IO) { vault.load() }
         if (credentials == null) {
             ManualParentAuthProofRegistry.invalidateAll()
-            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                ensureActive()
+            runSessionPersistenceTransaction {
                 suspendExistingDownloadOwner()
                 accountSessionStore.clearActiveSession()
                 AuthenticatedSessionRegistry.clear()
             }
         }
-        credentials
+        return credentials
     }
 
     fun activeAccountSession(): AccountSessionMetadata? = accountSessionStore.metadata()
@@ -153,18 +151,13 @@ class HulkRepository(context: Context) {
                 null
             }
             if (restored != null) {
-                val metadata = withContext(Dispatchers.IO) {
-                    ensureActive()
-                    synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                        ensureActive()
-                        if (!matchesCurrentSessionOwner(owner)) {
-                            null
-                        } else {
-                            val recorded = accountSessionStore.recordAuthenticated(restored)
-                            ensureActive()
-                            AuthenticatedSessionRegistry.update(restored)
-                            recorded
-                        }
+                val metadata = runSessionPersistenceTransaction {
+                    if (!matchesCurrentSessionOwner(owner)) {
+                        null
+                    } else {
+                        val recorded = accountSessionStore.recordAuthenticated(restored)
+                        AuthenticatedSessionRegistry.update(restored)
+                        recorded
                     }
                 }
                 if (metadata != null) {
@@ -184,9 +177,10 @@ class HulkRepository(context: Context) {
     suspend fun logout() {
         ManualParentAuthProofRegistry.invalidateAll()
         AuthenticatedSessionRegistry.clear()
-        withContext(Dispatchers.IO) {
+        withContext(NonCancellable + Dispatchers.IO) {
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                 suspendExistingDownloadOwner()
+                // Credentials are cleared first so a partial storage failure cannot restore access.
                 vault.clear()
                 accountSessionStore.clearActiveSession()
             }
