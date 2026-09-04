@@ -183,6 +183,7 @@ class HulkRepository(context: Context) {
                 // Credentials are cleared first so a partial storage failure cannot restore access.
                 vault.clear()
                 accountSessionStore.clearActiveSession()
+                AuthenticatedSessionRegistry.clear()
             }
         }
     }
