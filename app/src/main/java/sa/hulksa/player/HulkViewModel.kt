@@ -257,6 +257,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val accountRefreshCoordinator = AccountRefreshCoordinator()
     private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
+    private var logoutJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
@@ -334,6 +335,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun login(accessCode: String, username: String, password: String, remember: Boolean = true) {
+        if (logoutJob?.isActive == true || loginJob?.isActive == true) return
         if (authenticationAttemptGate.isActive()) return
         val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
         if (normalizedAccessCode == null) {
@@ -2214,7 +2216,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         pendingTvDeepLink = null
         mutableState.update { it.copy(downloads = emptyList()) }
         downloadRepository.suspendActiveAccountForLogout()
-        repository.logout()
+        startSessionPersistenceLogout()
         session = null
         sessionRestorationComplete = true
         notificationScanJob?.cancel()
@@ -2239,27 +2241,52 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun startSessionPersistenceLogout() {
+        if (logoutJob?.isActive == true) return
+        logoutJob = viewModelScope.launch {
+            try {
+                repository.logout()
+            } finally {
+                logoutJob = null
+            }
+        }
+    }
+
     fun clearError() {
         mutableState.update { it.copy(errorMessage = null) }
     }
 
     private fun restoreSession() {
-        val credentials = repository.savedCredentials()
-        if (credentials == null) {
-            sessionRestorationComplete = true
-            mutableState.update { it.copy(isStarting = false) }
-            resolvePendingTvDeepLink()
-            return
+        sessionRestorationComplete = false
+        loginJob = viewModelScope.launch {
+            var handedOff = false
+            try {
+                val credentials = repository.savedCredentials()
+                if (credentials == null) {
+                    sessionRestorationComplete = true
+                    mutableState.update { it.copy(isStarting = false) }
+                    resolvePendingTvDeepLink()
+                    return@launch
+                }
+                handedOff = authenticate(credentials, remember = true, restoringSession = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                sessionRestorationComplete = true
+                showFailure(error)
+                resolvePendingTvDeepLink()
+            } finally {
+                if (!handedOff) loginJob = null
+            }
         }
-        authenticate(credentials, remember = true, restoringSession = true)
     }
 
     private fun authenticate(
         credentials: Credentials,
         remember: Boolean,
         restoringSession: Boolean = false,
-    ) {
-        val attemptGeneration = authenticationAttemptGate.tryStart() ?: return
+    ): Boolean {
+        val attemptGeneration = authenticationAttemptGate.tryStart() ?: return false
         invalidateAccountRefresh()
         if (restoringSession) sessionRestorationComplete = false
         mutableState.update {
@@ -2316,6 +2343,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        return true
     }
 
     private fun ensureCatalog(type: ContentType, force: Boolean = false) {
@@ -2673,7 +2701,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             beginTvPlatformProfileTransition(resetPublishedScope = true)
             mutableState.update { it.copy(downloads = emptyList()) }
             downloadRepository.suspendActiveAccountForLogout()
-            repository.logout()
+            startSessionPersistenceLogout()
             session = null
             notificationScanJob?.cancel()
             notificationScanJob = null
