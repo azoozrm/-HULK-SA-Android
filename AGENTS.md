@@ -1,6 +1,6 @@
 # HULK SA Android — Repository Agent Instructions
 
-These instructions apply to the entire repository unless a deeper `AGENTS.override.md`
+These instructions apply to the entire repository unless an applicable `AGENTS.override.md`
 provides more specific instructions for a subtree.
 
 ## 1. Role and Priority
@@ -344,9 +344,11 @@ Status semantics are authoritative:
 
 Never convert `BLOCKED` to `PASS`.
 
-Do not retry product assertion failures merely to obtain a green result.
+Product assertion failures are never retried.
 
-Do not create or update visual baselines automatically when human approval is required.
+Screenshot baselines are never created or updated automatically.
+
+Compatibility validation must not rewrite, recolor, crop, or normalize approved branding assets.
 
 Useful local checks:
 
@@ -492,6 +494,7 @@ Do not use without explicit authorization:
 - force push
 - history-changing rebase
 - amend
+- squash
 - destructive reset
 - destructive cleanup
 - deleting correct commits
