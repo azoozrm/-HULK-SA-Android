@@ -275,6 +275,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var diagnosticsJob: Job? = null
     private var profileLibraryRefreshJob: Job? = null
     private var notificationScanJob: Job? = null
+    private var notificationPopupActionJob: Job? = null
     private var operationsRefreshJob: Job? = null
     private var operationsDownloadJob: Job? = null
     private var tvPlatformSyncJob: Job? = null
@@ -1400,46 +1401,97 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmNotificationPopupPresented() {
         val popup = mutableState.value.notificationPopup ?: return
         if (!notificationUiReady) return
-        persistNotificationPopupShown(popup)
+        viewModelScope.launch {
+            persistNotificationPopupShown(popup)
+        }
     }
 
     fun dismissNotificationPopup() {
         val popup = mutableState.value.notificationPopup
-        val persisted = popup == null || persistNotificationPopupShown(popup)
-        mutableState.update { it.copy(notificationPopup = null) }
-        if (persisted) maybeShowPendingNotificationPopup()
+        if (popup == null) {
+            maybeShowPendingNotificationPopup()
+            return
+        }
+        if (notificationPopupActionJob?.isActive == true) return
+        notificationPopupActionJob = viewModelScope.launch {
+            try {
+                if (!persistNotificationPopupShown(popup)) return@launch
+                if (mutableState.value.notificationPopup != popup) return@launch
+                mutableState.update { state ->
+                    if (state.notificationPopup == popup) {
+                        state.copy(notificationPopup = null)
+                    } else {
+                        state
+                    }
+                }
+                maybeShowPendingNotificationPopup()
+            } finally {
+                notificationPopupActionJob = null
+            }
+        }
     }
 
     fun activateNotificationPopup(onResult: (String?) -> Unit = {}) {
         val popup = mutableState.value.notificationPopup ?: return
-        persistNotificationPopupShown(popup)
-        if (popup.summary) {
-            mutableState.update { it.copy(notificationPopup = null) }
-            openNotificationCenter()
-            return
-        }
-        val target = popup.notifications.maxWithOrNull(
-            compareBy(LocalEpisodeNotification::seasonNumber, LocalEpisodeNotification::episodeNumber),
-        ) ?: return
-        viewModelScope.launch {
-            val targetError = openNotificationTarget(target)
-            if (targetError != null) {
-                mutableState.update { it.copy(notificationPopup = null) }
-                onResult(targetError)
-                return@launch
-            }
-            withContext(Dispatchers.IO) {
-                popup.eventIds.forEach { id ->
-                    localEpisodeNotificationStore.markRead(
-                        profileId = popup.profileId,
-                        notificationId = id,
-                        expectedAccountId = target.accountId,
-                    )
+        if (notificationPopupActionJob?.isActive == true) return
+        notificationPopupActionJob = viewModelScope.launch {
+            try {
+                if (!persistNotificationPopupShown(popup)) return@launch
+                if (mutableState.value.notificationPopup != popup) return@launch
+                if (popup.summary) {
+                    mutableState.update { state ->
+                        if (state.notificationPopup == popup) {
+                            state.copy(notificationPopup = null)
+                        } else {
+                            state
+                        }
+                    }
+                    openNotificationCenter()
+                    return@launch
                 }
+                val target = popup.notifications.maxWithOrNull(
+                    compareBy(
+                        LocalEpisodeNotification::seasonNumber,
+                        LocalEpisodeNotification::episodeNumber,
+                    ),
+                ) ?: return@launch
+                val targetError = openNotificationTarget(target)
+                if (targetError != null) {
+                    mutableState.update { state ->
+                        if (state.notificationPopup == popup) {
+                            state.copy(notificationPopup = null)
+                        } else {
+                            state
+                        }
+                    }
+                    onResult(targetError)
+                    return@launch
+                }
+                withContext(Dispatchers.IO) {
+                    popup.eventIds.forEach { id ->
+                        localEpisodeNotificationStore.markRead(
+                            profileId = popup.profileId,
+                            notificationId = id,
+                            expectedAccountId = target.accountId,
+                        )
+                    }
+                }
+                if (
+                    profileStore.activeProfileId() != popup.profileId ||
+                    localEpisodeNotificationStore.activeAccountId() != target.accountId
+                ) return@launch
+                mutableState.update { state ->
+                    if (state.notificationPopup == popup) {
+                        state.copy(notificationPopup = null)
+                    } else {
+                        state
+                    }
+                }
+                refreshNotificationState(clearPopup = false)
+                onResult(null)
+            } finally {
+                notificationPopupActionJob = null
             }
-            mutableState.update { it.copy(notificationPopup = null) }
-            refreshNotificationState(clearPopup = false)
-            onResult(null)
         }
     }
 
@@ -2039,11 +2091,25 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(notificationPopup = popup) }
     }
 
-    private fun persistNotificationPopupShown(popup: EpisodeNotificationPopup): Boolean {
-        val profileId = profileStore.activeProfileId()
-        if (popup.profileId != profileId) return false
+    private suspend fun persistNotificationPopupShown(popup: EpisodeNotificationPopup): Boolean {
+        val profileId = popup.profileId
         val accountId = popup.notifications.firstOrNull()?.accountId ?: return false
-        if (!localEpisodeNotificationStore.markPopupShown(profileId, popup.eventIds, accountId)) return false
+        if (
+            profileStore.activeProfileId() != profileId ||
+            localEpisodeNotificationStore.activeAccountId() != accountId
+        ) return false
+        val persisted = withContext(Dispatchers.IO) {
+            localEpisodeNotificationStore.markPopupShown(
+                profileId = profileId,
+                notificationIds = popup.eventIds,
+                expectedAccountId = accountId,
+            )
+        }
+        if (!persisted) return false
+        if (
+            profileStore.activeProfileId() != profileId ||
+            localEpisodeNotificationStore.activeAccountId() != accountId
+        ) return false
         refreshNotificationState(clearPopup = false)
         return true
     }
