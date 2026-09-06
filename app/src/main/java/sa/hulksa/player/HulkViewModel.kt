@@ -258,6 +258,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
+    private var catalogGeneration: Long = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
     private val homeCatalogs = mutableMapOf<ContentType, Catalog>()
     private val selectedCategoryByType = mutableMapOf<ContentType, String?>()
@@ -2197,6 +2198,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         profileLibraryRefreshJob = null
     }
 
+    private fun invalidateCatalogRequests() {
+        catalogGeneration += 1L
+        catalogJobs.values.forEach(Job::cancel)
+        catalogJobs.clear()
+    }
+
     private fun invalidateAccountRefresh() {
         accountRefreshCoordinator.invalidate()
         accountRefreshJob?.cancel()
@@ -2220,10 +2227,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         notificationScanJob?.cancel()
         notificationScanJob = null
         notificationUiReady = false
+        invalidateCatalogRequests()
         clearCatalogMemory()
         diagnosticsJob?.cancel()
-        catalogJobs.values.forEach(Job::cancel)
-        catalogJobs.clear()
         mutableState.value = HulkUiState(
             isStarting = false,
             favorites = userLibrary.favorites(),
@@ -2275,6 +2281,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 val authenticated = repository.login(credentials, remember)
                 if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return@launch
 
+                invalidateCatalogRequests()
                 session = authenticated
                 sessionRestorationComplete = true
                 clearCatalogMemory()
@@ -2330,11 +2337,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         if (catalogJobs[type]?.isActive == true) return
+        val requestGeneration = catalogGeneration
         mutableState.update {
             it.copy(loadingTypes = it.loadingTypes + type, errorMessage = null)
         }
         catalogJobs[type] = viewModelScope.launch {
-            runCatching {
+            try {
                 val full = repository.catalog(activeSession, type)
                 val snapshot = mutableState.value
                 val compact = if (type == ContentType.MOVIE || type == ContentType.SERIES) {
@@ -2344,25 +2352,26 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     full
                 }
-                full to compact
+                if (requestGeneration != catalogGeneration) return@launch
+
+                loadedCatalogs[type] = full
+                homeCatalogs[type] = compact
+                mutableState.update { state ->
+                    val base = state.catalogs + (type to full)
+                    state.copy(
+                        catalogs = catalogsForDestination(state.destination, base),
+                        loadingTypes = state.loadingTypes - type,
+                    )
+                }
+                resolvePendingTvDeepLink()
+                scheduleTvPlatformSync(immediate = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (requestGeneration != catalogGeneration) return@launch
+                mutableState.update { it.copy(loadingTypes = it.loadingTypes - type) }
+                showFailure(error)
             }
-                .onSuccess { (full, compact) ->
-                    loadedCatalogs[type] = full
-                    homeCatalogs[type] = compact
-                    mutableState.update { state ->
-                        val base = state.catalogs + (type to full)
-                        state.copy(
-                            catalogs = catalogsForDestination(state.destination, base),
-                            loadingTypes = state.loadingTypes - type,
-                        )
-                    }
-                    resolvePendingTvDeepLink()
-                    scheduleTvPlatformSync(immediate = false)
-                }
-                .onFailure { error ->
-                    mutableState.update { it.copy(loadingTypes = it.loadingTypes - type) }
-                    showFailure(error)
-                }
         }
     }
 
@@ -2678,6 +2687,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             notificationScanJob?.cancel()
             notificationScanJob = null
             notificationUiReady = false
+            invalidateCatalogRequests()
             clearCatalogMemory()
         }
         mutableState.update {
@@ -2685,6 +2695,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 screen = if (invalidSession) HulkScreen.LOGIN else it.screen,
                 isStarting = false,
                 isLoading = false,
+                loadingTypes = if (invalidSession) emptySet() else it.loadingTypes,
                 isAccountRefreshing = false,
                 notificationPopup = if (invalidSession) null else it.notificationPopup,
                 errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
