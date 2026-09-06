@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+INFRASTRUCTURE_FAILURE_PATTERN = re.compile(
+    r"INSTRUMENTATION_FAILED:.*|Process crashed.*|FAILURES!!!.*",
+    re.DOTALL,
+)
+
+
 @dataclass
 class TestCase:
     class_name: str
@@ -49,17 +55,25 @@ def parse_instrumentation(text: str, process_status: int) -> list[TestCase]:
                 )
             pending = {}
 
+    infrastructure_failure = INFRASTRUCTURE_FAILURE_PATTERN.search(text)
     if not cases:
-        detail_match = re.search(r"INSTRUMENTATION_FAILED:.*|Process crashed.*|FAILURES!!!.*", text, re.DOTALL)
-        status = "FAIL" if process_status else "PASS"
-        detail = detail_match.group(0)[:4000] if detail_match else ("No per-test status records" if process_status == 0 else text[-4000:])
-        cases[(current_class, current_test)] = TestCase(current_class, current_test, status, detail)
+        if infrastructure_failure is not None:
+            detail = infrastructure_failure.group(0)[:4000]
+        elif process_status != 0:
+            detail = text[-4000:] or f"Instrumentation exited with status {process_status} without a terminal test result"
+        else:
+            detail = "Instrumentation produced no terminal per-test status records"
+        cases[(current_class, current_test)] = TestCase(current_class, current_test, "FAIL", detail)
 
     for case in cases.values():
         if case.status == "RUNNING":
-            case.status = "FAIL" if process_status else "PASS"
-            if process_status:
-                case.detail = "Instrumentation ended before a terminal result was reported"
+            case.status = "FAIL"
+            case.detail = "Instrumentation ended before a terminal result was reported"
+
+    if infrastructure_failure is not None and not any(case.status == "FAIL" for case in cases.values()):
+        key = ("android.instrumentation", "instrumentation-run")
+        cases[key] = TestCase(key[0], key[1], "FAIL", infrastructure_failure.group(0)[:4000])
+
     return list(cases.values())
 
 
