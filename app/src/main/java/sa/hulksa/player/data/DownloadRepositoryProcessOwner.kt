@@ -63,6 +63,17 @@ internal fun accountDownloadAccessAllowed(
         recordAccountId.isNotBlank() &&
         recordAccountId == activeAccountId
 
+internal fun downloadRemovalContextMatches(
+    expectedAccountId: String,
+    expectedProfileId: String,
+    activeAccountId: String?,
+    activeProfileId: String,
+): Boolean =
+    expectedAccountId.isNotBlank() &&
+        expectedProfileId.isNotBlank() &&
+        expectedAccountId == activeAccountId &&
+        expectedProfileId == activeProfileId
+
 /**
  * Captures the pre-existing account owner before a new login can claim account
  * scope, then exposes rollback-safe account namespaces for download metadata.
@@ -300,21 +311,49 @@ internal class ProfileScopedDownloadRepository(context: Context) {
     }
 
     fun remove(downloadId: Long): List<OfflineDownload> {
+        val expectedAccountId = activeAccountId() ?: return emptyList()
+        val expectedProfileId = profileStore.activeProfileId()
+        return remove(downloadId, expectedAccountId, expectedProfileId)
+    }
+
+    fun remove(
+        downloadId: Long,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): List<OfflineDownload> {
+        if (
+            !downloadRemovalContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) return snapshot()
+
         val binding = activeBinding() ?: return emptyList()
+        if (binding.accountId != expectedAccountId) return snapshot()
         val item = binding.delegate.snapshot().firstOrNull { it.downloadId == downloadId }
             ?: return snapshot()
-        val profileId = profileStore.activeProfileId()
         val owners = binding.ownershipStore.ownersForExistingDownload(item.historyKey)
-        if (profileId !in owners) return snapshot()
+        if (expectedProfileId !in owners) return snapshot()
 
-        val removal = profileReferenceRemoval(owners, profileId)
+        if (
+            !downloadRemovalContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) return snapshot()
+
+        val removal = profileReferenceRemoval(owners, expectedProfileId)
         if (removal.deletePhysicalDownload) {
             binding.delegate.remove(downloadId)
             if (binding.delegate.record(downloadId) == null) {
                 binding.ownershipStore.clearOwners(item.historyKey)
             }
         } else {
-            binding.ownershipStore.removeExistingOwner(item.historyKey, profileId)
+            binding.ownershipStore.removeExistingOwner(item.historyKey, expectedProfileId)
         }
         return snapshot()
     }
