@@ -257,6 +257,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val accountRefreshCoordinator = AccountRefreshCoordinator()
     private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
+    private var logoutJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
     private var catalogGeneration: Long = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
@@ -335,7 +336,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun login(accessCode: String, username: String, password: String, remember: Boolean = true) {
-        if (authenticationAttemptGate.isActive()) return
+        if (logoutJob?.isActive == true || authenticationAttemptGate.isActive()) return
         val normalizedAccessCode = normalizeResellerAccessCode(accessCode)
         if (normalizedAccessCode == null) {
             mutableState.update { it.copy(errorMessage = "ادخل كود دخول صحيح.") }
@@ -2211,38 +2212,68 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout() {
+        beginLogout(errorMessage = null)
+    }
+
+    private fun beginLogout(errorMessage: String?) {
+        if (logoutJob?.isActive == true) return
+
         authenticationAttemptGate.invalidate()
         invalidateAccountRefresh()
-        loginJob?.cancel()
+        val pendingLoginJob = loginJob
+        pendingLoginJob?.cancel()
         loginJob = null
         invalidateDetailsRequest()
         val operationsState = mutableState.value.operations
         beginTvPlatformProfileTransition(resetPublishedScope = true)
         pendingTvDeepLink = null
-        mutableState.update { it.copy(downloads = emptyList()) }
-        downloadRepository.suspendActiveAccountForLogout()
-        repository.logout()
-        session = null
-        sessionRestorationComplete = true
         notificationScanJob?.cancel()
         notificationScanJob = null
         notificationUiReady = false
         invalidateCatalogRequests()
         clearCatalogMemory()
         diagnosticsJob?.cancel()
-        mutableState.value = HulkUiState(
-            isStarting = false,
-            favorites = userLibrary.favorites(),
-            history = userLibrary.history(),
-            downloads = emptyList(),
-            downloadSettings = downloadRepository.settings(),
-            notificationSubscribedSeriesIds = emptySet(),
-            localNotifications = emptyList(),
-            unreadNotificationCount = 0,
-            episodeNotificationsEnabled = true,
-            notificationPopup = null,
-            operations = operationsState,
-        )
+        mutableState.update {
+            it.copy(
+                screen = HulkScreen.LOGIN,
+                isStarting = false,
+                isLoading = false,
+                loadingTypes = emptySet(),
+                account = null,
+                isAccountRefreshing = false,
+                downloads = emptyList(),
+                notificationPopup = null,
+                errorMessage = errorMessage,
+            )
+        }
+
+        logoutJob = viewModelScope.launch {
+            try {
+                pendingLoginJob?.join()
+                withContext(Dispatchers.IO) {
+                    downloadRepository.suspendActiveAccountForLogout()
+                }
+                repository.logout()
+                session = null
+                sessionRestorationComplete = true
+                mutableState.value = HulkUiState(
+                    isStarting = false,
+                    favorites = userLibrary.favorites(),
+                    history = userLibrary.history(),
+                    downloads = emptyList(),
+                    downloadSettings = downloadRepository.settings(),
+                    notificationSubscribedSeriesIds = emptySet(),
+                    localNotifications = emptyList(),
+                    unreadNotificationCount = 0,
+                    episodeNotificationsEnabled = true,
+                    notificationPopup = null,
+                    operations = operationsState,
+                    errorMessage = errorMessage,
+                )
+            } finally {
+                logoutJob = null
+            }
+        }
     }
 
     fun clearError() {
@@ -2250,24 +2281,49 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun restoreSession() {
-        val credentials = repository.savedCredentials()
-        if (credentials == null) {
-            sessionRestorationComplete = true
-            mutableState.update { it.copy(isStarting = false) }
-            resolvePendingTvDeepLink()
-            return
+        val restoreGeneration = authenticationAttemptGate.tryStart() ?: return
+        sessionRestorationComplete = false
+        loginJob = viewModelScope.launch {
+            try {
+                val credentials = repository.savedCredentials()
+                if (!authenticationAttemptGate.isCurrent(restoreGeneration)) return@launch
+                if (credentials == null) {
+                    sessionRestorationComplete = true
+                    mutableState.update { it.copy(isStarting = false) }
+                    resolvePendingTvDeepLink()
+                    return@launch
+                }
+                invalidateAccountRefresh()
+                mutableState.update {
+                    it.copy(
+                        isStarting = false,
+                        isLoading = true,
+                        isAccountRefreshing = false,
+                        errorMessage = null,
+                    )
+                }
+                runAuthenticationAttempt(credentials, remember = true, restoreGeneration)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (!authenticationAttemptGate.isCurrent(restoreGeneration)) return@launch
+                sessionRestorationComplete = true
+                showFailure(error)
+                resolvePendingTvDeepLink()
+            } finally {
+                if (authenticationAttemptGate.complete(restoreGeneration)) {
+                    loginJob = null
+                }
+            }
         }
-        authenticate(credentials, remember = true, restoringSession = true)
     }
 
     private fun authenticate(
         credentials: Credentials,
         remember: Boolean,
-        restoringSession: Boolean = false,
     ) {
         val attemptGeneration = authenticationAttemptGate.tryStart() ?: return
         invalidateAccountRefresh()
-        if (restoringSession) sessionRestorationComplete = false
         mutableState.update {
             it.copy(
                 isStarting = false,
@@ -2278,50 +2334,60 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         loginJob = viewModelScope.launch {
             try {
-                val authenticated = repository.login(credentials, remember)
-                if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return@launch
-
-                invalidateCatalogRequests()
-                session = authenticated
-                sessionRestorationComplete = true
-                clearCatalogMemory()
-                val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
-                val downloadSettings = withContext(Dispatchers.IO) {
-                    downloadRepository.settings()
-                }
-                mutableState.update {
-                    it.copy(
-                        screen = HulkScreen.MAIN,
-                        destination = MainDestination.HOME,
-                        isLoading = false,
-                        account = authenticated.account,
-                        isAccountRefreshing = false,
-                        catalogs = emptyMap(),
-                        selectedCategoryId = null,
-                        searchQuery = "",
-                        downloads = downloads,
-                        downloadSettings = downloadSettings,
-                        errorMessage = null,
-                    )
-                }
-                ensureCatalog(ContentType.MOVIE)
-                ensureCatalog(ContentType.SERIES)
-                refreshOperations(force = false)
-                refreshNotificationState(clearPopup = true)
-                scanSubscribedSeries(NotificationScanTrigger.APP_START)
-                resolvePendingTvDeepLink()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return@launch
-                sessionRestorationComplete = true
-                showFailure(error)
-                resolvePendingTvDeepLink()
+                runAuthenticationAttempt(credentials, remember, attemptGeneration)
             } finally {
                 if (authenticationAttemptGate.complete(attemptGeneration)) {
                     loginJob = null
                 }
             }
+        }
+    }
+
+    private suspend fun runAuthenticationAttempt(
+        credentials: Credentials,
+        remember: Boolean,
+        attemptGeneration: Long,
+    ) {
+        try {
+            val authenticated = repository.login(credentials, remember)
+            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
+
+            invalidateCatalogRequests()
+            session = authenticated
+            sessionRestorationComplete = true
+            clearCatalogMemory()
+            val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
+            val downloadSettings = withContext(Dispatchers.IO) {
+                downloadRepository.settings()
+            }
+            mutableState.update {
+                it.copy(
+                    screen = HulkScreen.MAIN,
+                    destination = MainDestination.HOME,
+                    isLoading = false,
+                    account = authenticated.account,
+                    isAccountRefreshing = false,
+                    catalogs = emptyMap(),
+                    selectedCategoryId = null,
+                    searchQuery = "",
+                    downloads = downloads,
+                    downloadSettings = downloadSettings,
+                    errorMessage = null,
+                )
+            }
+            ensureCatalog(ContentType.MOVIE)
+            ensureCatalog(ContentType.SERIES)
+            refreshOperations(force = false)
+            refreshNotificationState(clearPopup = true)
+            scanSubscribedSeries(NotificationScanTrigger.APP_START)
+            resolvePendingTvDeepLink()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
+            sessionRestorationComplete = true
+            showFailure(error)
+            resolvePendingTvDeepLink()
         }
     }
 
@@ -2676,28 +2742,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             error is PortalException.InvalidAccessCode ||
             error is PortalException.ResellerInactive
         if (invalidSession) {
-            invalidateAccountRefresh()
-            invalidateDetailsRequest()
-            sessionRestorationComplete = true
-            beginTvPlatformProfileTransition(resetPublishedScope = true)
-            mutableState.update { it.copy(downloads = emptyList()) }
-            downloadRepository.suspendActiveAccountForLogout()
-            repository.logout()
-            session = null
-            notificationScanJob?.cancel()
-            notificationScanJob = null
-            notificationUiReady = false
-            invalidateCatalogRequests()
-            clearCatalogMemory()
+            beginLogout(error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.")
+            return
         }
         mutableState.update {
             it.copy(
                 screen = if (invalidSession) HulkScreen.LOGIN else it.screen,
                 isStarting = false,
                 isLoading = false,
-                loadingTypes = if (invalidSession) emptySet() else it.loadingTypes,
                 isAccountRefreshing = false,
-                notificationPopup = if (invalidSession) null else it.notificationPopup,
                 errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
             )
         }

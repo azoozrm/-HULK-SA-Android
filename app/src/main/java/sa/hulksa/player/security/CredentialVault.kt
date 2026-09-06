@@ -22,13 +22,16 @@ class CredentialVault(context: Context) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val plaintext = CredentialPayloadCodec.encode(credentials)
-        val encrypted = cipher.doFinal(plaintext)
-
-        preferences.edit()
-            .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
-            .putString(KEY_PAYLOAD, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
-        plaintext.fill(0)
+        try {
+            check(
+                preferences.edit()
+                    .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+                    .putString(KEY_PAYLOAD, Base64.encodeToString(cipher.doFinal(plaintext), Base64.NO_WRAP))
+                    .commit(),
+            ) { "Unable to persist credential envelope" }
+        } finally {
+            plaintext.fill(0)
+        }
     }
 
     fun load(): Credentials? {
@@ -51,7 +54,7 @@ class CredentialVault(context: Context) {
     }
 
     fun clear() {
-        preferences.edit().clear().apply()
+        preferences.edit().clear().commit()
     }
 
     private fun getOrCreateKey(): SecretKey {
