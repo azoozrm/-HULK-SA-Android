@@ -89,6 +89,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -130,11 +131,14 @@ import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
@@ -3225,6 +3229,40 @@ private fun TvSearchField(
     )
 }
 
+internal fun downloadStorageObservationKey(
+    downloads: List<OfflineDownload>,
+): List<Pair<Long, Long>> = downloads.map { item ->
+    item.downloadId to item.bytesDownloaded
+}
+
+internal suspend fun readAvailableDownloadStorageBytes(
+    storageRootProvider: () -> java.io.File,
+    statFsAvailableBytes: (String) -> Long = { path -> StatFs(path).availableBytes },
+    usableSpaceBytes: (java.io.File) -> Long = { root -> root.usableSpace },
+): Long = withContext(Dispatchers.IO) {
+    try {
+        val storageRoot = storageRootProvider()
+        val bytes = try {
+            statFsAvailableBytes(storageRoot.absolutePath)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            try {
+                usableSpaceBytes(storageRoot)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                0L
+            }
+        }
+        bytes.coerceAtLeast(0L)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        0L
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DownloadsScreen(
@@ -3280,14 +3318,20 @@ private fun DownloadsScreen(
     TrackDownloadFocusHandle(toolbarFocusHandles.schedule, isTv)
     TrackDownloadFocusHandle(toolbarFocusHandles.concurrent, isTv)
 
-    val context = LocalContext.current
-    val downloadStorageRoot = remember(context) {
-        context.getExternalFilesDir(null) ?: context.filesDir
+    val appContext = LocalContext.current.applicationContext
+    val storageObservationKey = remember(downloads) {
+        downloadStorageObservationKey(downloads)
     }
-    val availableBytes = remember(downloadStorageRoot, downloads) {
-        runCatching { StatFs(downloadStorageRoot.absolutePath).availableBytes }
-            .getOrElse { downloadStorageRoot.usableSpace }
-            .coerceAtLeast(0L)
+    val availableBytes by produceState(
+        initialValue = 0L,
+        key1 = appContext,
+        key2 = storageObservationKey,
+    ) {
+        value = readAvailableDownloadStorageBytes(
+            storageRootProvider = {
+                appContext.getExternalFilesDir(null) ?: appContext.filesDir
+            },
+        )
     }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
