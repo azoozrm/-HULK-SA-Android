@@ -89,7 +89,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -3322,12 +3321,9 @@ private fun DownloadsScreen(
     val storageObservationKey = remember(downloads) {
         downloadStorageObservationKey(downloads)
     }
-    val availableBytes by produceState(
-        initialValue = 0L,
-        key1 = appContext,
-        key2 = storageObservationKey,
-    ) {
-        value = readAvailableDownloadStorageBytes(
+    var availableBytes by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(appContext, storageObservationKey) {
+        availableBytes = readAvailableDownloadStorageBytes(
             storageRootProvider = {
                 appContext.getExternalFilesDir(null) ?: appContext.filesDir
             },
