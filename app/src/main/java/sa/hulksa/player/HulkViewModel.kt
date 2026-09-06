@@ -2747,6 +2747,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         mutableState.update {
             it.copy(
+                screen = if (invalidSession) HulkScreen.LOGIN else it.screen,
                 isStarting = false,
                 isLoading = false,
                 isAccountRefreshing = false,
