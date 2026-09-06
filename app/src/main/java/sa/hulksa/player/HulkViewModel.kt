@@ -53,6 +53,7 @@ import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
 import sa.hulksa.player.data.buildEpisodeNotificationPopups
 import sa.hulksa.player.data.canUseSeriesEpisodeNotifications
+import sa.hulksa.player.data.downloadRemovalContextMatches
 import sa.hulksa.player.data.effectiveOperationsServiceStatus
 import sa.hulksa.player.data.eligibleOperationsAnnouncements
 import sa.hulksa.player.data.evaluateOperationsUpdatePolicy
@@ -209,6 +210,12 @@ internal suspend fun loadDownloadUiSnapshot(
     snapshotLoader: () -> List<OfflineDownload>,
 ): List<OfflineDownload> = withContext(Dispatchers.IO) {
     snapshotLoader()
+}
+
+internal suspend fun runDownloadRemovalOffMain(
+    removal: () -> List<OfflineDownload>,
+): List<OfflineDownload> = withContext(Dispatchers.IO) {
+    removal()
 }
 
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
@@ -940,7 +947,27 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteDownload(item: OfflineDownload) {
-        mutableState.update { it.copy(downloads = downloadRepository.remove(item.downloadId)) }
+        val expectedAccountId = downloadRepository.activeAccountIdForCleanup() ?: return
+        val expectedProfileId = profileStore.activeProfileId()
+        viewModelScope.launch {
+            val downloads = runDownloadRemovalOffMain {
+                downloadRepository.remove(
+                    downloadId = item.downloadId,
+                    expectedAccountId = expectedAccountId,
+                    expectedProfileId = expectedProfileId,
+                )
+            }
+            if (
+                downloadRemovalContextMatches(
+                    expectedAccountId = expectedAccountId,
+                    expectedProfileId = expectedProfileId,
+                    activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                    activeProfileId = profileStore.activeProfileId(),
+                )
+            ) {
+                mutableState.update { state -> state.copy(downloads = downloads) }
+            }
+        }
     }
 
     fun toggleWifiOnly(): String {
