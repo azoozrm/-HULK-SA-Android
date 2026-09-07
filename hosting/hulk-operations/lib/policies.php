@@ -118,6 +118,25 @@ function ops_csrf_tokens_match(string $expected, string $provided): bool
     return $expected !== '' && $provided !== '' && hash_equals($expected, $provided);
 }
 
+function ops_admin_record_matches_session(int $sessionId, string $sessionUsername, mixed $record): bool
+{
+    if (
+        $sessionId < 1 ||
+        $sessionUsername === '' ||
+        !is_array($record) ||
+        !(bool) ($record['enabled'] ?? false)
+    ) {
+        return false;
+    }
+
+    $recordId = filter_var($record['id'] ?? null, FILTER_VALIDATE_INT);
+    $recordUsername = $record['username'] ?? null;
+    return $recordId !== false &&
+        (int) $recordId === $sessionId &&
+        is_string($recordUsername) &&
+        hash_equals($sessionUsername, $recordUsername);
+}
+
 function ops_is_sha256(string $value): bool
 {
     return (bool) preg_match('/^[a-f0-9]{64}$/', strtolower($value));

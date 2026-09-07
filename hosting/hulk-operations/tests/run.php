@@ -85,6 +85,22 @@ ops_test(!ops_announcement_is_active([
 
 ops_test(ops_csrf_tokens_match('abc', 'abc'), 'matching CSRF token is accepted');
 ops_test(!ops_csrf_tokens_match('abc', 'different'), 'mismatched CSRF token is rejected');
+ops_test(
+    ops_admin_record_matches_session(7, 'admin', ['id' => 7, 'username' => 'admin', 'enabled' => 1]),
+    'enabled authoritative admin matches the current session'
+);
+ops_test(
+    !ops_admin_record_matches_session(7, 'admin', ['id' => 7, 'username' => 'admin', 'enabled' => 0]),
+    'disabled admin is rejected even when the session identity remains'
+);
+ops_test(
+    !ops_admin_record_matches_session(7, 'admin', null),
+    'deleted admin is rejected even when the session identity remains'
+);
+ops_test(
+    !ops_admin_record_matches_session(7, 'admin', ['id' => 7, 'username' => 'renamed', 'enabled' => 1]),
+    'session username must still match the authoritative admin record'
+);
 ops_test(ops_is_sha256(hash('sha256', 'HULK SA')), 'server generated SHA-256 is valid');
 ops_test(ops_safe_message_key('msg-001') === 'MSG-001', 'message key is stable and normalized');
 

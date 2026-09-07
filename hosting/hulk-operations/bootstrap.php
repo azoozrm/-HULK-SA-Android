@@ -157,6 +157,14 @@ function ops_require_csrf(): void
     }
 }
 
+function ops_clear_admin_identity(): void
+{
+    unset($_SESSION['admin_user_id'], $_SESSION['admin_username'], $_SESSION['csrf_token']);
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_regenerate_id(true);
+    }
+}
+
 function ops_admin(): ?array
 {
     ops_start_admin_session();
@@ -166,7 +174,24 @@ function ops_admin(): ?array
         return null;
     }
 
-    return ['id' => (int) $id, 'username' => $username];
+    try {
+        $statement = ops_db()->prepare(
+            'SELECT id, username, enabled FROM app_admin_users WHERE id = :id LIMIT 1'
+        );
+        $statement->execute(['id' => (int) $id]);
+        $user = $statement->fetch();
+    } catch (Throwable $exception) {
+        error_log('HULK Operations admin authorization check failed.');
+        ops_clear_admin_identity();
+        return null;
+    }
+
+    if (!ops_admin_record_matches_session((int) $id, $username, $user)) {
+        ops_clear_admin_identity();
+        return null;
+    }
+
+    return ['id' => (int) $user['id'], 'username' => (string) $user['username']];
 }
 
 function ops_require_admin(): array
