@@ -33,6 +33,7 @@ import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.LocalEpisodeNotification
 import sa.hulksa.player.data.LocalEpisodeNotificationStore
 import sa.hulksa.player.data.LocalNotificationItem
+import sa.hulksa.player.data.LocalSystemNotification
 import sa.hulksa.player.data.OPERATIONS_CACHE_TTL_MS
 import sa.hulksa.player.data.OperationsApkInstaller
 import sa.hulksa.player.data.OperationsClient
@@ -169,37 +170,6 @@ private data class MovieCardProbeMetadata(
     val durationMs: Long? = null,
 )
 
-private fun initialOperationsUiState(
-    config: OperationsConfig,
-    fetchedAtEpochMs: Long,
-    isTv: Boolean,
-): OperationsUiState {
-    val nowEpochMs = System.currentTimeMillis()
-    val source = OperationsConfigSource.CACHE
-    val effectiveService = config.service.copy(
-        status = effectiveOperationsServiceStatus(config.service, source),
-    )
-    return OperationsUiState(
-        source = source,
-        updateDecision = evaluateOperationsUpdatePolicy(
-            currentVersionCode = BuildConfig.VERSION_CODE,
-            update = config.update,
-            source = source,
-            cacheAgeMs = nowEpochMs - fetchedAtEpochMs,
-        ),
-        update = config.update,
-        service = effectiveService,
-        features = config.features,
-        growth = config.growth,
-        persistentAnnouncement = activePersistentOperationsAnnouncement(
-            announcements = config.announcements,
-            currentVersionCode = BuildConfig.VERSION_CODE,
-            isTv = isTv,
-            nowEpochSeconds = nowEpochMs / 1_000L,
-        ),
-    )
-}
-
 private fun Application.isTelevisionDevice(): Boolean {
     val uiMode = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
     return uiMode?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -223,6 +193,12 @@ internal suspend fun <T> runDownloadEnqueueOffMain(
     enqueue: () -> T,
 ): T = withContext(Dispatchers.IO) {
     enqueue()
+}
+
+internal suspend fun <T> runOperationsPersistenceOffMain(
+    persistence: () -> T,
+): T = withContext(Dispatchers.IO) {
+    persistence()
 }
 
 internal fun downloadEnqueuePublicationAllowed(
@@ -255,7 +231,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val tvPlatformIntegration = TvPlatformIntegrationProvider {
         TvPlatformIntegration(application)
     }
-    private val initialCachedOperations = operationsStore.cachedConfig()
     private val initialNotificationSnapshot = localEpisodeNotificationStore.snapshot(
         profileStore.activeProfileId(),
     )
@@ -268,14 +243,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             notificationSubscribedSeriesIds = initialNotificationSnapshot.subscribedSeriesIds,
             localNotifications = mergeNotificationCenterItems(
                 initialNotificationSnapshot.notifications,
-                operationsStore.systemNotifications(),
+                emptyList(),
             ),
-            unreadNotificationCount = initialNotificationSnapshot.unreadCount +
-                operationsStore.systemNotifications().count { !it.read },
+            unreadNotificationCount = initialNotificationSnapshot.unreadCount,
             episodeNotificationsEnabled = initialNotificationSnapshot.settings.enabled,
-            operations = initialCachedOperations?.let { cached ->
-                initialOperationsUiState(cached.config, cached.fetchedAtEpochMs, operationsDeviceIsTv)
-            } ?: OperationsUiState(),
+            operations = OperationsUiState(),
         ),
     )
     val state: StateFlow<HulkUiState> = mutableState.asStateFlow()
@@ -300,6 +272,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var notificationPopupActionJob: Job? = null
     private var operationsRefreshJob: Job? = null
     private var operationsDownloadJob: Job? = null
+    private var operationsAnnouncementConfirmationJob: Job? = null
     private var tvPlatformSyncJob: Job? = null
     private var tvPlatformClearJob: Job? = null
     private var tvDeepLinkEpisodeJob: Job? = null
@@ -310,8 +283,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var tvPublishedProfileScopeId: String? = null
     private val tvLastSyncedPositions = mutableMapOf<String, Long>()
     private var pendingTvDeepLink: TvDeepLinkTarget? = null
-    private var activeOperationsConfig: OperationsConfig? = initialCachedOperations?.config
-    private var activeOperationsFetchedAtEpochMs: Long = initialCachedOperations?.fetchedAtEpochMs ?: 0L
+    private var activeOperationsConfig: OperationsConfig? = null
+    private var activeOperationsFetchedAtEpochMs: Long = 0L
+    private var operationsSystemNotifications: List<LocalSystemNotification> = emptyList()
     private val presentedOperationsMessageIds = linkedSetOf<String>()
     private val dismissedOptionalUpdateVersionCodes = linkedSetOf<Int>()
     private var notificationUiReady: Boolean = false
@@ -329,13 +303,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val movieCardProbeAttempted = mutableSetOf<Int>()
 
     init {
-        initialCachedOperations?.let { cached ->
-            applyOperationsConfig(
-                config = cached.config,
-                source = OperationsConfigSource.CACHE,
-                fetchedAtEpochMs = cached.fetchedAtEpochMs,
-            )
-        }
         refreshOperations(force = true)
         restoreSession()
         viewModelScope.launch {
@@ -1354,7 +1321,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            val systemNotifications = withContext(Dispatchers.IO) {
                 when (item) {
                     is LocalNotificationItem.Episode -> accountId?.let {
                         localEpisodeNotificationStore.markRead(profileId, notificationId, it)
@@ -1362,7 +1329,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     is LocalNotificationItem.System ->
                         operationsStore.markSystemNotificationRead(notificationId)
                 }
+                operationsStore.systemNotifications()
             }
+            operationsSystemNotifications = systemNotifications
             refreshNotificationState(clearPopup = false)
         }
     }
@@ -1371,10 +1340,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            val systemNotifications = withContext(Dispatchers.IO) {
                 accountId?.let { localEpisodeNotificationStore.markAllRead(profileId, it) }
                 operationsStore.markAllSystemNotificationsRead()
+                operationsStore.systemNotifications()
             }
+            operationsSystemNotifications = systemNotifications
             refreshNotificationState(clearPopup = false)
         }
     }
@@ -1384,7 +1355,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            val systemNotifications = withContext(Dispatchers.IO) {
                 when (item) {
                     is LocalNotificationItem.Episode -> accountId?.let {
                         localEpisodeNotificationStore.deleteNotification(profileId, notificationId, it)
@@ -1392,7 +1363,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     is LocalNotificationItem.System ->
                         operationsStore.deleteSystemNotification(notificationId)
                 }
+                operationsStore.systemNotifications()
             }
+            operationsSystemNotifications = systemNotifications
             refreshNotificationState(clearPopup = false)
         }
     }
@@ -1401,10 +1374,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            val systemNotifications = withContext(Dispatchers.IO) {
                 accountId?.let { localEpisodeNotificationStore.clearNotifications(profileId, it) }
                 operationsStore.clearSystemNotifications()
+                operationsStore.systemNotifications()
             }
+            operationsSystemNotifications = systemNotifications
             refreshNotificationState(clearPopup = true)
         }
     }
@@ -1416,9 +1391,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId }
         if (item is LocalNotificationItem.System) {
             viewModelScope.launch {
-                withContext(Dispatchers.IO) {
+                val systemNotifications = withContext(Dispatchers.IO) {
                     operationsStore.markSystemNotificationRead(notificationId)
+                    operationsStore.systemNotifications()
                 }
+                operationsSystemNotifications = systemNotifications
                 refreshNotificationState(clearPopup = false)
                 onResult(null)
             }
@@ -1693,28 +1670,56 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun confirmOperationsAnnouncement() {
+        if (operationsAnnouncementConfirmationJob?.isActive == true) return
         val popup = mutableState.value.operations.announcementPopup ?: return
         presentedOperationsMessageIds += popup.id
-        if (popup.showOnce) {
-            operationsStore.acknowledgeMessage(popup.id)
+        operationsAnnouncementConfirmationJob = viewModelScope.launch {
+            try {
+                val acknowledged = runOperationsPersistenceOffMain {
+                    if (popup.showOnce) {
+                        operationsStore.acknowledgeMessage(popup.id)
+                    }
+                    operationsStore.acknowledgedMessageIds()
+                }
+                updateOperationsAnnouncementPresentation(acknowledged)
+            } finally {
+                operationsAnnouncementConfirmationJob = null
+            }
         }
-        updateOperationsAnnouncementPresentation()
     }
 
     private fun refreshOperations(force: Boolean) {
         if (operationsRefreshJob?.isActive == true) return
-        val cached = operationsStore.cachedConfig()
-        val nowEpochMs = System.currentTimeMillis()
-        if (
-            !force &&
-            cached != null &&
-            nowEpochMs - cached.fetchedAtEpochMs in 0 until OPERATIONS_CACHE_TTL_MS
-        ) return
-
         operationsRefreshJob = viewModelScope.launch {
+            val (cached, systemNotifications) = runOperationsPersistenceOffMain {
+                operationsStore.cachedConfig() to operationsStore.systemNotifications()
+            }
+            operationsSystemNotifications = systemNotifications
+            if (activeOperationsConfig == null) {
+                if (cached != null) {
+                    applyOperationsConfig(
+                        config = cached.config,
+                        source = OperationsConfigSource.CACHE,
+                        fetchedAtEpochMs = cached.fetchedAtEpochMs,
+                    )
+                } else {
+                    refreshNotificationState(clearPopup = false)
+                }
+            }
+
+            val nowEpochMs = System.currentTimeMillis()
+            if (
+                !force &&
+                cached != null &&
+                nowEpochMs - cached.fetchedAtEpochMs in 0 until OPERATIONS_CACHE_TTL_MS
+            ) return@launch
+
             when (val result = operationsClient.fetch()) {
                 is OperationsFetchResult.Success -> {
-                    if (operationsStore.saveConfig(result.rawJson, result.fetchedAtEpochMs)) {
+                    val saved = runOperationsPersistenceOffMain {
+                        operationsStore.saveConfig(result.rawJson, result.fetchedAtEpochMs)
+                    }
+                    if (saved) {
                         applyOperationsConfig(
                             config = result.config,
                             source = OperationsConfigSource.NETWORK,
@@ -1729,8 +1734,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun applyOperationsFailure() {
-        val cached = operationsStore.cachedConfig()
+    private suspend fun applyOperationsFailure() {
+        val cached = runOperationsPersistenceOffMain(operationsStore::cachedConfig)
         when {
             cached != null -> applyOperationsConfig(
                 config = cached.config,
@@ -1756,7 +1761,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun applyOperationsConfig(
+    private suspend fun applyOperationsConfig(
         config: OperationsConfig,
         source: OperationsConfigSource,
         fetchedAtEpochMs: Long,
@@ -1772,11 +1777,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             acknowledgedMessageIds = emptySet(),
             presentedMessageIds = emptySet(),
         )
-        operationsStore.recordImportantAnnouncements(
-            announcements = activeAnnouncements,
-            generatedAtEpochSeconds = config.generatedAtEpochSeconds,
-        )
-        val acknowledged = operationsStore.acknowledgedMessageIds()
+        val (acknowledged, systemNotifications) = runOperationsPersistenceOffMain {
+            operationsStore.recordImportantAnnouncements(
+                announcements = activeAnnouncements,
+                generatedAtEpochSeconds = config.generatedAtEpochSeconds,
+            )
+            operationsStore.acknowledgedMessageIds() to operationsStore.systemNotifications()
+        }
+        operationsSystemNotifications = systemNotifications
         val announcementPopup = eligibleOperationsAnnouncements(
             announcements = config.announcements,
             currentVersionCode = BuildConfig.VERSION_CODE,
@@ -1852,7 +1860,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         refreshNotificationState(clearPopup = false)
     }
 
-    private fun updateOperationsAnnouncementPresentation() {
+    private fun updateOperationsAnnouncementPresentation(acknowledgedMessageIds: Set<String>) {
         val config = activeOperationsConfig ?: run {
             mutableState.update { state ->
                 state.copy(operations = state.operations.copy(announcementPopup = null))
@@ -1864,7 +1872,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             currentVersionCode = BuildConfig.VERSION_CODE,
             isTv = operationsDeviceIsTv,
             nowEpochSeconds = System.currentTimeMillis() / 1_000L,
-            acknowledgedMessageIds = operationsStore.acknowledgedMessageIds(),
+            acknowledgedMessageIds = acknowledgedMessageIds,
             presentedMessageIds = presentedOperationsMessageIds,
         ).firstOrNull()
         mutableState.update { state ->
@@ -1903,7 +1911,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         val notificationCenterItems = mergeNotificationCenterItems(
             episodeNotifications = safeNotifications,
-            systemNotifications = operationsStore.systemNotifications(),
+            systemNotifications = operationsSystemNotifications,
         )
         val safeSubscribed = snapshot.subscriptions.asSequence()
             .filter(EpisodeNotificationSubscription::enabled)
