@@ -20,7 +20,7 @@ class LoginLazyTvPlatformContractTest(unittest.TestCase):
     def test_view_model_construction_defers_tv_platform_integration(self) -> None:
         declaration = self.section(
             "private val tvPlatformIntegration = TvPlatformIntegrationProvider {",
-            "private val initialCachedOperations",
+            "private val initialNotificationSnapshot",
         )
 
         self.assertIn("TvPlatformIntegration(application)", declaration)
