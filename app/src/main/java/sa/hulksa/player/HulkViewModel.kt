@@ -1104,7 +1104,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun rebuildDownload(item: OfflineDownload): String {
         val activeSession = session ?: return "سجل الدخول اولا لاعادة التحميل."
-        downloadRepository.remove(item.downloadId)
         val request = repository.playback(
             activeSession,
             HistoryEntry(
@@ -1120,7 +1119,16 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 updatedAtEpochMs = System.currentTimeMillis(),
             ),
         )
-        return enqueueDownload(request, item.seriesTitle, item.season, item.episodeNumber)
+        enqueueDownload(
+            request = request,
+            expectedSession = activeSession,
+            seriesTitle = item.seriesTitle,
+            season = item.season,
+            episodeNumber = item.episodeNumber,
+            replaceDownloadId = item.downloadId,
+            onResult = {},
+        )
+        return "جار اعادة تجهيز التحميل."
     }
 
     fun openHistory(entry: HistoryEntry) {
@@ -2855,6 +2863,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         seriesTitle: String? = null,
         season: Int? = null,
         episodeNumber: Int? = null,
+        replaceDownloadId: Long? = null,
         onResult: (String) -> Unit,
     ) {
         if (!pendingDownloadEnqueues.add(request.historyKey)) {
@@ -2872,6 +2881,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val outcome = runDownloadEnqueueOffMain {
+                    replaceDownloadId?.let { downloadId ->
+                        downloadRepository.remove(
+                            downloadId = downloadId,
+                            expectedAccountId = expectedAccountId,
+                            expectedProfileId = expectedProfileId,
+                        )
+                    }
                     downloadRepository.enqueue(
                         request = request,
                         expectedAccountId = expectedAccountId,
