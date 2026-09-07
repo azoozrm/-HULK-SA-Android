@@ -40,6 +40,48 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlin.math.max
 
+internal class DownloadTransportAttemptRegistry {
+    internal class Attempt internal constructor(
+        val downloadId: Long,
+        val generation: Long,
+    ) {
+        @Volatile
+        private var valid: Boolean = true
+
+        internal fun invalidate() {
+            valid = false
+        }
+
+        internal fun isValid(): Boolean = valid
+    }
+
+    private val nextGeneration = AtomicLong(0L)
+    private val active = ConcurrentHashMap<Long, Attempt>()
+
+    fun newAttempt(downloadId: Long): Attempt {
+        validateDurableDownloadId(downloadId)
+        return Attempt(downloadId, nextGeneration.incrementAndGet())
+    }
+
+    fun claim(attempt: Attempt): Boolean =
+        active.putIfAbsent(attempt.downloadId, attempt) == null
+
+    fun current(downloadId: Long): Attempt? = active[downloadId]
+
+    fun invalidate(downloadId: Long): Attempt? =
+        active[downloadId]?.also(Attempt::invalidate)
+
+    fun invalidateAll(): List<Attempt> = active.values.toList().onEach(Attempt::invalidate)
+
+    fun owns(attempt: Attempt): Boolean =
+        attempt.isValid() && active[attempt.downloadId] === attempt
+
+    fun release(attempt: Attempt): Boolean =
+        active.remove(attempt.downloadId, attempt)
+
+    fun activeCount(): Int = active.size
+}
+
 class DownloadRepository internal constructor(
     context: Context,
     internal val accountId: String,
@@ -61,7 +103,8 @@ class DownloadRepository internal constructor(
         .followSslRedirects(true)
         .build()
     private val jobs = ConcurrentHashMap<Long, Job>()
-    private val calls = ConcurrentHashMap<Long, Call>()
+    private val transportAttempts = DownloadTransportAttemptRegistry()
+    private val calls = ConcurrentHashMap<Long, TrackedDownloadCall>()
     private val lock = Any()
     private val nextId = AtomicLong(System.currentTimeMillis())
     @Volatile
@@ -119,13 +162,14 @@ class DownloadRepository internal constructor(
     internal fun record(downloadId: Long): OfflineDownload? = item(downloadId)
 
     internal fun interruptForDurableWorkerStop(downloadId: Long) {
-        val interrupted = synchronized(lock) {
-            if (accountBoundarySuspended) return@synchronized false
+        val attempt = synchronized(lock) {
+            if (accountBoundarySuspended) return@synchronized null
             val index = cache.indexOfFirst { it.downloadId == downloadId }
-            if (index < 0) return@synchronized false
+            if (index < 0) return@synchronized null
             val current = cache[index]
             val recoveredStatus = durableWorkerInterruptedStatus(current.status)
-                ?: return@synchronized false
+                ?: return@synchronized null
+            val activeAttempt = transportAttempts.invalidate(downloadId)
             cache[index] = current.copy(
                 status = recoveredStatus,
                 sourceCandidates = emptyList(),
@@ -136,25 +180,23 @@ class DownloadRepository internal constructor(
             )
             publishSnapshotLocked()
             writeStoredLocked(synchronous = true)
-            true
+            activeAttempt
         }
-        if (interrupted) {
-            calls.remove(downloadId)?.cancel()
-            jobs.remove(downloadId)?.cancel()
-        }
+        attempt?.let { cancelTrackedCall(downloadId, it) }
+        jobs[downloadId]?.cancel()
     }
 
     internal fun suspendForAccountBoundary() {
-        accountBoundarySuspended = true
-        calls.values.forEach(Call::cancel)
-        jobs.values.forEach(Job::cancel)
-        synchronized(lock) {
+        val attempts = synchronized(lock) {
+            accountBoundarySuspended = true
+            val activeAttempts = transportAttempts.invalidateAll()
             cache = suspendDownloadsForAccountBoundary(cache).toMutableList()
             publishSnapshotLocked()
             writeStoredLocked(synchronous = true)
+            activeAttempts
         }
-        calls.clear()
-        jobs.clear()
+        attempts.forEach { attempt -> cancelTrackedCall(attempt.downloadId, attempt) }
+        jobs.values.forEach(Job::cancel)
     }
 
     fun settings(): DownloadSettings = DownloadSettings(
@@ -287,7 +329,8 @@ class DownloadRepository internal constructor(
     }
 
     fun pause(downloadId: Long): List<OfflineDownload> {
-        synchronized(lock) {
+        val attempt = synchronized(lock) {
+            val activeAttempt = transportAttempts.invalidate(downloadId)
             mutateLocked(downloadId) { item ->
                 if (item.status in ACTIVE_STATUSES) {
                     item.copy(
@@ -300,9 +343,10 @@ class DownloadRepository internal constructor(
                     item
                 }
             }
+            activeAttempt
         }
-        calls.remove(downloadId)?.cancel()
-        jobs.remove(downloadId)?.cancel()
+        attempt?.let { cancelTrackedCall(downloadId, it) }
+        jobs[downloadId]?.cancel()
         schedule()
         return snapshot()
     }
@@ -330,11 +374,12 @@ class DownloadRepository internal constructor(
     }
 
     fun remove(downloadId: Long): List<OfflineDownload> {
-        calls.remove(downloadId)?.cancel()
-        jobs.remove(downloadId)?.cancel()
-        val candidate = synchronized(lock) {
-            cache.firstOrNull { it.downloadId == downloadId }
-        } ?: return snapshot()
+        val (candidate, attempt) = synchronized(lock) {
+            cache.firstOrNull { it.downloadId == downloadId } to transportAttempts.invalidate(downloadId)
+        }
+        attempt?.let { cancelTrackedCall(downloadId, it) }
+        jobs[downloadId]?.cancel()
+        candidate ?: return snapshot()
 
         if (!deleteDownloadFiles(candidate)) {
             synchronized(lock) {
@@ -374,7 +419,7 @@ class DownloadRepository internal constructor(
             return
         }
         val limit = settings().concurrentDownloads
-        val availableSlots = (limit - jobs.values.count { it.isActive }).coerceAtLeast(0)
+        val availableSlots = (limit - transportAttempts.activeCount()).coerceAtLeast(0)
         if (availableSlots == 0) return
         val now = System.currentTimeMillis()
         val networkAvailable = networkConstraintMessage() == null
@@ -382,7 +427,7 @@ class DownloadRepository internal constructor(
             cache.asSequence()
                 .filter { it.status in SCHEDULABLE_STATUSES }
                 .filter { DurableDownloadExecutionLeaseRegistry.owns(accountId, it.downloadId) }
-                .filter { jobs[it.downloadId]?.isActive != true }
+                .filter { transportAttempts.current(it.downloadId) == null }
                 .filter { item ->
                     decideDownloadAttempt(
                         item = item,
@@ -399,18 +444,37 @@ class DownloadRepository internal constructor(
                 .take(availableSlots)
                 .toList()
         }
-        candidates.forEach { item ->
+        candidates.forEach { candidate ->
+            val attempt = transportAttempts.newAttempt(candidate.downloadId)
             lateinit var job: Job
             job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
-                    runDownload(item.downloadId)
+                    runDownload(candidate.downloadId, attempt)
                 } finally {
-                    calls.remove(item.downloadId)
-                    jobs.remove(item.downloadId, job)
+                    clearTrackedCall(candidate.downloadId, attempt)
+                    jobs.remove(candidate.downloadId, job)
+                    transportAttempts.release(attempt)
                     schedule()
                 }
             }
-            if (jobs.putIfAbsent(item.downloadId, job) == null) {
+            val claimed = synchronized(lock) {
+                val current = cache.firstOrNull { it.downloadId == candidate.downloadId }
+                if (
+                    accountBoundarySuspended ||
+                    current == null ||
+                    current.status !in SCHEDULABLE_STATUSES ||
+                    !DurableDownloadExecutionLeaseRegistry.owns(accountId, candidate.downloadId) ||
+                    !transportAttempts.claim(attempt)
+                ) {
+                    false
+                } else if (jobs.putIfAbsent(candidate.downloadId, job) != null) {
+                    transportAttempts.release(attempt)
+                    false
+                } else {
+                    true
+                }
+            }
+            if (claimed) {
                 job.start()
             } else {
                 job.cancel()
@@ -418,18 +482,23 @@ class DownloadRepository internal constructor(
         }
     }
 
-    private suspend fun runDownload(downloadId: Long) {
-        var attempt = item(downloadId)?.retryCount ?: 0
+    private suspend fun runDownload(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+    ) {
+        var retryAttempt = item(downloadId)?.retryCount ?: 0
         while (currentCoroutineContext().isActive) {
+            ensureTransportAttemptCurrent(transportAttempt, currentCoroutineContext())
             if (accountScopeStore.activeAccountId() != accountId) return
             val current = item(downloadId) ?: return
             if (current.status == OfflineStatus.PAUSED || current.status == OfflineStatus.COMPLETED) return
 
             val networkBlock = networkConstraintMessage()
             if (networkBlock != null) {
-                update(
-                    downloadId,
-                    current.copy(
+                updateFromTransport(
+                    downloadId = downloadId,
+                    attempt = transportAttempt,
+                    replacement = current.copy(
                         status = OfflineStatus.WAITING_NETWORK,
                         bytesPerSecond = 0L,
                         etaSeconds = -1L,
@@ -439,9 +508,10 @@ class DownloadRepository internal constructor(
                 return
             }
             if (storageTarget(current) == null) {
-                update(
-                    downloadId,
-                    current.copy(
+                updateFromTransport(
+                    downloadId = downloadId,
+                    attempt = transportAttempt,
+                    replacement = current.copy(
                         status = OfflineStatus.WAITING_STORAGE,
                         bytesPerSecond = 0L,
                         etaSeconds = -1L,
@@ -452,54 +522,62 @@ class DownloadRepository internal constructor(
             }
 
             try {
-                performDownload(downloadId)
+                performDownload(downloadId, transportAttempt)
                 return
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: InsufficientSpaceException) {
-                fail(downloadId, error.message ?: "المساحة غير كافية لاكمال التحميل.")
+                fail(downloadId, transportAttempt, error.message ?: "المساحة غير كافية لاكمال التحميل.")
                 return
             } catch (error: StorageUnavailableException) {
-                waitingForStorage(downloadId)
+                waitingForStorage(downloadId, transportAttempt)
                 return
             } catch (error: NetworkUnavailableException) {
-                waitingForNetwork(downloadId)
+                waitingForNetwork(downloadId, transportAttempt)
                 return
             } catch (error: PermanentDownloadException) {
-                fail(downloadId, error.message ?: "تعذر تحميل الملف من الخادم.")
+                fail(downloadId, transportAttempt, error.message ?: "تعذر تحميل الملف من الخادم.")
                 return
             } catch (error: IOException) {
-                currentCoroutineContext().ensureActive()
-                if (finalizeCompletedFileAfterTransportError(downloadId)) return
+                ensureTransportAttemptCurrent(transportAttempt, currentCoroutineContext())
+                if (finalizeCompletedFileAfterTransportError(downloadId, transportAttempt)) return
                 if (networkConstraintMessage() != null) {
-                    waitingForNetwork(downloadId)
+                    waitingForNetwork(downloadId, transportAttempt)
                     return
                 }
                 if (storageTarget(item(downloadId) ?: return) == null) {
-                    waitingForStorage(downloadId)
+                    waitingForStorage(downloadId, transportAttempt)
                     return
                 }
-                attempt += 1
-                if (attempt >= MAX_RETRIES) {
-                    fail(downloadId, "تعذر استئناف التحميل بعد عدة محاولات. اضغط اعادة المحاولة.")
+                retryAttempt += 1
+                if (retryAttempt >= MAX_RETRIES) {
+                    fail(
+                        downloadId,
+                        transportAttempt,
+                        "تعذر استئناف التحميل بعد عدة محاولات. اضغط اعادة المحاولة.",
+                    )
                     return
                 }
-                mutate(downloadId) {
+                mutateFromTransport(downloadId, transportAttempt) {
                     it.copy(
                         status = OfflineStatus.QUEUED,
                         bytesPerSecond = 0L,
                         etaSeconds = -1L,
-                        retryCount = attempt,
+                        retryCount = retryAttempt,
                         errorMessage = "انقطع الاتصال مؤقتا. سيكمل التحميل تلقائيا من اخر نقطة.",
                     )
                 }
-                delay((attempt * 1_500L).coerceAtMost(8_000L))
+                delay((retryAttempt * 1_500L).coerceAtMost(8_000L))
             }
         }
     }
 
     @Throws(IOException::class)
-    private suspend fun performDownload(downloadId: Long) {
+    private suspend fun performDownload(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+    ) {
+        ensureTransportAttemptCurrent(transportAttempt, currentCoroutineContext())
         val startItem = item(downloadId) ?: return
         val runtimeSources = downloadRuntimeSourceCandidates(
             record = startItem,
@@ -510,7 +588,7 @@ class DownloadRepository internal constructor(
         if (runtimeSources.isEmpty()) {
             throw CancellationException("Authenticated download session changed")
         }
-        mutate(downloadId) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 status = OfflineStatus.CHECKING,
                 scheduledAtEpochMs = 0L,
@@ -530,12 +608,12 @@ class DownloadRepository internal constructor(
             runCatching { finalFile.renameTo(partFile) }
         }
 
-        val probe = probe(downloadId, runtimeSources)
+        val probe = probe(downloadId, transportAttempt, runtimeSources)
         var totalBytes = probe.totalBytes
         var existingBytes = partFile.takeIf(File::exists)?.length() ?: 0L
 
         if (totalBytes > 0L && finalFile.exists() && finalFile.length() == totalBytes) {
-            markCompleted(downloadId, finalFile, totalBytes, probe.supportsRange)
+            markCompleted(downloadId, transportAttempt, finalFile, totalBytes, probe.supportsRange)
             return
         }
         if (totalBytes > 0L && existingBytes > totalBytes) {
@@ -548,7 +626,7 @@ class DownloadRepository internal constructor(
         }
 
         checkAvailableSpace(target.directory, totalBytes, existingBytes)
-        mutate(downloadId) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 sourceCandidates = emptyList(),
                 fileName = fileName,
@@ -571,6 +649,7 @@ class DownloadRepository internal constructor(
         while (totalBytes <= 0L || downloaded < totalBytes) {
             var response = executeDownloadCall(
                 downloadId = downloadId,
+                transportAttempt = transportAttempt,
                 url = probe.url,
                 offset = downloaded,
                 useRange = probe.supportsRange,
@@ -578,7 +657,7 @@ class DownloadRepository internal constructor(
             )
             if (downloaded > 0L && response.code == 416 && totalBytes > 0L && downloaded == totalBytes) {
                 response.close()
-                finalizePart(downloadId, partFile, finalFile, totalBytes, probe.supportsRange)
+                finalizePart(downloadId, transportAttempt, partFile, finalFile, totalBytes, probe.supportsRange)
                 return
             }
             if (downloaded > 0L && response.code == 200) {
@@ -587,7 +666,7 @@ class DownloadRepository internal constructor(
                 downloaded = 0L
                 lastReportedBytes = 0L
                 checkAvailableSpace(target.directory, totalBytes, downloaded)
-                mutate(downloadId) {
+                mutateFromTransport(downloadId, transportAttempt) {
                     it.copy(
                         bytesDownloaded = 0L,
                         bytesPerSecond = 0L,
@@ -596,6 +675,7 @@ class DownloadRepository internal constructor(
                 }
                 response = executeDownloadCall(
                     downloadId = downloadId,
+                    transportAttempt = transportAttempt,
                     url = probe.url,
                     offset = 0L,
                     useRange = false,
@@ -622,13 +702,13 @@ class DownloadRepository internal constructor(
                 if (responseTotal > 0L && responseTotal != totalBytes) {
                     totalBytes = responseTotal
                     checkAvailableSpace(target.directory, totalBytes, downloaded)
-                    mutate(downloadId) { it.copy(totalBytes = totalBytes) }
+                    mutateFromTransport(downloadId, transportAttempt) { it.copy(totalBytes = totalBytes) }
                 } else if (totalBytes <= 0L) {
                     val responseLength = body.contentLength()
                     if (responseLength > 0L && activeResponse.code != 206) {
                         totalBytes = downloaded + responseLength
                         checkAvailableSpace(target.directory, totalBytes, downloaded)
-                        mutate(downloadId) { it.copy(totalBytes = totalBytes) }
+                        mutateFromTransport(downloadId, transportAttempt) { it.copy(totalBytes = totalBytes) }
                     }
                 }
 
@@ -649,7 +729,7 @@ class DownloadRepository internal constructor(
                     body.byteStream().use { input ->
                         val buffer = ByteArray(BUFFER_SIZE)
                         while (bytesReadFromResponse < maximumResponseBytes) {
-                            ensureDownloadContextActive(currentCoroutineContext())
+                            ensureTransportAttemptCurrent(transportAttempt, currentCoroutineContext())
                             networkConstraintMessage()?.let { throw NetworkUnavailableException() }
                             if (!target.directory.exists()) throw StorageUnavailableException()
                             if (totalBytes > 0L && downloaded >= totalBytes) break
@@ -671,6 +751,7 @@ class DownloadRepository internal constructor(
                             if (count == 0) {
                                 throw IOException("Download response returned an empty read")
                             }
+                            ensureTransportAttemptCurrent(transportAttempt, currentCoroutineContext())
                             output.write(buffer, 0, count)
                             downloaded += count
                             bytesReadFromResponse += count
@@ -698,7 +779,7 @@ class DownloadRepository internal constructor(
                                 } else {
                                     -1L
                                 }
-                                mutate(downloadId) {
+                                mutateFromTransport(downloadId, transportAttempt) {
                                     it.copy(
                                         status = OfflineStatus.DOWNLOADING,
                                         bytesDownloaded = downloaded,
@@ -731,7 +812,7 @@ class DownloadRepository internal constructor(
                     )
                 }
                 val speed = smoothedSpeed.toLong().coerceAtLeast(0L)
-                mutate(downloadId) {
+                mutateFromTransport(downloadId, transportAttempt) {
                     it.copy(
                         status = OfflineStatus.DOWNLOADING,
                         bytesDownloaded = downloaded,
@@ -746,7 +827,7 @@ class DownloadRepository internal constructor(
                     )
                 }
             }
-            calls.remove(downloadId)
+            clearTrackedCall(downloadId, transportAttempt)
 
             if (!probe.supportsRange || totalBytes <= 0L) {
                 if (totalBytes <= 0L) totalBytes = downloaded
@@ -754,7 +835,7 @@ class DownloadRepository internal constructor(
             }
         }
 
-        mutate(downloadId) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 bytesDownloaded = downloaded,
                 totalBytes = if (totalBytes > 0L) totalBytes else downloaded,
@@ -763,46 +844,60 @@ class DownloadRepository internal constructor(
             )
         }
         val expected = if (totalBytes > 0L) totalBytes else partFile.length()
-        finalizePart(downloadId, partFile, finalFile, expected, probe.supportsRange)
+        finalizePart(downloadId, transportAttempt, partFile, finalFile, expected, probe.supportsRange)
     }
 
-    private fun finalizeCompletedFileAfterTransportError(downloadId: Long): Boolean {
+    private fun finalizeCompletedFileAfterTransportError(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+    ): Boolean {
         val current = item(downloadId) ?: return false
         val expectedBytes = current.totalBytes.takeIf { it > 0L } ?: return false
         val target = storageTarget(current) ?: return false
         val fileName = current.fileName ?: return false
         val finalFile = File(target.directory, fileName)
         if (finalFile.exists() && finalFile.length() == expectedBytes) {
-            markCompleted(downloadId, finalFile, expectedBytes, current.supportsRange ?: false)
+            markCompleted(downloadId, transportAttempt, finalFile, expectedBytes, current.supportsRange ?: false)
             return true
         }
         val partFile = File(target.directory, "$fileName.part")
         if (!partFile.exists() || partFile.length() != expectedBytes) return false
-        return runCatching {
+        return try {
             finalizePart(
                 downloadId = downloadId,
+                transportAttempt = transportAttempt,
                 partFile = partFile,
                 finalFile = finalFile,
                 expectedBytes = expectedBytes,
                 supportsRange = current.supportsRange ?: false,
             )
             true
-        }.getOrDefault(false)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            false
+        }
     }
 
-    private fun executeDownloadCall(
+    private suspend fun executeDownloadCall(
         downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
         url: String,
         offset: Long,
         useRange: Boolean,
         totalBytes: Long,
     ): Response {
+        ensureTransportAttemptCurrent(transportAttempt, currentCoroutineContext())
         val call = client.newCall(buildDownloadRequest(url, offset, useRange, totalBytes))
-        calls[downloadId] = call
+        trackCall(downloadId, transportAttempt, call)
         return call.execute()
     }
 
-    private fun probe(downloadId: Long, candidates: List<String>): Probe {
+    private fun probe(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+        candidates: List<String>,
+    ): Probe {
         var lastError: Throwable? = null
         candidates.forEach { candidate ->
             try {
@@ -814,7 +909,7 @@ class DownloadRepository internal constructor(
                     .header("Range", "bytes=0-0")
                     .build()
                 val call = client.newCall(request)
-                calls[downloadId] = call
+                trackCall(downloadId, transportAttempt, call)
                 call.execute().use { response ->
                     if (!response.isSuccessful) {
                         if (response.code in 400..499 && response.code !in setOf(408, 429)) {
@@ -840,7 +935,7 @@ class DownloadRepository internal constructor(
                 if (error is CancellationException) throw error
                 lastError = error
             } finally {
-                calls.remove(downloadId)
+                clearTrackedCall(downloadId, transportAttempt)
             }
         }
         when (lastError) {
@@ -852,11 +947,15 @@ class DownloadRepository internal constructor(
 
     private fun finalizePart(
         downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
         partFile: File,
         finalFile: File,
         expectedBytes: Long,
         supportsRange: Boolean,
     ) {
+        if (!transportAttempts.owns(transportAttempt)) {
+            throw CancellationException("Download transport attempt is no longer current")
+        }
         if (!partFile.exists()) throw IOException("ملف التحميل المؤقت غير موجود.")
         if (expectedBytes > 0L && partFile.length() != expectedBytes) {
             throw IOException("حجم الملف غير مكتمل.")
@@ -871,14 +970,23 @@ class DownloadRepository internal constructor(
             finalFile.delete()
             throw IOException("فشل التحقق من سلامة الملف.")
         }
-        markCompleted(downloadId, finalFile, actualBytes, supportsRange)
+        markCompleted(downloadId, transportAttempt, finalFile, actualBytes, supportsRange)
     }
 
-    private fun markCompleted(downloadId: Long, file: File, bytes: Long, supportsRange: Boolean) {
+    private fun markCompleted(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+        file: File,
+        bytes: Long,
+        supportsRange: Boolean,
+    ) {
+        if (!transportAttempts.owns(transportAttempt)) {
+            throw CancellationException("Download transport attempt is no longer current")
+        }
         if (!completedDownloadFileIsUsable(file, bytes)) {
             throw IOException("فشل التحقق من قابلية قراءة الملف المكتمل.")
         }
-        mutate(downloadId) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 status = OfflineStatus.COMPLETED,
                 bytesDownloaded = bytes,
@@ -907,8 +1015,11 @@ class DownloadRepository internal constructor(
         }
     }
 
-    private fun waitingForNetwork(downloadId: Long) {
-        mutate(downloadId) {
+    private fun waitingForNetwork(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+    ) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 status = OfflineStatus.WAITING_NETWORK,
                 bytesPerSecond = 0L,
@@ -919,8 +1030,11 @@ class DownloadRepository internal constructor(
         }
     }
 
-    private fun waitingForStorage(downloadId: Long) {
-        mutate(downloadId) {
+    private fun waitingForStorage(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+    ) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 status = OfflineStatus.WAITING_STORAGE,
                 bytesPerSecond = 0L,
@@ -930,8 +1044,12 @@ class DownloadRepository internal constructor(
         }
     }
 
-    private fun fail(downloadId: Long, message: String) {
-        mutate(downloadId) {
+    private fun fail(
+        downloadId: Long,
+        transportAttempt: DownloadTransportAttemptRegistry.Attempt,
+        message: String,
+    ) {
+        mutateFromTransport(downloadId, transportAttempt) {
             it.copy(
                 status = OfflineStatus.FAILED,
                 bytesPerSecond = 0L,
@@ -1062,13 +1180,25 @@ class DownloadRepository internal constructor(
         if (uri.startsWith("file:")) Uri.parse(uri).path?.let(::File) else null
     }.getOrNull()
 
-    private fun item(downloadId: Long): OfflineDownload? = synchronized(lock) {
-        cache.firstOrNull { it.downloadId == downloadId }
+    private fun ensureTransportAttemptCurrent(
+        attempt: DownloadTransportAttemptRegistry.Attempt,
+        context: CoroutineContext,
+    ) {
+        context.ensureActive()
+        if (!transportAttempts.owns(attempt)) {
+            throw CancellationException("Download transport attempt is no longer current")
+        }
     }
 
-    private fun update(downloadId: Long, replacement: OfflineDownload) {
+    private fun updateFromTransport(
+        downloadId: Long,
+        attempt: DownloadTransportAttemptRegistry.Attempt,
+        replacement: OfflineDownload,
+    ) {
         synchronized(lock) {
-            if (accountBoundarySuspended) return
+            if (accountBoundarySuspended || !transportAttempts.owns(attempt)) {
+                throw CancellationException("Download transport attempt is no longer current")
+            }
             val index = cache.indexOfFirst { it.downloadId == downloadId }
             if (index >= 0) {
                 cache[index] = replacement.copy(sourceCandidates = emptyList())
@@ -1078,11 +1208,57 @@ class DownloadRepository internal constructor(
         }
     }
 
-    private inline fun mutate(downloadId: Long, transform: (OfflineDownload) -> OfflineDownload) {
+    private inline fun mutateFromTransport(
+        downloadId: Long,
+        attempt: DownloadTransportAttemptRegistry.Attempt,
+        transform: (OfflineDownload) -> OfflineDownload,
+    ) {
         synchronized(lock) {
-            if (accountBoundarySuspended) return
+            if (accountBoundarySuspended || !transportAttempts.owns(attempt)) {
+                throw CancellationException("Download transport attempt is no longer current")
+            }
             mutateLocked(downloadId, transform)
         }
+    }
+
+    private fun trackCall(
+        downloadId: Long,
+        attempt: DownloadTransportAttemptRegistry.Attempt,
+        call: Call,
+    ): TrackedDownloadCall {
+        val tracked = TrackedDownloadCall(attempt = attempt, call = call)
+        synchronized(lock) {
+            if (accountBoundarySuspended || !transportAttempts.owns(attempt)) {
+                call.cancel()
+                throw CancellationException("Download transport attempt is no longer current")
+            }
+            calls[downloadId] = tracked
+        }
+        return tracked
+    }
+
+    private fun clearTrackedCall(
+        downloadId: Long,
+        attempt: DownloadTransportAttemptRegistry.Attempt,
+    ) {
+        val tracked = calls[downloadId] ?: return
+        if (tracked.attempt !== attempt) return
+        calls.remove(downloadId, tracked)
+    }
+
+    private fun cancelTrackedCall(
+        downloadId: Long,
+        attempt: DownloadTransportAttemptRegistry.Attempt,
+    ) {
+        val tracked = calls[downloadId] ?: return
+        if (tracked.attempt !== attempt) return
+        if (calls.remove(downloadId, tracked)) {
+            tracked.call.cancel()
+        }
+    }
+
+    private fun item(downloadId: Long): OfflineDownload? = synchronized(lock) {
+        cache.firstOrNull { it.downloadId == downloadId }
     }
 
     private inline fun mutateLocked(downloadId: Long, transform: (OfflineDownload) -> OfflineDownload) {
@@ -1270,6 +1446,11 @@ class DownloadRepository internal constructor(
         val url: String,
         val totalBytes: Long,
         val supportsRange: Boolean,
+    )
+
+    private data class TrackedDownloadCall(
+        val attempt: DownloadTransportAttemptRegistry.Attempt,
+        val call: Call,
     )
 
     private class InsufficientSpaceException(message: String) : IOException(message)

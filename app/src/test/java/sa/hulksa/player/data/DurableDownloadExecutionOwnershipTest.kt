@@ -4,6 +4,7 @@ import java.io.File
 import kotlin.io.path.createTempDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,17 +12,33 @@ import sa.hulksa.player.model.OfflineStatus
 
 class DurableDownloadExecutionOwnershipTest {
     @Test
-    fun `durable execution lease prevents duplicate ownership`() {
-        assertTrue(DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L))
-        try {
-            assertFalse(DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L))
-            assertTrue(DurableDownloadExecutionLeaseRegistry.claim("account-a", 43L))
-            DurableDownloadExecutionLeaseRegistry.release("account-a", 43L)
-        } finally {
-            DurableDownloadExecutionLeaseRegistry.release("account-a", 42L)
-        }
-        assertTrue(DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L))
-        DurableDownloadExecutionLeaseRegistry.release("account-a", 42L)
+    fun `stale worker cleanup cannot release replacement lease`() {
+        val first = DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L)
+        assertNotNull(first)
+        first ?: return
+        assertNull(DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L))
+
+        assertTrue(DurableDownloadExecutionLeaseRegistry.release(first))
+        val replacement = DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L)
+        assertNotNull(replacement)
+        replacement ?: return
+
+        assertFalse(DurableDownloadExecutionLeaseRegistry.release(first))
+        assertTrue(DurableDownloadExecutionLeaseRegistry.owns("account-a", 42L))
+        assertNull(DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L))
+
+        assertTrue(DurableDownloadExecutionLeaseRegistry.release(replacement))
+        assertFalse(DurableDownloadExecutionLeaseRegistry.owns("account-a", 42L))
+    }
+
+    @Test
+    fun `durable execution lease is isolated by download id`() {
+        val first = DurableDownloadExecutionLeaseRegistry.claim("account-a", 42L)
+        val second = DurableDownloadExecutionLeaseRegistry.claim("account-a", 43L)
+        assertNotNull(first)
+        assertNotNull(second)
+        first?.let(DurableDownloadExecutionLeaseRegistry::release)
+        second?.let(DurableDownloadExecutionLeaseRegistry::release)
     }
 
     @Test

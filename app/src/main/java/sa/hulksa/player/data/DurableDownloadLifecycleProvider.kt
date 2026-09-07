@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.ContentProvider
+import android.content.Context
 import android.content.ContentValues
 import android.content.SharedPreferences
 import android.database.Cursor
@@ -11,10 +12,30 @@ import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sa.hulksa.player.model.OfflineStatus
+
+internal suspend fun runDurableDownloadStartupMaintenance(
+    scrubPersistedCredentials: () -> Boolean,
+    captureLegacyOwner: () -> Boolean,
+): Boolean = withContext(Dispatchers.IO) {
+    try {
+        scrubPersistedCredentials() && captureLegacyOwner()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        false
+    }
+}
 
 internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var store: DurableDownloadPreferenceStore? = null
     private var bridge: DurableDownloadLifecycleBridge? = null
     private var accountScopeStore: AccountScopeStore? = null
@@ -49,8 +70,19 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
 
     override fun onCreate(): Boolean {
         val appContext = context?.applicationContext ?: return false
-        scrubPersistedDownloadCredentialUrls(appContext)
-        DownloadRepositoryProcessOwner.captureLegacyOwner(appContext)
+        startupScope.launch {
+            val maintenanceComplete = runDurableDownloadStartupMaintenance(
+                scrubPersistedCredentials = { scrubPersistedDownloadCredentialUrls(appContext) },
+                captureLegacyOwner = { DownloadRepositoryProcessOwner.captureLegacyOwner(appContext) },
+            )
+            if (maintenanceComplete) {
+                initializeLifecycle(appContext)
+            }
+        }
+        return true
+    }
+
+    private fun initializeLifecycle(appContext: Context) {
         accountScopeStore = AccountScopeStore(appContext).also { accountScope ->
             accountScope.registerActiveAccountListener(accountScopeListener)
         }
@@ -63,11 +95,8 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
                 networkCallback,
             )
         }
-        mainHandler.post {
-            bridge = DurableDownloadLifecycleBridge(appContext)
-            reconcile()
-        }
-        return true
+        bridge = DurableDownloadLifecycleBridge(appContext)
+        reconcile()
     }
 
     private fun requestNetworkRecoveryIfUsable(network: Network) {

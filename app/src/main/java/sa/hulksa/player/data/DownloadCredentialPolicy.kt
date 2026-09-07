@@ -103,7 +103,7 @@ internal fun downloadRuntimeSourceCandidates(
  * source URLs are removed and credential-bearing artwork metadata is scrubbed
  * across inactive account namespaces as well as the active account.
  */
-internal fun scrubPersistedDownloadCredentialUrls(context: Context) {
+internal fun scrubPersistedDownloadCredentialUrls(context: Context): Boolean {
     val appContext = context.applicationContext
     val sharedPrefsDirectory = File(appContext.applicationInfo.dataDir, "shared_prefs")
     val existingNames = sharedPrefsDirectory.listFiles().orEmpty()
@@ -114,14 +114,15 @@ internal fun scrubPersistedDownloadCredentialUrls(context: Context) {
     val downloadNames = existingNames.filterTo(linkedSetOf()) {
         it == downloadBase || it.startsWith("$downloadBase.account.")
     }.apply { add(downloadBase) }
+    var persisted = true
     downloadNames.forEach { name ->
         val preferences = appContext.getSharedPreferences(name, Context.MODE_PRIVATE)
         val raw = preferences.getString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, null)
         val sanitized = sanitizePersistedDownloadJson(raw)
         if (sanitized != raw) {
-            preferences.edit()
+            persisted = preferences.edit()
                 .putString(DurableDownloadPreferenceStore.KEY_DOWNLOADS, sanitized)
-                .commit()
+                .commit() && persisted
         }
     }
 
@@ -133,23 +134,24 @@ internal fun scrubPersistedDownloadCredentialUrls(context: Context) {
                 name.startsWith("hulk_profile_content_search_history_v2.account.")
         }
         .forEach { name ->
-            scrubCredentialBearingMetadataPreferences(
+            persisted = scrubCredentialBearingMetadataPreferences(
                 appContext.getSharedPreferences(name, Context.MODE_PRIVATE),
-            )
+            ) && persisted
         }
+    return persisted
 }
 
-private fun scrubCredentialBearingMetadataPreferences(preferences: SharedPreferences) {
+private fun scrubCredentialBearingMetadataPreferences(preferences: SharedPreferences): Boolean {
     val replacements = mutableMapOf<String, String>()
     preferences.all.forEach { (key, value) ->
         val raw = value as? String ?: return@forEach
         val sanitized = sanitizePersistedMetadataJson(raw)
         if (sanitized != raw) replacements[key] = sanitized
     }
-    if (replacements.isEmpty()) return
+    if (replacements.isEmpty()) return true
     val editor = preferences.edit()
     replacements.forEach { (key, value) -> editor.putString(key, value) }
-    editor.commit()
+    return editor.commit()
 }
 
 private fun sanitizePersistedMetadataJson(raw: String): String = runCatching {
