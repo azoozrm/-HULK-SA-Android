@@ -183,7 +183,7 @@ fun KidsProfileExperience(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
-                                    if (download == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(download)
+                                    if (download == null) viewModel.downloadSelectedMovie { } else viewModel.retryDownload(download)
                                 },
                                 onCancelDownload = { download?.let(viewModel::deleteDownload) },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
@@ -204,7 +204,7 @@ fun KidsProfileExperience(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
-                                    if (download == null) viewModel.downloadSelectedMovie() else viewModel.retryDownload(download)
+                                    if (download == null) viewModel.downloadSelectedMovie { } else viewModel.retryDownload(download)
                                 },
                                 onCancelDownload = { download?.let(viewModel::deleteDownload) },
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
@@ -253,7 +253,7 @@ fun KidsProfileExperience(
                                 onPlay = viewModel::playEpisode,
                                 onDownload = { episode ->
                                     val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                    if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing)
+                                    if (existing == null) viewModel.downloadEpisode(episode) { } else viewModel.retryDownload(existing)
                                 },
                                 onCancelDownload = { episode ->
                                     state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
@@ -295,7 +295,7 @@ fun KidsProfileExperience(
                                 onPlay = viewModel::playEpisode,
                                 onDownload = { episode ->
                                     val existing = state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }
-                                    if (existing == null) viewModel.downloadEpisode(episode) else viewModel.retryDownload(existing)
+                                    if (existing == null) viewModel.downloadEpisode(episode) { } else viewModel.retryDownload(existing)
                                 },
                                 onCancelDownload = { episode ->
                                     state.downloads.firstOrNull { it.historyKey == "SERIES:${episode.id}" }

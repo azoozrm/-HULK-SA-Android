@@ -53,6 +53,7 @@ import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
 import sa.hulksa.player.data.buildEpisodeNotificationPopups
 import sa.hulksa.player.data.canUseSeriesEpisodeNotifications
+import sa.hulksa.player.data.downloadOwnerContextMatches
 import sa.hulksa.player.data.downloadRemovalContextMatches
 import sa.hulksa.player.data.effectiveOperationsServiceStatus
 import sa.hulksa.player.data.eligibleOperationsAnnouncements
@@ -218,6 +219,27 @@ internal suspend fun runDownloadRemovalOffMain(
     removal()
 }
 
+internal suspend fun <T> runDownloadEnqueueOffMain(
+    enqueue: () -> T,
+): T = withContext(Dispatchers.IO) {
+    enqueue()
+}
+
+internal fun downloadEnqueuePublicationAllowed(
+    sameSession: Boolean,
+    expectedAccountId: String,
+    expectedProfileId: String,
+    activeAccountId: String?,
+    activeProfileId: String,
+): Boolean =
+    sameSession &&
+        downloadOwnerContextMatches(
+            expectedAccountId = expectedAccountId,
+            expectedProfileId = expectedProfileId,
+            activeAccountId = activeAccountId,
+            activeProfileId = activeProfileId,
+        )
+
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
     private val repository = HulkRepository(application)
@@ -281,6 +303,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var tvPlatformSyncJob: Job? = null
     private var tvPlatformClearJob: Job? = null
     private var tvDeepLinkEpisodeJob: Job? = null
+    private val pendingDownloadEnqueues = mutableSetOf<String>()
     private var tvPlatformProfileReady: Boolean = false
     private var tvPlatformGeneration: Long = 0L
     private var tvExpectedProfileScopeId: String? = null
@@ -905,27 +928,50 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         startPlayback(repository.playback(activeSession, channel))
     }
 
-    fun downloadSelectedMovie(): String {
+    fun downloadSelectedMovie(onResult: (String) -> Unit) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            onResult("التنزيلات متوقفة مؤقتًا.")
+            return
         }
-        val activeSession = session ?: return "سجل الدخول اولا لبدء التحميل."
+        val activeSession = session
+        if (activeSession == null) {
+            onResult("سجل الدخول اولا لبدء التحميل.")
+            return
+        }
         val movie = mutableState.value.selectedItem?.takeIf { it.type == ContentType.MOVIE }
-            ?: return "تعذر تحديد الفيلم."
-        return enqueueDownload(repository.playback(activeSession, movie))
+        if (movie == null) {
+            onResult("تعذر تحديد الفيلم.")
+            return
+        }
+        enqueueDownload(
+            request = repository.playback(activeSession, movie),
+            expectedSession = activeSession,
+            onResult = onResult,
+        )
     }
 
-    fun downloadEpisode(episode: Episode): String {
+    fun downloadEpisode(episode: Episode, onResult: (String) -> Unit) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            onResult("التنزيلات متوقفة مؤقتًا.")
+            return
         }
-        val activeSession = session ?: return "سجل الدخول اولا لبدء التحميل."
-        val series = mutableState.value.selectedSeries ?: return "تعذر تحديد المسلسل."
-        return enqueueDownload(
+        val activeSession = session
+        if (activeSession == null) {
+            onResult("سجل الدخول اولا لبدء التحميل.")
+            return
+        }
+        val series = mutableState.value.selectedSeries
+        if (series == null) {
+            onResult("تعذر تحديد المسلسل.")
+            return
+        }
+        enqueueDownload(
             request = repository.playback(activeSession, series, episode),
+            expectedSession = activeSession,
             seriesTitle = series.name,
             season = episode.season,
             episodeNumber = episode.episodeNumber,
+            onResult = onResult,
         )
     }
 
@@ -2805,27 +2851,77 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun enqueueDownload(
         request: PlaybackRequest,
+        expectedSession: AuthenticatedSession,
         seriesTitle: String? = null,
         season: Int? = null,
         episodeNumber: Int? = null,
-    ): String {
-        return when (
-            val result = downloadRepository.enqueue(
-                request = request,
-                seriesTitle = seriesTitle,
-                season = season,
-                episodeNumber = episodeNumber,
-            )
-        ) {
-            is DownloadRepository.EnqueueResult.Started -> {
-                mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                "بدا فحص حجم ${result.item.title} والمساحة المتاحة."
+        onResult: (String) -> Unit,
+    ) {
+        if (!pendingDownloadEnqueues.add(request.historyKey)) {
+            onResult("جار بدء هذا التحميل.")
+            return
+        }
+        val expectedAccountId = repository.activeAccountSession()?.accountId
+        val expectedProfileId = profileStore.activeProfileId()
+        if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
+            pendingDownloadEnqueues.remove(request.historyKey)
+            onResult("تعذر تثبيت مالك التحميل.")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val outcome = runDownloadEnqueueOffMain {
+                    downloadRepository.enqueue(
+                        request = request,
+                        expectedAccountId = expectedAccountId,
+                        expectedProfileId = expectedProfileId,
+                        seriesTitle = seriesTitle,
+                        season = season,
+                        episodeNumber = episodeNumber,
+                    )
+                }
+                if (
+                    !downloadEnqueuePublicationAllowed(
+                        sameSession = session === expectedSession,
+                        expectedAccountId = expectedAccountId,
+                        expectedProfileId = expectedProfileId,
+                        activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                        activeProfileId = profileStore.activeProfileId(),
+                    )
+                ) {
+                    return@launch
+                }
+
+                val message = when (val result = outcome.result) {
+                    is DownloadRepository.EnqueueResult.Started -> {
+                        mutableState.update { it.copy(downloads = outcome.downloads) }
+                        "بدا فحص حجم ${result.item.title} والمساحة المتاحة."
+                    }
+                    is DownloadRepository.EnqueueResult.AlreadyExists -> when (result.item.status) {
+                        OfflineStatus.COMPLETED -> "هذا المحتوى محمل بالفعل."
+                        else -> "هذا المحتوى موجود في قائمة التحميلات."
+                    }
+                    is DownloadRepository.EnqueueResult.Failed -> result.message
+                }
+                onResult(message)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                if (
+                    downloadEnqueuePublicationAllowed(
+                        sameSession = session === expectedSession,
+                        expectedAccountId = expectedAccountId,
+                        expectedProfileId = expectedProfileId,
+                        activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                        activeProfileId = profileStore.activeProfileId(),
+                    )
+                ) {
+                    onResult("تعذر بدء التحميل. حاول مرة اخرى.")
+                }
+            } finally {
+                pendingDownloadEnqueues.remove(request.historyKey)
             }
-            is DownloadRepository.EnqueueResult.AlreadyExists -> when (result.item.status) {
-                OfflineStatus.COMPLETED -> "هذا المحتوى محمل بالفعل."
-                else -> "هذا المحتوى موجود في قائمة التحميلات."
-            }
-            is DownloadRepository.EnqueueResult.Failed -> result.message
         }
     }
 

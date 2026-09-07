@@ -63,7 +63,7 @@ internal fun accountDownloadAccessAllowed(
         recordAccountId.isNotBlank() &&
         recordAccountId == activeAccountId
 
-internal fun downloadRemovalContextMatches(
+internal fun downloadOwnerContextMatches(
     expectedAccountId: String,
     expectedProfileId: String,
     activeAccountId: String?,
@@ -73,6 +73,18 @@ internal fun downloadRemovalContextMatches(
         expectedProfileId.isNotBlank() &&
         expectedAccountId == activeAccountId &&
         expectedProfileId == activeProfileId
+
+internal fun downloadRemovalContextMatches(
+    expectedAccountId: String,
+    expectedProfileId: String,
+    activeAccountId: String?,
+    activeProfileId: String,
+): Boolean = downloadOwnerContextMatches(
+    expectedAccountId = expectedAccountId,
+    expectedProfileId = expectedProfileId,
+    activeAccountId = activeAccountId,
+    activeProfileId = activeProfileId,
+)
 
 /**
  * Captures the pre-existing account owner before a new login can claim account
@@ -87,11 +99,11 @@ internal class DownloadAccountStorage(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun captureLegacyOwner() {
+    fun captureLegacyOwner(): Boolean {
         synchronized(MIGRATION_LOCK) {
-            if (migrationState.getBoolean(KEY_LEGACY_OWNER_CAPTURED, false)) return
+            if (migrationState.getBoolean(KEY_LEGACY_OWNER_CAPTURED, false)) return true
             val legacyOwner = accountScope.legacyOwnerAccountId()
-            migrationState.edit()
+            return migrationState.edit()
                 .putBoolean(KEY_LEGACY_OWNER_CAPTURED, true)
                 .apply {
                     if (legacyOwner == null) {
@@ -106,7 +118,7 @@ internal class DownloadAccountStorage(context: Context) {
 
     fun preferences(baseName: String, accountId: String): SharedPreferences {
         synchronized(MIGRATION_LOCK) {
-            captureLegacyOwner()
+            check(captureLegacyOwner()) { "Unable to capture legacy download owner" }
             val normalizedAccountId = accountId.trim().takeIf(String::isNotEmpty)
                 ?: throw IllegalArgumentException("accountId must not be blank")
             val scoped = appContext.getSharedPreferences(
@@ -126,7 +138,9 @@ internal class DownloadAccountStorage(context: Context) {
                     target = editor,
                 )
             }
-            editor.putBoolean(KEY_ACCOUNT_DOWNLOAD_SCOPE_MIGRATED, true).commit()
+            check(editor.putBoolean(KEY_ACCOUNT_DOWNLOAD_SCOPE_MIGRATED, true).commit()) {
+                "Unable to persist download account migration"
+            }
             return scoped
         }
     }
@@ -164,9 +178,8 @@ internal class DownloadAccountStorage(context: Context) {
 internal object DownloadRepositoryProcessOwner {
     private val instances = mutableMapOf<String, DownloadRepository>()
 
-    fun captureLegacyOwner(context: Context) {
+    fun captureLegacyOwner(context: Context): Boolean =
         DownloadAccountStorage(context.applicationContext).captureLegacyOwner()
-    }
 
     @Synchronized
     fun get(context: Context, accountId: String): DownloadRepository {
@@ -221,6 +234,11 @@ internal object DownloadRepositoryProcessOwner {
  * by more than one profile in that account, avoiding duplicate files while
  * keeping each profile's Downloads screen isolated.
  */
+internal data class ProfileDownloadEnqueueOutcome(
+    val result: DownloadRepository.EnqueueResult,
+    val downloads: List<OfflineDownload>,
+)
+
 internal class ProfileScopedDownloadRepository(context: Context) {
     private val appContext = context.applicationContext
     private val accountSessionStore = AccountSessionStore(appContext)
@@ -259,41 +277,80 @@ internal class ProfileScopedDownloadRepository(context: Context) {
 
     fun enqueue(
         request: PlaybackRequest,
+        expectedAccountId: String,
+        expectedProfileId: String,
         seriesTitle: String? = null,
         season: Int? = null,
         episodeNumber: Int? = null,
-    ): DownloadRepository.EnqueueResult {
+    ): ProfileDownloadEnqueueOutcome {
+        if (
+            !downloadOwnerContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) {
+            return ProfileDownloadEnqueueOutcome(
+                result = DownloadRepository.EnqueueResult.Failed("تغير المستخدم قبل بدء التحميل."),
+                downloads = emptyList(),
+            )
+        }
         val binding = activeBinding()
-            ?: return DownloadRepository.EnqueueResult.Failed("سجل الدخول قبل بدء التحميل.")
-        val profileId = profileStore.activeProfileId()
+            ?: return ProfileDownloadEnqueueOutcome(
+                result = DownloadRepository.EnqueueResult.Failed("سجل الدخول قبل بدء التحميل."),
+                downloads = emptyList(),
+            )
+        if (binding.accountId != expectedAccountId) {
+            return ProfileDownloadEnqueueOutcome(
+                result = DownloadRepository.EnqueueResult.Failed("تغير الحساب قبل بدء التحميل."),
+                downloads = emptyList(),
+            )
+        }
         val existing = binding.delegate.snapshot().firstOrNull { it.historyKey == request.historyKey }
         val ownersBefore = if (existing != null) {
             binding.ownershipStore.ownersForExistingDownload(request.historyKey)
         } else {
             binding.ownershipStore.explicitOwners(request.historyKey).orEmpty()
         }
-        val alreadyOwned = profileId in ownersBefore
+        val alreadyOwned = expectedProfileId in ownersBefore
 
-        binding.ownershipStore.addOwner(
-            historyKey = request.historyKey,
-            profileId = profileId,
-            includeLegacyPrimary = existing != null,
-        )
+        if (
+            !binding.ownershipStore.addOwner(
+                historyKey = request.historyKey,
+                profileId = expectedProfileId,
+                includeLegacyPrimary = existing != null,
+            )
+        ) {
+            return ProfileDownloadEnqueueOutcome(
+                result = DownloadRepository.EnqueueResult.Failed("تعذر حفظ ملكية التحميل."),
+                downloads = snapshotForOwner(binding, expectedAccountId, expectedProfileId),
+            )
+        }
 
         return try {
-            binding.delegate.enqueue(
+            val result = binding.delegate.enqueue(
                 request = request,
                 seriesTitle = seriesTitle,
                 season = season,
                 episodeNumber = episodeNumber,
-            ).also { result ->
-                if (result is DownloadRepository.EnqueueResult.Failed && !alreadyOwned) {
-                    binding.ownershipStore.removeExplicitOwner(request.historyKey, profileId)
+            )
+            val persistedResult = if (result is DownloadRepository.EnqueueResult.Failed && !alreadyOwned) {
+                if (binding.ownershipStore.removeExplicitOwner(request.historyKey, expectedProfileId)) {
+                    result
+                } else {
+                    DownloadRepository.EnqueueResult.Failed("تعذر حفظ حالة التحميل.")
                 }
+            } else {
+                result
             }
+            ProfileDownloadEnqueueOutcome(
+                result = persistedResult,
+                downloads = snapshotForOwner(binding, expectedAccountId, expectedProfileId),
+            )
         } catch (error: Throwable) {
             if (!alreadyOwned) {
-                binding.ownershipStore.removeExplicitOwner(request.historyKey, profileId)
+                binding.ownershipStore.removeExplicitOwner(request.historyKey, expectedProfileId)
             }
             throw error
         }
@@ -398,6 +455,18 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         DownloadRepositoryProcessOwner.suspendAccount(appContext, accountId)
     }
 
+    private fun snapshotForOwner(
+        binding: Binding,
+        accountId: String,
+        profileId: String,
+    ): List<OfflineDownload> = ProfileDownloadSnapshotList(
+        accountId = binding.accountId,
+        allDownloads = binding.delegate.snapshot(),
+        activeAccountId = { accountId },
+        activeProfileId = { profileId },
+        ownersForExistingDownload = binding.ownershipStore::ownersForExistingDownload,
+    )
+
     private fun owns(binding: Binding, downloadId: Long): Boolean {
         val item = binding.delegate.record(downloadId) ?: return false
         return accountDownloadAccessAllowed(
@@ -410,7 +479,7 @@ internal class ProfileScopedDownloadRepository(context: Context) {
 
     private fun activeBinding(): Binding? {
         val binding = activeSnapshotBinding() ?: return null
-        binding.ownershipStore.migrateLegacy(binding.delegate.snapshot())
+        if (!binding.ownershipStore.migrateLegacy(binding.delegate.snapshot())) return null
         return binding
     }
 
@@ -516,8 +585,8 @@ private class ProfileDownloadOwnershipStore(
     )
 
     @Synchronized
-    fun migrateLegacy(downloads: List<OfflineDownload>) {
-        if (preferences.getBoolean(KEY_LEGACY_MIGRATION_COMPLETE, false)) return
+    fun migrateLegacy(downloads: List<OfflineDownload>): Boolean {
+        if (preferences.getBoolean(KEY_LEGACY_MIGRATION_COMPLETE, false)) return true
         val editor = preferences.edit()
         downloads.forEach { item ->
             val key = ownersKey(item.historyKey)
@@ -525,7 +594,7 @@ private class ProfileDownloadOwnershipStore(
                 editor.putStringSet(key, setOf(ProfileStore.PRIMARY_PROFILE_ID))
             }
         }
-        editor.putBoolean(KEY_LEGACY_MIGRATION_COMPLETE, true).commit()
+        return editor.putBoolean(KEY_LEGACY_MIGRATION_COMPLETE, true).commit()
     }
 
     @Synchronized
@@ -550,11 +619,12 @@ private class ProfileDownloadOwnershipStore(
         historyKey: String,
         profileId: String,
         includeLegacyPrimary: Boolean,
-    ) {
+    ): Boolean {
         val current = explicitOwners(historyKey)
             ?: if (includeLegacyPrimary) setOf(ProfileStore.PRIMARY_PROFILE_ID) else emptySet()
         val updated = current + profileId
-        preferences.edit().putStringSet(ownersKey(historyKey), updated).commit()
+        if (updated == current && explicitOwners(historyKey) != null) return true
+        return preferences.edit().putStringSet(ownersKey(historyKey), updated).commit()
     }
 
     @Synchronized
@@ -572,10 +642,10 @@ private class ProfileDownloadOwnershipStore(
     }
 
     @Synchronized
-    fun removeExplicitOwner(historyKey: String, profileId: String) {
-        val current = explicitOwners(historyKey) ?: return
+    fun removeExplicitOwner(historyKey: String, profileId: String): Boolean {
+        val current = explicitOwners(historyKey) ?: return true
         val updated = current - profileId
-        if (updated.isEmpty()) {
+        return if (updated.isEmpty()) {
             preferences.edit().remove(ownersKey(historyKey)).commit()
         } else {
             preferences.edit().putStringSet(ownersKey(historyKey), updated).commit()

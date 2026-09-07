@@ -3,6 +3,8 @@ package sa.hulksa.player.data
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -97,5 +99,26 @@ class DownloadTransportPolicyTest {
         }
 
         assertTrue(cancellationObserved)
+    }
+
+    @Test
+    fun `invalidated writer retains slot until cleanup releases its attempt`() {
+        val registry = DownloadTransportAttemptRegistry()
+        val first = registry.newAttempt(42L)
+        assertTrue(registry.claim(first))
+        assertTrue(registry.owns(first))
+
+        assertEquals(first, registry.invalidate(42L))
+        assertFalse(registry.owns(first))
+        val replacement = registry.newAttempt(42L)
+        assertNotEquals(first.generation, replacement.generation)
+        assertFalse(registry.claim(replacement))
+
+        assertTrue(registry.release(first))
+        assertTrue(registry.claim(replacement))
+        assertTrue(registry.owns(replacement))
+        assertFalse(registry.release(first))
+        assertTrue(registry.owns(replacement))
+        assertTrue(registry.release(replacement))
     }
 }

@@ -76,10 +76,10 @@ internal class DownloadExecutionEntryPoint(
         accountId: String,
         downloadId: Long,
     ): DurableDownloadExecutionResult {
-        if (!DurableDownloadExecutionLeaseRegistry.claim(accountId, downloadId)) {
-            return DurableDownloadExecutionResult.RETRY
-        }
+        val executionLease = DurableDownloadExecutionLeaseRegistry.claim(accountId, downloadId)
+            ?: return DurableDownloadExecutionResult.RETRY
         var repository: DownloadRepository? = null
+        var leaseReleasedForCancellation = false
         return try {
             repository = repositoryProvider(accountId)
             if (!downloadWorkerOwnsRecord(accountId, repository, downloadId)) {
@@ -93,11 +93,14 @@ internal class DownloadExecutionEntryPoint(
         } catch (cancelled: CancellationException) {
             // Drop the execution lease before cancelling the repository job. Its finally block
             // re-runs scheduling, and must not be able to restart transport after worker stop.
-            DurableDownloadExecutionLeaseRegistry.release(accountId, downloadId)
+            DurableDownloadExecutionLeaseRegistry.release(executionLease)
+            leaseReleasedForCancellation = true
             repository?.interruptForDurableWorkerStop(downloadId)
             throw cancelled
         } finally {
-            DurableDownloadExecutionLeaseRegistry.release(accountId, downloadId)
+            if (!leaseReleasedForCancellation) {
+                DurableDownloadExecutionLeaseRegistry.release(executionLease)
+            }
         }
     }
 }

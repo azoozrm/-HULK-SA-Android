@@ -293,13 +293,11 @@ fun HulkApp(
                                 onBack = viewModel::back,
                                 onPlay = viewModel::playSelectedMovie,
                                 onDownload = {
-                                    notify(
-                                        if (movieDownload == null) {
-                                            viewModel.downloadSelectedMovie()
-                                        } else {
-                                            viewModel.retryDownload(movieDownload)
-                                        },
-                                    )
+                                    if (movieDownload == null) {
+                                        viewModel.downloadSelectedMovie(notify)
+                                    } else {
+                                        notify(viewModel.retryDownload(movieDownload))
+                                    }
                                 },
                                 onCancelDownload = {
                                     movieDownload?.let {
@@ -368,13 +366,11 @@ fun HulkApp(
                                     val existing = state.downloads.firstOrNull {
                                         it.historyKey == "SERIES:${episode.id}"
                                     }
-                                    notify(
-                                        if (existing == null) {
-                                            viewModel.downloadEpisode(episode)
-                                        } else {
-                                            viewModel.retryDownload(existing)
-                                        },
-                                    )
+                                    if (existing == null) {
+                                        viewModel.downloadEpisode(episode, notify)
+                                    } else {
+                                        notify(viewModel.retryDownload(existing))
+                                    }
                                 },
                                 onCancelDownload = { episode ->
                                     state.downloads.firstOrNull {
