@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.model.ContentDetails
@@ -97,6 +99,12 @@ private data class DetailsTvPolishMetrics(
 private data class DetailsTvMovieTechnical(
     val quality: String? = null,
     val durationMs: Long? = null,
+)
+
+private data class DetailsTvLazyFocusRequest(
+    val sourceItemKey: String,
+    val targetItemKey: String,
+    val targetRequester: FocusRequester,
 )
 
 private fun detailsTvPolishMetrics(widthDp: Int, heightDp: Int): DetailsTvPolishMetrics {
@@ -701,6 +709,28 @@ private fun SeriesDetailsProTvPolished(
     val firstSeasonRequester = seasonRequesters.firstOrNull()
     val heroDownTarget = firstSeasonRequester ?: firstEpisodeRequester
     val listState = rememberLazyListState()
+    var pendingLazyFocus by remember(series.id, selectedSeason) {
+        mutableStateOf<DetailsTvLazyFocusRequest?>(null)
+    }
+
+    LaunchedEffect(pendingLazyFocus, listState) {
+        val request = pendingLazyFocus ?: return@LaunchedEffect
+        try {
+            if (listState.layoutInfo.visibleItemsInfo.none { it.key == request.targetItemKey }) {
+                val sourceIndex = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key == request.sourceItemKey }
+                    ?.index
+                    ?: return@LaunchedEffect
+                listState.scrollToItem(sourceIndex + 1)
+                snapshotFlow {
+                    listState.layoutInfo.visibleItemsInfo.any { it.key == request.targetItemKey }
+                }.first { it }
+            }
+            runCatching { request.targetRequester.requestFocus() }
+        } finally {
+            if (pendingLazyFocus == request) pendingLazyFocus = null
+        }
+    }
 
     LaunchedEffect(series.id, targetEpisode?.id) {
         if (targetEpisode == null) {
@@ -1083,7 +1113,8 @@ private fun SeriesDetailsProTvPolished(
 
         val rows = visibleEpisodes.chunked(metrics.episodeColumns)
         rows.forEachIndexed { rowIndex, rowEpisodes ->
-            item(key = "series_tv_polished_episode_row_${selectedSeason}_$rowIndex") {
+            val sourceRowKey = "series_tv_polished_episode_row_${selectedSeason}_$rowIndex"
+            item(key = sourceRowKey) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1118,6 +1149,24 @@ private fun SeriesDetailsProTvPolished(
                         } else {
                             null
                         }
+                        val downTarget = nextRowCard ?: relatedDown
+                        val lazyDownItemKey = when {
+                            nextRowCard != null -> "series_tv_polished_episode_row_${selectedSeason}_${rowIndex + 1}"
+                            relatedDown != null -> "series_tv_polished_related"
+                            else -> null
+                        }
+                        val lazyDownRequest = if (downTarget != null && lazyDownItemKey != null) {
+                            DetailsTvLazyFocusRequest(
+                                sourceItemKey = sourceRowKey,
+                                targetItemKey = lazyDownItemKey,
+                                targetRequester = downTarget,
+                            )
+                        } else {
+                            null
+                        }
+                        val moveDown: (() -> Unit)? = lazyDownRequest?.let { request ->
+                            { pendingLazyFocus = request }
+                        }
                         DetailsTvEpisodeUnit(
                             episode = episode,
                             highlighted = targetEpisode?.id == episode.id,
@@ -1132,7 +1181,9 @@ private fun SeriesDetailsProTvPolished(
                             leftAction = leftAction,
                             rightAction = rightAction,
                             upCard = upCard,
-                            downCard = nextRowCard ?: relatedDown,
+                            downCard = null,
+                            onMoveDown = moveDown,
+                            onCancelPendingMove = { pendingLazyFocus = null },
                             onPlay = { onPlay(episode) },
                             onDownload = { onDownload(episode) },
                             onCancelDownload = { onCancelDownload(episode) },
@@ -1179,6 +1230,8 @@ private fun DetailsTvEpisodeUnit(
     rightAction: FocusRequester?,
     upCard: FocusRequester,
     downCard: FocusRequester?,
+    onMoveDown: (() -> Unit)?,
+    onCancelPendingMove: () -> Unit,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit,
@@ -1312,6 +1365,8 @@ private fun DetailsTvEpisodeUnit(
                 downTarget = downCard,
                 leftTarget = if (download != null) cancelRequester else leftAction,
                 rightTarget = rightAction,
+                onMoveDown = onMoveDown,
+                onCancelPendingMove = onCancelPendingMove,
                 enabled = actionEnabled,
             )
             if (download != null) {
@@ -1324,6 +1379,8 @@ private fun DetailsTvEpisodeUnit(
                     downTarget = downCard,
                     rightTarget = if (actionEnabled) actionRequester else rightAction,
                     leftTarget = leftAction,
+                    onMoveDown = onMoveDown,
+                    onCancelPendingMove = onCancelPendingMove,
                 )
             }
         }
@@ -1340,6 +1397,8 @@ private fun DetailsTvMiniAction(
     downTarget: FocusRequester?,
     leftTarget: FocusRequester? = null,
     rightTarget: FocusRequester? = null,
+    onMoveDown: (() -> Unit)? = null,
+    onCancelPendingMove: () -> Unit = {},
     enabled: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
@@ -1364,18 +1423,25 @@ private fun DetailsTvMiniAction(
                 } else {
                     when (event.key) {
                         Key.DirectionUp -> {
+                            onCancelPendingMove()
                             runCatching { upTarget.requestFocus() }
                             true
                         }
                         Key.DirectionDown -> {
-                            downTarget?.let { runCatching { it.requestFocus() } }
+                            if (onMoveDown != null) {
+                                onMoveDown()
+                            } else {
+                                downTarget?.let { runCatching { it.requestFocus() } }
+                            }
                             true
                         }
                         Key.DirectionLeft -> {
+                            onCancelPendingMove()
                             leftTarget?.let { runCatching { it.requestFocus() } }
                             true
                         }
                         Key.DirectionRight -> {
+                            onCancelPendingMove()
                             rightTarget?.let { runCatching { it.requestFocus() } }
                             true
                         }
