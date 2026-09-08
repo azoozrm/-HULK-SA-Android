@@ -79,6 +79,17 @@ internal class DownloadTransportAttemptRegistry {
     fun release(attempt: Attempt): Boolean =
         active.remove(attempt.downloadId, attempt)
 
+    fun releaseWhenCompleted(
+        job: Job,
+        attempt: Attempt,
+        afterRelease: () -> Unit,
+    ) {
+        job.invokeOnCompletion {
+            release(attempt)
+            afterRelease()
+        }
+    }
+
     fun activeCount(): Int = active.size
 }
 
@@ -448,14 +459,12 @@ class DownloadRepository internal constructor(
             val attempt = transportAttempts.newAttempt(candidate.downloadId)
             lateinit var job: Job
             job = scope.launch(start = CoroutineStart.LAZY) {
-                try {
-                    runDownload(candidate.downloadId, attempt)
-                } finally {
-                    clearTrackedCall(candidate.downloadId, attempt)
-                    jobs.remove(candidate.downloadId, job)
-                    transportAttempts.release(attempt)
-                    schedule()
-                }
+                runDownload(candidate.downloadId, attempt)
+            }
+            transportAttempts.releaseWhenCompleted(job, attempt) {
+                clearTrackedCall(candidate.downloadId, attempt)
+                jobs.remove(candidate.downloadId, job)
+                schedule()
             }
             val claimed = synchronized(lock) {
                 val current = cache.firstOrNull { it.downloadId == candidate.downloadId }

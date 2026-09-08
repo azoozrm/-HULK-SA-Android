@@ -1,7 +1,11 @@
 package sa.hulksa.player.data
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -119,6 +123,34 @@ class DownloadTransportPolicyTest {
         assertTrue(registry.owns(replacement))
         assertFalse(registry.release(first))
         assertTrue(registry.owns(replacement))
+        assertTrue(registry.release(replacement))
+    }
+
+    @Test
+    fun `pre-start cancellation releases its claimed transport attempt`() = runBlocking {
+        val registry = DownloadTransportAttemptRegistry()
+        val attempt = registry.newAttempt(42L)
+        assertTrue(registry.claim(attempt))
+
+        var coroutineEntered = false
+        var cleanupCount = 0
+        val job = CoroutineScope(Job()).launch(start = CoroutineStart.LAZY) {
+            coroutineEntered = true
+        }
+        registry.releaseWhenCompleted(job, attempt) {
+            cleanupCount += 1
+        }
+
+        job.cancel()
+        job.join()
+
+        assertFalse(coroutineEntered)
+        assertEquals(1, cleanupCount)
+        assertNull(registry.current(attempt.downloadId))
+        assertEquals(0, registry.activeCount())
+
+        val replacement = registry.newAttempt(attempt.downloadId)
+        assertTrue(registry.claim(replacement))
         assertTrue(registry.release(replacement))
     }
 }
