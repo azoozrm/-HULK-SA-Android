@@ -91,8 +91,6 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
-private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
-
 private data class VerifiedMovieCardMetadata(
     val quality: String? = null,
     val durationMs: Long? = null,
@@ -102,22 +100,6 @@ enum class HulkArtworkSurface {
     SQUARE,
     POSTER,
     WIDE,
-}
-
-private fun Context.verifiedMovieCardMetadata(item: ContentItem): VerifiedMovieCardMetadata {
-    if (item.type != ContentType.MOVIE) return VerifiedMovieCardMetadata()
-
-    val prefs = applicationContext.getSharedPreferences(MOVIE_CARD_METADATA_PREFS, Context.MODE_PRIVATE)
-    val quality = prefs.getString("movie:${item.id}:quality", null)
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-    val duration = prefs.getLong("movie:${item.id}:duration_ms", 0L)
-        .takeIf { it > 0L }
-
-    return VerifiedMovieCardMetadata(
-        quality = quality,
-        durationMs = duration,
-    )
 }
 
 private fun compactMovieDuration(durationMs: Long?): String? {
@@ -534,13 +516,25 @@ fun CompactPosterCard(
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
     val polishMovieCard = item.type == ContentType.MOVIE
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
     val viewModel = remember(context) {
         context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
     }
-    var verifiedMovieMetadata by remember(item.type, item.id) {
-        mutableStateOf(context.verifiedMovieCardMetadata(item))
+    var verifiedMovieMetadata by remember(
+        item.type,
+        item.id,
+        metadataOwner,
+    ) {
+        val cached = metadataStore.cached(metadataOwner, item)
+        mutableStateOf(
+            VerifiedMovieCardMetadata(
+                quality = cached.quality,
+                durationMs = cached.durationMs,
+            ),
+        )
     }
-    LaunchedEffect(polishMovieCard, item.id, viewModel) {
+    LaunchedEffect(polishMovieCard, item.id, metadataOwner, viewModel) {
         if (polishMovieCard && viewModel != null) {
             viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
                 verifiedMovieMetadata = VerifiedMovieCardMetadata(
@@ -1099,12 +1093,16 @@ fun InfoPill(text: String, modifier: Modifier = Modifier) {
 
     val context = LocalContext.current
     val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
-    var metadata by remember(heroToken.type, heroToken.contentId) {
-        mutableStateOf(metadataStore.cached(heroToken.type, heroToken.contentId))
+    val metadataOwner = metadataStore.currentOwner()
+    var metadata by remember(heroToken.type, heroToken.contentId, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, heroToken.type, heroToken.contentId))
     }
-    LaunchedEffect(heroToken.type, heroToken.contentId) {
-        metadata = metadataStore.cached(heroToken.type, heroToken.contentId)
-        metadata = metadataStore.metadata(heroToken.type, heroToken.contentId)
+    LaunchedEffect(heroToken.type, heroToken.contentId, metadataOwner) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val cached = metadataStore.cached(owner, heroToken.type, heroToken.contentId)
+        metadataStore.publishIfCurrent(owner) { metadata = cached }
+        val loaded = metadataStore.metadata(owner, heroToken.type, heroToken.contentId)
+        metadataStore.publishIfCurrent(owner) { metadata = loaded }
     }
 
     Row(

@@ -2,6 +2,8 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.model.ProfileKind
@@ -17,41 +19,39 @@ internal fun normalizeProfileName(raw: String): String? = raw
 internal fun canDeleteProfile(isPrimary: Boolean, profileCount: Int): Boolean =
     !isPrimary && profileCount > 1
 
+internal suspend fun <T> runProfilePersistenceOffMain(operation: () -> T): T =
+    withContext(Dispatchers.IO) { operation() }
+
+internal data class ProfileStoreSnapshot(
+    val profiles: List<UserProfile>,
+    val activeProfileId: String,
+)
+
+internal data class ProfileStoreMutation<T>(
+    val value: T,
+    val snapshot: ProfileStoreSnapshot,
+)
+
 class ProfileStore(context: Context) {
     private val appContext = context.applicationContext
     private val accountScope = AccountScopeStore(appContext)
-    private val preferences: SharedPreferences
-        get() = accountScope.preferences(PREFERENCES_NAME)
-
-    init {
-        ensureInitialized()
-    }
 
     @Synchronized
-    fun profiles(): List<UserProfile> {
-        ensureInitialized()
-        val decoded = decodeProfiles(preferences.getString(KEY_PROFILES, null))
-        return if (decoded.isNotEmpty()) decoded else listOf(createPrimaryProfile())
-    }
+    fun profiles(): List<UserProfile> = readSnapshot(readPreferences()).profiles
 
     @Synchronized
     fun activeProfile(): UserProfile {
-        val profiles = profiles()
-        val activeId = preferences.getString(KEY_ACTIVE_PROFILE_ID, null)
-        val active = profiles.firstOrNull { it.id == activeId }
-        if (active != null) return active
-
-        val fallback = profiles.firstOrNull(UserProfile::isPrimary) ?: profiles.first()
-        preferences.edit().putString(KEY_ACTIVE_PROFILE_ID, fallback.id).commit()
-        return fallback
+        val snapshot = readSnapshot(readPreferences())
+        return snapshot.profiles.first { it.id == snapshot.activeProfileId }
     }
 
     fun activeProfileId(): String = activeProfile().id
 
     @Synchronized
     fun setActiveProfile(profileId: String): Boolean {
-        val target = profiles().firstOrNull { it.id == profileId } ?: return false
-        return preferences.edit().putString(KEY_ACTIVE_PROFILE_ID, target.id).commit()
+        val preferences = writablePreferences()
+        if (!ensureInitialized(preferences)) return false
+        return setActiveProfile(preferences, profileId) != null
     }
 
     @Synchronized
@@ -60,21 +60,9 @@ class ProfileStore(context: Context) {
         avatarKey: String = UserProfile.DEFAULT_AVATAR_KEY,
         kind: ProfileKind = ProfileKind.STANDARD,
     ): UserProfile? {
-        val normalizedName = normalizeProfileName(displayName) ?: return null
-        val current = profiles()
-        if (current.size >= MAX_PROFILES) return null
-
-        val profile = UserProfile(
-            id = "profile_${UUID.randomUUID()}",
-            displayName = normalizedName,
-            kind = kind,
-            avatarKey = avatarKey.trim().ifBlank { UserProfile.DEFAULT_AVATAR_KEY },
-            createdAtEpochMs = System.currentTimeMillis(),
-            isPrimary = false,
-        )
-        val updated = current + profile
-        if (!preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated)).commit()) return null
-        return profile
+        val preferences = writablePreferences()
+        if (!ensureInitialized(preferences)) return null
+        return createProfile(preferences, displayName, avatarKey, kind)
     }
 
     @Synchronized
@@ -83,45 +71,129 @@ class ProfileStore(context: Context) {
         displayName: String,
         avatarKey: String,
     ): UserProfile? {
-        val normalizedName = normalizeProfileName(displayName) ?: return null
-        val current = profiles()
-        val index = current.indexOfFirst { it.id == profileId }
-        if (index < 0) return null
-
-        val existing = current[index]
-        val updatedProfile = existing.copy(
-            displayName = normalizedName,
-            avatarKey = avatarKey.trim().ifBlank { UserProfile.DEFAULT_AVATAR_KEY },
-        )
-        val updated = current.toMutableList().apply { this[index] = updatedProfile }
-        if (!preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated)).commit()) return null
-        return updatedProfile
+        val preferences = writablePreferences()
+        if (!ensureInitialized(preferences)) return null
+        return updateProfile(preferences, profileId, displayName, avatarKey)
     }
 
     @Synchronized
     fun deleteProfile(profileId: String): Boolean {
-        val current = profiles()
-        val target = current.firstOrNull { it.id == profileId } ?: return false
-        if (!canDeleteProfile(target.isPrimary, current.size)) return false
-
-        val updated = current.filterNot { it.id == profileId }
-        val activeId = preferences.getString(KEY_ACTIVE_PROFILE_ID, null)
-        val editor = preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated))
-        if (activeId == profileId) {
-            val fallback = updated.firstOrNull(UserProfile::isPrimary) ?: updated.first()
-            editor.putString(KEY_ACTIVE_PROFILE_ID, fallback.id)
-        }
-        return editor.commit()
+        val preferences = writablePreferences()
+        if (!ensureInitialized(preferences)) return false
+        return deleteProfile(preferences, profileId)
     }
 
     fun schemaVersion(): Int {
-        ensureInitialized()
-        return preferences.getInt(KEY_SCHEMA_VERSION, 0)
+        return readPreferences().getInt(KEY_SCHEMA_VERSION, 0)
+    }
+
+    internal suspend fun load(expectedAccountId: String): ProfileStoreSnapshot? =
+        runProfilePersistenceOffMain { loadForAccount(expectedAccountId) }
+
+    internal suspend fun setActiveProfileForAccount(
+        expectedAccountId: String,
+        profileId: String,
+    ): ProfileStoreSnapshot? = runProfilePersistenceOffMain {
+        setActiveProfileForAccountBlocking(expectedAccountId, profileId)
+    }
+
+    internal suspend fun createProfileForAccount(
+        expectedAccountId: String,
+        displayName: String,
+        avatarKey: String = UserProfile.DEFAULT_AVATAR_KEY,
+        kind: ProfileKind = ProfileKind.STANDARD,
+    ): ProfileStoreMutation<UserProfile>? = runProfilePersistenceOffMain {
+        createProfileForAccountBlocking(expectedAccountId, displayName, avatarKey, kind)
+    }
+
+    internal suspend fun updateProfileForAccount(
+        expectedAccountId: String,
+        profileId: String,
+        displayName: String,
+        avatarKey: String,
+    ): ProfileStoreMutation<UserProfile>? = runProfilePersistenceOffMain {
+        updateProfileForAccountBlocking(expectedAccountId, profileId, displayName, avatarKey)
+    }
+
+    internal suspend fun deleteProfileForAccount(
+        expectedAccountId: String,
+        profileId: String,
+    ): ProfileStoreMutation<Boolean>? = runProfilePersistenceOffMain {
+        deleteProfileForAccountBlocking(expectedAccountId, profileId)
     }
 
     @Synchronized
-    private fun ensureInitialized() {
-        val scopedPreferences = preferences
+    private fun setActiveProfileForAccountBlocking(
+        expectedAccountId: String,
+        profileId: String,
+    ): ProfileStoreSnapshot? {
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val preferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+        if (!ensureInitialized(preferences)) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val snapshot = setActiveProfile(preferences, profileId) ?: return null
+        return snapshot.takeIf { accountScope.activeAccountId() == expectedAccountId }
+    }
+
+    @Synchronized
+    private fun createProfileForAccountBlocking(
+        expectedAccountId: String,
+        displayName: String,
+        avatarKey: String,
+        kind: ProfileKind,
+    ): ProfileStoreMutation<UserProfile>? {
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val preferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+        if (!ensureInitialized(preferences)) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val profile = createProfile(preferences, displayName, avatarKey, kind)
+            ?: return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        return ProfileStoreMutation(profile, readSnapshot(preferences))
+    }
+
+    @Synchronized
+    private fun updateProfileForAccountBlocking(
+        expectedAccountId: String,
+        profileId: String,
+        displayName: String,
+        avatarKey: String,
+    ): ProfileStoreMutation<UserProfile>? {
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val preferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+        if (!ensureInitialized(preferences)) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val profile = updateProfile(preferences, profileId, displayName, avatarKey)
+            ?: return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        return ProfileStoreMutation(profile, readSnapshot(preferences))
+    }
+
+    @Synchronized
+    private fun deleteProfileForAccountBlocking(
+        expectedAccountId: String,
+        profileId: String,
+    ): ProfileStoreMutation<Boolean>? {
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val preferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+        if (!ensureInitialized(preferences)) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        if (!deleteProfile(preferences, profileId)) return null
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        return ProfileStoreMutation(true, readSnapshot(preferences))
+    }
+
+    @Synchronized
+    private fun loadForAccount(expectedAccountId: String): ProfileStoreSnapshot? {
+        if (accountScope.activeAccountId() != expectedAccountId) return null
+        val preferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+        if (!ensureInitialized(preferences)) return null
+        return readSnapshot(preferences)
+            .takeIf { accountScope.activeAccountId() == expectedAccountId }
+    }
+
+    @Synchronized
+    private fun ensureInitialized(scopedPreferences: SharedPreferences): Boolean {
         val storedProfiles = decodeProfiles(scopedPreferences.getString(KEY_PROFILES, null))
         val profiles = if (storedProfiles.isEmpty()) {
             listOf(createPrimaryProfile())
@@ -143,8 +215,105 @@ class ProfileStore(context: Context) {
         if (scopedPreferences.getInt(KEY_SCHEMA_VERSION, 0) < CURRENT_SCHEMA_VERSION) {
             editor.putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
         }
-        editor.commit()
+        return editor.commit()
     }
+
+    @Synchronized
+    private fun setActiveProfile(
+        preferences: SharedPreferences,
+        profileId: String,
+    ): ProfileStoreSnapshot? {
+        val current = readSnapshot(preferences)
+        val target = current.profiles.firstOrNull { it.id == profileId } ?: return null
+        if (!preferences.edit().putString(KEY_ACTIVE_PROFILE_ID, target.id).commit()) return null
+        return current.copy(activeProfileId = target.id)
+    }
+
+    @Synchronized
+    private fun createProfile(
+        preferences: SharedPreferences,
+        displayName: String,
+        avatarKey: String,
+        kind: ProfileKind,
+    ): UserProfile? {
+        val normalizedName = normalizeProfileName(displayName) ?: return null
+        val current = readSnapshot(preferences).profiles
+        if (current.size >= MAX_PROFILES) return null
+        val profile = UserProfile(
+            id = "profile_${UUID.randomUUID()}",
+            displayName = normalizedName,
+            kind = kind,
+            avatarKey = avatarKey.trim().ifBlank { UserProfile.DEFAULT_AVATAR_KEY },
+            createdAtEpochMs = System.currentTimeMillis(),
+            isPrimary = false,
+        )
+        return profile.takeIf {
+            preferences.edit().putString(KEY_PROFILES, encodeProfiles(current + profile)).commit()
+        }
+    }
+
+    @Synchronized
+    private fun updateProfile(
+        preferences: SharedPreferences,
+        profileId: String,
+        displayName: String,
+        avatarKey: String,
+    ): UserProfile? {
+        val normalizedName = normalizeProfileName(displayName) ?: return null
+        val current = readSnapshot(preferences).profiles
+        val index = current.indexOfFirst { it.id == profileId }
+        if (index < 0) return null
+        val updatedProfile = current[index].copy(
+            displayName = normalizedName,
+            avatarKey = avatarKey.trim().ifBlank { UserProfile.DEFAULT_AVATAR_KEY },
+        )
+        val updated = current.toMutableList().apply { this[index] = updatedProfile }
+        return updatedProfile.takeIf {
+            preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated)).commit()
+        }
+    }
+
+    @Synchronized
+    private fun deleteProfile(preferences: SharedPreferences, profileId: String): Boolean {
+        val current = readSnapshot(preferences).profiles
+        val target = current.firstOrNull { it.id == profileId } ?: return false
+        if (!canDeleteProfile(target.isPrimary, current.size)) return false
+        val updated = current.filterNot { it.id == profileId }
+        val snapshot = readSnapshot(preferences)
+        val editor = preferences.edit().putString(KEY_PROFILES, encodeProfiles(updated))
+        if (snapshot.activeProfileId == profileId) {
+            val fallback = updated.firstOrNull(UserProfile::isPrimary) ?: updated.first()
+            editor.putString(KEY_ACTIVE_PROFILE_ID, fallback.id)
+        }
+        return editor.commit()
+    }
+
+    private fun readSnapshot(preferences: SharedPreferences): ProfileStoreSnapshot {
+        val decoded = decodeProfiles(preferences.getString(KEY_PROFILES, null))
+        val profiles = if (decoded.isNotEmpty()) decoded else listOf(createPrimaryProfile())
+        val storedActiveId = preferences.getString(KEY_ACTIVE_PROFILE_ID, null)
+        val activeProfileId = profiles.firstOrNull { it.id == storedActiveId }?.id
+            ?: profiles.firstOrNull(UserProfile::isPrimary)?.id
+            ?: profiles.first().id
+        return ProfileStoreSnapshot(profiles = profiles, activeProfileId = activeProfileId)
+    }
+
+    private fun readPreferences(): SharedPreferences {
+        val accountId = accountScope.activeAccountId()
+            ?: return appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        val scoped = appContext.getSharedPreferences(
+            accountScopedPreferencesName(PREFERENCES_NAME, accountId),
+            Context.MODE_PRIVATE,
+        )
+        if (scoped.contains(KEY_PROFILES)) return scoped
+        return if (accountScope.legacyOwnerAccountId() == accountId) {
+            appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        } else {
+            scoped
+        }
+    }
+
+    private fun writablePreferences(): SharedPreferences = accountScope.preferences(PREFERENCES_NAME)
 
     private fun createPrimaryProfile(): UserProfile = UserProfile(
         id = PRIMARY_PROFILE_ID,

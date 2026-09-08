@@ -45,62 +45,173 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.VoiceSearchOwner
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
+internal class VoiceSearchRequestGate {
+    data class Request(
+        val generation: Long,
+        val owner: VoiceSearchOwner,
+    )
+
+    private var generation = 0L
+    private var context: VoiceSearchOwner? = null
+    private var active: Request? = null
+
+    @Synchronized
+    fun updateContext(owner: VoiceSearchOwner?): Boolean {
+        if (context == owner) return false
+        generation += 1L
+        context = owner
+        active = null
+        return true
+    }
+
+    @Synchronized
+    fun begin(owner: VoiceSearchOwner): Request {
+        if (context != owner) {
+            generation += 1L
+            context = owner
+            active = null
+        }
+        generation += 1L
+        return Request(generation = generation, owner = owner).also { active = it }
+    }
+
+    @Synchronized
+    fun isCurrent(request: Request, currentOwner: VoiceSearchOwner?): Boolean =
+        active == request && context == request.owner && currentOwner == request.owner
+
+    @Synchronized
+    fun complete(request: Request) {
+        if (active == request) active = null
+    }
+
+    @Synchronized
+    fun invalidate() {
+        generation += 1L
+        context = null
+        active = null
+    }
+}
+
 internal class VoiceSearchDelegate(
     private val activity: ComponentActivity,
-    private val onTranscript: (String) -> Unit,
-) {
+    private val ownerProvider: () -> VoiceSearchOwner?,
+    private val onTranscript: (VoiceSearchOwner, String) -> Unit,
+) : DefaultLifecycleObserver {
+    private data class PendingRecognition(
+        val request: VoiceSearchRequestGate.Request,
+        val query: String,
+    )
+
+    private val requestGate = VoiceSearchRequestGate()
     private var activeRecognizer: SpeechRecognizer? = null
-    private var pendingQuery: String = ""
+    private var activeRequest: VoiceSearchRequestGate.Request? = null
+    private var pendingRecognition: PendingRecognition? = null
+    private var permissionRequestInFlight = false
 
     private val microphonePermissionLauncher = activity.registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        val query = pendingQuery
-        pendingQuery = ""
+        permissionRequestInFlight = false
+        val pending = pendingRecognition
+        pendingRecognition = null
+        if (pending == null || !isCurrent(pending.request)) return@registerForActivityResult
         if (granted) {
-            startRecognition(query)
-        } else {
+            startRecognition(pending)
+        } else if (isCurrent(pending.request)) {
+            requestGate.complete(pending.request)
             showMessage("يلزم السماح بالميكروفون لاستخدام البحث الصوتي.")
         }
     }
 
+    init {
+        activity.lifecycle.addObserver(this)
+    }
+
+    fun updateContext(owner: VoiceSearchOwner?) {
+        if (requestGate.updateContext(owner)) {
+            pendingRecognition = null
+            releaseRecognizer(cancel = true)
+        }
+    }
+
     fun launch(currentQuery: String) {
+        val owner = ownerProvider() ?: return
+        if (!activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
             showMessage("البحث الصوتي غير متاح على هذا الجهاز.")
             return
         }
+
+        updateContext(owner)
+        pendingRecognition?.let { requestGate.complete(it.request) }
+        pendingRecognition = null
+        releaseRecognizer(cancel = true)
+        val request = requestGate.begin(owner)
 
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            pendingQuery = currentQuery
-            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            pendingRecognition = PendingRecognition(request, currentQuery)
+            if (!permissionRequestInFlight) {
+                permissionRequestInFlight = true
+                try {
+                    microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                } catch (_: RuntimeException) {
+                    permissionRequestInFlight = false
+                    pendingRecognition = null
+                    requestGate.complete(request)
+                    showMessage("تعذر طلب صلاحية الميكروفون. حاول مرة أخرى.")
+                }
+            }
             return
         }
 
-        startRecognition(currentQuery)
+        startRecognition(PendingRecognition(request, currentQuery))
     }
 
-    private fun startRecognition(currentQuery: String) {
+    override fun onStop(owner: LifecycleOwner) {
+        invalidate()
+    }
+
+    override fun onDestroy(owner: LifecycleOwner) {
+        invalidate()
+        activity.lifecycle.removeObserver(this)
+    }
+
+    private fun invalidate() {
+        pendingRecognition = null
         releaseRecognizer(cancel = true)
+        requestGate.invalidate()
+    }
+
+    private fun startRecognition(pending: PendingRecognition) {
+        if (!isCurrent(pending.request)) return
 
         val recognizer = try {
             SpeechRecognizer.createSpeechRecognizer(activity)
         } catch (_: RuntimeException) {
-            showMessage("تعذر تشغيل خدمة البحث الصوتي على هذا الجهاز.")
+            if (isCurrent(pending.request)) {
+                requestGate.complete(pending.request)
+                showMessage("تعذر تشغيل خدمة البحث الصوتي على هذا الجهاز.")
+            }
             return
         }
 
         activeRecognizer = recognizer
+        activeRequest = pending.request
         recognizer.setRecognitionListener(
             object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) = Unit
@@ -114,8 +225,9 @@ internal class VoiceSearchDelegate(
                 override fun onEndOfSpeech() = Unit
 
                 override fun onError(error: Int) {
-                    if (activeRecognizer !== recognizer) return
+                    if (!isCurrent(recognizer, pending.request)) return
                     releaseRecognizer(cancel = false)
+                    requestGate.complete(pending.request)
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH,
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
@@ -129,23 +241,24 @@ internal class VoiceSearchDelegate(
                 }
 
                 override fun onResults(results: Bundle?) {
-                    if (activeRecognizer !== recognizer) return
+                    if (!isCurrent(recognizer, pending.request)) return
                     val transcript = firstVoiceSearchTranscript(
                         results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION),
                     )
                     releaseRecognizer(cancel = false)
+                    requestGate.complete(pending.request)
                     if (transcript == null) {
                         showMessage("لم يتم التعرف على صوت واضح. حاول مرة اخرى.")
                     } else {
-                        onTranscript(transcript)
+                        onTranscript(pending.request.owner, transcript)
                     }
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
-                    if (activeRecognizer !== recognizer) return
+                    if (!isCurrent(recognizer, pending.request)) return
                     firstVoiceSearchTranscript(
                         partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION),
-                    )?.let(onTranscript)
+                    )?.let { transcript -> onTranscript(pending.request.owner, transcript) }
                 }
 
                 override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -160,7 +273,7 @@ internal class VoiceSearchDelegate(
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             preferredVoiceSearchLanguageTag(
-                query = currentQuery,
+                query = pending.query,
                 deviceLanguageTag = Locale.getDefault().toLanguageTag(),
             )?.let { languageTag ->
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
@@ -171,13 +284,28 @@ internal class VoiceSearchDelegate(
             recognizer.startListening(intent)
         } catch (_: RuntimeException) {
             releaseRecognizer(cancel = false)
-            showMessage("تعذر تشغيل البحث الصوتي. حاول مرة اخرى.")
+            if (isCurrent(pending.request)) {
+                requestGate.complete(pending.request)
+                showMessage("تعذر تشغيل البحث الصوتي. حاول مرة اخرى.")
+            }
         }
     }
 
+    private fun isCurrent(request: VoiceSearchRequestGate.Request): Boolean =
+        activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+            requestGate.isCurrent(request, ownerProvider())
+
+    private fun isCurrent(
+        recognizer: SpeechRecognizer,
+        request: VoiceSearchRequestGate.Request,
+    ): Boolean =
+        activeRecognizer === recognizer && activeRequest == request && isCurrent(request)
+
     private fun releaseRecognizer(cancel: Boolean) {
-        val recognizer = activeRecognizer ?: return
+        val recognizer = activeRecognizer
         activeRecognizer = null
+        activeRequest = null
+        if (recognizer == null) return
         if (cancel) {
             runCatching { recognizer.cancel() }
         }
@@ -185,7 +313,9 @@ internal class VoiceSearchDelegate(
     }
 
     private fun showMessage(message: String) {
-        Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+        if (activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+        }
     }
 }
 

@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import sa.hulksa.player.R
 import sa.hulksa.player.data.SeriesCardMetadataStore
-import sa.hulksa.player.data.SeriesCardTechnicalMetadata
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
@@ -71,10 +70,15 @@ fun SeriesPosterCard(
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
     val metadataStore = remember(context) { SeriesCardMetadataStore.get(context) }
-    var metadata by remember(item.id) { mutableStateOf(SeriesCardTechnicalMetadata()) }
+    val metadataOwner = metadataStore.currentOwner()
+    var metadata by remember(item.id, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, item.id))
+    }
 
-    LaunchedEffect(item.id, metadataStore) {
-        metadata = metadataStore.metadata(item.id)
+    LaunchedEffect(item.id, metadataOwner, metadataStore) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = metadataStore.metadata(owner, item.id)
+        metadataStore.publishIfCurrent(owner) { metadata = loaded }
     }
 
     var focused by remember { mutableStateOf(false) }

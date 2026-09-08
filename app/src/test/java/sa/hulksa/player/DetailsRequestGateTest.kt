@@ -1,6 +1,8 @@
 package sa.hulksa.player
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.model.ContentType
@@ -120,5 +122,20 @@ class DetailsRequestGateTest {
                 profileId = "profile-a",
             ),
         )
+    }
+
+    @Test
+    fun `notification toggle can pin the exact current details generation`() {
+        val gate = DetailsRequestGate()
+        val first = gate.begin(key(ContentType.SERIES, contentId = 22))
+
+        assertEquals(first, gate.currentToken())
+
+        val reopened = gate.begin(key(ContentType.SERIES, contentId = 22))
+        assertEquals(reopened, gate.currentToken())
+        assertFalse(gate.isCurrent(first))
+
+        gate.invalidate()
+        assertNull(gate.currentToken())
     }
 }

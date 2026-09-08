@@ -146,7 +146,21 @@ class ProfilePreferencesStore(context: Context) {
     @Synchronized
     fun removeProfilePreferences(profileId: String) {
         val id = profileId.trim().takeIf(String::isNotBlank) ?: return
-        val prefix = "profile:$id:"
+        removeProfilePreferences(preferences, id)
+    }
+
+    @Synchronized
+    internal fun removeProfilePreferences(accountId: String, profileId: String) {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank) ?: return
+        val id = profileId.trim().takeIf(String::isNotBlank) ?: return
+        removeProfilePreferences(
+            accountScope.preferences(PREFERENCES_NAME, normalizedAccountId),
+            id,
+        )
+    }
+
+    private fun removeProfilePreferences(preferences: SharedPreferences, profileId: String) {
+        val prefix = "profile:$profileId:"
         val keys = preferences.all.keys.filter { it.startsWith(prefix) }
         if (keys.isEmpty()) return
         preferences.edit().apply {

@@ -1,6 +1,5 @@
 package sa.hulksa.player.ui.screens
 
-import android.content.Context
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -62,10 +61,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
-import sa.hulksa.player.data.SeriesCardTechnicalMetadata
 import sa.hulksa.player.model.ContentDetails
 import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
@@ -82,7 +82,6 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private const val DETAILS_TV_POLISH_MOVIE_PREFS = "movie_card_verified_metadata"
 private const val DETAILS_TV_POLISH_FOCUS_DELAY_MS = 110L
 
 private data class DetailsTvPolishMetrics(
@@ -208,9 +207,14 @@ private fun MovieDetailsProTvPolished(
     val colors = LocalHulkColors.current
     val adaptive = LocalAdaptiveUi.current
     val context = LocalContext.current
+    val movieMetadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val movieMetadataOwner = movieMetadataStore.currentOwner()
     val metrics = detailsTvPolishMetrics(adaptive.screenWidthDp, adaptive.screenHeightDp)
     val backdrop = details?.backdropUrl ?: item.backdropUrl ?: item.posterUrl
-    val technical = remember(item.id) { context.detailsTvMovieTechnical(item.id) }
+    val technical = remember(item.id, movieMetadataOwner) {
+        val cached = movieMetadataStore.cached(movieMetadataOwner, ContentType.MOVIE, item.id)
+        DetailsTvMovieTechnical(cached.quality, cached.durationMs)
+    }
     val progress = historyEntry?.detailsTvWatchProgress()
     val movieResumeHeroExtraDp = if (progress != null && historyEntry != null) 34 else 0
     val playRequester = remember(item.id) { FocusRequester() }
@@ -613,8 +617,15 @@ private fun SeriesDetailsProTvPolished(
     val context = LocalContext.current
     val metrics = detailsTvPolishMetrics(adaptive.screenWidthDp, adaptive.screenHeightDp)
     val metadataStore = remember(context) { SeriesCardMetadataStore.get(context) }
-    var technical by remember(series.id) { mutableStateOf(SeriesCardTechnicalMetadata()) }
-    LaunchedEffect(series.id, metadataStore) { technical = metadataStore.metadata(series.id) }
+    val metadataOwner = metadataStore.currentOwner()
+    var technical by remember(series.id, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, series.id))
+    }
+    LaunchedEffect(series.id, metadataOwner, metadataStore) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = metadataStore.metadata(owner, series.id)
+        metadataStore.publishIfCurrent(owner) { technical = loaded }
+    }
 
     val ordered = remember(episodes) {
         episodes.sortedWith(compareBy(Episode::season, Episode::episodeNumber, Episode::id))
@@ -1668,14 +1679,6 @@ private fun DetailsTvDownloadProgress(download: OfflineDownload, modifier: Modif
             Box(Modifier.fillMaxWidth(download.progress.coerceIn(0f, 1f)).fillMaxHeight().background(colors.goldBright))
         }
     }
-}
-
-private fun Context.detailsTvMovieTechnical(movieId: Int): DetailsTvMovieTechnical {
-    val prefs = applicationContext.getSharedPreferences(DETAILS_TV_POLISH_MOVIE_PREFS, Context.MODE_PRIVATE)
-    return DetailsTvMovieTechnical(
-        quality = prefs.getString("movie:$movieId:quality", null)?.trim()?.takeIf(String::isNotBlank),
-        durationMs = prefs.getLong("movie:$movieId:duration_ms", 0L).takeIf { it > 0L },
-    )
 }
 
 private fun detailsTvHasInformation(details: ContentDetails?): Boolean =

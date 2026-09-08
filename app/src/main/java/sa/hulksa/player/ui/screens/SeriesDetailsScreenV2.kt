@@ -108,9 +108,14 @@ fun SeriesDetailsScreenV2(
     val colors = LocalHulkColors.current
     val context = LocalContext.current
     val metadataStore = remember(context) { SeriesCardMetadataStore.get(context) }
-    var technicalMetadata by remember(series.id) { mutableStateOf(SeriesCardTechnicalMetadata()) }
-    LaunchedEffect(series.id, metadataStore) {
-        technicalMetadata = metadataStore.metadata(series.id)
+    val metadataOwner = metadataStore.currentOwner()
+    var technicalMetadata by remember(series.id, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, series.id))
+    }
+    LaunchedEffect(series.id, metadataOwner, metadataStore) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = metadataStore.metadata(owner, series.id)
+        metadataStore.publishIfCurrent(owner) { technicalMetadata = loaded }
     }
 
     val relatedFavoriteOverrides = remember(series.id) { mutableStateMapOf<String, Boolean>() }

@@ -145,12 +145,18 @@ class AccountScopeStore(context: Context) {
     fun preferences(baseName: String): SharedPreferences {
         val accountId = activeAccountId()
             ?: return appContext.getSharedPreferences(baseName, Context.MODE_PRIVATE)
-        val scopedName = accountScopedPreferencesName(baseName, accountId)
+        return preferences(baseName, accountId)
+    }
+
+    internal fun preferences(baseName: String, accountId: String): SharedPreferences {
+        val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank)
+            ?: return appContext.getSharedPreferences(baseName, Context.MODE_PRIVATE)
+        val scopedName = accountScopedPreferencesName(baseName, normalizedAccountId)
         val scoped = appContext.getSharedPreferences(scopedName, Context.MODE_PRIVATE)
         migrateLegacyPreferencesIfNeeded(
             legacyName = baseName,
             scoped = scoped,
-            accountId = accountId,
+            accountId = normalizedAccountId,
         )
         return scoped
     }

@@ -57,13 +57,29 @@ internal fun isAllowedKidsPlaybackRequest(
  * even when they are reconstructed outside the Kids composable tree or after a process restart.
  */
 class KidsContentFilterStore(context: Context) {
-    private val accountScope = AccountScopeStore(context.applicationContext)
-    private val preferences: SharedPreferences
-        get() = accountScope.preferences(PREFERENCES_NAME)
+    private val appContext = context.applicationContext
+    private val accountScope = AccountScopeStore(appContext)
+
+    fun replace(snapshot: VerifiedKidsCatalogSnapshot): Boolean {
+        val owner = AuthenticatedSessionRegistry.currentOwner() ?: return false
+        return replace(owner, snapshot)
+    }
 
     @Synchronized
-    fun replace(snapshot: VerifiedKidsCatalogSnapshot): Boolean {
+    internal fun replace(
+        owner: AuthenticatedSessionOwner,
+        snapshot: VerifiedKidsCatalogSnapshot,
+    ): Boolean {
+        if (
+            !AuthenticatedSessionRegistry.isCurrent(owner) ||
+            accountScope.activeAccountId() != owner.accountId
+        ) return false
+        val preferences = preferences(owner)
         val allowed = verifiedKidsContentKeys(snapshot)
+        if (
+            !AuthenticatedSessionRegistry.isCurrent(owner) ||
+            accountScope.activeAccountId() != owner.accountId
+        ) return false
         val committed = preferences.edit()
             .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
             .putBoolean(KEY_SNAPSHOT_VERIFIED, true)
@@ -74,14 +90,23 @@ class KidsContentFilterStore(context: Context) {
             // Never keep a stale allow-list if the new verified scope could not be persisted.
             preferences.edit().clear().commit()
         }
-        return committed
+        return committed &&
+            AuthenticatedSessionRegistry.isCurrent(owner) &&
+            accountScope.activeAccountId() == owner.accountId
     }
 
     fun allowedKeys(): Set<String> {
+        val owner = AuthenticatedSessionRegistry.currentOwner() ?: return emptySet()
+        if (accountScope.activeAccountId() != owner.accountId) return emptySet()
+        val preferences = preferences(owner)
         if (!preferences.getBoolean(KEY_SNAPSHOT_VERIFIED, false)) return emptySet()
-        return preferences.getStringSet(KEY_ALLOWED_CONTENT, emptySet())
+        val allowed = preferences.getStringSet(KEY_ALLOWED_CONTENT, emptySet())
             .orEmpty()
             .toSet()
+        return allowed.takeIf {
+            AuthenticatedSessionRegistry.isCurrent(owner) &&
+                accountScope.activeAccountId() == owner.accountId
+        }.orEmpty()
     }
 
     fun isAllowedKey(key: String): Boolean = key in allowedKeys()
@@ -92,6 +117,12 @@ class KidsContentFilterStore(context: Context) {
 
     fun isAllowed(request: PlaybackRequest): Boolean =
         isAllowedKidsPlaybackRequest(allowedKeys(), request)
+
+    private fun preferences(owner: AuthenticatedSessionOwner): SharedPreferences =
+        appContext.getSharedPreferences(
+            authenticatedOwnerPreferencesName(PREFERENCES_NAME, owner),
+            Context.MODE_PRIVATE,
+        )
 
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1

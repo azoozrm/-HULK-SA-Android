@@ -1,6 +1,5 @@
 package sa.hulksa.player.ui.screens
 
-import android.content.Context
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -71,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.data.SeriesCardTechnicalMetadata
 import sa.hulksa.player.model.ContentDetails
@@ -91,7 +91,6 @@ import sa.hulksa.player.ui.components.SeriesPosterCard
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
-private const val DETAILS_PRO_MOVIE_METADATA_PREFS = "movie_card_verified_metadata"
 private const val DETAILS_PRO_FOCUS_DELAY_MS = 90L
 private const val DETAILS_PRO_GRID_FOCUS_DELAY_MS = 28L
 
@@ -166,8 +165,13 @@ fun MovieDetailsProScreen(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
     val metrics = detailsProMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, isTv)
-    val technical = remember(item.id) { context.detailsProMovieTechnicalMetadata(item.id) }
+    val technical = remember(item.id, metadataOwner) {
+        val cached = metadataStore.cached(metadataOwner, ContentType.MOVIE, item.id)
+        DetailsProMovieTechnicalMetadata(cached.quality, cached.durationMs)
+    }
     val progress = historyEntry?.detailsProWatchProgress()
     val resumePosition = historyEntry?.positionMs?.takeIf { progress != null }
     val backdrop = details?.backdropUrl ?: item.backdropUrl ?: item.posterUrl
@@ -469,10 +473,15 @@ fun SeriesDetailsProScreen(
     val gridState = rememberLazyGridState()
     val navigationScope = rememberCoroutineScope()
     val metadataStore = remember(context) { SeriesCardMetadataStore.get(context) }
-    var technicalMetadata by remember(series.id) { mutableStateOf(SeriesCardTechnicalMetadata()) }
+    val metadataOwner = metadataStore.currentOwner()
+    var technicalMetadata by remember(series.id, metadataOwner) {
+        mutableStateOf(metadataStore.cached(metadataOwner, series.id))
+    }
 
-    LaunchedEffect(series.id, metadataStore) {
-        technicalMetadata = metadataStore.metadata(series.id)
+    LaunchedEffect(series.id, metadataOwner, metadataStore) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = metadataStore.metadata(owner, series.id)
+        metadataStore.publishIfCurrent(owner) { technicalMetadata = loaded }
     }
 
     val orderedEpisodes = remember(episodes) {
@@ -1955,19 +1964,6 @@ private fun Modifier.detailsProTvActionExit(
                 }
             }
         }
-}
-
-private fun Context.detailsProMovieTechnicalMetadata(movieId: Int): DetailsProMovieTechnicalMetadata {
-    val prefs = applicationContext.getSharedPreferences(
-        DETAILS_PRO_MOVIE_METADATA_PREFS,
-        Context.MODE_PRIVATE,
-    )
-    return DetailsProMovieTechnicalMetadata(
-        quality = prefs.getString("movie:$movieId:quality", null)
-            ?.trim()
-            ?.takeIf(String::isNotBlank),
-        durationMs = prefs.getLong("movie:$movieId:duration_ms", 0L).takeIf { it > 0L },
-    )
 }
 
 private fun HistoryEntry.detailsProWatchProgress(): Float? {
