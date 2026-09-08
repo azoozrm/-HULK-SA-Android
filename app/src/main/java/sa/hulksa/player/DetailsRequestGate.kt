@@ -33,6 +33,9 @@ internal class DetailsRequestGate {
     fun isCurrent(token: Token): Boolean = active == token
 
     @Synchronized
+    fun currentToken(): Token? = active
+
+    @Synchronized
     fun isCurrentForContext(
         token: Token,
         accountId: String?,

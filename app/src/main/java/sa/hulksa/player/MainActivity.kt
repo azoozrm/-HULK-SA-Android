@@ -20,6 +20,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -50,12 +51,14 @@ class MainActivity : ComponentActivity() {
         subscriptionResumeEnforcer = SubscriptionResumeEnforcer(this, viewModel)
         voiceSearchDelegate = VoiceSearchDelegate(
             activity = this,
-            onTranscript = viewModel::updateSearch,
+            ownerProvider = viewModel::currentVoiceSearchOwner,
+            onTranscript = viewModel::updateSearchFromVoice,
         )
 
         configurePhoneWindow()
         applyPhoneOrientationPolicy(HulkScreen.LOGIN)
         observePhoneOrientationPolicy()
+        observeVoiceSearchContext()
         requestDownloadNotificationPermissionIfNeeded(
             televisionDevice = isTelevisionDevice,
         )
@@ -117,6 +120,19 @@ class MainActivity : ComponentActivity() {
                         currentScreen = screen
                         applyPhoneOrientationPolicy(screen)
                     }
+            }
+        }
+    }
+
+    private fun observeVoiceSearchContext() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    viewModel.state,
+                    viewModel.voiceSearchContextGeneration,
+                ) { _, _ -> viewModel.currentVoiceSearchOwner() }
+                    .distinctUntilChanged()
+                    .collect(voiceSearchDelegate::updateContext)
             }
         }
     }

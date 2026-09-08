@@ -22,6 +22,9 @@ import sa.hulksa.player.security.CredentialVault
 
 private val ACCOUNT_SESSION_COMMIT_LOCK = Any()
 
+internal suspend fun <T> runKidsSnapshotPersistenceOffMain(operation: () -> T): T =
+    withContext(Dispatchers.IO) { operation() }
+
 private data class AccountSessionOwner(
     val accountId: String,
     val sessionId: String,
@@ -53,7 +56,7 @@ class HulkRepository(context: Context) {
                 synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                     suspendExistingDownloadOwner()
                     val recorded = accountSessionStore.recordAuthenticated(session)
-                    AuthenticatedSessionRegistry.update(session)
+                    AuthenticatedSessionRegistry.update(session, recorded)
                     if (remember) vault.save(credentials) else vault.clear()
                     recorded
                 }
@@ -98,7 +101,7 @@ class HulkRepository(context: Context) {
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                 if (!matchesCurrentSessionOwner(owner)) throw staleReauthentication()
                 val recorded = accountSessionStore.recordAuthenticated(refreshed)
-                AuthenticatedSessionRegistry.update(refreshed)
+                AuthenticatedSessionRegistry.update(refreshed, recorded)
                 recorded
             }
         }
@@ -149,7 +152,7 @@ class HulkRepository(context: Context) {
                             null
                         } else {
                             val recorded = accountSessionStore.recordAuthenticated(restored)
-                            AuthenticatedSessionRegistry.update(restored)
+                            AuthenticatedSessionRegistry.update(restored, recorded)
                             recorded
                         }
                     }
@@ -182,6 +185,11 @@ class HulkRepository(context: Context) {
         client.catalog(session, type)
 
     suspend fun verifiedKidsCatalog(session: AuthenticatedSession): VerifiedKidsCatalogSnapshot {
+        val owner = withContext(Dispatchers.IO) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                AuthenticatedSessionRegistry.currentOwner()?.takeIf { it.session === session }
+            }
+        } ?: throw CancellationException("Stale Kids catalog session")
         var snapshot = kidsCatalogClient.loadVerified(session)
         var retryIndex = 0
         while (snapshot.hasOnlyTransientKidsFailures() && retryIndex < 2) {
@@ -189,7 +197,15 @@ class HulkRepository(context: Context) {
             snapshot = kidsCatalogClient.loadVerified(session)
             retryIndex++
         }
-        if (!kidsContentFilterStore.replace(snapshot)) {
+        val persisted = runKidsSnapshotPersistenceOffMain {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                if (!AuthenticatedSessionRegistry.isCurrent(owner)) {
+                    throw CancellationException("Stale Kids catalog owner")
+                }
+                kidsContentFilterStore.replace(owner, snapshot)
+            }
+        }
+        if (!persisted) {
             return VerifiedKidsCatalogSnapshot(
                 catalogs = emptyMap(),
                 blockedTypes = ContentType.entries.associateWith {
@@ -197,6 +213,12 @@ class HulkRepository(context: Context) {
                 },
             )
         }
+        val ownerStillCurrent = withContext(Dispatchers.IO) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                AuthenticatedSessionRegistry.isCurrent(owner)
+            }
+        }
+        if (!ownerStillCurrent) throw CancellationException("Stale Kids catalog owner")
         return snapshot
     }
 

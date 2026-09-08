@@ -10,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.runBlocking
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.ContentItem
@@ -35,15 +36,55 @@ class ProfileFoundationInstrumentedTest {
 
     @Test
     fun newInstallCreatesStablePrimaryProfile() {
+        val account = AccountSessionStore(context).recordAuthenticated(
+            session(host = HOST_A, accessCode = FIRST_ACCESS_CODE),
+        )
         val store = ProfileStore(context)
+        val snapshot = requireNotNull(runBlocking { store.load(account.accountId) })
         val profiles = store.profiles()
         val active = store.activeProfile()
 
         assertEquals(ProfileStore.CURRENT_SCHEMA_VERSION, store.schemaVersion())
+        assertEquals(ProfileStore.PRIMARY_PROFILE_ID, snapshot.activeProfileId)
         assertEquals(1, profiles.size)
         assertEquals(ProfileStore.PRIMARY_PROFILE_ID, active.id)
         assertTrue(active.isPrimary)
         assertTrue(active.displayName.isNotBlank())
+    }
+
+    @Test
+    fun constructorAndReadPathDoNotInitializePreferences() {
+        val preferences = context.getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE)
+        val store = ProfileStore(context)
+
+        assertEquals(1, store.profiles().size)
+        assertEquals(ProfileStore.PRIMARY_PROFILE_ID, store.activeProfileId())
+        assertEquals(0, store.schemaVersion())
+        assertTrue(preferences.all.isEmpty())
+    }
+
+    @Test
+    fun staleAccountMutationIsRejectedWithoutWritingPreviousOwner() {
+        val accountScope = AccountScopeStore(context)
+        assertTrue(accountScope.bind(TEST_ACCOUNT_A))
+        val store = ProfileStore(context)
+        requireNotNull(runBlocking { store.load(TEST_ACCOUNT_A) })
+        val previousOwnerPreferences = context.getSharedPreferences(
+            accountScopedPreferencesName(PROFILE_PREFS, TEST_ACCOUNT_A),
+            Context.MODE_PRIVATE,
+        )
+        val before = previousOwnerPreferences.all.toMap()
+
+        assertTrue(accountScope.bind(TEST_ACCOUNT_B))
+        val staleMutation = runBlocking {
+            store.createProfileForAccount(
+                expectedAccountId = TEST_ACCOUNT_A,
+                displayName = "ملف متأخر",
+            )
+        }
+
+        assertNull(staleMutation)
+        assertEquals(before, previousOwnerPreferences.all)
     }
 
     @Test
@@ -155,6 +196,8 @@ class ProfileFoundationInstrumentedTest {
         val accountIds = setOf(
             stableAccountId(HOST_A, USERNAME),
             stableAccountId(HOST_B, USERNAME),
+            TEST_ACCOUNT_A,
+            TEST_ACCOUNT_B,
         )
         val preferenceNames = linkedSetOf(
             USER_LIBRARY_PREFS,
@@ -183,5 +226,7 @@ class ProfileFoundationInstrumentedTest {
         const val USERNAME = "subscriber"
         const val FIRST_ACCESS_CODE = "VUKqm6Z6ZZ"
         const val SECOND_ACCESS_CODE = "aB12Cd34Ef"
+        const val TEST_ACCOUNT_A = "profile-test-account-a"
+        const val TEST_ACCOUNT_B = "profile-test-account-b"
     }
 }

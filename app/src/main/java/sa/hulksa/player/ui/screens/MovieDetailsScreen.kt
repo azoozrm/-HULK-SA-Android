@@ -1,6 +1,5 @@
 package sa.hulksa.player.ui.screens
 
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -41,8 +40,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.model.ContentDetails
 import sa.hulksa.player.model.ContentItem
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
@@ -55,8 +56,6 @@ import sa.hulksa.player.ui.components.InfoPill
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
-
-private const val MOVIE_DETAILS_METADATA_PREFS = "movie_card_verified_metadata"
 
 private data class MovieDetailsTechnicalMetadata(
     val quality: String? = null,
@@ -85,7 +84,12 @@ fun MovieDetailsScreen(
 ) {
     val colors = LocalHulkColors.current
     val context = LocalContext.current
-    val technicalMetadata = remember(item.id) { context.movieDetailsTechnicalMetadata(item.id) }
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
+    val technicalMetadata = remember(item.id, metadataOwner) {
+        val cached = metadataStore.cached(metadataOwner, ContentType.MOVIE, item.id)
+        MovieDetailsTechnicalMetadata(cached.quality, cached.durationMs)
+    }
     val compactRating = compactMovieDetailsRating(item.rating)
     val compactDuration = compactMovieDetailsDuration(
         technicalMetadata.durationMs ?: parseMovieDetailsDurationMs(details?.duration),
@@ -560,16 +564,6 @@ private fun DetailLine(label: String, value: String, isTv: Boolean) {
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-private fun Context.movieDetailsTechnicalMetadata(movieId: Int): MovieDetailsTechnicalMetadata {
-    val prefs = applicationContext.getSharedPreferences(MOVIE_DETAILS_METADATA_PREFS, Context.MODE_PRIVATE)
-    val quality = prefs.getString("movie:$movieId:quality", null)
-        ?.trim()
-        ?.takeIf(String::isNotBlank)
-    val durationMs = prefs.getLong("movie:$movieId:duration_ms", 0L)
-        .takeIf { it > 0L }
-    return MovieDetailsTechnicalMetadata(quality = quality, durationMs = durationMs)
 }
 
 private fun compactMovieDetailsRating(raw: String?): String? {

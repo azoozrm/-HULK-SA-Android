@@ -1,6 +1,7 @@
 package sa.hulksa.player.data
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
 
@@ -17,6 +18,25 @@ internal data class HomeHeroMetadataToken(
     val type: ContentType,
     val contentId: Int,
     val label: String,
+)
+
+internal data class ContentMetadataRequestKey(
+    val accountId: String,
+    val providerId: String,
+    val sessionId: String,
+    val type: ContentType,
+    val contentId: Int,
+)
+
+internal fun AuthenticatedSessionOwner.contentMetadataKey(
+    type: ContentType,
+    contentId: Int,
+): ContentMetadataRequestKey = ContentMetadataRequestKey(
+    accountId = accountId,
+    providerId = providerId,
+    sessionId = sessionId,
+    type = type,
+    contentId = contentId,
 )
 
 internal fun ContentItem.withHomeHeroMetadataToken(): ContentItem = this
@@ -41,63 +61,128 @@ internal fun decodeHomeHeroMetadataToken(raw: String): HomeHeroMetadataToken? {
 internal class HomeHeroMetadataStore private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val movieClient = MovieCardMetadataClient()
-    private val moviePreferences =
-        appContext.getSharedPreferences(MOVIE_PREFERENCES, Context.MODE_PRIVATE)
-    private val seriesPreferences =
-        appContext.getSharedPreferences(SERIES_PREFERENCES, Context.MODE_PRIVATE)
     private val seriesStore = SeriesCardMetadataStore.get(appContext)
-    private val lastMovieAttemptAtMs = mutableMapOf<Int, Long>()
+    private val lastMovieAttemptAtMs = mutableMapOf<ContentMetadataRequestKey, Long>()
 
-    fun cached(item: ContentItem): HomeHeroTechnicalMetadata = cached(item.type, item.id)
+    fun currentOwner(): AuthenticatedSessionOwner? = AuthenticatedSessionRegistry.currentOwner()
 
-    fun cached(type: ContentType, contentId: Int): HomeHeroTechnicalMetadata = when (type) {
-        ContentType.MOVIE -> readMovieCached(contentId)
-        ContentType.SERIES -> readSeriesCached(contentId)
+    fun isCurrent(owner: AuthenticatedSessionOwner): Boolean =
+        AuthenticatedSessionRegistry.isCurrent(owner)
+
+    fun publishIfCurrent(owner: AuthenticatedSessionOwner, publish: () -> Unit): Boolean =
+        AuthenticatedSessionRegistry.withCurrentOwner(owner) {
+            publish()
+            true
+        } ?: false
+
+    fun cached(
+        owner: AuthenticatedSessionOwner?,
+        item: ContentItem,
+    ): HomeHeroTechnicalMetadata = cached(owner, item.type, item.id)
+
+    fun cached(
+        owner: AuthenticatedSessionOwner?,
+        type: ContentType,
+        contentId: Int,
+    ): HomeHeroTechnicalMetadata {
+        if (owner == null || !isCurrent(owner)) return HomeHeroTechnicalMetadata()
+        val cached = when (type) {
+            ContentType.MOVIE -> readMovieCached(owner, contentId)
+            ContentType.SERIES -> readSeriesCached(owner, contentId)
+            ContentType.LIVE -> HomeHeroTechnicalMetadata()
+        }
+        return cached.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
+    }
+
+    suspend fun metadata(
+        owner: AuthenticatedSessionOwner,
+        item: ContentItem,
+    ): HomeHeroTechnicalMetadata = metadata(owner, item.type, item.id)
+
+    suspend fun metadata(
+        owner: AuthenticatedSessionOwner,
+        type: ContentType,
+        contentId: Int,
+    ): HomeHeroTechnicalMetadata = when (type) {
+        ContentType.MOVIE -> movieMetadata(owner, contentId)
+        ContentType.SERIES -> seriesMetadata(owner, contentId)
         ContentType.LIVE -> HomeHeroTechnicalMetadata()
     }
 
-    suspend fun metadata(item: ContentItem): HomeHeroTechnicalMetadata = metadata(item.type, item.id)
-
-    suspend fun metadata(type: ContentType, contentId: Int): HomeHeroTechnicalMetadata = when (type) {
-        ContentType.MOVIE -> movieMetadata(contentId)
-        ContentType.SERIES -> seriesMetadata(contentId)
-        ContentType.LIVE -> HomeHeroTechnicalMetadata()
+    fun cacheMovieMetadata(
+        owner: AuthenticatedSessionOwner,
+        movieId: Int,
+        quality: String? = null,
+        durationMs: Long? = null,
+    ): Boolean {
+        if (quality == null && durationMs == null) return false
+        return AuthenticatedSessionRegistry.withCurrentOwner(owner) {
+            moviePreferences(owner).edit().apply {
+                quality?.trim()?.takeIf(String::isNotBlank)?.let {
+                    putString("movie:$movieId:quality", it)
+                }
+                durationMs?.takeIf { it > 0L }?.let {
+                    putLong("movie:$movieId:duration_ms", it)
+                }
+            }.apply()
+            true
+        } ?: false
     }
 
-    private suspend fun movieMetadata(movieId: Int): HomeHeroTechnicalMetadata {
-        val cached = readMovieCached(movieId)
-        if (cached.quality != null && (cached.durationMs ?: 0L) > 0L) return cached
+    private suspend fun movieMetadata(
+        owner: AuthenticatedSessionOwner,
+        movieId: Int,
+    ): HomeHeroTechnicalMetadata {
+        if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
+        val cached = readMovieCached(owner, movieId)
+        if (cached.quality != null && (cached.durationMs ?: 0L) > 0L) {
+            return cached.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
+        }
 
+        val requestKey = owner.contentMetadataKey(ContentType.MOVIE, movieId)
         val now = System.currentTimeMillis()
         val lastAttempt = synchronized(lastMovieAttemptAtMs) {
-            val previous = lastMovieAttemptAtMs[movieId] ?: 0L
+            val previous = lastMovieAttemptAtMs[requestKey] ?: 0L
             if (now - previous >= RETRY_COOLDOWN_MS) {
-                lastMovieAttemptAtMs[movieId] = now
+                lastMovieAttemptAtMs[requestKey] = now
             }
             previous
         }
-        if (now - lastAttempt < RETRY_COOLDOWN_MS) return cached
+        if (now - lastAttempt < RETRY_COOLDOWN_MS) {
+            return cached.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
+        }
 
-        val session = AuthenticatedSessionRegistry.current() ?: return cached
-        val fetched = runCatching { movieClient.fetch(session, movieId) }
-            .getOrDefault(MovieCardTechnicalMetadata())
+        val fetched = try {
+            movieClient.fetch(owner.session, movieId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            MovieCardTechnicalMetadata()
+        }
         val merged = HomeHeroTechnicalMetadata(
             quality = fetched.quality ?: cached.quality,
             durationMs = fetched.durationMs ?: cached.durationMs,
         )
+        if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
         if (merged.quality != null || merged.durationMs != null) {
-            moviePreferences.edit().apply {
-                merged.quality?.let { putString("movie:$movieId:quality", it) }
-                merged.durationMs
-                    ?.takeIf { it > 0L }
-                    ?.let { putLong("movie:$movieId:duration_ms", it) }
-            }.apply()
+            val cachedForOwner = cacheMovieMetadata(
+                owner = owner,
+                movieId = movieId,
+                quality = merged.quality,
+                durationMs = merged.durationMs,
+            )
+            if (!cachedForOwner) return HomeHeroTechnicalMetadata()
         }
-        return merged
+        return merged.takeIf { isCurrent(owner) } ?: HomeHeroTechnicalMetadata()
     }
 
-    private suspend fun seriesMetadata(seriesId: Int): HomeHeroTechnicalMetadata {
-        val metadata = seriesStore.metadata(seriesId)
+    private suspend fun seriesMetadata(
+        owner: AuthenticatedSessionOwner,
+        seriesId: Int,
+    ): HomeHeroTechnicalMetadata {
+        if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
+        val metadata = seriesStore.metadata(owner, seriesId)
+        if (!isCurrent(owner)) return HomeHeroTechnicalMetadata()
         return HomeHeroTechnicalMetadata(
             quality = metadata.quality,
             seasonCount = metadata.seasonCount,
@@ -105,30 +190,46 @@ internal class HomeHeroMetadataStore private constructor(context: Context) {
         )
     }
 
-    private fun readMovieCached(movieId: Int): HomeHeroTechnicalMetadata =
+    private fun readMovieCached(
+        owner: AuthenticatedSessionOwner,
+        movieId: Int,
+    ): HomeHeroTechnicalMetadata =
         HomeHeroTechnicalMetadata(
-            quality = moviePreferences
+            quality = moviePreferences(owner)
                 .getString("movie:$movieId:quality", null)
                 ?.trim()
                 ?.takeIf(String::isNotBlank),
-            durationMs = moviePreferences
+            durationMs = moviePreferences(owner)
                 .getLong("movie:$movieId:duration_ms", 0L)
                 .takeIf { it > 0L },
         )
 
-    private fun readSeriesCached(seriesId: Int): HomeHeroTechnicalMetadata =
+    private fun readSeriesCached(
+        owner: AuthenticatedSessionOwner,
+        seriesId: Int,
+    ): HomeHeroTechnicalMetadata =
         HomeHeroTechnicalMetadata(
-            quality = seriesPreferences
+            quality = seriesPreferences(owner)
                 .getString("series:$seriesId:quality", null)
                 ?.trim()
                 ?.takeIf(String::isNotBlank),
-            seasonCount = seriesPreferences
+            seasonCount = seriesPreferences(owner)
                 .getInt("series:$seriesId:season_count", 0)
                 .takeIf { it > 0 },
-            episodeCount = seriesPreferences
+            episodeCount = seriesPreferences(owner)
                 .getInt("series:$seriesId:episode_count", 0)
                 .takeIf { it > 0 },
         )
+
+    private fun moviePreferences(owner: AuthenticatedSessionOwner) = appContext.getSharedPreferences(
+        authenticatedOwnerPreferencesName(MOVIE_PREFERENCES, owner),
+        Context.MODE_PRIVATE,
+    )
+
+    private fun seriesPreferences(owner: AuthenticatedSessionOwner) = appContext.getSharedPreferences(
+        authenticatedOwnerPreferencesName(SERIES_PREFERENCES, owner),
+        Context.MODE_PRIVATE,
+    )
 
     companion object {
         private const val MOVIE_PREFERENCES = "movie_card_verified_metadata"

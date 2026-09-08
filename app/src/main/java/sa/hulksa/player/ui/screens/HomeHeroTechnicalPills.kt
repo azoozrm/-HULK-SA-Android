@@ -20,12 +20,15 @@ internal fun HomeHeroTechnicalPills(
 ) {
     val context = LocalContext.current
     val store = remember(context) { HomeHeroMetadataStore.get(context) }
-    var metadata by remember(item.type, item.id, store) {
-        mutableStateOf(store.cached(item))
+    val metadataOwner = store.currentOwner()
+    var metadata by remember(item.type, item.id, metadataOwner, store) {
+        mutableStateOf(store.cached(metadataOwner, item))
     }
 
-    LaunchedEffect(item.type, item.id, store) {
-        metadata = store.metadata(item)
+    LaunchedEffect(item.type, item.id, metadataOwner, store) {
+        val owner = metadataOwner ?: return@LaunchedEffect
+        val loaded = store.metadata(owner, item)
+        store.publishIfCurrent(owner) { metadata = loaded }
     }
 
     when (item.type) {

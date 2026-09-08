@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,7 +50,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
@@ -67,9 +70,9 @@ fun AdaptiveProfileManagementScreen(
     kidsSourceLoading: Boolean,
     kidsSourceMessage: String?,
     onRetryKidsSource: () -> Unit,
-    onCreate: (name: String, avatarKey: String, kind: ProfileKind) -> Boolean,
-    onUpdate: (profileId: String, name: String, avatarKey: String) -> Boolean,
-    onDelete: (profileId: String) -> Boolean,
+    onCreate: suspend (name: String, avatarKey: String, kind: ProfileKind) -> Boolean,
+    onUpdate: suspend (profileId: String, name: String, avatarKey: String) -> Boolean,
+    onDelete: suspend (profileId: String) -> Boolean,
     onSelect: (UserProfile) -> Unit,
     onManagePin: (UserProfile) -> Unit,
     onClose: () -> Unit,
@@ -81,6 +84,8 @@ fun AdaptiveProfileManagementScreen(
     var avatarKey by remember { mutableStateOf(PROFILE_AVATARS.first()) }
     var profileKind by remember { mutableStateOf(ProfileKind.STANDARD) }
     var error by remember { mutableStateOf<String?>(null) }
+    var operationInProgress by remember { mutableStateOf(false) }
+    val operationScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val activeFocusRequester = remember(activeProfileId) { FocusRequester() }
 
@@ -114,7 +119,9 @@ fun AdaptiveProfileManagementScreen(
         runCatching { activeFocusRequester.requestFocus() }
     }
 
-    BackHandler(enabled = creating || editingProfile != null) {
+    BackHandler(enabled = operationInProgress) { Unit }
+
+    BackHandler(enabled = !operationInProgress && (creating || editingProfile != null)) {
         creating = false
         editingProfile = null
         error = null
@@ -150,34 +157,51 @@ fun AdaptiveProfileManagementScreen(
                 onNameChange = { name = it.take(ProfileStore.MAX_DISPLAY_NAME_LENGTH) },
                 onAvatarChange = { avatarKey = it },
                 onKindChange = { profileKind = it },
-                onRetryKidsSource = onRetryKidsSource,
+                onRetryKidsSource = { if (!operationInProgress) onRetryKidsSource() },
                 onSave = {
-                    val ok = if (creating) {
-                        if (profileKind == ProfileKind.KIDS && !kidsSourceAvailable) {
-                            false
-                        } else {
-                            onCreate(name, avatarKey, profileKind)
-                        }
-                    } else {
-                        val profile = editingProfile ?: return@AdaptiveProfileEditor
-                        onUpdate(profile.id, name, avatarKey)
-                    }
-                    if (ok) {
-                        creating = false
-                        editingProfile = null
-                        error = null
-                    } else {
-                        error = if (profileKind == ProfileKind.KIDS && !kidsSourceAvailable) {
-                            "وضع الأطفال غير متاح حاليًا. حاول مرة أخرى بعد قليل."
-                        } else {
-                            "تعذر الحفظ. تأكد من الاسم وعدد الملفات الشخصية."
+                    if (!operationInProgress) {
+                        operationInProgress = true
+                        operationScope.launch {
+                            try {
+                                val ok = if (creating) {
+                                    if (profileKind == ProfileKind.KIDS && !kidsSourceAvailable) {
+                                        false
+                                    } else {
+                                        onCreate(name, avatarKey, profileKind)
+                                    }
+                                } else {
+                                    val profile = editingProfile
+                                    profile != null && onUpdate(profile.id, name, avatarKey)
+                                }
+                                if (ok) {
+                                    creating = false
+                                    editingProfile = null
+                                    error = null
+                                } else {
+                                    error = if (
+                                        profileKind == ProfileKind.KIDS && !kidsSourceAvailable
+                                    ) {
+                                        "وضع الأطفال غير متاح حاليًا. حاول مرة أخرى بعد قليل."
+                                    } else {
+                                        "تعذر الحفظ. تأكد من الاسم وعدد الملفات الشخصية."
+                                    }
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                error = "تعذر الحفظ. حاول مرة أخرى."
+                            } finally {
+                                operationInProgress = false
+                            }
                         }
                     }
                 },
                 onCancel = {
-                    creating = false
-                    editingProfile = null
-                    error = null
+                    if (!operationInProgress) {
+                        creating = false
+                        editingProfile = null
+                        error = null
+                    }
                 },
             )
             return@Box
@@ -221,9 +245,13 @@ fun AdaptiveProfileManagementScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                         ) {
                             if (profiles.size < ProfileStore.MAX_PROFILES) {
-                                ManagementAction("+ إضافة ملف", false, onClick = ::openCreate)
+                                ManagementAction("+ إضافة ملف", false) {
+                                    if (!operationInProgress) openCreate()
+                                }
                             }
-                            ManagementAction("رجوع", false, secondary = true, onClick = onClose)
+                            ManagementAction("رجوع", false, secondary = true) {
+                                if (!operationInProgress) onClose()
+                            }
                         }
                     }
                 } else {
@@ -235,9 +263,13 @@ fun AdaptiveProfileManagementScreen(
                         ManagementHeading(isTv = isTv)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (profiles.size < ProfileStore.MAX_PROFILES) {
-                                ManagementAction("+ إضافة ملف", isTv, onClick = ::openCreate)
+                                ManagementAction("+ إضافة ملف", isTv) {
+                                    if (!operationInProgress) openCreate()
+                                }
                             }
-                            ManagementAction("رجوع", isTv, secondary = true, onClick = onClose)
+                            ManagementAction("رجوع", isTv, secondary = true) {
+                                if (!operationInProgress) onClose()
+                            }
                         }
                     }
                 }
@@ -269,10 +301,27 @@ fun AdaptiveProfileManagementScreen(
                             profileCount = profiles.size,
                             isTv = isTv,
                             focusRequester = if (profile.id == activeProfileId) activeFocusRequester else null,
-                            onSelect = { onSelect(profile) },
-                            onEdit = { openEdit(profile) },
-                            onPin = { onManagePin(profile) },
-                            onDelete = { if (!onDelete(profile.id)) error = "تعذر حذف الملف الشخصي." },
+                            onSelect = { if (!operationInProgress) onSelect(profile) },
+                            onEdit = { if (!operationInProgress) openEdit(profile) },
+                            onPin = { if (!operationInProgress) onManagePin(profile) },
+                            onDelete = {
+                                if (!operationInProgress) {
+                                    operationInProgress = true
+                                    operationScope.launch {
+                                        try {
+                                            if (!onDelete(profile.id)) {
+                                                error = "تعذر حذف الملف الشخصي."
+                                            }
+                                        } catch (cancelled: CancellationException) {
+                                            throw cancelled
+                                        } catch (_: Exception) {
+                                            error = "تعذر حذف الملف الشخصي."
+                                        } finally {
+                                            operationInProgress = false
+                                        }
+                                    }
+                                }
+                            },
                         )
                     }
                 }

@@ -25,10 +25,15 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.data.DownloadRepository
+import sa.hulksa.player.data.AuthenticatedSessionOwner
+import sa.hulksa.player.data.AuthenticatedSessionRegistry
+import sa.hulksa.player.data.ContentMetadataRequestKey
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
 import sa.hulksa.player.data.HulkRepository
+import sa.hulksa.player.data.HomeHeroMetadataStore
+import sa.hulksa.player.data.HomeHeroTechnicalMetadata
 import sa.hulksa.player.data.KidsContentFilterStore
 import sa.hulksa.player.data.LocalEpisodeNotification
 import sa.hulksa.player.data.LocalEpisodeNotificationStore
@@ -63,6 +68,7 @@ import sa.hulksa.player.data.mergeNotificationCenterItems
 import sa.hulksa.player.data.normalizeResellerAccessCode
 import sa.hulksa.player.data.reliableEpisodeKeys
 import sa.hulksa.player.data.resolveLocalNotificationSeriesTarget
+import sa.hulksa.player.data.contentMetadataKey
 import sa.hulksa.player.model.AccountInfo
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.Catalog
@@ -112,6 +118,22 @@ enum class MainDestination {
     DOWNLOADS,
     SETTINGS,
 }
+
+internal data class VoiceSearchOwner(
+    val accountId: String,
+    val sessionId: String,
+    val profileId: String,
+    val contextGeneration: Long,
+)
+
+private data class SeriesNotificationToggleOwner(
+    val authenticatedSession: AuthenticatedSessionOwner,
+    val detailsRequest: DetailsRequestGate.Token,
+    val accountId: String,
+    val profileId: String,
+    val profileKind: ProfileKind,
+    val seriesId: Int,
+)
 
 data class HulkUiState(
     val screen: HulkScreen = HulkScreen.LOGIN,
@@ -165,11 +187,6 @@ private enum class NotificationScanTrigger(val minimumAgeMs: Long) {
     MASTER_REENABLE(0L),
 }
 
-private data class MovieCardProbeMetadata(
-    val quality: String? = null,
-    val durationMs: Long? = null,
-)
-
 private fun Application.isTelevisionDevice(): Boolean {
     val uiMode = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
     return uiMode?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -215,6 +232,24 @@ internal fun downloadEnqueuePublicationAllowed(
             activeAccountId = activeAccountId,
             activeProfileId = activeProfileId,
         )
+
+internal fun seriesNotificationPublicationAllowed(
+    sameAuthenticatedSession: Boolean,
+    detailsGenerationCurrent: Boolean,
+    expectedAccountId: String,
+    activeAccountId: String?,
+    expectedProfileId: String,
+    activeProfileId: String,
+    screen: HulkScreen,
+    expectedSeriesId: Int,
+    selectedSeriesId: Int?,
+): Boolean =
+    sameAuthenticatedSession &&
+        detailsGenerationCurrent &&
+        activeAccountId == expectedAccountId &&
+        activeProfileId == expectedProfileId &&
+        screen == HulkScreen.SERIES &&
+        selectedSeriesId == expectedSeriesId
 
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
@@ -289,18 +324,19 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val presentedOperationsMessageIds = linkedSetOf<String>()
     private val dismissedOptionalUpdateVersionCodes = linkedSetOf<Int>()
     private var notificationUiReady: Boolean = false
+    private val mutableVoiceSearchContextGeneration = MutableStateFlow(0L)
+    internal val voiceSearchContextGeneration: StateFlow<Long> =
+        mutableVoiceSearchContextGeneration.asStateFlow()
     private var notificationCenterReturnScreen = HulkScreen.MAIN
     private var playerReturnScreen = HulkScreen.MAIN
-    private val movieCardMetadataPrefs = application.getSharedPreferences(
-        MOVIE_CARD_METADATA_PREFS,
-        Context.MODE_PRIVATE,
-    )
+    private val contentMetadataStore = HomeHeroMetadataStore.get(application)
     private val movieCardProbeSemaphore = Semaphore(MOVIE_CARD_PROBE_CONCURRENCY)
     private val episodeNotificationScanSemaphore = Semaphore(EPISODE_NOTIFICATION_SCAN_CONCURRENCY)
     private val movieCardProbeCallbacks =
-        mutableMapOf<Int, MutableList<(String?, Long?) -> Unit>>()
-    private val movieCardProbeInFlight = mutableSetOf<Int>()
-    private val movieCardProbeAttempted = mutableSetOf<Int>()
+        mutableMapOf<ContentMetadataRequestKey, MutableList<(String?, Long?) -> Unit>>()
+    private val movieCardProbeInFlight = mutableSetOf<ContentMetadataRequestKey>()
+    private val movieCardProbeAttempted = mutableSetOf<ContentMetadataRequestKey>()
+    private val movieCardProbeJobs = mutableMapOf<ContentMetadataRequestKey, Job>()
 
     init {
         refreshOperations(force = true)
@@ -435,6 +471,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             ensureDestinationCatalogs(destination)
             return
         }
+
+        invalidateVoiceSearchContext()
 
         mutableState.update { state ->
             state.copy(
@@ -587,6 +625,30 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(searchQuery = query) }
     }
 
+    internal fun currentVoiceSearchOwner(): VoiceSearchOwner? {
+        val currentState = mutableState.value
+        if (
+            currentState.screen != HulkScreen.MAIN ||
+            currentState.account == null ||
+            currentState.destination != MainDestination.SEARCH ||
+            !notificationUiReady
+        ) return null
+        val authenticatedOwner = AuthenticatedSessionRegistry.currentOwner() ?: return null
+        if (session !== authenticatedOwner.session) return null
+        val activeAccountId = repository.activeAccountSession()?.accountId ?: return null
+        if (activeAccountId != authenticatedOwner.accountId) return null
+        return VoiceSearchOwner(
+            accountId = activeAccountId,
+            sessionId = authenticatedOwner.sessionId,
+            profileId = profileStore.activeProfileId(),
+            contextGeneration = mutableVoiceSearchContextGeneration.value,
+        )
+    }
+
+    internal fun updateSearchFromVoice(owner: VoiceSearchOwner, query: String) {
+        if (currentVoiceSearchOwner() == owner) updateSearch(query)
+    }
+
     fun refresh() {
         refreshOperations(force = true)
         val types = when (mutableState.value.destination) {
@@ -612,79 +674,69 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (item.type != ContentType.MOVIE) return
 
-        val cached = readMovieCardMetadata(item.id)
-        if (cached.quality != null && cached.durationMs != null) {
+        val owner = contentMetadataStore.currentOwner()
+        val cached = contentMetadataStore.cached(owner, item)
+        if (
+            owner != null &&
+            contentMetadataStore.isCurrent(owner) &&
+            cached.quality != null &&
+            cached.durationMs != null
+        ) {
+            onResult(cached.quality, cached.durationMs)
+            return
+        }
+        if (owner == null) {
             onResult(cached.quality, cached.durationMs)
             return
         }
 
-        movieCardProbeCallbacks.getOrPut(item.id) { mutableListOf() }.add(onResult)
-        if (item.id in movieCardProbeInFlight) return
+        val requestKey = owner.contentMetadataKey(ContentType.MOVIE, item.id)
+        movieCardProbeCallbacks.getOrPut(requestKey) { mutableListOf() }.add(onResult)
+        if (requestKey in movieCardProbeInFlight) return
 
-        if (item.id in movieCardProbeAttempted) {
-            notifyMovieCardProbeCallbacks(item.id, cached)
+        if (requestKey in movieCardProbeAttempted) {
+            notifyMovieCardProbeCallbacks(requestKey, cached)
             return
         }
 
-        val activeSession = session ?: run {
-            notifyMovieCardProbeCallbacks(item.id, cached)
-            return
-        }
+        movieCardProbeAttempted += requestKey
+        movieCardProbeInFlight += requestKey
 
-        movieCardProbeAttempted += item.id
-        movieCardProbeInFlight += item.id
-
-        viewModelScope.launch {
-            val fetched = runCatching {
-                movieCardProbeSemaphore.withPermit {
-                    repository.movieCardMetadata(activeSession, item.id)
+        movieCardProbeJobs[requestKey] = viewModelScope.launch {
+            try {
+                val fetched = try {
+                    movieCardProbeSemaphore.withPermit {
+                        contentMetadataStore.metadata(owner, item)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    contentMetadataStore.cached(owner, item)
                 }
-            }.getOrNull()
 
-            if (fetched != null) {
-                cacheMovieCardMetadata(
-                    movieId = item.id,
-                    quality = fetched.quality,
-                    durationMs = fetched.durationMs,
-                )
+                val published = AuthenticatedSessionRegistry.withCurrentOwner(owner) {
+                    notifyMovieCardProbeCallbacks(requestKey, fetched)
+                    true
+                } ?: false
+                if (!published) {
+                    movieCardProbeCallbacks.remove(requestKey)
+                }
+            } finally {
+                movieCardProbeInFlight -= requestKey
+                movieCardProbeJobs.remove(requestKey)
+                if (!contentMetadataStore.isCurrent(owner)) {
+                    movieCardProbeCallbacks.remove(requestKey)
+                }
             }
-
-            movieCardProbeInFlight -= item.id
-            notifyMovieCardProbeCallbacks(item.id, readMovieCardMetadata(item.id))
         }
-    }
-
-    private fun readMovieCardMetadata(movieId: Int): MovieCardProbeMetadata {
-        val quality = movieCardMetadataPrefs
-            .getString("movie:$movieId:quality", null)
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-        val durationMs = movieCardMetadataPrefs
-            .getLong("movie:$movieId:duration_ms", 0L)
-            .takeIf { it > 0L }
-        return MovieCardProbeMetadata(quality = quality, durationMs = durationMs)
-    }
-
-    private fun cacheMovieCardMetadata(
-        movieId: Int,
-        quality: String?,
-        durationMs: Long?,
-    ) {
-        if (quality == null && durationMs == null) return
-        movieCardMetadataPrefs.edit().apply {
-            quality?.let { putString("movie:$movieId:quality", it) }
-            durationMs
-                ?.takeIf { it > 0L }
-                ?.let { putLong("movie:$movieId:duration_ms", it) }
-        }.apply()
     }
 
     private fun notifyMovieCardProbeCallbacks(
-        movieId: Int,
-        metadata: MovieCardProbeMetadata,
+        requestKey: ContentMetadataRequestKey,
+        metadata: HomeHeroTechnicalMetadata,
     ) {
         movieCardProbeCallbacks
-            .remove(movieId)
+            .remove(requestKey)
             .orEmpty()
             .forEach { callback ->
                 callback(metadata.quality, metadata.durationMs)
@@ -701,6 +753,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 profileId = profileStore.activeProfileId(),
             ),
         )
+        invalidateVoiceSearchContext()
         detailsJob?.cancel()
         detailsJob = null
         return request
@@ -1165,6 +1218,30 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             onResult("لا يمكن تفعيل التنبيه لأن المسلسل غير موثّق ضمن محتوى الأطفال.")
             return
         }
+        val authenticatedOwner = AuthenticatedSessionRegistry.currentOwner()
+        val detailsRequest = detailsRequestGate.currentToken()
+        val activeSession = session
+        if (
+            authenticatedOwner == null ||
+            authenticatedOwner.session !== activeSession ||
+            authenticatedOwner.accountId != accountId ||
+            detailsRequest == null ||
+            detailsRequest.key.type != ContentType.SERIES ||
+            detailsRequest.key.contentId != series.id ||
+            detailsRequest.key.accountId != accountId ||
+            detailsRequest.key.profileId != profile.id
+        ) {
+            onResult("تغيّر سياق المسلسل. أعد فتحه ثم حاول مرة أخرى.")
+            return
+        }
+        val toggleOwner = SeriesNotificationToggleOwner(
+            authenticatedSession = authenticatedOwner,
+            detailsRequest = detailsRequest,
+            accountId = accountId,
+            profileId = profile.id,
+            profileKind = profile.kind,
+            seriesId = series.id,
+        )
         val currentlyEnabled = isSeriesNotificationsEnabled(series)
         val currentState = mutableState.value
         if (
@@ -1180,61 +1257,63 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            if (
-                localEpisodeNotificationStore.activeAccountId() != accountId ||
-                profileStore.activeProfileId() != profile.id
-            ) {
-                onResult("تغيّر الحساب أو الملف الشخصي. حاول مرة أخرى.")
-                return@launch
-            }
+            if (!isCurrentSeriesNotificationToggle(toggleOwner)) return@launch
             var enabledBaselineEpisodes: List<Episode>? = null
             val result = if (currentlyEnabled) {
                 withContext(Dispatchers.IO) {
                     localEpisodeNotificationStore.disableSubscription(
-                        profileId = profile.id,
-                        seriesId = series.id,
-                        expectedAccountId = accountId,
+                        profileId = toggleOwner.profileId,
+                        seriesId = toggleOwner.seriesId,
+                        expectedAccountId = toggleOwner.accountId,
                     )
                 }
             } else {
-                val activeSession = session
-                    ?: return@launch onResult("سجل الدخول أولًا.")
                 val episodes = try {
-                    repository.seriesBundle(activeSession, series.id).episodes
+                    repository.seriesBundle(
+                        toggleOwner.authenticatedSession.session,
+                        series.id,
+                    ).episodes
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
-                    onResult("تعذر جلب الحلقات الحالية. لم يتم تفعيل التنبيهات.")
+                    if (isCurrentSeriesNotificationToggle(toggleOwner)) {
+                        onResult("تعذر جلب الحلقات الحالية. لم يتم تفعيل التنبيهات.")
+                    }
                     return@launch
                 }
+                if (!isCurrentSeriesNotificationToggle(toggleOwner)) return@launch
                 val displayedKeys = reliableEpisodeKeys(currentState.episodes)
                 val freshKeys = reliableEpisodeKeys(episodes)
                 if (displayedKeys.isNotEmpty() && !freshKeys.containsAll(displayedKeys)) {
-                    onResult("وصلت بيانات حلقات غير مكتملة. لم يتم تفعيل التنبيهات.")
+                    if (isCurrentSeriesNotificationToggle(toggleOwner)) {
+                        onResult("وصلت بيانات حلقات غير مكتملة. لم يتم تفعيل التنبيهات.")
+                    }
                     return@launch
                 }
                 if (
-                    localEpisodeNotificationStore.activeAccountId() != accountId ||
-                    profileStore.activeProfileId() != profile.id ||
-                    !canUseSeriesNotifications(profile.kind, series.id)
+                    !isCurrentSeriesNotificationToggle(toggleOwner) ||
+                    !canUseSeriesNotifications(toggleOwner.profileKind, toggleOwner.seriesId)
                 ) {
-                    onResult("تغيّر الملف الشخصي أو نطاق المحتوى. حاول مرة أخرى.")
                     return@launch
                 }
                 enabledBaselineEpisodes = episodes
                 withContext(Dispatchers.IO) {
                     localEpisodeNotificationStore.enableSubscription(
-                        profileId = profile.id,
+                        profileId = toggleOwner.profileId,
                         series = series,
                         episodes = episodes,
-                        expectedAccountId = accountId,
+                        expectedAccountId = toggleOwner.accountId,
                     )
                 }
             }
+            if (!isCurrentSeriesNotificationToggle(toggleOwner)) return@launch
             if (result == EpisodeNotificationStoreResult.SUCCESS && !currentlyEnabled) {
                 val refreshedEpisodes = enabledBaselineEpisodes.orEmpty()
                 mutableState.update { state ->
-                    if (state.selectedSeries?.id == series.id) {
+                    if (
+                        isCurrentSeriesNotificationToggle(toggleOwner) &&
+                        state.selectedSeries?.id == series.id
+                    ) {
                         state.copy(episodes = refreshedEpisodes)
                     } else {
                         state
@@ -1256,6 +1335,33 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 },
             )
         }
+    }
+
+    private fun isCurrentSeriesNotificationToggle(
+        owner: SeriesNotificationToggleOwner,
+    ): Boolean {
+        val detailsGenerationCurrent = detailsRequestGate.isCurrentForContext(
+            token = owner.detailsRequest,
+            accountId = owner.accountId,
+            profileId = owner.profileId,
+        )
+        val current = mutableState.value
+        val selectedSeriesId = current.selectedSeries
+            ?.takeIf { it.type == ContentType.SERIES }
+            ?.id
+        return seriesNotificationPublicationAllowed(
+            sameAuthenticatedSession =
+                AuthenticatedSessionRegistry.isCurrent(owner.authenticatedSession) &&
+                    session === owner.authenticatedSession.session,
+            detailsGenerationCurrent = detailsGenerationCurrent,
+            expectedAccountId = owner.accountId,
+            activeAccountId = localEpisodeNotificationStore.activeAccountId(),
+            expectedProfileId = owner.profileId,
+            activeProfileId = profileStore.activeProfileId(),
+            screen = current.screen,
+            expectedSeriesId = owner.seriesId,
+            selectedSeriesId = selectedSeriesId,
+        )
     }
 
     fun toggleEpisodeNotificationMaster(onResult: (String) -> Unit) {
@@ -1301,6 +1407,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun openNotificationCenter() {
         val current = mutableState.value
         if (current.screen == HulkScreen.LOGIN || current.account == null) return
+        if (current.screen != HulkScreen.NOTIFICATION_CENTER) {
+            invalidateVoiceSearchContext()
+        }
         if (current.screen != HulkScreen.NOTIFICATION_CENTER) {
             notificationCenterReturnScreen = current.screen.takeUnless { it == HulkScreen.PLAYER }
                 ?: HulkScreen.MAIN
@@ -1529,6 +1638,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     fun onProfileChanged() {
         notificationScanJob?.cancel()
         invalidateDetailsRequest()
+        invalidateVoiceSearchContext()
         mutableState.update { state ->
             if (state.screen == HulkScreen.MOVIE_DETAILS || state.screen == HulkScreen.SERIES) {
                 state.copy(
@@ -1559,18 +1669,26 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         scheduleTvPlatformSync(immediate = true)
     }
 
-    fun removeNotificationProfileData(profileId: String) {
-        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+    fun removeNotificationProfileData(accountId: String, profileId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             localEpisodeNotificationStore.removeProfile(profileId, accountId)
         }
     }
 
-    fun removeDownloadProfileData(profileId: String) {
-        val accountId = downloadRepository.activeAccountIdForCleanup() ?: return
+    fun removeNotificationProfileData(profileId: String) {
+        val accountId = localEpisodeNotificationStore.activeAccountId() ?: return
+        removeNotificationProfileData(accountId, profileId)
+    }
+
+    fun removeDownloadProfileData(accountId: String, profileId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             downloadRepository.removeProfile(accountId, profileId)
         }
+    }
+
+    fun removeDownloadProfileData(profileId: String) {
+        val accountId = downloadRepository.activeAccountIdForCleanup() ?: return
+        removeDownloadProfileData(accountId, profileId)
     }
 
     fun onAppResumed() {
@@ -1882,7 +2000,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setNotificationUiReady(ready: Boolean) {
         val becameReady = ready && !notificationUiReady
+        val readinessChanged = notificationUiReady != ready
         notificationUiReady = ready
+        if (readinessChanged) invalidateVoiceSearchContext()
         if (ready) {
             maybeShowPendingNotificationPopup()
             if (becameReady && profileStore.activeProfile().kind == ProfileKind.KIDS) {
@@ -2347,6 +2467,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         loadedCatalogs.clear()
         homeCatalogs.clear()
         selectedCategoryByType.clear()
+        movieCardProbeJobs.values.forEach { it.cancel() }
+        movieCardProbeJobs.clear()
         movieCardProbeCallbacks.clear()
         movieCardProbeInFlight.clear()
         movieCardProbeAttempted.clear()
@@ -2755,6 +2877,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun openSafeTvHome(message: String?) {
         invalidateDetailsRequest()
+        invalidateVoiceSearchContext()
         playerReturnScreen = HulkScreen.MAIN
         mutableState.update {
             it.copy(
@@ -2846,10 +2969,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun invalidateVoiceSearchContext() {
+        mutableVoiceSearchContextGeneration.update { generation -> generation + 1L }
+    }
+
     private fun startPlayback(request: PlaybackRequest) {
         if (playerReturnScreen == HulkScreen.MAIN) {
             invalidateDetailsRequest()
         }
+        invalidateVoiceSearchContext()
         if (operationsDeviceIsTv && !request.isLive) {
             tvLastSyncedPositions.remove(request.historyKey)
         }
@@ -2974,7 +3102,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         private const val HOME_RECENT_LIMIT = 240
         private const val HOME_RATED_LIMIT = 120
         private const val HOME_CATALOG_LIMIT = 320
-        private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
         private const val MOVIE_CARD_PROBE_CONCURRENCY = 2
         private const val EPISODE_NOTIFICATION_SCAN_CONCURRENCY = 3
         private const val TV_PLATFORM_SYNC_DEBOUNCE_MS = 350L

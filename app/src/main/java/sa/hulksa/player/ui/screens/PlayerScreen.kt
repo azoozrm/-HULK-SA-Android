@@ -104,6 +104,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.first
 import sa.hulksa.player.data.SettingsProStore
+import sa.hulksa.player.data.AuthenticatedSessionOwner
+import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.PlaybackRequest
@@ -139,7 +141,6 @@ private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
 private const val PREF_IDS = "ids"
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
-private const val MOVIE_CARD_METADATA_PREFS = "movie_card_verified_metadata"
 
 private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
@@ -193,33 +194,21 @@ private fun movieCardQualityLabel(height: Int): String? = when {
     else -> null
 }
 
-private fun Context.cacheVerifiedMovieCardMetadata(
+private fun cacheVerifiedMovieCardMetadata(
+    metadataStore: HomeHeroMetadataStore,
+    metadataOwner: AuthenticatedSessionOwner?,
     request: PlaybackRequest,
     videoHeight: Int? = null,
     durationMs: Long? = null,
 ) {
     if (!request.streamKind.equals("movie", ignoreCase = true)) return
-
-    val editor = applicationContext
-        .getSharedPreferences(MOVIE_CARD_METADATA_PREFS, Context.MODE_PRIVATE)
-        .edit()
-    var changed = false
-
-    videoHeight
-        ?.let(::movieCardQualityLabel)
-        ?.let { quality ->
-            editor.putString("movie:${request.streamId}:quality", quality)
-            changed = true
-        }
-
-    durationMs
-        ?.takeIf { it > 0L }
-        ?.let { duration ->
-            editor.putLong("movie:${request.streamId}:duration_ms", duration)
-            changed = true
-        }
-
-    if (changed) editor.apply()
+    val owner = metadataOwner ?: return
+    metadataStore.cacheMovieMetadata(
+        owner = owner,
+        movieId = request.streamId,
+        quality = videoHeight?.let(::movieCardQualityLabel),
+        durationMs = durationMs,
+    )
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -238,6 +227,10 @@ fun PlayerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val settingsProStore = remember(context) { SettingsProStore(context) }
+    val contentMetadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val contentMetadataOwner = remember(request, contentMetadataStore) {
+        contentMetadataStore.currentOwner()
+    }
     val playbackSettings = remember(context, request.historyKey) { settingsProStore.playbackSettings() }
     val seekStepMs = playbackSettings.seekStepSeconds * 1_000L
     val adaptiveUi = LocalAdaptiveUi.current
@@ -737,7 +730,9 @@ fun PlayerScreen(
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 videoHeight = videoSize.height
-                context.cacheVerifiedMovieCardMetadata(
+                cacheVerifiedMovieCardMetadata(
+                    metadataStore = contentMetadataStore,
+                    metadataOwner = contentMetadataOwner,
                     request = request,
                     videoHeight = videoSize.height,
                 )
@@ -933,7 +928,9 @@ fun PlayerScreen(
 
             durationMs = player.duration.takeIf { it > 0L } ?: 0L
             if (durationMs > 0L && durationMs != cachedMovieDurationMs) {
-                context.cacheVerifiedMovieCardMetadata(
+                cacheVerifiedMovieCardMetadata(
+                    metadataStore = contentMetadataStore,
+                    metadataOwner = contentMetadataOwner,
                     request = request,
                     durationMs = durationMs,
                 )

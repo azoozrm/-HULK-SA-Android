@@ -13,6 +13,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import sa.hulksa.player.ui.ProfileAwareHulkApp
 import sa.hulksa.player.ui.VoiceSearchAppLayer
 import sa.hulksa.player.ui.VoiceSearchDelegate
@@ -33,8 +39,10 @@ class TvMainActivity : ComponentActivity() {
         subscriptionResumeEnforcer = SubscriptionResumeEnforcer(this, viewModel)
         voiceSearchDelegate = VoiceSearchDelegate(
             activity = this,
-            onTranscript = viewModel::updateSearch,
+            ownerProvider = viewModel::currentVoiceSearchOwner,
+            onTranscript = viewModel::updateSearchFromVoice,
         )
+        observeVoiceSearchContext()
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         setContent {
             HulkTheme {
@@ -73,6 +81,19 @@ class TvMainActivity : ComponentActivity() {
             viewModel.onAppResumed()
         }
         window.decorView.post { enterImmersiveModeSafely() }
+    }
+
+    private fun observeVoiceSearchContext() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    viewModel.state,
+                    viewModel.voiceSearchContextGeneration,
+                ) { _, _ -> viewModel.currentVoiceSearchOwner() }
+                    .distinctUntilChanged()
+                    .collect(voiceSearchDelegate::updateContext)
+            }
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
