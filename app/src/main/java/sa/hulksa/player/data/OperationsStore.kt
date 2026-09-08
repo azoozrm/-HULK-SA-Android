@@ -3,6 +3,8 @@ package sa.hulksa.player.data
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import sa.hulksa.player.OperationsNotificationSnapshot
+import sa.hulksa.player.OperationsNotificationSnapshotGate
 
 enum class LocalNotificationKind {
     NEW_EPISODE,
@@ -57,6 +59,7 @@ class OperationsStore(context: Context) {
         Context.MODE_PRIVATE,
     )
     private val lock = Any()
+    private val notificationSnapshotGate = OperationsNotificationSnapshotGate(lock)
 
     fun cachedConfig(): CachedOperationsConfig? = synchronized(lock) {
         val rawJson = preferences.getString(KEY_CONFIG_JSON, null) ?: return@synchronized null
@@ -87,14 +90,32 @@ class OperationsStore(context: Context) {
         writeStringSet(KEY_ACKNOWLEDGED_MESSAGES, updated)
     }
 
-    fun systemNotifications(): List<LocalSystemNotification> = synchronized(lock) {
-        readSystemNotifications()
-    }
+    internal fun systemNotificationSnapshot(): OperationsNotificationSnapshot =
+        notificationSnapshotGate.capture {
+            readSystemNotifications()
+        }
 
-    fun recordImportantAnnouncements(
+    internal fun isCurrentSystemNotificationSnapshot(
+        snapshot: OperationsNotificationSnapshot,
+    ): Boolean = notificationSnapshotGate.isCurrent(snapshot)
+
+    internal fun recordImportantAnnouncementsAndSnapshot(
         announcements: List<OperationsAnnouncement>,
         generatedAtEpochSeconds: Long,
-    ): Boolean = synchronized(lock) {
+    ): Pair<Set<String>, OperationsNotificationSnapshot> {
+        var acknowledgedMessageIds = emptySet<String>()
+        val notificationSnapshot = notificationSnapshotGate.capture {
+            recordImportantAnnouncementsLocked(announcements, generatedAtEpochSeconds)
+            acknowledgedMessageIds = readStringSet(KEY_ACKNOWLEDGED_MESSAGES)
+            readSystemNotifications()
+        }
+        return acknowledgedMessageIds to notificationSnapshot
+    }
+
+    private fun recordImportantAnnouncementsLocked(
+        announcements: List<OperationsAnnouncement>,
+        generatedAtEpochSeconds: Long,
+    ) {
         val existing = readSystemNotifications().associateByTo(linkedMapOf(), LocalSystemNotification::messageId)
         val recordedMessageIds = readStringSet(KEY_RECORDED_SYSTEM_MESSAGES).toMutableSet()
         announcements.asSequence()
@@ -119,33 +140,47 @@ class OperationsStore(context: Context) {
                 .sortedByDescending(LocalSystemNotification::createdAtEpochMs)
                 .take(MAX_SYSTEM_NOTIFICATIONS),
         )
-        notificationsSaved && writeStringSet(KEY_RECORDED_SYSTEM_MESSAGES, recordedMessageIds)
+        if (notificationsSaved) {
+            writeStringSet(KEY_RECORDED_SYSTEM_MESSAGES, recordedMessageIds)
+        }
     }
 
-    fun markSystemNotificationRead(notificationId: String): Boolean = synchronized(lock) {
+    internal fun markSystemNotificationReadAndSnapshot(
+        notificationId: String,
+    ): OperationsNotificationSnapshot = notificationSnapshotGate.capture {
         val current = readSystemNotifications()
-        if (current.none { it.id == notificationId }) return@synchronized false
-        writeSystemNotifications(
-            current.map { item ->
-                if (item.id == notificationId) item.copy(read = true) else item
-            },
-        )
+        if (current.any { it.id == notificationId }) {
+            writeSystemNotifications(
+                current.map { item ->
+                    if (item.id == notificationId) item.copy(read = true) else item
+                },
+            )
+        }
+        readSystemNotifications()
     }
 
-    fun deleteSystemNotification(notificationId: String): Boolean = synchronized(lock) {
+    internal fun deleteSystemNotificationAndSnapshot(
+        notificationId: String,
+    ): OperationsNotificationSnapshot = notificationSnapshotGate.capture {
         val current = readSystemNotifications()
         val updated = current.filterNot { it.id == notificationId }
-        if (updated.size == current.size) return@synchronized false
-        writeSystemNotifications(updated)
+        if (updated.size != current.size) {
+            writeSystemNotifications(updated)
+        }
+        readSystemNotifications()
     }
 
-    fun markAllSystemNotificationsRead(): Boolean = synchronized(lock) {
-        writeSystemNotifications(readSystemNotifications().map { it.copy(read = true) })
-    }
+    internal fun markAllSystemNotificationsReadAndSnapshot(): OperationsNotificationSnapshot =
+        notificationSnapshotGate.capture {
+            writeSystemNotifications(readSystemNotifications().map { it.copy(read = true) })
+            readSystemNotifications()
+        }
 
-    fun clearSystemNotifications(): Boolean = synchronized(lock) {
-        preferences.edit().remove(KEY_SYSTEM_NOTIFICATIONS).commit()
-    }
+    internal fun clearSystemNotificationsAndSnapshot(): OperationsNotificationSnapshot =
+        notificationSnapshotGate.capture {
+            preferences.edit().remove(KEY_SYSTEM_NOTIFICATIONS).commit()
+            readSystemNotifications()
+        }
 
     private fun readStringSet(key: String): Set<String> {
         val encoded = preferences.getString(key, null) ?: return emptySet()

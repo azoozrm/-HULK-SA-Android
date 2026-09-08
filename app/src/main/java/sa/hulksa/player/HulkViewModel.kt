@@ -321,7 +321,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var activeOperationsConfig: OperationsConfig? = null
     private var activeOperationsFetchedAtEpochMs: Long = 0L
     private var operationsSystemNotifications: List<LocalSystemNotification> = emptyList()
-    private val operationsNotificationSnapshotGate = OperationsNotificationSnapshotGate()
     private val presentedOperationsMessageIds = linkedSetOf<String>()
     private val dismissedOptionalUpdateVersionCodes = linkedSetOf<Int>()
     private var notificationUiReady: Boolean = false
@@ -1430,33 +1429,32 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId } ?: return
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
-        val snapshotGeneration = operationsNotificationSnapshotGate.begin()
         viewModelScope.launch {
-            val systemNotifications = withContext(Dispatchers.IO) {
+            val operationsSnapshot = withContext(Dispatchers.IO) {
                 when (item) {
-                    is LocalNotificationItem.Episode -> accountId?.let {
-                        localEpisodeNotificationStore.markRead(profileId, notificationId, it)
+                    is LocalNotificationItem.Episode -> {
+                        accountId?.let {
+                            localEpisodeNotificationStore.markRead(profileId, notificationId, it)
+                        }
+                        operationsStore.systemNotificationSnapshot()
                     }
                     is LocalNotificationItem.System ->
-                        operationsStore.markSystemNotificationRead(notificationId)
+                        operationsStore.markSystemNotificationReadAndSnapshot(notificationId)
                 }
-                operationsStore.systemNotifications()
             }
-            publishOperationsSystemNotifications(snapshotGeneration, systemNotifications, clearPopup = false)
+            publishOperationsSystemNotifications(operationsSnapshot, clearPopup = false)
         }
     }
 
     fun markAllNotificationsRead() {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
-        val snapshotGeneration = operationsNotificationSnapshotGate.begin()
         viewModelScope.launch {
-            val systemNotifications = withContext(Dispatchers.IO) {
+            val operationsSnapshot = withContext(Dispatchers.IO) {
                 accountId?.let { localEpisodeNotificationStore.markAllRead(profileId, it) }
-                operationsStore.markAllSystemNotificationsRead()
-                operationsStore.systemNotifications()
+                operationsStore.markAllSystemNotificationsReadAndSnapshot()
             }
-            publishOperationsSystemNotifications(snapshotGeneration, systemNotifications, clearPopup = false)
+            publishOperationsSystemNotifications(operationsSnapshot, clearPopup = false)
         }
     }
 
@@ -1464,33 +1462,32 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId } ?: return
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
-        val snapshotGeneration = operationsNotificationSnapshotGate.begin()
         viewModelScope.launch {
-            val systemNotifications = withContext(Dispatchers.IO) {
+            val operationsSnapshot = withContext(Dispatchers.IO) {
                 when (item) {
-                    is LocalNotificationItem.Episode -> accountId?.let {
-                        localEpisodeNotificationStore.deleteNotification(profileId, notificationId, it)
+                    is LocalNotificationItem.Episode -> {
+                        accountId?.let {
+                            localEpisodeNotificationStore.deleteNotification(profileId, notificationId, it)
+                        }
+                        operationsStore.systemNotificationSnapshot()
                     }
                     is LocalNotificationItem.System ->
-                        operationsStore.deleteSystemNotification(notificationId)
+                        operationsStore.deleteSystemNotificationAndSnapshot(notificationId)
                 }
-                operationsStore.systemNotifications()
             }
-            publishOperationsSystemNotifications(snapshotGeneration, systemNotifications, clearPopup = false)
+            publishOperationsSystemNotifications(operationsSnapshot, clearPopup = false)
         }
     }
 
     fun clearNotifications() {
         val profileId = profileStore.activeProfileId()
         val accountId = localEpisodeNotificationStore.activeAccountId()
-        val snapshotGeneration = operationsNotificationSnapshotGate.begin()
         viewModelScope.launch {
-            val systemNotifications = withContext(Dispatchers.IO) {
+            val operationsSnapshot = withContext(Dispatchers.IO) {
                 accountId?.let { localEpisodeNotificationStore.clearNotifications(profileId, it) }
-                operationsStore.clearSystemNotifications()
-                operationsStore.systemNotifications()
+                operationsStore.clearSystemNotificationsAndSnapshot()
             }
-            publishOperationsSystemNotifications(snapshotGeneration, systemNotifications, clearPopup = true)
+            publishOperationsSystemNotifications(operationsSnapshot, clearPopup = true)
         }
     }
 
@@ -1500,15 +1497,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val item = mutableState.value.localNotifications.firstOrNull { it.id == notificationId }
         if (item is LocalNotificationItem.System) {
-            val snapshotGeneration = operationsNotificationSnapshotGate.begin()
             viewModelScope.launch {
-                val systemNotifications = withContext(Dispatchers.IO) {
-                    operationsStore.markSystemNotificationRead(notificationId)
-                    operationsStore.systemNotifications()
+                val operationsSnapshot = withContext(Dispatchers.IO) {
+                    operationsStore.markSystemNotificationReadAndSnapshot(notificationId)
                 }
                 publishOperationsSystemNotifications(
-                    snapshotGeneration,
-                    systemNotifications,
+                    operationsSnapshot,
                     clearPopup = false,
                 )
                 onResult(null)
@@ -1813,14 +1807,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun refreshOperations(force: Boolean) {
         if (operationsRefreshJob?.isActive == true) return
-        val snapshotGeneration = operationsNotificationSnapshotGate.begin()
         operationsRefreshJob = viewModelScope.launch {
-            val (cached, systemNotifications) = runOperationsPersistenceOffMain {
-                operationsStore.cachedConfig() to operationsStore.systemNotifications()
+            val (cached, operationsSnapshot) = runOperationsPersistenceOffMain {
+                operationsStore.cachedConfig() to operationsStore.systemNotificationSnapshot()
             }
             publishOperationsSystemNotifications(
-                snapshotGeneration,
-                systemNotifications,
+                operationsSnapshot,
                 clearPopup = false,
             )
             if (activeOperationsConfig == null) {
@@ -1905,15 +1897,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             acknowledgedMessageIds = emptySet(),
             presentedMessageIds = emptySet(),
         )
-        val snapshotGeneration = operationsNotificationSnapshotGate.begin()
-        val (acknowledged, systemNotifications) = runOperationsPersistenceOffMain {
-            operationsStore.recordImportantAnnouncements(
+        val (acknowledged, operationsSnapshot) = runOperationsPersistenceOffMain {
+            operationsStore.recordImportantAnnouncementsAndSnapshot(
                 announcements = activeAnnouncements,
                 generatedAtEpochSeconds = config.generatedAtEpochSeconds,
             )
-            operationsStore.acknowledgedMessageIds() to operationsStore.systemNotifications()
         }
-        publishOperationsSystemNotifications(snapshotGeneration, systemNotifications, clearPopup = false)
+        publishOperationsSystemNotifications(operationsSnapshot, clearPopup = false)
         val announcementPopup = eligibleOperationsAnnouncements(
             announcements = config.announcements,
             currentVersionCode = BuildConfig.VERSION_CODE,
@@ -2025,16 +2015,15 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun publishOperationsSystemNotifications(
-        snapshotGeneration: Long,
-        systemNotifications: List<LocalSystemNotification>,
+        snapshot: OperationsNotificationSnapshot,
         clearPopup: Boolean,
     ) {
-        if (operationsNotificationSnapshotGate.isCurrent(snapshotGeneration)) {
-            operationsSystemNotifications = systemNotifications
+        if (operationsStore.isCurrentSystemNotificationSnapshot(snapshot)) {
+            operationsSystemNotifications = snapshot.notifications
             refreshNotificationState(clearPopup)
         } else {
             // The local episode state may still have changed, but this older Operations
-            // snapshot is not allowed to replace the one owned by the newer operation.
+            // snapshot is not allowed to replace the latest persisted snapshot.
             refreshNotificationState(clearPopup = false)
         }
     }
