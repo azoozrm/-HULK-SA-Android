@@ -339,7 +339,7 @@ class DownloadRepository internal constructor(
         return EnqueueResult.Started(entry)
     }
 
-    fun pause(downloadId: Long): DownloadPauseResult {
+    internal fun pause(downloadId: Long): DownloadPauseResult {
         val result = synchronized(lock) {
             val index = cache.indexOfFirst { it.downloadId == downloadId }
             if (index < 0 || cache[index].status !in ACTIVE_STATUSES) {

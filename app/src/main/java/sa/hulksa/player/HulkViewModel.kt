@@ -54,6 +54,7 @@ import sa.hulksa.player.data.OperationsUiState
 import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.activePersistentOperationsAnnouncement
 import sa.hulksa.player.data.PortalException
+import sa.hulksa.player.data.ProfileDownloadPauseOutcome
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
