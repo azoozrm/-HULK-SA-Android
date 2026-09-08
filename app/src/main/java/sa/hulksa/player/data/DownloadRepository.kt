@@ -120,7 +120,7 @@ class DownloadRepository internal constructor(
     private val nextId = AtomicLong(System.currentTimeMillis())
     @Volatile
     private var accountBoundarySuspended = false
-    private var cache = readStored().map(::recoverInterruptedState).toMutableList()
+    private var cache = readStored().map(::recoverInterruptedDownloadState).toMutableList()
     @Volatile
     private var publishedSnapshot: List<OfflineDownload> = emptyList()
 
@@ -339,27 +339,52 @@ class DownloadRepository internal constructor(
         return EnqueueResult.Started(entry)
     }
 
-    fun pause(downloadId: Long): List<OfflineDownload> {
-        val attempt = synchronized(lock) {
-            val activeAttempt = transportAttempts.invalidate(downloadId)
-            mutateLocked(downloadId) { item ->
-                if (item.status in ACTIVE_STATUSES) {
-                    item.copy(
-                        status = OfflineStatus.PAUSED,
-                        bytesPerSecond = 0L,
-                        etaSeconds = -1L,
-                        errorMessage = null,
-                    )
-                } else {
-                    item
-                }
+    fun pause(downloadId: Long): DownloadPauseResult {
+        val result = synchronized(lock) {
+            val index = cache.indexOfFirst { it.downloadId == downloadId }
+            if (index < 0 || cache[index].status !in ACTIVE_STATUSES) {
+                return@synchronized DownloadPauseResult(persisted = true)
             }
-            activeAttempt
+            val current = cache[index]
+            cache[index] = pausedDownloadRecord(current)
+            if (!writeStoredLocked(synchronous = true)) {
+                cache[index] = current
+                return@synchronized DownloadPauseResult(persisted = false)
+            }
+            publishSnapshotLocked()
+            DownloadPauseResult(
+                persisted = true,
+                invalidatedAttempt = transportAttempts.invalidate(downloadId),
+            )
         }
-        attempt?.let { cancelTrackedCall(downloadId, it) }
-        jobs[downloadId]?.cancel()
-        schedule()
-        return snapshot()
+        if (shouldCancelDownloadForPause(result.persisted)) {
+            result.invalidatedAttempt?.let { cancelTrackedCall(downloadId, it) }
+            jobs[downloadId]?.cancel()
+            schedule()
+        }
+        return result
+    }
+
+    internal fun failForSessionRestore(downloadId: Long): Boolean = synchronized(lock) {
+        val index = cache.indexOfFirst { it.downloadId == downloadId }
+        if (index < 0) return@synchronized false
+        val current = cache[index]
+        if (current.status !in SCHEDULABLE_STATUSES && current.status !in ACTIVE_STATUSES) {
+            return@synchronized true
+        }
+        cache[index] = current.copy(
+            status = OfflineStatus.FAILED,
+            sourceCandidates = emptyList(),
+            bytesPerSecond = 0L,
+            etaSeconds = -1L,
+            errorMessage = "تعذر استعادة جلسة التحميل. سجل الدخول ثم اضغط إعادة المحاولة.",
+        )
+        if (!writeStoredLocked(synchronous = true)) {
+            cache[index] = current
+            return@synchronized false
+        }
+        publishSnapshotLocked()
+        true
     }
 
     fun resume(downloadId: Long): Boolean {
@@ -1144,20 +1169,6 @@ class DownloadRepository internal constructor(
         }
         .distinctBy { runCatching { it.directory.canonicalPath }.getOrDefault(it.directory.absolutePath) }
 
-    private fun recoverInterruptedState(item: OfflineDownload): OfflineDownload {
-        if (item.status == OfflineStatus.COMPLETED) return item
-        if (item.status in ACTIVE_STATUSES || item.status == OfflineStatus.CHECKING) {
-            return item.copy(
-                status = OfflineStatus.QUEUED,
-                sourceCandidates = emptyList(),
-                bytesPerSecond = 0L,
-                etaSeconds = -1L,
-                errorMessage = "سيتم استئناف التحميل من اخر نقطة بعد إعادة إنشاء رابط آمن.",
-            )
-        }
-        return item.copy(sourceCandidates = emptyList())
-    }
-
     private fun completedFileIsUsable(item: OfflineDownload): Boolean {
         val expectedBytes = item.totalBytes.takeIf { it > 0L }
             ?: item.bytesDownloaded.takeIf { it > 0L }
@@ -1365,7 +1376,7 @@ class DownloadRepository internal constructor(
         }.getOrDefault(emptyList())
     }
 
-    private fun writeStoredLocked(synchronous: Boolean = false) {
+    private fun writeStoredLocked(synchronous: Boolean = false): Boolean {
         val array = JSONArray()
         cache.forEach { item ->
             array.put(
@@ -1400,7 +1411,12 @@ class DownloadRepository internal constructor(
             )
         }
         val editor = preferences.edit().putString(KEY_DOWNLOADS, array.toString())
-        if (synchronous) editor.commit() else editor.apply()
+        return if (synchronous) {
+            runCatching { editor.commit() }.getOrDefault(false)
+        } else {
+            editor.apply()
+            true
+        }
     }
 
     private fun parseTotalFromContentRange(value: String?): Long {
@@ -1500,6 +1516,42 @@ class DownloadRepository internal constructor(
             OfflineStatus.WAITING_STORAGE,
         )
     }
+}
+
+internal data class DownloadPauseResult(
+    val persisted: Boolean,
+    val invalidatedAttempt: DownloadTransportAttemptRegistry.Attempt? = null,
+)
+
+internal fun pausedDownloadRecord(item: OfflineDownload): OfflineDownload = item.copy(
+    status = OfflineStatus.PAUSED,
+    sourceCandidates = emptyList(),
+    bytesPerSecond = 0L,
+    etaSeconds = -1L,
+    errorMessage = null,
+)
+
+internal fun shouldCancelDownloadForPause(persisted: Boolean): Boolean = persisted
+
+internal fun recoverInterruptedDownloadState(item: OfflineDownload): OfflineDownload {
+    if (item.status == OfflineStatus.COMPLETED) return item
+    if (
+        item.status == OfflineStatus.QUEUED ||
+        item.status == OfflineStatus.CHECKING ||
+        item.status == OfflineStatus.DOWNLOADING ||
+        item.status == OfflineStatus.WAITING_SCHEDULE ||
+        item.status == OfflineStatus.WAITING_NETWORK ||
+        item.status == OfflineStatus.WAITING_STORAGE
+    ) {
+        return item.copy(
+            status = OfflineStatus.QUEUED,
+            sourceCandidates = emptyList(),
+            bytesPerSecond = 0L,
+            etaSeconds = -1L,
+            errorMessage = "سيتم استئناف التحميل من اخر نقطة بعد إعادة إنشاء رابط آمن.",
+        )
+    }
+    return item.copy(sourceCandidates = emptyList())
 }
 
 internal const val DOWNLOAD_STALL_TIMEOUT_SECONDS = 30L

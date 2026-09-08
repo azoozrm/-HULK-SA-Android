@@ -30,7 +30,7 @@ class DurableDownloadStartupMaintenanceTest {
             },
         )
 
-        assertTrue(result)
+        assertEquals(DurableDownloadStartupMaintenanceResult.READY, result)
         assertEquals(2, calls.get())
         assertEquals(listOf("scrub", "capture"), order)
         assertNotEquals(callerThreadId, maintenanceThreadId)
@@ -48,7 +48,7 @@ class DurableDownloadStartupMaintenanceTest {
             },
         )
 
-        assertFalse(result)
+        assertEquals(DurableDownloadStartupMaintenanceResult.CREDENTIAL_SCRUB_FAILED, result)
         assertFalse(captureCalled)
     }
 
@@ -59,6 +59,16 @@ class DurableDownloadStartupMaintenanceTest {
             captureLegacyOwner = { false },
         )
 
-        assertFalse(result)
+        assertEquals(DurableDownloadStartupMaintenanceResult.LEGACY_OWNER_CAPTURE_FAILED, result)
+    }
+
+    @Test
+    fun `owner capture exception remains typed for an account-change retry`() = runBlocking {
+        val result = runDurableDownloadStartupMaintenance(
+            scrubPersistedCredentials = { true },
+            captureLegacyOwner = { error("storage temporarily unavailable") },
+        )
+
+        assertEquals(DurableDownloadStartupMaintenanceResult.LEGACY_OWNER_CAPTURE_FAILED, result)
     }
 }

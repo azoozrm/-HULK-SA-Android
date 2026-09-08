@@ -252,7 +252,7 @@ fun HulkApp(
                                         viewModel.deleteDownload(item)
                                         notify("تم حذف التحميل.")
                                     },
-                                    onRetryDownload = { item -> notify(viewModel.retryDownload(item)) },
+                                    onRetryDownload = { item -> viewModel.retryDownload(item, ::notify) },
                                     onToggleWifiOnly = { notify(viewModel.toggleWifiOnly()) },
                                     onToggleDownloadSchedule = { notify(viewModel.toggleDownloadSchedule()) },
                                     onCycleConcurrentDownloads = { notify(viewModel.cycleConcurrentDownloads()) },
@@ -296,7 +296,7 @@ fun HulkApp(
                                     if (movieDownload == null) {
                                         viewModel.downloadSelectedMovie(notify)
                                     } else {
-                                        notify(viewModel.retryDownload(movieDownload))
+                                        viewModel.retryDownload(movieDownload, ::notify)
                                     }
                                 },
                                 onCancelDownload = {
@@ -369,7 +369,7 @@ fun HulkApp(
                                     if (existing == null) {
                                         viewModel.downloadEpisode(episode, notify)
                                     } else {
-                                        notify(viewModel.retryDownload(existing))
+                                        viewModel.retryDownload(existing, ::notify)
                                     }
                                 },
                                 onCancelDownload = { episode ->

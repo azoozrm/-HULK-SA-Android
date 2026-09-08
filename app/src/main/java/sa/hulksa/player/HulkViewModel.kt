@@ -212,6 +212,12 @@ internal suspend fun <T> runDownloadEnqueueOffMain(
     enqueue()
 }
 
+internal suspend fun runDownloadPauseOffMain(
+    pause: () -> ProfileDownloadPauseOutcome,
+): ProfileDownloadPauseOutcome = withContext(Dispatchers.IO) {
+    pause()
+}
+
 internal suspend fun <T> runOperationsPersistenceOffMain(
     persistence: () -> T,
 ): T = withContext(Dispatchers.IO) {
@@ -1086,18 +1092,48 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun retryDownload(item: OfflineDownload): String {
+    fun retryDownload(item: OfflineDownload, onResult: (String) -> Unit = {}) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
-            return "التنزيلات متوقفة مؤقتًا."
+            onResult("التنزيلات متوقفة مؤقتًا.")
+            return
         }
-        return when (item.status) {
-            OfflineStatus.COMPLETED -> "التحميل مكتمل وجاهز للتشغيل."
+        when (item.status) {
+            OfflineStatus.COMPLETED -> onResult("التحميل مكتمل وجاهز للتشغيل.")
             OfflineStatus.QUEUED,
             OfflineStatus.CHECKING,
             OfflineStatus.DOWNLOADING,
             -> {
-                mutableState.update { it.copy(downloads = downloadRepository.pause(item.downloadId)) }
-                "تم ايقاف التحميل مؤقتا."
+                val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
+                val expectedProfileId = profileStore.activeProfileId()
+                if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
+                    onResult("تغير المستخدم قبل إيقاف التحميل.")
+                    return
+                }
+                viewModelScope.launch {
+                    val outcome = runDownloadPauseOffMain {
+                        downloadRepository.pause(
+                            downloadId = item.downloadId,
+                            expectedAccountId = expectedAccountId,
+                            expectedProfileId = expectedProfileId,
+                        )
+                    }
+                    if (
+                        !downloadOwnerContextMatches(
+                            expectedAccountId = expectedAccountId,
+                            expectedProfileId = expectedProfileId,
+                            activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                            activeProfileId = profileStore.activeProfileId(),
+                        )
+                    ) {
+                        return@launch
+                    }
+                    if (outcome.applied && outcome.persisted) {
+                        mutableState.update { it.copy(downloads = outcome.downloads) }
+                        onResult("تم ايقاف التحميل مؤقتا.")
+                    } else {
+                        onResult("تعذر حفظ إيقاف التحميل. حاول مرة أخرى.")
+                    }
+                }
             }
             OfflineStatus.PAUSED,
             OfflineStatus.WAITING_SCHEDULE,
@@ -1106,17 +1142,17 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             -> {
                 if (downloadRepository.resume(item.downloadId)) {
                     mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                    "جار استئناف التحميل من اخر نقطة."
+                    onResult("جار استئناف التحميل من اخر نقطة.")
                 } else {
-                    rebuildDownload(item)
+                    onResult(rebuildDownload(item))
                 }
             }
             OfflineStatus.FAILED -> {
                 if (downloadRepository.resume(item.downloadId)) {
                     mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                    "جار اعادة المحاولة من اخر نقطة."
+                    onResult("جار اعادة المحاولة من اخر نقطة.")
                 } else {
-                    rebuildDownload(item)
+                    onResult(rebuildDownload(item))
                 }
             }
         }
