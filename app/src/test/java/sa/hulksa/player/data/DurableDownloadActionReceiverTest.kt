@@ -26,4 +26,17 @@ class DurableDownloadActionReceiverTest {
         assertNull(durableDownloadNotificationAction("unknown"))
         assertNull(durableDownloadNotificationAction(null))
     }
+
+    @Test
+    fun `pause notification is dispatched asynchronously while resume remains direct`() {
+        assertEquals(
+            DurableDownloadReceiverExecution.ASYNC_PAUSE,
+            durableDownloadReceiverExecution(ACTION_PAUSE_DOWNLOAD),
+        )
+        assertEquals(
+            DurableDownloadReceiverExecution.DIRECT_RESUME,
+            durableDownloadReceiverExecution(ACTION_RESUME_DOWNLOAD),
+        )
+        assertNull(durableDownloadReceiverExecution("unknown"))
+    }
 }
