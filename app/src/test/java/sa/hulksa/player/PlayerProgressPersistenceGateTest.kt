@@ -11,6 +11,7 @@ import org.junit.Test
 import sa.hulksa.player.data.resumePositionForHistory
 import sa.hulksa.player.data.runUserLibraryProgressPersistenceOffMain
 import sa.hulksa.player.data.userLibraryProgressWriteAllowed
+import sa.hulksa.player.data.UserLibraryHistoryMutationGate
 import sa.hulksa.player.model.HistoryEntry
 
 class PlayerProgressPersistenceGateTest {
@@ -48,9 +49,9 @@ class PlayerProgressPersistenceGateTest {
 
     @Test
     fun `rapid out of order progress keeps only the newest attempt writable`() {
-        val gate = PlayerProgressPersistenceGate()
-        val older = gate.start()
-        val newer = gate.start()
+        val gate = UserLibraryHistoryMutationGate()
+        val older = gate.beginProgress()
+        val newer = gate.beginProgress()
 
         assertFalse(gate.isCurrent(older))
         assertTrue(gate.isCurrent(newer))
@@ -78,9 +79,9 @@ class PlayerProgressPersistenceGateTest {
 
     @Test
     fun `profile switch rejects a late write for the prior profile`() {
-        val gate = PlayerProgressPersistenceGate()
-        val priorProfile = gate.start()
-        gate.invalidate()
+        val gate = UserLibraryHistoryMutationGate()
+        val priorProfile = gate.beginProgress()
+        gate.invalidateProgress()
 
         assertFalse(
             userLibraryProgressWriteAllowed(
@@ -96,8 +97,8 @@ class PlayerProgressPersistenceGateTest {
 
     @Test
     fun `logout or session replacement rejects stale progress writes`() {
-        val gate = PlayerProgressPersistenceGate()
-        val stale = gate.start()
+        val gate = UserLibraryHistoryMutationGate()
+        val stale = gate.beginProgress()
 
         assertFalse(
             userLibraryProgressWriteAllowed(
@@ -127,6 +128,59 @@ class PlayerProgressPersistenceGateTest {
         val stale = history(positionMs = 12_000L, durationMs = 120_000L)
 
         assertEquals(81_000L, resumePositionForHistory(listOf(newest, stale), newest.key))
+    }
+
+    @Test
+    fun `in flight progress cannot restore history after clear`() {
+        val gate = UserLibraryHistoryMutationGate()
+        val progress = gate.beginProgress()
+        var persistedHistory = listOf(history(positionMs = 10_000L, durationMs = 120_000L))
+
+        gate.beginHistoryMutation()
+        persistedHistory = emptyList()
+        val written = gate.writeIfCurrent(progress) { persistedHistory = listOf(history(70_000L, 120_000L)) }
+
+        assertEquals(null, written)
+        assertTrue(persistedHistory.isEmpty())
+    }
+
+    @Test
+    fun `in flight progress cannot restore a removed entry`() {
+        val gate = UserLibraryHistoryMutationGate()
+        val progress = gate.beginProgress()
+        var persistedHistory = listOf(history(positionMs = 10_000L, durationMs = 120_000L))
+
+        gate.beginHistoryMutation()
+        persistedHistory = persistedHistory.filterNot { it.key == "MOVIE:1" }
+        val written = gate.writeIfCurrent(progress) { persistedHistory = listOf(history(70_000L, 120_000L)) }
+
+        assertEquals(null, written)
+        assertTrue(persistedHistory.none { it.key == "MOVIE:1" })
+    }
+
+    @Test
+    fun `in flight progress cannot overwrite a newer record start`() {
+        val gate = UserLibraryHistoryMutationGate()
+        val progress = gate.beginProgress()
+        var persistedHistory = listOf(history(positionMs = 10_000L, durationMs = 120_000L))
+        val newer = history(positionMs = 0L, durationMs = 0L).copy(key = "EPISODE:2")
+
+        gate.beginHistoryMutation()
+        persistedHistory = listOf(newer)
+        val written = gate.writeIfCurrent(progress) { persistedHistory = listOf(history(70_000L, 120_000L)) }
+
+        assertEquals(null, written)
+        assertEquals(listOf(newer), persistedHistory)
+    }
+
+    @Test
+    fun `progress after a history mutation remains writable and resumable`() {
+        val gate = UserLibraryHistoryMutationGate()
+        gate.beginHistoryMutation()
+        val progress = gate.beginProgress()
+        val persisted = gate.writeIfCurrent(progress) { history(81_000L, 120_000L) }
+
+        assertEquals(81_000L, resumePositionForHistory(listOf(requireNotNull(persisted)), "MOVIE:1"))
     }
 
     private fun history(positionMs: Long, durationMs: Long): HistoryEntry = HistoryEntry(

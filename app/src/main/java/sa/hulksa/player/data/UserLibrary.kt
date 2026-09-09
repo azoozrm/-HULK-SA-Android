@@ -54,6 +54,18 @@ class UserLibrary(context: Context) {
         get() = accountScope.preferences(PREFERENCES_NAME)
     private val profileStore = ProfileStore(appContext)
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
+    private val historyMutationGate = UserLibraryHistoryMutationGate()
+
+    internal fun beginProgressMutation(): UserLibraryHistoryMutationGate.ProgressAttempt =
+        historyMutationGate.beginProgress()
+
+    internal fun isCurrentProgressMutation(
+        attempt: UserLibraryHistoryMutationGate.ProgressAttempt,
+    ): Boolean = historyMutationGate.isCurrent(attempt)
+
+    internal fun invalidateProgressMutations() {
+        historyMutationGate.invalidateProgress()
+    }
 
     fun favorites(): Set<String> = favorites(
         preferences = preferences,
@@ -171,6 +183,7 @@ class UserLibrary(context: Context) {
     }
 
     fun recordStart(request: PlaybackRequest): List<HistoryEntry> {
+        historyMutationGate.beginHistoryMutation()
         if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(request)) return history()
         val previous = history().firstOrNull { it.key == request.historyKey }
         val entry = HistoryEntry(
@@ -205,11 +218,12 @@ class UserLibrary(context: Context) {
         request: PlaybackRequest,
         positionMs: Long,
         durationMs: Long,
+        historyAttempt: UserLibraryHistoryMutationGate.ProgressAttempt,
         isCurrentAttempt: () -> Boolean,
     ): List<HistoryEntry>? = runUserLibraryProgressPersistenceOffMain {
         currentCoroutineContext().ensureActive()
         fun canWrite(): Boolean = userLibraryProgressWriteAllowed(
-            attemptCurrent = isCurrentAttempt(),
+            attemptCurrent = isCurrentAttempt() && historyMutationGate.isCurrent(historyAttempt),
             sameAuthenticatedSession = AuthenticatedSessionRegistry.isCurrent(expectedOwner),
             expectedAccountId = expectedOwner.accountId,
             activeAccountId = accountScope.activeAccountId(),
@@ -257,14 +271,17 @@ class UserLibrary(context: Context) {
             profile = profile,
         )
         currentCoroutineContext().ensureActive()
-        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
-        scopedPreferences.edit()
-            .putString(profileKey(profile.id, KEY_HISTORY), encodeHistory(normalized))
-            .apply()
-        normalized
+        historyMutationGate.writeIfCurrent(historyAttempt) {
+            if (!canWrite()) return@writeIfCurrent null
+            scopedPreferences.edit()
+                .putString(profileKey(profile.id, KEY_HISTORY), encodeHistory(normalized))
+                .apply()
+            normalized
+        }
     }
 
     fun removeHistory(key: String): List<HistoryEntry> {
+        historyMutationGate.beginHistoryMutation()
         val current = history()
         if (current.none { it.key == key }) return current
         return saveHistory(current.filterNot { it.key == key })
@@ -275,6 +292,7 @@ class UserLibrary(context: Context) {
     }
 
     fun clearHistory(): List<HistoryEntry> {
+        historyMutationGate.beginHistoryMutation()
         preferences.edit().remove(activeKey(KEY_HISTORY)).apply()
         return emptyList()
     }
