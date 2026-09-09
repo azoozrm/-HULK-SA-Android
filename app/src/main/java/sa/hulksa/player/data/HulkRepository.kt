@@ -171,6 +171,44 @@ class HulkRepository(context: Context) {
         return null
     }
 
+    /**
+     * Restores the session needed by a durable download worker without collapsing a
+     * missing credential or an invalid subscription into a transient retry.
+     */
+    internal suspend fun restoreDurableDownloadSession(): DurableDownloadSessionRestoreResult {
+        AuthenticatedSessionRegistry.current()?.let {
+            return DurableDownloadSessionRestoreResult.Authenticated(it)
+        }
+        val credentials = withContext(Dispatchers.IO) { vault.load() }
+            ?: return DurableDownloadSessionRestoreResult.NoCredentials
+        val owner = withContext(Dispatchers.IO) { currentSessionOwner() }
+            ?: return DurableDownloadSessionRestoreResult.PermanentAuthFailure
+        val restored = try {
+            val portal = portalResolver.resolve(credentials.accessCode)
+            client.authenticate(portal, credentials)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            return durableDownloadSessionRestoreFailure(error)
+        }
+        val metadata = withContext(Dispatchers.IO) {
+            synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                if (!matchesCurrentSessionOwner(owner)) {
+                    null
+                } else {
+                    val recorded = accountSessionStore.recordAuthenticated(restored)
+                    AuthenticatedSessionRegistry.update(restored, recorded)
+                    recorded
+                }
+            }
+        } ?: return DurableDownloadSessionRestoreResult.PermanentAuthFailure
+        ManualParentAuthProofRegistry.onSessionReplacement(
+            accountId = metadata.accountId,
+            sessionId = metadata.sessionId,
+        )
+        return DurableDownloadSessionRestoreResult.Authenticated(restored)
+    }
+
     suspend fun logout() = withContext(Dispatchers.IO) {
         ManualParentAuthProofRegistry.invalidateAll()
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
@@ -301,6 +339,27 @@ class HulkRepository(context: Context) {
 
     private fun staleReauthentication(): CancellationException =
         CancellationException("Stale account reauthentication result")
+}
+
+internal sealed interface DurableDownloadSessionRestoreResult {
+    data class Authenticated(val session: AuthenticatedSession) : DurableDownloadSessionRestoreResult
+    data object NoCredentials : DurableDownloadSessionRestoreResult
+    data object PermanentAuthFailure : DurableDownloadSessionRestoreResult
+    data object TransientFailure : DurableDownloadSessionRestoreResult
+}
+
+internal fun durableDownloadSessionRestoreFailure(
+    error: Throwable,
+): DurableDownloadSessionRestoreResult = when (error) {
+    XtreamException.InvalidCredentials,
+    XtreamException.SubscriptionInactive,
+    PortalException.ConfigurationMissing,
+    PortalException.InvalidAccessCode,
+    PortalException.ResellerInactive,
+    PortalException.InvalidHost,
+    -> DurableDownloadSessionRestoreResult.PermanentAuthFailure
+
+    else -> DurableDownloadSessionRestoreResult.TransientFailure
 }
 
 private fun VerifiedKidsCatalogSnapshot.hasOnlyTransientKidsFailures(): Boolean {

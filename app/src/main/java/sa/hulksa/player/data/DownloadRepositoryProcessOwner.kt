@@ -239,6 +239,12 @@ internal data class ProfileDownloadEnqueueOutcome(
     val downloads: List<OfflineDownload>,
 )
 
+internal data class ProfileDownloadPauseOutcome(
+    val downloads: List<OfflineDownload>,
+    val applied: Boolean,
+    val persisted: Boolean,
+)
+
 internal class ProfileScopedDownloadRepository(context: Context) {
     private val appContext = context.applicationContext
     private val accountSessionStore = AccountSessionStore(appContext)
@@ -356,10 +362,44 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         }
     }
 
-    fun pause(downloadId: Long): List<OfflineDownload> {
-        val binding = activeBinding() ?: return emptyList()
-        if (owns(binding, downloadId)) binding.delegate.pause(downloadId)
-        return snapshot()
+    fun pause(
+        downloadId: Long,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): ProfileDownloadPauseOutcome {
+        if (
+            !downloadOwnerContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) {
+            return ProfileDownloadPauseOutcome(
+                downloads = snapshot(),
+                applied = false,
+                persisted = true,
+            )
+        }
+        val binding = activeBinding()
+            ?: return ProfileDownloadPauseOutcome(
+                downloads = emptyList(),
+                applied = false,
+                persisted = true,
+            )
+        if (binding.accountId != expectedAccountId || !owns(binding, downloadId)) {
+            return ProfileDownloadPauseOutcome(
+                downloads = snapshot(),
+                applied = false,
+                persisted = true,
+            )
+        }
+        val result = binding.delegate.pause(downloadId)
+        return ProfileDownloadPauseOutcome(
+            downloads = snapshot(),
+            applied = result.persisted,
+            persisted = result.persisted,
+        )
     }
 
     fun resume(downloadId: Long): Boolean {

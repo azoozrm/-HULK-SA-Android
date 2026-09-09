@@ -72,6 +72,30 @@ internal enum class DownloadWorkerSessionGate {
     TERMINAL,
 }
 
+internal enum class DurableDownloadSessionRecoveryAction {
+    EXECUTE,
+    WAIT_FOR_LOGIN,
+    RETRY,
+}
+
+internal fun durableDownloadSessionRecoveryAction(
+    restoration: DurableDownloadSessionRestoreResult,
+    runAttemptCount: Int,
+): DurableDownloadSessionRecoveryAction = when (restoration) {
+    is DurableDownloadSessionRestoreResult.Authenticated -> DurableDownloadSessionRecoveryAction.EXECUTE
+    DurableDownloadSessionRestoreResult.NoCredentials,
+    DurableDownloadSessionRestoreResult.PermanentAuthFailure,
+    -> DurableDownloadSessionRecoveryAction.WAIT_FOR_LOGIN
+
+    DurableDownloadSessionRestoreResult.TransientFailure -> if (
+        runAttemptCount < MAX_DURABLE_DOWNLOAD_SESSION_RESTORE_ATTEMPTS
+    ) {
+        DurableDownloadSessionRecoveryAction.RETRY
+    } else {
+        DurableDownloadSessionRecoveryAction.WAIT_FOR_LOGIN
+    }
+}
+
 internal fun downloadWorkerSessionGate(
     workerAccountId: String,
     activeAccountId: String?,
@@ -203,7 +227,27 @@ internal class DownloadCoordinatorWorker(
             // Reconstruct stale RUNNING state before authentication. If credentials were not
             // persisted, the record remains safely queued instead of presenting phantom progress.
             DownloadRepositoryProcessOwner.get(applicationContext, accountId).downloads()
-            session = HulkRepository(applicationContext).currentAuthenticatedSession()
+            when (
+                durableDownloadSessionRecoveryAction(
+                    restoration = HulkRepository(applicationContext).restoreDurableDownloadSession(),
+                    runAttemptCount = runAttemptCount,
+                )
+            ) {
+                DurableDownloadSessionRecoveryAction.EXECUTE -> {
+                    session = AuthenticatedSessionRegistry.current()
+                }
+                DurableDownloadSessionRecoveryAction.RETRY -> return Result.retry()
+                DurableDownloadSessionRecoveryAction.WAIT_FOR_LOGIN -> {
+                    return if (
+                        DownloadRepositoryProcessOwner.get(applicationContext, accountId)
+                            .failForSessionRestore(downloadId)
+                    ) {
+                        Result.success()
+                    } else {
+                        boundedSessionRestorePersistenceResult()
+                    }
+                }
+            }
         }
 
         when (
@@ -217,7 +261,16 @@ internal class DownloadCoordinatorWorker(
             )
         ) {
             DownloadWorkerSessionGate.TERMINAL -> return Result.success()
-            DownloadWorkerSessionGate.RETRY -> return Result.retry()
+            DownloadWorkerSessionGate.RETRY -> {
+                return if (
+                    DownloadRepositoryProcessOwner.get(applicationContext, accountId)
+                        .failForSessionRestore(downloadId)
+                ) {
+                    Result.success()
+                } else {
+                    boundedSessionRestorePersistenceResult()
+                }
+            }
             DownloadWorkerSessionGate.ALLOW -> Unit
         }
         setForeground(
@@ -234,6 +287,14 @@ internal class DownloadCoordinatorWorker(
             DurableDownloadExecutionResult.RETRY -> Result.retry()
         }
     }
+
+    private fun boundedSessionRestorePersistenceResult(): Result = if (
+        runAttemptCount < MAX_DURABLE_DOWNLOAD_SESSION_RESTORE_ATTEMPTS
+    ) {
+        Result.retry()
+    } else {
+        Result.failure()
+    }
 }
 
 internal const val KEY_DOWNLOAD_ID = "download_id"
@@ -243,3 +304,4 @@ internal const val DURABLE_DOWNLOAD_TAG = "hulk_durable_download"
 private const val DURABLE_DOWNLOAD_ACCOUNT_TAG_PREFIX = "hulk_durable_download_account_"
 private const val UNIQUE_WORK_PREFIX = "hulk_durable_download_"
 private const val DURABLE_DOWNLOAD_BACKOFF_MS = 30_000L
+private const val MAX_DURABLE_DOWNLOAD_SESSION_RESTORE_ATTEMPTS = 3

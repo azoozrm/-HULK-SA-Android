@@ -15,22 +15,68 @@ import android.os.Looper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.model.OfflineStatus
 
+internal enum class DurableDownloadStartupMaintenanceResult {
+    READY,
+    CREDENTIAL_SCRUB_FAILED,
+    LEGACY_OWNER_CAPTURE_FAILED,
+}
+
 internal suspend fun runDurableDownloadStartupMaintenance(
     scrubPersistedCredentials: () -> Boolean,
     captureLegacyOwner: () -> Boolean,
-): Boolean = withContext(Dispatchers.IO) {
-    try {
-        scrubPersistedCredentials() && captureLegacyOwner()
+): DurableDownloadStartupMaintenanceResult = withContext(Dispatchers.IO) {
+    val scrubbed = try {
+        scrubPersistedCredentials()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Throwable) {
         false
     }
+    if (!scrubbed) return@withContext DurableDownloadStartupMaintenanceResult.CREDENTIAL_SCRUB_FAILED
+
+    val ownerCaptured = try {
+        captureLegacyOwner()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        false
+    }
+    if (ownerCaptured) {
+        DurableDownloadStartupMaintenanceResult.READY
+    } else {
+        DurableDownloadStartupMaintenanceResult.LEGACY_OWNER_CAPTURE_FAILED
+    }
+}
+
+// Two exponential retries bound total backoff to 1.5 seconds without a tight storage loop.
+internal val DURABLE_DOWNLOAD_STARTUP_RETRY_BACKOFF_MS = listOf(500L, 1_000L)
+
+internal suspend fun runDurableDownloadStartupMaintenanceWithRetry(
+    retryBackoffMs: List<Long> = DURABLE_DOWNLOAD_STARTUP_RETRY_BACKOFF_MS,
+    maintenance: suspend () -> DurableDownloadStartupMaintenanceResult,
+    waitBeforeRetry: suspend (Long) -> Unit = { delay(it) },
+    onReady: () -> Unit,
+): DurableDownloadStartupMaintenanceResult {
+    var result = maintenance()
+    retryBackoffMs.forEach { backoffMs ->
+        if (result == DurableDownloadStartupMaintenanceResult.READY) {
+            onReady()
+            return result
+        }
+        waitBeforeRetry(backoffMs)
+        result = maintenance()
+    }
+    if (result == DurableDownloadStartupMaintenanceResult.READY) {
+        onReady()
+    }
+    return result
 }
 
 internal class DurableDownloadLifecycleProvider : ContentProvider() {
@@ -39,6 +85,8 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
     private var store: DurableDownloadPreferenceStore? = null
     private var bridge: DurableDownloadLifecycleBridge? = null
     private var accountScopeStore: AccountScopeStore? = null
+    private var startupMaintenanceJob: Job? = null
+    private var lifecycleInitialized = false
     private var boundAccountId: String? = null
     private var connectivityManager: ConnectivityManager? = null
     private var knownSchedulingStates: Map<Long, DurableDownloadSchedulingState> = emptyMap()
@@ -54,7 +102,13 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         }
     }
     private val accountScopeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        requestReconciliation()
+        mainHandler.post {
+            if (lifecycleInitialized) {
+                requestReconciliation()
+            } else {
+                startStartupMaintenance()
+            }
+        }
     }
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -70,22 +124,34 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
 
     override fun onCreate(): Boolean {
         val appContext = context?.applicationContext ?: return false
-        startupScope.launch {
-            val maintenanceComplete = runDurableDownloadStartupMaintenance(
-                scrubPersistedCredentials = { scrubPersistedDownloadCredentialUrls(appContext) },
-                captureLegacyOwner = { DownloadRepositoryProcessOwner.captureLegacyOwner(appContext) },
-            )
-            if (maintenanceComplete) {
-                initializeLifecycle(appContext)
-            }
-        }
-        return true
-    }
-
-    private fun initializeLifecycle(appContext: Context) {
         accountScopeStore = AccountScopeStore(appContext).also { accountScope ->
             accountScope.registerActiveAccountListener(accountScopeListener)
         }
+        startStartupMaintenance()
+        return true
+    }
+
+    private fun startStartupMaintenance() {
+        if (lifecycleInitialized || startupMaintenanceJob?.isActive == true) return
+        val appContext = context?.applicationContext ?: return
+        startupMaintenanceJob = startupScope.launch {
+            runDurableDownloadStartupMaintenanceWithRetry(
+                maintenance = {
+                    runDurableDownloadStartupMaintenance(
+                        scrubPersistedCredentials = { scrubPersistedDownloadCredentialUrls(appContext) },
+                        captureLegacyOwner = { DownloadRepositoryProcessOwner.captureLegacyOwner(appContext) },
+                    )
+                },
+                onReady = {
+                    initializeLifecycle(appContext)
+                },
+            )
+        }
+    }
+
+    private fun initializeLifecycle(appContext: Context) {
+        if (lifecycleInitialized) return
+        lifecycleInitialized = true
         connectivityManager = appContext.getSystemService(ConnectivityManager::class.java)
         runCatching {
             connectivityManager?.registerNetworkCallback(

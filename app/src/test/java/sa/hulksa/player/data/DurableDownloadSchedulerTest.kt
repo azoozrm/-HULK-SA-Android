@@ -117,6 +117,46 @@ class DurableDownloadSchedulerTest {
         )
     }
 
+    @Test
+    fun `missing credentials and permanent authentication failures wait for foreground login`() {
+        assertEquals(
+            DurableDownloadSessionRecoveryAction.WAIT_FOR_LOGIN,
+            durableDownloadSessionRecoveryAction(
+                restoration = DurableDownloadSessionRestoreResult.NoCredentials,
+                runAttemptCount = 0,
+            ),
+        )
+        assertEquals(
+            DurableDownloadSessionRestoreResult.PermanentAuthFailure,
+            durableDownloadSessionRestoreFailure(XtreamException.InvalidCredentials),
+        )
+        assertEquals(
+            DurableDownloadSessionRecoveryAction.WAIT_FOR_LOGIN,
+            durableDownloadSessionRecoveryAction(
+                restoration = DurableDownloadSessionRestoreResult.PermanentAuthFailure,
+                runAttemptCount = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun `transient restoration failure retries only a bounded number of times`() {
+        assertEquals(
+            DurableDownloadSessionRecoveryAction.RETRY,
+            durableDownloadSessionRecoveryAction(
+                restoration = DurableDownloadSessionRestoreResult.TransientFailure,
+                runAttemptCount = 2,
+            ),
+        )
+        assertEquals(
+            DurableDownloadSessionRecoveryAction.WAIT_FOR_LOGIN,
+            durableDownloadSessionRecoveryAction(
+                restoration = DurableDownloadSessionRestoreResult.TransientFailure,
+                runAttemptCount = 3,
+            ),
+        )
+    }
+
     private fun metadata(
         accountId: String,
         expiresAtEpochSeconds: Long?,
