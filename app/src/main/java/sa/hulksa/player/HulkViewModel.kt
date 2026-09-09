@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 34708)
-Total output lines: 3283
-
 package sa.hulksa.player
 
 import android.app.Application
