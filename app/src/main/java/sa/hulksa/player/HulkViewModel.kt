@@ -298,6 +298,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var sessionRestorationComplete: Boolean = false
     private val authenticationAttemptGate = AuthenticationAttemptGate()
     private val accountRefreshCoordinator = AccountRefreshCoordinator()
+    private val diagnosticsCoordinator = DiagnosticsCoordinator()
     private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
@@ -2381,6 +2382,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 is AccountRefreshOutcome.Success -> {
                     accountRefreshJob = null
                     val refreshed = outcome.value
+                    invalidateDiagnosticsForSessionChange()
                     session = refreshed
                     mutableState.update {
                         it.copy(
@@ -2422,7 +2424,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        if (diagnosticsJob?.isActive == true) return
+        val attempt = diagnosticsCoordinator.tryStart(activeSession) ?: return
         mutableState.update {
             it.copy(
                 diagnostics = DiagnosticsState(
@@ -2434,39 +2436,57 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         diagnosticsJob = viewModelScope.launch {
-            runCatching {
-                repository.diagnose(activeSession) { progress, stage ->
-                    mutableState.update { state ->
-                        state.copy(
-                            diagnostics = state.diagnostics.copy(
-                                isRunning = true,
-                                progress = progress,
-                                stage = stage,
-                                errorMessage = null,
+            when (
+                val outcome = diagnosticsCoordinator.runCurrent(
+                    attempt = attempt,
+                    currentSession = { session },
+                ) {
+                    coroutineScope {
+                        val progressScope = this
+                        repository.diagnose(activeSession) { progress, stage ->
+                            progressScope.launch {
+                                if (!diagnosticsCoordinator.isCurrent(attempt, session)) {
+                                    return@launch
+                                }
+                                mutableState.update { state ->
+                                    state.copy(
+                                        diagnostics = state.diagnostics.copy(
+                                            isRunning = true,
+                                            progress = progress,
+                                            stage = stage,
+                                            errorMessage = null,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            ) {
+                null -> return@launch
+                is DiagnosticsOutcome.Success -> {
+                    mutableState.update {
+                        it.copy(
+                            diagnostics = DiagnosticsState(
+                                isRunning = false,
+                                progress = 100,
+                                stage = "اكتمل الفحص",
+                                report = outcome.value,
                             ),
                         )
                     }
                 }
-            }.onSuccess { report ->
-                mutableState.update {
-                    it.copy(
-                        diagnostics = DiagnosticsState(
-                            isRunning = false,
-                            progress = 100,
-                            stage = "اكتمل الفحص",
-                            report = report,
-                        ),
-                    )
-                }
-            }.onFailure { error ->
-                mutableState.update {
-                    it.copy(
-                        diagnostics = it.diagnostics.copy(
-                            isRunning = false,
-                            stage = "تعذر اكمال الفحص",
-                            errorMessage = error.message ?: "حدث خطا غير متوقع اثناء الفحص.",
-                        ),
-                    )
+                is DiagnosticsOutcome.Failure -> {
+                    mutableState.update {
+                        it.copy(
+                            diagnostics = it.diagnostics.copy(
+                                isRunning = false,
+                                stage = "تعذر اكمال الفحص",
+                                errorMessage = outcome.error.message
+                                    ?: "حدث خطا غير متوقع اثناء الفحص.",
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -2561,7 +2581,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         notificationUiReady = false
         invalidateCatalogRequests()
         clearCatalogMemory()
-        diagnosticsJob?.cancel()
+        invalidateDiagnosticsForSessionChange()
         mutableState.update {
             it.copy(
                 screen = HulkScreen.LOGIN,
@@ -2682,6 +2702,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
 
             invalidateCatalogRequests()
+            invalidateDiagnosticsForSessionChange()
             session = authenticated
             sessionRestorationComplete = true
             clearCatalogMemory()
@@ -3023,6 +3044,26 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun invalidateVoiceSearchContext() {
         mutableVoiceSearchContextGeneration.update { generation -> generation + 1L }
+    }
+
+    private fun invalidateDiagnosticsForSessionChange() {
+        diagnosticsCoordinator.invalidate()
+        diagnosticsJob?.cancel()
+        diagnosticsJob = null
+        mutableState.update { state ->
+            if (!state.diagnostics.isRunning) {
+                state
+            } else {
+                state.copy(
+                    diagnostics = state.diagnostics.copy(
+                        isRunning = false,
+                        progress = 0,
+                        stage = "",
+                        errorMessage = null,
+                    ),
+                )
+            }
+        }
     }
 
     private fun startPlayback(request: PlaybackRequest) {
