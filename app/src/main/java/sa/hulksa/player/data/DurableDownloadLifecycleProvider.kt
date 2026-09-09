@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import sa.hulksa.player.model.OfflineStatus
@@ -52,6 +53,30 @@ internal suspend fun runDurableDownloadStartupMaintenance(
     } else {
         DurableDownloadStartupMaintenanceResult.LEGACY_OWNER_CAPTURE_FAILED
     }
+}
+
+// Two exponential retries bound total backoff to 1.5 seconds without a tight storage loop.
+internal val DURABLE_DOWNLOAD_STARTUP_RETRY_BACKOFF_MS = listOf(500L, 1_000L)
+
+internal suspend fun runDurableDownloadStartupMaintenanceWithRetry(
+    retryBackoffMs: List<Long> = DURABLE_DOWNLOAD_STARTUP_RETRY_BACKOFF_MS,
+    maintenance: suspend () -> DurableDownloadStartupMaintenanceResult,
+    waitBeforeRetry: suspend (Long) -> Unit = { delay(it) },
+    onReady: () -> Unit,
+): DurableDownloadStartupMaintenanceResult {
+    var result = maintenance()
+    retryBackoffMs.forEach { backoffMs ->
+        if (result == DurableDownloadStartupMaintenanceResult.READY) {
+            onReady()
+            return result
+        }
+        waitBeforeRetry(backoffMs)
+        result = maintenance()
+    }
+    if (result == DurableDownloadStartupMaintenanceResult.READY) {
+        onReady()
+    }
+    return result
 }
 
 internal class DurableDownloadLifecycleProvider : ContentProvider() {
@@ -110,17 +135,17 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
         if (lifecycleInitialized || startupMaintenanceJob?.isActive == true) return
         val appContext = context?.applicationContext ?: return
         startupMaintenanceJob = startupScope.launch {
-            when (
-                runDurableDownloadStartupMaintenance(
-                    scrubPersistedCredentials = { scrubPersistedDownloadCredentialUrls(appContext) },
-                    captureLegacyOwner = { DownloadRepositoryProcessOwner.captureLegacyOwner(appContext) },
-                )
-            ) {
-                DurableDownloadStartupMaintenanceResult.READY -> initializeLifecycle(appContext)
-                DurableDownloadStartupMaintenanceResult.CREDENTIAL_SCRUB_FAILED,
-                DurableDownloadStartupMaintenanceResult.LEGACY_OWNER_CAPTURE_FAILED,
-                -> Unit
-            }
+            runDurableDownloadStartupMaintenanceWithRetry(
+                maintenance = {
+                    runDurableDownloadStartupMaintenance(
+                        scrubPersistedCredentials = { scrubPersistedDownloadCredentialUrls(appContext) },
+                        captureLegacyOwner = { DownloadRepositoryProcessOwner.captureLegacyOwner(appContext) },
+                    )
+                },
+                onReady = {
+                    initializeLifecycle(appContext)
+                },
+            )
         }
     }
 
