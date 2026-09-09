@@ -149,6 +149,7 @@ data class OfflineDownload(
     val queuePosition: Int = 0,
     val scheduledAtEpochMs: Long = 0L,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
+    val ownerProfileIds: Set<String> = emptySet(),
 ) {
     val progress: Float
         get() = if (totalBytes > 0L) {

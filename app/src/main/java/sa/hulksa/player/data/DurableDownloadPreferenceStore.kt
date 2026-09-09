@@ -77,6 +77,10 @@ internal fun shouldApplyDurableDownloadSchedulingState(
     return true
 }
 
+internal fun durableDownloadPreferenceTriggersReconciliation(key: String?): Boolean =
+    key == DurableDownloadPreferenceStore.KEY_LIFECYCLE_REVISION ||
+        key == DurableDownloadPreferenceStore.KEY_WIFI_ONLY
+
 internal class DurableDownloadPreferenceStore(
     context: Context,
     private val accountId: String,
@@ -131,5 +135,9 @@ internal class DurableDownloadPreferenceStore(
         const val PREFERENCES_NAME = "hulk_downloads"
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_WIFI_ONLY = "wifi_only"
+        const val KEY_LIFECYCLE_REVISION = "download_lifecycle_revision"
+        const val KEY_STORAGE_VERSION = "download_storage_version"
+        const val KEY_PROGRESS_PREFIX = "download_progress:"
+        const val STORAGE_VERSION = 2
     }
 }
