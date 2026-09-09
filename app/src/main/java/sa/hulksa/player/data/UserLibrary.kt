@@ -2,7 +2,9 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,6 +23,29 @@ internal data class UserLibrarySnapshot(
 
 internal suspend fun <T> runUserLibraryStartupOffMain(operation: () -> T): T =
     withContext(Dispatchers.IO) { operation() }
+
+internal suspend fun <T> runUserLibraryProgressPersistenceOffMain(operation: suspend () -> T): T =
+    withContext(Dispatchers.IO) { operation() }
+
+internal fun userLibraryProgressWriteAllowed(
+    attemptCurrent: Boolean,
+    sameAuthenticatedSession: Boolean,
+    expectedAccountId: String,
+    activeAccountId: String?,
+    expectedProfileId: String,
+    activeProfileId: String,
+): Boolean =
+    attemptCurrent &&
+        sameAuthenticatedSession &&
+        expectedAccountId == activeAccountId &&
+        expectedProfileId == activeProfileId
+
+internal fun resumePositionForHistory(entries: List<HistoryEntry>, key: String): Long {
+    val entry = entries.firstOrNull { it.key == key } ?: return 0L
+    return entry.positionMs.takeIf {
+        entry.durationMs <= 0L || entry.positionMs.toDouble() / entry.durationMs < COMPLETED_RATIO
+    }?.coerceAtLeast(0L) ?: 0L
+}
 
 class UserLibrary(context: Context) {
     private val appContext = context.applicationContext
@@ -80,11 +105,13 @@ class UserLibrary(context: Context) {
     private fun history(
         preferences: SharedPreferences,
         profile: UserProfile,
+        canRepair: () -> Boolean = { true },
     ): List<HistoryEntry> = runCatching {
         val historyKey = profileKey(profile.id, KEY_HISTORY)
         val raw = preferences.getString(historyKey, null) ?: return emptyList()
         val safeRaw = sanitizeHistoryJson(raw)
         if (safeRaw != raw) {
+            if (!canRepair()) return emptyList()
             preferences.edit().putString(historyKey, safeRaw).commit()
         }
         val array = JSONArray(safeRaw)
@@ -166,9 +193,48 @@ class UserLibrary(context: Context) {
         return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
     }
 
-    fun updateProgress(request: PlaybackRequest, positionMs: Long, durationMs: Long): List<HistoryEntry> {
-        if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(request)) return history()
-        val previous = history().firstOrNull { it.key == request.historyKey }
+    /**
+     * Persists one Player progress update away from the caller thread. The caller supplies its
+     * monotonic attempt and this method verifies the authenticated account/profile owner again
+     * immediately before each repair or write, so a cancelled or replaced owner cannot mutate
+     * its old library after the switch.
+     */
+    internal suspend fun updateProgressForOwner(
+        expectedOwner: AuthenticatedSessionOwner,
+        expectedProfileId: String,
+        request: PlaybackRequest,
+        positionMs: Long,
+        durationMs: Long,
+        isCurrentAttempt: () -> Boolean,
+    ): List<HistoryEntry>? = runUserLibraryProgressPersistenceOffMain {
+        currentCoroutineContext().ensureActive()
+        fun canWrite(): Boolean = userLibraryProgressWriteAllowed(
+            attemptCurrent = isCurrentAttempt(),
+            sameAuthenticatedSession = AuthenticatedSessionRegistry.isCurrent(expectedOwner),
+            expectedAccountId = expectedOwner.accountId,
+            activeAccountId = accountScope.activeAccountId(),
+            expectedProfileId = expectedProfileId,
+            activeProfileId = profileStore.activeProfileId(),
+        )
+
+        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
+        val profile = profileStore.activeProfile()
+        if (profile.id != expectedProfileId || !canWrite()) return@runUserLibraryProgressPersistenceOffMain null
+        val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedOwner.accountId)
+        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
+
+        val currentHistory = history(
+            preferences = scopedPreferences,
+            profile = profile,
+            canRepair = ::canWrite,
+        )
+        currentCoroutineContext().ensureActive()
+        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
+        if (profile.kind == ProfileKind.KIDS && !kidsContentFilterStore.isAllowed(request)) {
+            return@runUserLibraryProgressPersistenceOffMain currentHistory
+        }
+
+        val previous = currentHistory.firstOrNull { it.key == request.historyKey }
         val entry = HistoryEntry(
             key = request.historyKey,
             title = request.title,
@@ -186,7 +252,16 @@ class UserLibrary(context: Context) {
             episodeTitle = request.episodeTitle ?: previous?.episodeTitle,
             parentContentId = request.parentContentId ?: previous?.parentContentId,
         )
-        return saveHistory(listOf(entry) + history().filterNot { it.key == entry.key })
+        val normalized = normalizeHistory(
+            entries = listOf(entry) + currentHistory.filterNot { it.key == entry.key },
+            profile = profile,
+        )
+        currentCoroutineContext().ensureActive()
+        if (!canWrite()) return@runUserLibraryProgressPersistenceOffMain null
+        scopedPreferences.edit()
+            .putString(profileKey(profile.id, KEY_HISTORY), encodeHistory(normalized))
+            .apply()
+        normalized
     }
 
     fun removeHistory(key: String): List<HistoryEntry> {
@@ -196,9 +271,7 @@ class UserLibrary(context: Context) {
     }
 
     fun resumePosition(key: String): Long {
-        val entry = history().firstOrNull { it.key == key } ?: return 0L
-        if (entry.durationMs > 0L && entry.positionMs.toDouble() / entry.durationMs >= COMPLETED_RATIO) return 0L
-        return entry.positionMs.coerceAtLeast(0L)
+        return resumePositionForHistory(history(), key)
     }
 
     fun clearHistory(): List<HistoryEntry> {
@@ -207,7 +280,17 @@ class UserLibrary(context: Context) {
     }
 
     private fun saveHistory(entries: List<HistoryEntry>): List<HistoryEntry> {
-        val scopedEntries = if (isActiveKidsProfile()) {
+        val profile = profileStore.activeProfile()
+        val normalized = normalizeHistory(entries, profile)
+        preferences.edit().putString(profileKey(profile.id, KEY_HISTORY), encodeHistory(normalized)).apply()
+        return normalized
+    }
+
+    private fun normalizeHistory(
+        entries: List<HistoryEntry>,
+        profile: UserProfile,
+    ): List<HistoryEntry> {
+        val scopedEntries = if (profile.kind == ProfileKind.KIDS) {
             val allowed = kidsContentFilterStore.allowedKeys()
             entries.filter { entry -> isAllowedKidsHistoryEntry(allowed, entry) }
         } else {
@@ -218,7 +301,6 @@ class UserLibrary(context: Context) {
             .distinctBy(HistoryEntry::key)
             .sortedByDescending(HistoryEntry::updatedAtEpochMs)
             .take(MAX_HISTORY)
-        preferences.edit().putString(activeKey(KEY_HISTORY), encodeHistory(normalized)).apply()
         return normalized
     }
 
@@ -316,6 +398,7 @@ class UserLibrary(context: Context) {
         const val KEY_HISTORY = "history"
         const val KEY_PROFILE_SCOPE_MIGRATION_V1 = "profile_scope_migration_v1"
         const val MAX_HISTORY = 100
-        const val COMPLETED_RATIO = .92
     }
 }
+
+private const val COMPLETED_RATIO = .92
