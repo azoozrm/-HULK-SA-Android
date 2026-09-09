@@ -86,6 +86,7 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.ProfileKind
+import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
 import sa.hulksa.player.tv.TvDeepLinkResolution
 import sa.hulksa.player.tv.TvDeepLinkRouter
@@ -151,6 +152,7 @@ data class HulkUiState(
     val searchQuery: String = "",
     val favorites: Set<String> = emptySet(),
     val history: List<HistoryEntry> = emptyList(),
+    val isProfileLibraryReady: Boolean = false,
     val downloads: List<OfflineDownload> = emptyList(),
     val downloadSettings: DownloadSettings = DownloadSettings(),
     val selectedItem: ContentItem? = null,
@@ -278,8 +280,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val mutableState = MutableStateFlow(
         HulkUiState(
-            favorites = userLibrary.favorites(),
-            history = userLibrary.history(),
             downloads = emptyList(),
             downloadSettings = DownloadSettings(),
             notificationSubscribedSeriesIds = initialNotificationSnapshot.subscribedSeriesIds,
@@ -299,6 +299,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val authenticationAttemptGate = AuthenticationAttemptGate()
     private val accountRefreshCoordinator = AccountRefreshCoordinator()
     private val diagnosticsCoordinator = DiagnosticsCoordinator()
+    private val profileLibraryStartupGate = ProfileLibraryStartupGate()
     private val detailsRequestGate = DetailsRequestGate()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
@@ -495,27 +496,65 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         ensureDestinationCatalogs(destination)
     }
 
-    fun refreshProfileLibrary() {
-        val favorites = userLibrary.favorites()
-        val history = userLibrary.history()
-
+    fun refreshProfileLibrary(
+        expectedAccountId: String,
+        profile: UserProfile,
+    ) {
+        val activeSession = session ?: return
+        profileLibraryRefreshJob?.cancel()
+        val attempt = profileLibraryStartupGate.start(
+            session = activeSession,
+            accountId = expectedAccountId,
+            profileId = profile.id,
+        )
         mutableState.update {
             it.copy(
-                favorites = favorites,
-                history = history,
+                favorites = emptySet(),
+                history = emptyList(),
+                isProfileLibraryReady = false,
                 errorMessage = null,
             )
         }
-        refreshNotificationState(clearPopup = false)
-        scanSubscribedSeries(NotificationScanTrigger.LIBRARY_REFRESH)
-
-        profileLibraryRefreshJob?.cancel()
-        val sourceCatalogs = loadedCatalogs
-            .filterKeys { it == ContentType.MOVIE || it == ContentType.SERIES }
-            .toMap()
-        if (sourceCatalogs.isEmpty()) return
-
         profileLibraryRefreshJob = viewModelScope.launch {
+            val snapshot = try {
+                userLibrary.initializeForProfile(
+                    expectedAccountId = expectedAccountId,
+                    profile = profile,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                if (profileLibraryStartupGate.completeIfCurrent(attempt, session)) {
+                    mutableState.update {
+                        it.copy(
+                            favorites = emptySet(),
+                            history = emptyList(),
+                            isProfileLibraryReady = true,
+                            errorMessage = "تعذر تهيئة مكتبة هذا الملف الشخصي بأمان.",
+                        )
+                    }
+                }
+                return@launch
+            } ?: return@launch
+
+            if (!profileLibraryStartupGate.completeIfCurrent(attempt, session)) return@launch
+            val favorites = snapshot.favorites
+            val history = snapshot.history
+            mutableState.update {
+                it.copy(
+                    favorites = favorites,
+                    history = history,
+                    isProfileLibraryReady = true,
+                    errorMessage = null,
+                )
+            }
+            refreshNotificationState(clearPopup = false)
+            scanSubscribedSeries(NotificationScanTrigger.LIBRARY_REFRESH)
+
+            val sourceCatalogs = loadedCatalogs
+                .filterKeys { it == ContentType.MOVIE || it == ContentType.SERIES }
+                .toMap()
+            if (sourceCatalogs.isEmpty()) return@launch
             val rebuiltHomeCatalogs = withContext(Dispatchers.Default) {
                 sourceCatalogs.mapValues { (_, catalog) ->
                     compactHomeCatalog(catalog, favorites, history)
@@ -2536,6 +2575,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun clearCatalogMemory() {
+        profileLibraryStartupGate.invalidate()
         loadedCatalogs.clear()
         homeCatalogs.clear()
         selectedCategoryByType.clear()
@@ -2590,6 +2630,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 loadingTypes = emptySet(),
                 account = null,
                 isAccountRefreshing = false,
+                favorites = emptySet(),
+                history = emptyList(),
+                isProfileLibraryReady = false,
                 downloads = emptyList(),
                 notificationPopup = null,
                 errorMessage = errorMessage,
@@ -2607,8 +2650,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 sessionRestorationComplete = true
                 mutableState.value = HulkUiState(
                     isStarting = false,
-                    favorites = userLibrary.favorites(),
-                    history = userLibrary.history(),
                     downloads = emptyList(),
                     downloadSettings = downloadRepository.settings(),
                     notificationSubscribedSeriesIds = emptySet(),
@@ -2720,6 +2761,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     catalogs = emptyMap(),
                     selectedCategoryId = null,
                     searchQuery = "",
+                    favorites = emptySet(),
+                    history = emptyList(),
+                    isProfileLibraryReady = false,
                     downloads = downloads,
                     downloadSettings = downloadSettings,
                     errorMessage = null,

@@ -2,6 +2,7 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import sa.hulksa.player.model.UserProfile
 
 /**
  * Account/profile routing preferences used by the Multi Profile entry flow.
@@ -13,6 +14,9 @@ data class ProfileRoutingPreferences(
     val directEntryEnabled: Boolean = false,
     val defaultProfileId: String? = null,
 )
+
+internal suspend fun <T> runProfileRoutingStartupOffMain(operation: () -> T): T =
+    runProfilePersistenceOffMain(operation)
 
 /**
  * Profile-owned viewing preferences prepared in v1.1 so later playback and
@@ -53,11 +57,35 @@ class ProfilePreferencesStore(context: Context) {
         get() = accountScope.preferences(PREFERENCES_NAME).also(::ensureSchema)
     private val profileStore = ProfileStore(appContext)
 
-    fun routing(): ProfileRoutingPreferences {
+    fun routing(): ProfileRoutingPreferences = routing(
+        preferences = preferences,
+        profileIds = profileStore.profiles().mapTo(linkedSetOf(), UserProfile::id),
+    )
+
+    /**
+     * Loads and repairs routing metadata for the already-authoritative profile
+     * snapshot. Startup callers must use this instead of reading routing from
+     * composition, because schema repair and profile validation touch disk.
+     */
+    internal suspend fun routingForAccount(
+        expectedAccountId: String,
+        profileIds: Set<String>,
+    ): ProfileRoutingPreferences? = runProfileRoutingStartupOffMain {
+        if (accountScope.activeAccountId() != expectedAccountId) return@runProfileRoutingStartupOffMain null
+        val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+            .also(::ensureSchema)
+        val routing = routing(scopedPreferences, profileIds)
+        routing.takeIf { accountScope.activeAccountId() == expectedAccountId }
+    }
+
+    private fun routing(
+        preferences: SharedPreferences,
+        profileIds: Set<String>,
+    ): ProfileRoutingPreferences {
         val storedDefault = preferences.getString(KEY_DEFAULT_PROFILE_ID, null)
             ?.trim()
             ?.takeIf(String::isNotBlank)
-        val validDefault = storedDefault?.takeIf(::profileExists)
+        val validDefault = storedDefault?.takeIf(profileIds::contains)
         if (storedDefault != null && validDefault == null) {
             preferences.edit().remove(KEY_DEFAULT_PROFILE_ID).apply()
         }

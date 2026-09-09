@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import sa.hulksa.player.R
 import sa.hulksa.player.data.ProfilePreferencesStore
+import sa.hulksa.player.data.ProfileRoutingPreferences
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
@@ -154,6 +155,8 @@ fun ProfilePickerScreen(
     isSwitching: Boolean,
     errorMessage: String?,
     onSelectProfile: (UserProfile) -> Unit,
+    routingPreferences: ProfileRoutingPreferences,
+    onRoutingChanged: (ProfileRoutingPreferences) -> Unit,
     onCreateProfile: () -> Unit = {},
     onManageProfiles: () -> Unit = {},
 ) {
@@ -161,7 +164,6 @@ fun ProfilePickerScreen(
     val context = LocalContext.current
     val adaptiveUi = LocalAdaptiveUi.current
     val profilePreferencesStore = remember(context) { ProfilePreferencesStore(context) }
-    var routingPreferences by remember(context) { mutableStateOf(profilePreferencesStore.routing()) }
     var showEntryOptions by remember { mutableStateOf(false) }
     val profileIds = remember(profiles) { profiles.map(UserProfile::id) }
     val focusRequesters = remember(profileIds) { profiles.associate { it.id to FocusRequester() } }
@@ -170,10 +172,6 @@ fun ProfilePickerScreen(
     }
     val mobileLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
     val compactMobile = !isTv && (mobileLandscape || adaptiveUi.screenHeightDp < 620)
-
-    LaunchedEffect(profiles) {
-        routingPreferences = profilePreferencesStore.routing()
-    }
 
     LaunchedEffect(isTv, activeProfileId, profileIds, showEntryOptions) {
         if (!isTv || profiles.isEmpty() || showEntryOptions) return@LaunchedEffect
@@ -208,15 +206,19 @@ fun ProfilePickerScreen(
                 directEntryEnabled = routingPreferences.directEntryEnabled,
                 defaultProfileId = routingPreferences.defaultProfileId,
                 onToggleDirectEntry = {
-                    routingPreferences = profilePreferencesStore.setRouting(
-                        directEntryEnabled = !routingPreferences.directEntryEnabled,
-                        defaultProfileId = routingPreferences.defaultProfileId,
+                    onRoutingChanged(
+                        profilePreferencesStore.setRouting(
+                            directEntryEnabled = !routingPreferences.directEntryEnabled,
+                            defaultProfileId = routingPreferences.defaultProfileId,
+                        ),
                     )
                 },
                 onSelectDefaultProfile = { profileId ->
-                    routingPreferences = profilePreferencesStore.setRouting(
-                        directEntryEnabled = routingPreferences.directEntryEnabled,
-                        defaultProfileId = profileId,
+                    onRoutingChanged(
+                        profilePreferencesStore.setRouting(
+                            directEntryEnabled = routingPreferences.directEntryEnabled,
+                            defaultProfileId = profileId,
+                        ),
                     )
                 },
                 onClose = { showEntryOptions = false },
