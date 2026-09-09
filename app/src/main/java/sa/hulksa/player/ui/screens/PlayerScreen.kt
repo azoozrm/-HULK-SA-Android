@@ -142,6 +142,36 @@ private const val PREF_IDS = "ids"
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 
+internal enum class PlayerLifecyclePlaybackAction { NONE, STOP, PREPARE }
+
+internal fun playerBackgroundLifecycleAction(playbackState: Int): PlayerLifecyclePlaybackAction =
+    when (playbackState) {
+        Player.STATE_BUFFERING, Player.STATE_READY -> PlayerLifecyclePlaybackAction.STOP
+        else -> PlayerLifecyclePlaybackAction.NONE
+    }
+
+internal fun playerForegroundLifecycleAction(
+    playbackState: Int,
+    hasMediaItem: Boolean,
+    hasPlaybackError: Boolean,
+    sourceAvailable: Boolean,
+): PlayerLifecyclePlaybackAction =
+    if (
+        playbackState == Player.STATE_IDLE &&
+        hasMediaItem &&
+        !hasPlaybackError &&
+        sourceAvailable
+    ) {
+        PlayerLifecyclePlaybackAction.PREPARE
+    } else {
+        PlayerLifecyclePlaybackAction.NONE
+    }
+
+internal fun shouldAdvancePlayerAutoplayCountdown(
+    appForeground: Boolean,
+    countdown: Int,
+): Boolean = appForeground && countdown >= 0
+
 private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
 private data class PlayerTrackOption(
@@ -600,6 +630,13 @@ fun PlayerScreen(
                 Lifecycle.Event.ON_STOP -> {
                     appForeground = false
                     playerSession.onAppForegroundChanged(player, foreground = false)
+                    if (
+                        playerBackgroundLifecycleAction(player.playbackState) ==
+                        PlayerLifecyclePlaybackAction.STOP
+                    ) {
+                        saveCurrentProgress()
+                        player.stop()
+                    }
                 }
                 else -> Unit
             }
@@ -612,6 +649,20 @@ fun PlayerScreen(
 
     DisposableEffect(playerSession) {
         onDispose { playerSession.invalidate() }
+    }
+
+    LaunchedEffect(appForeground, localPlayback, networkAvailable, player) {
+        if (
+            appForeground &&
+            playerForegroundLifecycleAction(
+                playbackState = player.playbackState,
+                hasMediaItem = player.mediaItemCount > 0,
+                hasPlaybackError = player.playerError != null,
+                sourceAvailable = localPlayback || networkAvailable,
+            ) == PlayerLifecyclePlaybackAction.PREPARE
+        ) {
+            player.prepare()
+        }
     }
 
     DisposableEffect(context, request) {
@@ -978,7 +1029,10 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(nextCountdown) {
+    LaunchedEffect(nextCountdown, appForeground) {
+        if (!shouldAdvancePlayerAutoplayCountdown(appForeground, nextCountdown)) {
+            return@LaunchedEffect
+        }
         if (nextCountdown > 0) {
             delay(1_000L)
             nextCountdown -= 1
