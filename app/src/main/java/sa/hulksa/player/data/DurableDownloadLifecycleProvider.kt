@@ -94,10 +94,7 @@ internal class DurableDownloadLifecycleProvider : ContentProvider() {
 
     private val reconcileRunnable = Runnable(::reconcile)
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (
-            key == DurableDownloadPreferenceStore.KEY_DOWNLOADS ||
-            key == DurableDownloadPreferenceStore.KEY_WIFI_ONLY
-        ) {
+        if (durableDownloadPreferenceTriggersReconciliation(key)) {
             requestReconciliation()
         }
     }

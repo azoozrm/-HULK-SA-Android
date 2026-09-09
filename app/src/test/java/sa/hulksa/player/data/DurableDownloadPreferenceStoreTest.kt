@@ -111,4 +111,28 @@ class DurableDownloadPreferenceStoreTest {
             ),
         )
     }
+
+    @Test
+    fun `progress and record telemetry keys do not wake lifecycle reconciliation`() {
+        assertFalse(
+            durableDownloadPreferenceTriggersReconciliation(
+                "${DurableDownloadPreferenceStore.KEY_PROGRESS_PREFIX}42",
+            ),
+        )
+        assertFalse(
+            durableDownloadPreferenceTriggersReconciliation(
+                DurableDownloadPreferenceStore.KEY_DOWNLOADS,
+            ),
+        )
+        assertTrue(
+            durableDownloadPreferenceTriggersReconciliation(
+                DurableDownloadPreferenceStore.KEY_LIFECYCLE_REVISION,
+            ),
+        )
+        assertTrue(
+            durableDownloadPreferenceTriggersReconciliation(
+                DurableDownloadPreferenceStore.KEY_WIFI_ONLY,
+            ),
+        )
+    }
 }

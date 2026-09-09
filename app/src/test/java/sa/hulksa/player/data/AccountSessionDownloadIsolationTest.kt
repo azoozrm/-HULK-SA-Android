@@ -18,7 +18,6 @@ class AccountSessionDownloadIsolationTest {
             allDownloads = listOf(item),
             activeAccountId = { "account-b" },
             activeProfileId = { "primary" },
-            ownersForExistingDownload = { setOf("primary") },
         )
 
         assertTrue(snapshot.isEmpty())
@@ -34,10 +33,11 @@ class AccountSessionDownloadIsolationTest {
     @Test
     fun `profile filtering is resolved once and list accessors reuse the same snapshot`() {
         val visible = download(downloadId = 2L, historyKey = "movie:visible")
+            .copy(ownerProfileIds = setOf("profile-1"))
         val hidden = download(downloadId = 3L, historyKey = "movie:hidden")
+            .copy(ownerProfileIds = setOf("profile-2"))
         var accountReads = 0
         var profileReads = 0
-        var ownerReads = 0
         val snapshot = ProfileDownloadSnapshotList(
             accountId = "account-a",
             allDownloads = listOf(visible, hidden),
@@ -49,10 +49,6 @@ class AccountSessionDownloadIsolationTest {
                 profileReads += 1
                 "profile-1"
             },
-            ownersForExistingDownload = { historyKey ->
-                ownerReads += 1
-                if (historyKey == visible.historyKey) setOf("profile-1") else setOf("profile-2")
-            },
         )
 
         assertEquals(1, snapshot.size)
@@ -61,24 +57,20 @@ class AccountSessionDownloadIsolationTest {
         assertSame(visible, snapshot.listIterator().next())
         assertEquals(1, accountReads)
         assertEquals(1, profileReads)
-        assertEquals(2, ownerReads)
     }
 
     @Test
     fun `new snapshot reflects profile switch without changing old immutable snapshot`() {
         var activeProfileId = "profile-1"
         val shared = download(downloadId = 4L, historyKey = "movie:shared")
+            .copy(ownerProfileIds = setOf("profile-1", "profile-2"))
         val profileOneOnly = download(downloadId = 5L, historyKey = "movie:one")
-        val owners = mapOf(
-            shared.historyKey to setOf("profile-1", "profile-2"),
-            profileOneOnly.historyKey to setOf("profile-1"),
-        )
+            .copy(ownerProfileIds = setOf("profile-1"))
         fun snapshot() = ProfileDownloadSnapshotList(
             accountId = "account-a",
             allDownloads = listOf(shared, profileOneOnly),
             activeAccountId = { "account-a" },
             activeProfileId = { activeProfileId },
-            ownersForExistingDownload = { owners.getValue(it) },
         )
 
         val profileOneSnapshot = snapshot()
@@ -96,18 +88,27 @@ class AccountSessionDownloadIsolationTest {
             downloadId = 6L,
             historyKey = "movie:progress",
             status = OfflineStatus.DOWNLOADING,
-        ).copy(bytesDownloaded = 3_000L, totalBytes = 10_000L, bytesPerSecond = 500L)
+        ).copy(
+            bytesDownloaded = 3_000L,
+            totalBytes = 10_000L,
+            bytesPerSecond = 500L,
+            ownerProfileIds = setOf("profile-1"),
+        )
         val completed = download(
             downloadId = 7L,
             historyKey = "movie:completed",
             status = OfflineStatus.COMPLETED,
-        ).copy(bytesDownloaded = 10_000L, totalBytes = 10_000L, integrityVerified = true)
+        ).copy(
+            bytesDownloaded = 10_000L,
+            totalBytes = 10_000L,
+            integrityVerified = true,
+            ownerProfileIds = setOf("profile-1"),
+        )
         val snapshot = ProfileDownloadSnapshotList(
             accountId = "account-a",
             allDownloads = listOf(downloading, completed),
             activeAccountId = { "account-a" },
             activeProfileId = { "profile-1" },
-            ownersForExistingDownload = { setOf("profile-1") },
         )
 
         assertEquals(OfflineStatus.DOWNLOADING, snapshot[0].status)
@@ -306,5 +307,6 @@ class AccountSessionDownloadIsolationTest {
         sourceCandidates = listOf("https://example.invalid/content.mp4"),
         localUri = "file:///downloads/$historyKey.mp4",
         status = status,
+        ownerProfileIds = setOf(ProfileStore.PRIMARY_PROFILE_ID),
     )
 }
