@@ -2,14 +2,25 @@ package sa.hulksa.player.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.ProfileKind
+import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.security.containsCredentialBearingIptvMaterial
 import sa.hulksa.player.security.persistableExternalUrlOrNull
+
+internal data class UserLibrarySnapshot(
+    val favorites: Set<String>,
+    val history: List<HistoryEntry>,
+)
+
+internal suspend fun <T> runUserLibraryStartupOffMain(operation: () -> T): T =
+    withContext(Dispatchers.IO) { operation() }
 
 class UserLibrary(context: Context) {
     private val appContext = context.applicationContext
@@ -19,16 +30,20 @@ class UserLibrary(context: Context) {
     private val profileStore = ProfileStore(appContext)
     private val kidsContentFilterStore = KidsContentFilterStore(appContext)
 
-    init {
-        migrateLegacyLibraryIfNeeded()
-    }
+    fun favorites(): Set<String> = favorites(
+        preferences = preferences,
+        profile = profileStore.activeProfile(),
+    )
 
-    fun favorites(): Set<String> {
+    private fun favorites(
+        preferences: SharedPreferences,
+        profile: UserProfile,
+    ): Set<String> {
         val stored = preferences
-            .getStringSet(activeKey(KEY_FAVORITES), emptySet())
+            .getStringSet(profileKey(profile.id, KEY_FAVORITES), emptySet())
             .orEmpty()
             .toSet()
-        if (!isActiveKidsProfile()) return stored
+        if (profile.kind != ProfileKind.KIDS) return stored
         val allowed = kidsContentFilterStore.allowedKeys()
         return stored.filterTo(linkedSetOf()) { it in allowed }
     }
@@ -57,11 +72,20 @@ class UserLibrary(context: Context) {
 
     fun keyFor(item: ContentItem): String = "${item.type.name}:${item.id}"
 
-    fun history(): List<HistoryEntry> = runCatching {
-        val raw = preferences.getString(activeKey(KEY_HISTORY), null) ?: return emptyList()
+    fun history(): List<HistoryEntry> = history(
+        preferences = preferences,
+        profile = profileStore.activeProfile(),
+    )
+
+    private fun history(
+        preferences: SharedPreferences,
+        profile: UserProfile,
+    ): List<HistoryEntry> = runCatching {
+        val historyKey = profileKey(profile.id, KEY_HISTORY)
+        val raw = preferences.getString(historyKey, null) ?: return emptyList()
         val safeRaw = sanitizeHistoryJson(raw)
         if (safeRaw != raw) {
-            preferences.edit().putString(activeKey(KEY_HISTORY), safeRaw).commit()
+            preferences.edit().putString(historyKey, safeRaw).commit()
         }
         val array = JSONArray(safeRaw)
         val decoded = buildList {
@@ -94,10 +118,30 @@ class UserLibrary(context: Context) {
                 )
             }
         }.sortedByDescending(HistoryEntry::updatedAtEpochMs)
-        if (!isActiveKidsProfile()) return decoded
+        if (profile.kind != ProfileKind.KIDS) return decoded
         val allowed = kidsContentFilterStore.allowedKeys()
         decoded.filter { entry -> isAllowedKidsHistoryEntry(allowed, entry) }
     }.getOrDefault(emptyList())
+
+    /**
+     * Runs the account-scoped legacy migration and initial library decode away
+     * from the ViewModel constructor. The fixed account/profile owner prevents
+     * a late startup result from being reused after a scope switch.
+     */
+    internal suspend fun initializeForProfile(
+        expectedAccountId: String,
+        profile: UserProfile,
+    ): UserLibrarySnapshot? = runUserLibraryStartupOffMain {
+        if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
+        val scopedPreferences = accountScope.preferences(PREFERENCES_NAME, expectedAccountId)
+        migrateLegacyLibraryIfNeeded(scopedPreferences)
+        if (!matchesOwner(expectedAccountId, profile.id)) return@runUserLibraryStartupOffMain null
+        val snapshot = UserLibrarySnapshot(
+            favorites = favorites(scopedPreferences, profile),
+            history = history(scopedPreferences, profile),
+        )
+        snapshot.takeIf { matchesOwner(expectedAccountId, profile.id) }
+    }
 
     fun recordStart(request: PlaybackRequest): List<HistoryEntry> {
         if (isActiveKidsProfile() && !kidsContentFilterStore.isAllowed(request)) return history()
@@ -230,7 +274,11 @@ class UserLibrary(context: Context) {
     private fun profileKey(profileId: String, baseKey: String): String =
         "profile:$profileId:$baseKey"
 
-    private fun migrateLegacyLibraryIfNeeded() {
+    private fun matchesOwner(expectedAccountId: String, expectedProfileId: String): Boolean =
+        accountScope.activeAccountId() == expectedAccountId &&
+            profileStore.activeProfileId() == expectedProfileId
+
+    private fun migrateLegacyLibraryIfNeeded(preferences: SharedPreferences) {
         val primaryProfileId = ProfileStore.PRIMARY_PROFILE_ID
         val scopedFavoritesKey = profileKey(primaryProfileId, KEY_FAVORITES)
         val scopedHistoryKey = profileKey(primaryProfileId, KEY_HISTORY)

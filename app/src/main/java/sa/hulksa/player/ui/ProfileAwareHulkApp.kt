@@ -46,6 +46,7 @@ import sa.hulksa.player.data.ParentalCodeCredentialStore
 import sa.hulksa.player.data.ProfilePinCredentialStore
 import sa.hulksa.player.data.ProfileContentSearchHistoryStore
 import sa.hulksa.player.data.ProfilePreferencesStore
+import sa.hulksa.player.data.ProfileRoutingPreferences
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.ProfileStoreSnapshot
 import sa.hulksa.player.data.VerifiedKidsCatalogSnapshot
@@ -131,6 +132,9 @@ fun ProfileAwareHulkApp(
     }
     var profileLoadFailed by remember(activeAccountId) { mutableStateOf(false) }
     var profileLoadRequest by rememberSaveable(activeAccountId) { mutableIntStateOf(0) }
+    var routingPreferences by remember(activeAccountId) {
+        mutableStateOf<ProfileRoutingPreferences?>(null)
+    }
     var profileMutationInProgress by remember(activeAccountId) { mutableStateOf(false) }
     val profileMutationScope = rememberCoroutineScope()
     var pinRevision by rememberSaveable(activeAccountId) { mutableIntStateOf(0) }
@@ -181,6 +185,7 @@ fun ProfileAwareHulkApp(
     }
     val hasKidsProfiles = remember(profiles) { profiles.any { it.kind == ProfileKind.KIDS } }
     val profileStateReady = !authenticated || profileSnapshot != null
+    val routingStateReady = !authenticated || routingPreferences != null
     val parentalCodeAvailable = remember(activeAccountId, parentalCodeRevision) {
         activeAccountId != null && parentalCodeCredentialStore.hasCode()
     }
@@ -190,24 +195,73 @@ fun ProfileAwareHulkApp(
             parentalCodeMigrationResolvedAccountId == activeAccountId
     )
 
-    LaunchedEffect(authenticated, activeAccountId, profileStore, profileLoadRequest) {
+    LaunchedEffect(
+        authenticated,
+        activeAccountId,
+        authenticatedSessionOwner,
+        profileStore,
+        profileLoadRequest,
+    ) {
         profileSnapshot = null
         profileLoadFailed = false
+        val sessionOwner = authenticatedSessionOwner
         if (!authenticated) return@LaunchedEffect
-        if (activeAccountId == null) {
-            profileLoadFailed = true
+        if (activeAccountId == null || sessionOwner == null) {
+            if (activeAccountId == null) {
+                profileLoadFailed = true
+            }
             return@LaunchedEffect
         }
+        val accountId = activeAccountId
         val loaded = try {
-            profileStore.load(activeAccountId)
+            profileStore.load(accountId)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             null
         }
-        if (accountScopeStore.activeAccountId() == activeAccountId) {
+        if (
+            AuthenticatedSessionRegistry.isCurrent(sessionOwner) &&
+            accountScopeStore.activeAccountId() == accountId
+        ) {
             profileSnapshot = loaded
             profileLoadFailed = loaded == null
+        }
+    }
+
+    LaunchedEffect(
+        authenticated,
+        activeAccountId,
+        authenticatedSessionOwner,
+        profileSnapshot,
+        profilePreferencesStore,
+    ) {
+        routingPreferences = null
+        val accountId = activeAccountId
+        val sessionOwner = authenticatedSessionOwner
+        val snapshot = profileSnapshot
+        if (!authenticated || accountId == null || sessionOwner == null || snapshot == null) {
+            return@LaunchedEffect
+        }
+
+        val loaded = try {
+            profilePreferencesStore.routingForAccount(
+                expectedAccountId = accountId,
+                profileIds = snapshot.profiles.mapTo(linkedSetOf(), UserProfile::id),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            ProfileRoutingPreferences()
+        }
+        if (
+            AuthenticatedSessionRegistry.isCurrent(sessionOwner) &&
+            accountScopeStore.activeAccountId() == accountId &&
+            profileSnapshot == snapshot
+        ) {
+            // Never reuse routing data across account/profile snapshots. A
+            // failed load uses the safe picker path instead.
+            routingPreferences = loaded ?: ProfileRoutingPreferences()
         }
     }
 
@@ -246,10 +300,10 @@ fun ProfileAwareHulkApp(
             ProfileCatalogNavigationMemory()
         }
     }
-    val routingPreferences = profilePreferencesStore.routing()
     val directEntryCandidate = if (
         authenticated &&
         profileStateReady &&
+        routingStateReady &&
         parentalCodeStateReady &&
         !resolvedForSession &&
         !switching &&
@@ -259,9 +313,9 @@ fun ProfileAwareHulkApp(
         pinSecurityProfileId == null &&
         !pickerRequestedFromApp &&
         !managingProfiles &&
-        routingPreferences.directEntryEnabled
+        routingPreferences?.directEntryEnabled == true
     ) {
-        routingPreferences.defaultProfileId
+        routingPreferences?.defaultProfileId
             ?.let { defaultId -> profiles.firstOrNull { it.id == defaultId } }
             ?: profiles.firstOrNull { it.id == activeProfileId }
     } else {
@@ -380,7 +434,9 @@ fun ProfileAwareHulkApp(
         val currentProfileId = activeProfileId
         if (profile.id == currentProfileId) {
             if (profile.kind == ProfileKind.KIDS) viewModel.selectDestination(MainDestination.HOME)
-            viewModel.refreshProfileLibrary()
+            activeAccountId?.let { accountId ->
+                viewModel.refreshProfileLibrary(accountId, profile)
+            }
             viewModel.onProfileChanged()
             switchError = null
             resolvedForSession = true
@@ -444,7 +500,7 @@ fun ProfileAwareHulkApp(
                 viewModel.updateSearch("")
                 viewModel.selectCategory(null)
             }
-            viewModel.refreshProfileLibrary()
+            viewModel.refreshProfileLibrary(expectedAccountId, profile)
             viewModel.onProfileChanged()
             switching = false
             resolvedForSession = true
@@ -749,9 +805,10 @@ fun ProfileAwareHulkApp(
     LaunchedEffect(
         authenticated,
         profileStateReady,
+        routingStateReady,
         resolvedForSession,
-        routingPreferences.directEntryEnabled,
-        routingPreferences.defaultProfileId,
+        routingPreferences?.directEntryEnabled,
+        routingPreferences?.defaultProfileId,
         activeProfileId,
         profiles,
         pickerRequestedFromApp,
@@ -843,6 +900,7 @@ fun ProfileAwareHulkApp(
         kidsSnapshot?.isAvailable,
     ) {
         val profileReady = authenticated &&
+            state.isProfileLibraryReady &&
             parentalCodeStateReady &&
             resolvedForSession &&
             !showPicker &&
@@ -890,7 +948,7 @@ fun ProfileAwareHulkApp(
                 onRetry = viewModel::retryOperations,
             )
 
-            authenticated && profileSnapshot == null -> Box(
+            authenticated && (profileSnapshot == null || !routingStateReady) -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
@@ -909,7 +967,13 @@ fun ProfileAwareHulkApp(
                         )
                     }
                 } else {
-                    LoadingRing(label = "جار تحميل الملفات الشخصية…")
+                    LoadingRing(
+                        label = if (profileSnapshot == null) {
+                            "جار تحميل الملفات الشخصية…"
+                        } else {
+                            "جار تهيئة إعدادات الملف الشخصي…"
+                        },
+                    )
                 }
             }
 
@@ -1122,7 +1186,16 @@ fun ProfileAwareHulkApp(
             onManageProfiles = {
                 requestProfileManagement(startCreating = false)
             },
+            routingPreferences = routingPreferences ?: ProfileRoutingPreferences(),
+            onRoutingChanged = { updated -> routingPreferences = updated },
         )
+
+            authenticated && !state.isProfileLibraryReady -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                LoadingRing(label = "جار تحميل مكتبة الملف الشخصي…")
+            }
 
             activeProfile?.kind == ProfileKind.KIDS &&
                 state.screen != HulkScreen.NOTIFICATION_CENTER -> KidsProfileExperience(
