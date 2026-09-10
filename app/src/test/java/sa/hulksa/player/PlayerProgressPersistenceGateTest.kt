@@ -96,6 +96,40 @@ class PlayerProgressPersistenceGateTest {
     }
 
     @Test
+    fun `callback captured for profile A cannot write to profile B after the switch`() {
+        val capturedProfileId = "profile-a"
+
+        assertFalse(playerProgressProfileOwnerAllowed(capturedProfileId, "profile-b"))
+        assertFalse(
+            userLibraryProgressWriteAllowed(
+                attemptCurrent = true,
+                sameAuthenticatedSession = true,
+                expectedAccountId = "account-a",
+                activeAccountId = "account-a",
+                expectedProfileId = capturedProfileId,
+                activeProfileId = "profile-b",
+            ),
+        )
+    }
+
+    @Test
+    fun `callback started after profile B switch writes for profile B`() {
+        val capturedProfileId = "profile-b"
+
+        assertTrue(playerProgressProfileOwnerAllowed(capturedProfileId, "profile-b"))
+        assertTrue(
+            userLibraryProgressWriteAllowed(
+                attemptCurrent = true,
+                sameAuthenticatedSession = true,
+                expectedAccountId = "account-a",
+                activeAccountId = "account-a",
+                expectedProfileId = capturedProfileId,
+                activeProfileId = "profile-b",
+            ),
+        )
+    }
+
+    @Test
     fun `logout or session replacement rejects stale progress writes`() {
         val gate = UserLibraryHistoryMutationGate()
         val stale = gate.beginProgress()
