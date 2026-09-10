@@ -83,10 +83,6 @@ fun HulkApp(
         isTelevisionDevice = isTv,
         isPlayer = state.screen == HulkScreen.PLAYER,
     )
-    // Favorite state changes must update the star immediately, but they must not rebuild
-    // Home recommendation membership/order while the user is focused on those rows.
-    // Refresh recommendation inputs only when catalogs/history actually change.
-    val homeRecommendationFavorites = remember(state.catalogs, state.history) { state.favorites }
     val notify: (String) -> Unit = { message ->
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
@@ -220,7 +216,7 @@ fun HulkApp(
                             key(catalogNavigationMemory) {
                                 MainShellScreen(
                                     state = when (state.destination) {
-                                        MainDestination.HOME -> state.copy(favorites = homeRecommendationFavorites)
+                                        MainDestination.HOME -> state
                                         MainDestination.LIVE -> liveTvProDecorateMainState(state, context)
                                         else -> state
                                     },
