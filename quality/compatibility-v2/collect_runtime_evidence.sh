@@ -126,17 +126,25 @@ fi
 } > "$out/WINDOW-METRICS.txt" 2>&1
 
 instrumentation_timed_out=false
+instrumentation_timeout_ms=$((instrumentation_timeout_seconds * 1000))
+instrumentation_elapsed_ms=0
 test_cleanup_status="not-required"
 app_cleanup_status="not-required"
 set +e
+instrumentation_started_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
 timeout --signal=TERM --kill-after=15s "${instrumentation_timeout_seconds}s" \
   adb shell am instrument -w -r \
   -e class "$test_class" \
   "$test_package/$runner" > "$out/INSTRUMENTATION.txt" 2>&1
 instrumentation_status=$?
-if [[ "$instrumentation_status" -eq 124 ]]; then
+instrumentation_finished_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+instrumentation_elapsed_ms=$(((instrumentation_finished_ns - instrumentation_started_ns) / 1000000))
+# GNU timeout may return 137 after --kill-after escalates to SIGKILL; only classify it
+# as timeout when monotonic execution evidence proves the 600-second boundary was reached.
+if [[ "$instrumentation_status" -eq 124 ]] || \
+   [[ "$instrumentation_status" -eq 137 && "$instrumentation_elapsed_ms" -ge "$instrumentation_timeout_ms" ]]; then
   instrumentation_timed_out=true
-  echo "INSTRUMENTATION_TIMEOUT: exceeded ${instrumentation_timeout_seconds} seconds" >> "$out/INSTRUMENTATION.txt"
+  echo "INSTRUMENTATION_TIMEOUT: exceeded ${instrumentation_timeout_seconds} seconds (process_status=${instrumentation_status}, elapsed_ms=${instrumentation_elapsed_ms})" >> "$out/INSTRUMENTATION.txt"
   timeout 15s adb shell dumpsys activity instrumentation > "$out/INSTRUMENTATION-TIMEOUT-ACTIVITY.txt" 2>&1 || true
   timeout 15s adb shell dumpsys window windows > "$out/INSTRUMENTATION-TIMEOUT-WINDOW.txt" 2>&1 || true
   timeout 15s adb logcat -d -v threadtime > "$out/INSTRUMENTATION-TIMEOUT-LOGCAT.txt" 2>&1 || true
@@ -160,6 +168,7 @@ parser_status=$?
 set -e
 {
   echo "timeout_seconds=$instrumentation_timeout_seconds"
+  echo "elapsed_ms=$instrumentation_elapsed_ms"
   echo "timed_out=$instrumentation_timed_out"
   echo "process_status=$instrumentation_status"
   echo "parser_status=$parser_status"

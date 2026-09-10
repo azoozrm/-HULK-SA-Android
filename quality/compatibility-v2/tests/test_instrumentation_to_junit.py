@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).parents[1] / "instrumentation_to_junit.py"
+COLLECTOR_PATH = Path(__file__).parents[1] / "collect_runtime_evidence.sh"
 SPEC = importlib.util.spec_from_file_location("compatibility_v2_instrumentation", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -85,7 +86,7 @@ INSTRUMENTATION_STATUS_CODE: 1
         self.assertEqual("FAIL", cases[0].status)
         self.assertIn("before a terminal result", cases[0].detail)
 
-    def test_timeout_is_explicit_failure_even_with_partial_output(self) -> None:
+    def test_term_timeout_status_124_is_explicit_failure_even_with_partial_output(self) -> None:
         raw = """
 INSTRUMENTATION_STATUS: class=sample.Tests
 INSTRUMENTATION_STATUS: test=neverFinishes
@@ -101,6 +102,42 @@ INSTRUMENTATION_STATUS_CODE: 1
         self.assertEqual("FAIL", statuses["neverFinishes"].status)
         self.assertEqual("FAIL", statuses["instrumentation-timeout"].status)
         self.assertIn("600 seconds", statuses["instrumentation-timeout"].detail)
+
+    def test_hard_kill_after_status_137_is_timeout_when_boundary_was_reached(self) -> None:
+        raw = """
+INSTRUMENTATION_STATUS: class=sample.Tests
+INSTRUMENTATION_STATUS: test=hardHang
+INSTRUMENTATION_STATUS_CODE: 1
+"""
+        cases = MODULE.parse_instrumentation(
+            raw,
+            137,
+            timed_out=True,
+            timeout_seconds=600,
+        )
+        statuses = {case.name: case for case in cases}
+        self.assertEqual("FAIL", statuses["hardHang"].status)
+        self.assertEqual("FAIL", statuses["instrumentation-timeout"].status)
+        self.assertIn("600 seconds", statuses["instrumentation-timeout"].detail)
+
+    def test_early_status_137_is_not_relabelled_as_timeout(self) -> None:
+        cases = MODULE.parse_instrumentation("", 137, timed_out=False, timeout_seconds=600)
+        statuses = {case.name: case for case in cases}
+        self.assertNotIn("instrumentation-timeout", statuses)
+        self.assertTrue(all(case.status == "FAIL" for case in cases))
+        self.assertTrue(any("status 137" in case.detail for case in cases))
+
+    def test_collector_requires_measured_timeout_boundary_for_status_137(self) -> None:
+        source = COLLECTOR_PATH.read_text(encoding="utf-8")
+        self.assertIn("time.monotonic_ns()", source)
+        self.assertIn(
+            '"$instrumentation_status" -eq 137 && "$instrumentation_elapsed_ms" -ge "$instrumentation_timeout_ms"',
+            source,
+        )
+        self.assertNotIn(
+            '"$instrumentation_status" -eq 124 || "$instrumentation_status" -eq 137',
+            source,
+        )
 
     def test_valid_terminal_success_failure_and_skipped_are_preserved(self) -> None:
         raw = """
