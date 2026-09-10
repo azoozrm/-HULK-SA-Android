@@ -44,6 +44,14 @@ class CompatibilityV2InstrumentationTest {
     private val targetContext = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
 
+    private data class FakeAccessibilityNode(
+        val id: String,
+        val clickable: Boolean,
+        val parent: FakeAccessibilityNode? = null,
+    )
+
+    private class FakeStaleObjectException : RuntimeException()
+
     private fun isTelevision(): Boolean {
         val mode = (targetContext.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType
         return mode == Configuration.UI_MODE_TYPE_TELEVISION
@@ -84,24 +92,218 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
-    private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
-        val titleSelector = By.text("يتوفر تحديث جديد")
-        if (!device.hasObject(titleSelector)) return true
+    private fun <Node> nearestClickableOwner(
+        actionNode: Node,
+        parentOf: (Node) -> Node?,
+        isClickable: (Node) -> Boolean,
+        maxAncestorDepth: Int = 6,
+    ): Node? {
+        var current: Node? = actionNode
+        repeat(maxAncestorDepth + 1) {
+            val candidate = current ?: return null
+            if (isClickable(candidate)) return candidate
+            current = parentOf(candidate)
+        }
+        return null
+    }
 
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        while (SystemClock.uptimeMillis() < deadline) {
-            if (!device.hasObject(titleSelector)) return true
+    private fun <Node> dismissOptionalUpdateWithinDeadline(
+        timeoutMs: Long,
+        nowMs: () -> Long,
+        isOverlayPresent: () -> Boolean,
+        resolveLaterAction: () -> Node?,
+        parentOf: (Node) -> Node?,
+        isClickable: (Node) -> Boolean,
+        click: (Node) -> Unit,
+        waitForOverlayGone: (Long) -> Boolean,
+        isStaleObject: (Throwable) -> Boolean,
+    ): Boolean {
+        if (!isOverlayPresent()) return true
+
+        val deadline = nowMs() + timeoutMs
+        while (nowMs() < deadline) {
+            if (!isOverlayPresent()) return true
             try {
-                device.findObject(By.text("لاحقًا"))?.click()
-            } catch (_: StaleObjectException) {
-                // The optional overlay was recomposed; resolve the action again on the next bounded probe.
+                val actionNode = resolveLaterAction()
+                val clickableOwner = actionNode?.let { node ->
+                    nearestClickableOwner(
+                        actionNode = node,
+                        parentOf = parentOf,
+                        isClickable = isClickable,
+                    )
+                }
+                if (clickableOwner != null) {
+                    click(clickableOwner)
+                }
+            } catch (error: Throwable) {
+                if (!isStaleObject(error)) throw error
+                // Re-resolve the action from the current tree on the next bounded probe.
             }
-            val remaining = deadline - SystemClock.uptimeMillis()
-            if (remaining > 0L && device.wait(Until.gone(titleSelector), minOf(remaining, 500L))) {
+
+            val remaining = deadline - nowMs()
+            if (remaining > 0L && waitForOverlayGone(minOf(remaining, 500L))) {
                 return true
             }
         }
-        return !device.hasObject(titleSelector)
+        return !isOverlayPresent()
+    }
+
+    private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
+        val titleSelector = By.text("يتوفر تحديث جديد")
+        val laterSelector = By.text("لاحقًا")
+        return dismissOptionalUpdateWithinDeadline(
+            timeoutMs = timeoutMs,
+            nowMs = { SystemClock.uptimeMillis() },
+            isOverlayPresent = { device.hasObject(titleSelector) },
+            resolveLaterAction = { device.findObject(laterSelector) },
+            parentOf = { node -> node.parent },
+            isClickable = { node -> node.isClickable },
+            click = { node -> node.click() },
+            waitForOverlayGone = { waitMs -> device.wait(Until.gone(titleSelector), waitMs) },
+            isStaleObject = { error -> error is StaleObjectException },
+        )
+    }
+
+    @Test
+    fun optionalUpdateDismissalUsesClickableAncestorWhenTextNodeIsNotClickable() {
+        val clickableOwner = FakeAccessibilityNode(id = "later-owner", clickable = true)
+        val laterText = FakeAccessibilityNode(
+            id = "later-text",
+            clickable = false,
+            parent = clickableOwner,
+        )
+        var overlayPresent = true
+        var nowMs = 0L
+        var clickedNode: FakeAccessibilityNode? = null
+
+        val dismissed = dismissOptionalUpdateWithinDeadline(
+            timeoutMs = 1_000L,
+            nowMs = { nowMs },
+            isOverlayPresent = { overlayPresent },
+            resolveLaterAction = { laterText },
+            parentOf = { node -> node.parent },
+            isClickable = { node -> node.clickable },
+            click = { node ->
+                clickedNode = node
+                overlayPresent = false
+            },
+            waitForOverlayGone = { waitMs ->
+                nowMs += waitMs
+                !overlayPresent
+            },
+            isStaleObject = { false },
+        )
+
+        assertTrue("Optional update should dismiss through the clickable action owner", dismissed)
+        assertEquals("later-owner", clickedNode?.id)
+    }
+
+    @Test
+    fun optionalUpdateDismissalReResolvesAfterStaleActionNode() {
+        val clickableOwner = FakeAccessibilityNode(id = "later-owner", clickable = true)
+        val staleLaterText = FakeAccessibilityNode(
+            id = "stale-later-text",
+            clickable = false,
+            parent = clickableOwner,
+        )
+        val currentLaterText = FakeAccessibilityNode(
+            id = "current-later-text",
+            clickable = false,
+            parent = clickableOwner,
+        )
+        var overlayPresent = true
+        var nowMs = 0L
+        var resolveCount = 0
+        var clickedNode: FakeAccessibilityNode? = null
+
+        val dismissed = dismissOptionalUpdateWithinDeadline(
+            timeoutMs = 1_500L,
+            nowMs = { nowMs },
+            isOverlayPresent = { overlayPresent },
+            resolveLaterAction = {
+                resolveCount += 1
+                if (resolveCount == 1) staleLaterText else currentLaterText
+            },
+            parentOf = { node ->
+                if (node === staleLaterText) throw FakeStaleObjectException()
+                node.parent
+            },
+            isClickable = { node -> node.clickable },
+            click = { node ->
+                clickedNode = node
+                overlayPresent = false
+            },
+            waitForOverlayGone = { waitMs ->
+                nowMs += waitMs
+                !overlayPresent
+            },
+            isStaleObject = { error -> error is FakeStaleObjectException },
+        )
+
+        assertTrue("Optional update should dismiss after resolving the current action node", dismissed)
+        assertEquals(2, resolveCount)
+        assertEquals("later-owner", clickedNode?.id)
+    }
+
+    @Test
+    fun optionalUpdateDismissalWithoutOverlayHasNoSideEffects() {
+        var resolveCount = 0
+        var clickCount = 0
+        var waitCount = 0
+
+        val dismissed = dismissOptionalUpdateWithinDeadline<FakeAccessibilityNode>(
+            timeoutMs = 1_000L,
+            nowMs = { 0L },
+            isOverlayPresent = { false },
+            resolveLaterAction = {
+                resolveCount += 1
+                null
+            },
+            parentOf = { node -> node.parent },
+            isClickable = { node -> node.clickable },
+            click = { clickCount += 1 },
+            waitForOverlayGone = {
+                waitCount += 1
+                false
+            },
+            isStaleObject = { false },
+        )
+
+        assertTrue("Missing optional update overlay should already satisfy dismissal", dismissed)
+        assertEquals(0, resolveCount)
+        assertEquals(0, clickCount)
+        assertEquals(0, waitCount)
+    }
+
+    @Test
+    fun optionalUpdateDismissalFailsBoundedWhenNoClickableOwnerExists() {
+        val nonClickableContainer = FakeAccessibilityNode(id = "container", clickable = false)
+        val laterText = FakeAccessibilityNode(
+            id = "later-text",
+            clickable = false,
+            parent = nonClickableContainer,
+        )
+        var nowMs = 0L
+        var clickCount = 0
+
+        val dismissed = dismissOptionalUpdateWithinDeadline(
+            timeoutMs = 1_000L,
+            nowMs = { nowMs },
+            isOverlayPresent = { true },
+            resolveLaterAction = { laterText },
+            parentOf = { node -> node.parent },
+            isClickable = { node -> node.clickable },
+            click = { clickCount += 1 },
+            waitForOverlayGone = { waitMs ->
+                nowMs += waitMs
+                false
+            },
+            isStaleObject = { false },
+        )
+
+        assertFalse("Overlay without a proven clickable action owner must fail", dismissed)
+        assertEquals(0, clickCount)
+        assertEquals(1_000L, nowMs)
     }
 
     private fun clickResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
