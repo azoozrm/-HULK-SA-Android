@@ -92,7 +92,8 @@ class DownloadSettingsMutationGateTest {
             }
             assertTrue(started.await(1, TimeUnit.SECONDS))
 
-            val nextAttempt = uiExecutor.submit { gate.begin() }.get(1, TimeUnit.SECONDS)
+            val nextAttempt = uiExecutor.submit<DownloadSettingsMutationGate.Attempt> { gate.begin() }
+                .get(1, TimeUnit.SECONDS)
             uiExecutor.submit { gate.invalidate() }.get(1, TimeUnit.SECONDS)
 
             assertFalse(gate.isCurrent(nextAttempt))
