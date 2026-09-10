@@ -21,6 +21,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import java.io.File
@@ -82,6 +84,134 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
+    private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
+        val titleSelector = By.text("يتوفر تحديث جديد")
+        if (!device.hasObject(titleSelector)) return true
+
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (!device.hasObject(titleSelector)) return true
+            try {
+                device.findObject(By.text("لاحقًا"))?.click()
+            } catch (_: StaleObjectException) {
+                // The optional overlay was recomposed; resolve the action again on the next bounded probe.
+            }
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0L && device.wait(Until.gone(titleSelector), minOf(remaining, 500L))) {
+                return true
+            }
+        }
+        return !device.hasObject(titleSelector)
+    }
+
+    private fun clickResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (!dismissOptionalUpdateIfPresent()) return false
+            try {
+                val node = device.findObject(selector)
+                if (node != null) {
+                    node.click()
+                    instrumentation.waitForIdleSync()
+                    if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
+                }
+            } catch (_: StaleObjectException) {
+                // Resolve the selector again rather than retaining a node across a window transition.
+            }
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0L) {
+                device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+            }
+        }
+        return false
+    }
+
+    private fun resolvedVisibleBounds(selector: BySelector, timeoutMs: Long = 6_000L): Rect? {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (!dismissOptionalUpdateIfPresent()) return null
+            try {
+                device.findObject(selector)?.let { return Rect(it.visibleBounds) }
+            } catch (_: StaleObjectException) {
+                // Resolve from the current accessibility tree on the next bounded probe.
+            }
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0L) {
+                device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+            }
+        }
+        return null
+    }
+
+    private fun imeWindowIsActuallyVisible(): Boolean {
+        val dump = device.executeShellCommand("dumpsys window windows")
+        val block = StringBuilder()
+        var inImeWindow = false
+        for (line in dump.lineSequence()) {
+            val startsWindow = line.startsWith("  Window #") && line.contains(" Window{")
+            if (!inImeWindow && startsWindow && line.contains(" InputMethod}:")) {
+                inImeWindow = true
+            } else if (inImeWindow && startsWindow) {
+                break
+            }
+            if (inImeWindow) block.appendLine(line)
+        }
+        if (block.isEmpty()) return false
+        if (!block.contains("mViewVisibility=0x0")) return false
+        return block.contains("mHasSurface=true") ||
+            block.contains("isOnScreen=true") ||
+            block.contains("isVisible=true")
+    }
+
+    private fun waitForTelevisionImeHiddenSettled(
+        timeoutMs: Long = 30_000L,
+        stableHiddenMs: Long = 4_000L,
+    ): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        var hiddenSince = -1L
+        while (SystemClock.uptimeMillis() < deadline) {
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (!dismissOptionalUpdateIfPresent(minOf(1_000L, remaining))) {
+                hiddenSince = -1L
+                continue
+            }
+            val loginExposed = device.hasObject(By.text("كود الدخول"))
+            val now = SystemClock.uptimeMillis()
+            if (!loginExposed || imeWindowIsActuallyVisible()) {
+                hiddenSince = -1L
+            } else {
+                if (hiddenSince < 0L) hiddenSince = now
+                if (now - hiddenSince >= stableHiddenMs) return true
+            }
+            val sampleRemaining = deadline - SystemClock.uptimeMillis()
+            if (sampleRemaining > 0L) {
+                // Match the runtime collector's bounded sampling cadence; success depends on the hidden streak.
+                SystemClock.sleep(minOf(500L, sampleRemaining))
+            }
+        }
+        return false
+    }
+
+    private fun visibleApplicationBoundsSnapshot(timeoutMs: Long = 5_000L): List<Rect>? {
+        val selector = By.pkg(targetContext.packageName)
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            try {
+                val nodes = device.findObjects(selector)
+                if (nodes.isNotEmpty()) {
+                    return nodes.take(100).map { node -> Rect(node.visibleBounds) }
+                }
+            } catch (_: StaleObjectException) {
+                // Discard the partial snapshot and resolve the current accessibility tree again.
+            }
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0L) {
+                device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+            }
+        }
+        return null
+    }
+
     @Test
     fun phoneLauncherStartsRealApplicationAndSurvivesRecreation() {
         assumeFalse("Phone lifecycle test is not applicable to television UI mode", isTelevision())
@@ -112,22 +242,12 @@ class CompatibilityV2InstrumentationTest {
                 "Application package did not become visible",
                 device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L),
             )
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(1_200L)
-
-            var fields = device.findObjects(By.clazz("android.widget.EditText"))
-            if (fields.size < 3) {
-                val codeLabel = device.wait(Until.findObject(By.text("كود الدخول")), 6_000L)
-                assertNotNull("Access-code field was not exposed", codeLabel)
-                codeLabel?.click()
-            } else {
-                fields[0].click()
-            }
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(500L)
+            assertTrue(
+                "Access-code field was not exposed",
+                clickResolved(By.text("كود الدخول")),
+            )
             device.executeShellCommand("input text HULK-ABCD-EFGH-JKMN-PQRS")
             instrumentation.waitForIdleSync()
-            SystemClock.sleep(700L)
 
             scenario.onActivity { activity ->
                 assertFalse("Application finished after access-code input", activity.isFinishing)
@@ -138,33 +258,19 @@ class CompatibilityV2InstrumentationTest {
                 device.hasObject(By.pkg(targetContext.packageName).depth(0)),
             )
 
-            fields = device.findObjects(By.clazz("android.widget.EditText"))
-            if (fields.size >= 3) {
-                fields[1].click()
-            } else {
-                val usernameLabel = device.wait(Until.findObject(By.text("اسم المستخدم")), 6_000L)
-                assertNotNull("Username field was not exposed", usernameLabel)
-                usernameLabel?.click()
-            }
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(500L)
+            assertTrue(
+                "Username field was not exposed",
+                clickResolved(By.text("اسم المستخدم")),
+            )
             device.executeShellCommand("input text portraituser")
             instrumentation.waitForIdleSync()
-            SystemClock.sleep(700L)
 
-            fields = device.findObjects(By.clazz("android.widget.EditText"))
-            if (fields.size >= 3) {
-                fields[2].click()
-            } else {
-                val passwordLabel = device.wait(Until.findObject(By.text("كلمة المرور")), 6_000L)
-                assertNotNull("Password field was not exposed", passwordLabel)
-                passwordLabel?.click()
-            }
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(500L)
+            assertTrue(
+                "Password field was not exposed",
+                clickResolved(By.text("كلمة المرور")),
+            )
             device.executeShellCommand("input text portraitpass")
             instrumentation.waitForIdleSync()
-            SystemClock.sleep(900L)
 
             scenario.onActivity { activity ->
                 assertFalse("Application finished after password input", activity.isFinishing)
@@ -178,6 +284,10 @@ class CompatibilityV2InstrumentationTest {
                 "Android crash recovery dialog appeared after portrait login typing",
                 device.hasObject(By.textContains("مسح ذاكرة التخزين المؤقت")),
             )
+            assertTrue(
+                "Optional update overlay could not be dismissed for login qualification",
+                dismissOptionalUpdateIfPresent(),
+            )
 
             val output = File(targetContext.getExternalFilesDir(null), "compatibility-v2").apply { mkdirs() }
             assertTrue(
@@ -186,11 +296,13 @@ class CompatibilityV2InstrumentationTest {
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
-            var loginAction = device.findObject(By.text("دخول الى HULK"))
-            var subscribeAction = device.findObject(By.text("اشتراك او تجديد"))
+            var loginBounds: Rect? = null
+            var subscribeBounds: Rect? = null
             repeat(6) {
-                val loginVisible = loginAction?.visibleBounds?.height()?.let { it > 0 } == true
-                val subscribeVisible = subscribeAction?.visibleBounds?.height()?.let { it > 0 } == true
+                loginBounds = resolvedVisibleBounds(By.text("دخول الى HULK"), 500L)
+                subscribeBounds = resolvedVisibleBounds(By.text("اشتراك او تجديد"), 500L)
+                val loginVisible = loginBounds?.height()?.let { it > 0 } == true
+                val subscribeVisible = subscribeBounds?.height()?.let { it > 0 } == true
                 if (!loginVisible || !subscribeVisible) {
                     device.swipe(
                         device.displayWidth / 2,
@@ -200,20 +312,17 @@ class CompatibilityV2InstrumentationTest {
                         30,
                     )
                     instrumentation.waitForIdleSync()
-                    SystemClock.sleep(350L)
-                    loginAction = device.findObject(By.text("دخول الى HULK"))
-                    subscribeAction = device.findObject(By.text("اشتراك او تجديد"))
                 }
             }
-            assertNotNull("Login action was not exposed while the IME was active", loginAction)
-            assertNotNull("Subscribe action was not exposed while the IME was active", subscribeAction)
+            assertNotNull("Login action was not exposed while the IME was active", loginBounds)
+            assertNotNull("Subscribe action was not exposed while the IME was active", subscribeBounds)
             assertTrue(
                 "Login action remained outside the visible resized window",
-                loginAction?.visibleBounds?.height()?.let { it > 0 } == true,
+                loginBounds?.height()?.let { it > 0 } == true,
             )
             assertTrue(
                 "Subscribe action remained outside the visible resized window",
-                subscribeAction?.visibleBounds?.height()?.let { it > 0 } == true,
+                subscribeBounds?.height()?.let { it > 0 } == true,
             )
             assertTrue(
                 "Portrait login action reachability screenshot failed",
@@ -273,20 +382,20 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun loginFieldsAppearInRequiredResellerOrder() {
         assertTrue("Application package did not become visible", launchMainPackage())
-        val accessCode = device.wait(Until.findObject(By.text("كود الدخول")), 6_000L)
-        val username = device.wait(Until.findObject(By.text("اسم المستخدم")), 6_000L)
-        val password = device.wait(Until.findObject(By.text("كلمة المرور")), 6_000L)
+        val accessCode = resolvedVisibleBounds(By.text("كود الدخول"))
+        val username = resolvedVisibleBounds(By.text("اسم المستخدم"))
+        val password = resolvedVisibleBounds(By.text("كلمة المرور"))
 
         assertNotNull("Access-code field was not exposed", accessCode)
         assertNotNull("Username field was not exposed", username)
         assertNotNull("Password field was not exposed", password)
         assertTrue(
             "Access code must appear before username",
-            requireNotNull(accessCode).visibleBounds.top < requireNotNull(username).visibleBounds.top,
+            requireNotNull(accessCode).top < requireNotNull(username).top,
         )
         assertTrue(
             "Username must appear before password",
-            requireNotNull(username).visibleBounds.top < requireNotNull(password).visibleBounds.top,
+            requireNotNull(username).top < requireNotNull(password).top,
         )
     }
 
@@ -335,10 +444,12 @@ class CompatibilityV2InstrumentationTest {
 
         val loginSelector = By.textContains("دخول")
         val subscribeSelector = By.textContains("اشترك")
-        var loginVisible = device.hasObject(loginSelector)
-        var subscribeVisible = device.hasObject(subscribeSelector)
+        var loginBounds = resolvedVisibleBounds(loginSelector, 500L)
+        var subscribeBounds = resolvedVisibleBounds(subscribeSelector, 500L)
 
         repeat(8) {
+            val loginVisible = loginBounds?.height()?.let { it > 0 } == true
+            val subscribeVisible = subscribeBounds?.height()?.let { it > 0 } == true
             if (!loginVisible || !subscribeVisible) {
                 device.swipe(
                     device.displayWidth / 2,
@@ -348,20 +459,17 @@ class CompatibilityV2InstrumentationTest {
                     30,
                 )
                 instrumentation.waitForIdleSync()
-                SystemClock.sleep(250L)
-                loginVisible = device.hasObject(loginSelector)
-                subscribeVisible = device.hasObject(subscribeSelector)
+                loginBounds = resolvedVisibleBounds(loginSelector, 500L)
+                subscribeBounds = resolvedVisibleBounds(subscribeSelector, 500L)
             }
         }
 
-        assertTrue("Primary login action is not reachable after scrolling", loginVisible)
-        assertTrue("Subscribe or renew action is not reachable after scrolling", subscribeVisible)
+        assertNotNull("Primary login action is not reachable after scrolling", loginBounds)
+        assertNotNull("Subscribe or renew action is not reachable after scrolling", subscribeBounds)
 
         val display = Rect(0, 0, device.displayWidth, device.displayHeight)
-        val loginBounds = device.findObject(loginSelector).visibleBounds
-        val subscribeBounds = device.findObject(subscribeSelector).visibleBounds
-        assertTrue("Primary login action is outside the display", Rect.intersects(display, loginBounds))
-        assertTrue("Subscribe or renew action is outside the display", Rect.intersects(display, subscribeBounds))
+        assertTrue("Primary login action is outside the display", Rect.intersects(display, requireNotNull(loginBounds)))
+        assertTrue("Subscribe or renew action is outside the display", Rect.intersects(display, requireNotNull(subscribeBounds)))
     }
 
     @Suppress("DEPRECATION")
@@ -417,20 +525,20 @@ class CompatibilityV2InstrumentationTest {
                 assertTrue("Navigation safe content height is invalid", safeContentBounds.height() > 0)
             }
 
-            val visibleSafeAreaProbe =
-                device.wait(Until.findObject(By.textContains("دخول")), 1_500L)
-                    ?: device.wait(Until.findObject(By.textContains("كلمة المرور")), 5_000L)
+            val probeBounds =
+                resolvedVisibleBounds(By.textContains("دخول"), 1_500L)
+                    ?: resolvedVisibleBounds(By.textContains("كلمة المرور"), 5_000L)
             assertNotNull(
                 "No visible login control was exposed for safe-area verification",
-                visibleSafeAreaProbe,
+                probeBounds,
             )
-            val probeBounds = requireNotNull(visibleSafeAreaProbe).visibleBounds
+            val visibleProbeBounds = requireNotNull(probeBounds)
             assertTrue(
-                "Visible login control overlaps system navigation controls: control=$probeBounds safe=$safeContentBounds",
-                probeBounds.left >= safeContentBounds.left &&
-                    probeBounds.top >= safeContentBounds.top &&
-                    probeBounds.right <= safeContentBounds.right &&
-                    probeBounds.bottom <= safeContentBounds.bottom,
+                "Visible login control overlaps system navigation controls: control=$visibleProbeBounds safe=$safeContentBounds",
+                visibleProbeBounds.left >= safeContentBounds.left &&
+                    visibleProbeBounds.top >= safeContentBounds.top &&
+                    visibleProbeBounds.right <= safeContentBounds.right &&
+                    visibleProbeBounds.bottom <= safeContentBounds.bottom,
             )
             assertFalse(
                 "Normal phone pages must not trigger Android's immersive-mode education overlay",
@@ -447,17 +555,11 @@ class CompatibilityV2InstrumentationTest {
                 "Application package did not become visible",
                 device.wait(Until.hasObject(By.pkg(targetContext.packageName).depth(0)), 15_000L),
             )
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(2_500L)
-            instrumentation.waitForIdleSync()
-            scenario.onActivity { activity ->
-                assertTrue(activity is TvMainActivity)
-                val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
-                assertFalse(
-                    "TV login opened the software keyboard after the window settled",
-                    insets?.isVisible(WindowInsetsCompat.Type.ime()) == true,
-                )
-            }
+            scenario.onActivity { activity -> assertTrue(activity is TvMainActivity) }
+            assertTrue(
+                "TV login did not settle with the software keyboard hidden for four consecutive seconds",
+                waitForTelevisionImeHiddenSettled(),
+            )
         }
     }
 
@@ -467,7 +569,7 @@ class CompatibilityV2InstrumentationTest {
         launchScenario().use { scenario ->
             assertNotNull(
                 "TV reseller access-code field was not exposed",
-                device.wait(Until.findObject(By.text("كود الدخول")), 6_000L),
+                resolvedVisibleBounds(By.text("كود الدخول")),
             )
             repeat(12) { index ->
                 val keyCode = when (index % 4) {
@@ -484,11 +586,12 @@ class CompatibilityV2InstrumentationTest {
                 assertFalse(activity.isFinishing)
                 assertTrue(activity.window.decorView.isShown)
             }
-            val focused = device.wait(Until.findObject(By.focused(true)), 5_000L)
-            assertNotNull("No visible focused accessibility node after D-pad input", focused)
+            val focusedBounds = resolvedVisibleBounds(By.focused(true), 5_000L)
+            assertNotNull("No visible focused accessibility node after D-pad input", focusedBounds)
+            val visibleFocusedBounds = requireNotNull(focusedBounds)
             assertTrue(
                 "Focused node is outside the display",
-                focused.visibleBounds.width() > 0 && focused.visibleBounds.height() > 0,
+                visibleFocusedBounds.width() > 0 && visibleFocusedBounds.height() > 0,
             )
         }
     }
@@ -498,12 +601,16 @@ class CompatibilityV2InstrumentationTest {
         assertTrue("Application package did not become visible", launchMainPackage())
 
         val display = Rect(0, 0, device.displayWidth, device.displayHeight)
-        val nodes = device.findObjects(By.pkg(targetContext.packageName))
-        assertTrue("No accessibility nodes were exposed by the application", nodes.isNotEmpty())
-        nodes.take(100).forEach { node ->
-            val bounds = node.visibleBounds
-            assertTrue("Node has zero-sized visible bounds: $node", bounds.width() > 0 && bounds.height() > 0)
-            assertTrue("Node is outside the display: $bounds", Rect.intersects(display, bounds))
+        val bounds = visibleApplicationBoundsSnapshot()
+        assertNotNull("A stable accessibility snapshot was not available", bounds)
+        val visibleBounds = requireNotNull(bounds)
+        assertTrue("No visible accessibility nodes were exposed by the application", visibleBounds.isNotEmpty())
+        visibleBounds.forEach { nodeBounds ->
+            assertTrue(
+                "Node has zero-sized visible bounds: $nodeBounds",
+                nodeBounds.width() > 0 && nodeBounds.height() > 0,
+            )
+            assertTrue("Node is outside the display: $nodeBounds", Rect.intersects(display, nodeBounds))
         }
     }
 

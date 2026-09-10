@@ -11,6 +11,7 @@ test_package="sa.hulksa.player.dev.test"
 runner="androidx.test.runner.AndroidJUnitRunner"
 status=0
 sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+instrumentation_timeout_seconds=600
 
 is_tv=false
 category="android.intent.category.LAUNCHER"
@@ -124,17 +125,72 @@ fi
   adb shell dumpsys window insets 2>/dev/null || true
 } > "$out/WINDOW-METRICS.txt" 2>&1
 
+instrumentation_timed_out=false
+instrumentation_timeout_ms=$((instrumentation_timeout_seconds * 1000))
+instrumentation_elapsed_ms=0
+test_cleanup_status="not-required"
+app_cleanup_status="not-required"
 set +e
-adb shell am instrument -w -r \
+instrumentation_started_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+timeout --signal=TERM --kill-after=15s "${instrumentation_timeout_seconds}s" \
+  adb shell am instrument -w -r \
   -e class "$test_class" \
   "$test_package/$runner" > "$out/INSTRUMENTATION.txt" 2>&1
 instrumentation_status=$?
-python3 quality/compatibility-v2/instrumentation_to_junit.py \
-  "$out/INSTRUMENTATION.txt" "$out/INSTRUMENTATION.xml" --process-status "$instrumentation_status"
+instrumentation_finished_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+instrumentation_elapsed_ms=$(((instrumentation_finished_ns - instrumentation_started_ns) / 1000000))
+# GNU timeout may return 137 after --kill-after escalates to SIGKILL; only classify it
+# as timeout when monotonic execution evidence proves the 600-second boundary was reached.
+if [[ "$instrumentation_status" -eq 124 ]] || \
+   [[ "$instrumentation_status" -eq 137 && "$instrumentation_elapsed_ms" -ge "$instrumentation_timeout_ms" ]]; then
+  instrumentation_timed_out=true
+  echo "INSTRUMENTATION_TIMEOUT: exceeded ${instrumentation_timeout_seconds} seconds (process_status=${instrumentation_status}, elapsed_ms=${instrumentation_elapsed_ms})" >> "$out/INSTRUMENTATION.txt"
+  timeout 15s adb shell dumpsys activity instrumentation > "$out/INSTRUMENTATION-TIMEOUT-ACTIVITY.txt" 2>&1 || true
+  timeout 15s adb shell dumpsys window windows > "$out/INSTRUMENTATION-TIMEOUT-WINDOW.txt" 2>&1 || true
+  timeout 15s adb logcat -d -v threadtime > "$out/INSTRUMENTATION-TIMEOUT-LOGCAT.txt" 2>&1 || true
+  timeout 15s adb exec-out screencap -p > "$out/INSTRUMENTATION-TIMEOUT.png" 2>/dev/null || true
+  timeout 15s adb shell am force-stop "$test_package" >/dev/null 2>&1
+  test_cleanup_status=$?
+  timeout 15s adb shell am force-stop "$package" >/dev/null 2>&1
+  app_cleanup_status=$?
+fi
+parser_args=(
+  quality/compatibility-v2/instrumentation_to_junit.py
+  "$out/INSTRUMENTATION.txt"
+  "$out/INSTRUMENTATION.xml"
+  --process-status "$instrumentation_status"
+)
+if [[ "$instrumentation_timed_out" == true ]]; then
+  parser_args+=(--timed-out --timeout-seconds "$instrumentation_timeout_seconds")
+fi
+python3 "${parser_args[@]}"
 parser_status=$?
 set -e
-if [[ "$instrumentation_status" -ne 0 ]]; then status="$instrumentation_status"; fi
-if [[ "$parser_status" -ne 0 ]]; then status="$parser_status"; fi
+{
+  echo "timeout_seconds=$instrumentation_timeout_seconds"
+  echo "elapsed_ms=$instrumentation_elapsed_ms"
+  echo "timed_out=$instrumentation_timed_out"
+  echo "process_status=$instrumentation_status"
+  echo "parser_status=$parser_status"
+  echo "test_package_cleanup_status=$test_cleanup_status"
+  echo "app_package_cleanup_status=$app_cleanup_status"
+  if [[ "$instrumentation_timed_out" == true ]]; then
+    echo "result=FAIL"
+    echo "failure_reason=instrumentation exceeded bounded execution timeout"
+  elif [[ "$instrumentation_status" -eq 0 && "$parser_status" -eq 0 ]]; then
+    echo "result=PASS"
+  else
+    echo "result=FAIL"
+    echo "failure_reason=instrumentation or parsed test result failed"
+  fi
+} > "$out/INSTRUMENTATION-EXECUTION.txt"
+if [[ "$instrumentation_timed_out" == true ]]; then
+  status=124
+elif [[ "$instrumentation_status" -ne 0 ]]; then
+  status="$instrumentation_status"
+elif [[ "$parser_status" -ne 0 ]]; then
+  status="$parser_status"
+fi
 
 portrait_evidence_required=false
 if [[ "$test_class" == *"#phonePortraitLoginFieldsAcceptTypingWithoutCrash" ]]; then
@@ -324,6 +380,7 @@ for required in \
   WINDOW-METRICS.txt \
   INSTRUMENTATION.txt \
   INSTRUMENTATION.xml \
+  INSTRUMENTATION-EXECUTION.txt \
   FOREGROUND-APP.txt \
   IME-STATE.txt \
   ACTIVITY-TOP.txt \
