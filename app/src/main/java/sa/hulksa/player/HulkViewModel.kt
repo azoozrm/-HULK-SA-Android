@@ -223,7 +223,7 @@ internal suspend fun runDownloadPauseOffMain(
 }
 
 internal suspend fun runDownloadSettingsPersistenceOffMain(
-    persistence: () -> ProfileDownloadMutationOutcome?,
+    persistence: suspend () -> ProfileDownloadMutationOutcome?,
 ): ProfileDownloadMutationOutcome? = withContext(Dispatchers.IO) {
     persistence()
 }
@@ -314,7 +314,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val profileLibraryStartupGate = ProfileLibraryStartupGate()
     private val detailsRequestGate = DetailsRequestGate()
     private val downloadSettingsMutationGate = DownloadSettingsMutationGate()
-    private val downloadRecordMutationGates = mutableMapOf<Long, DownloadSettingsMutationGate>()
+    private val downloadResumeMutationGates = mutableMapOf<Long, DownloadSettingsMutationGate>()
+    private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
@@ -1148,7 +1149,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             return "التنزيلات متوقفة مؤقتًا."
         }
-        if (!submitDownloadRecordMutation(item.downloadId) { expectedAccountId, expectedProfileId ->
+        if (!submitDownloadPriorityMutation(item.downloadId) { expectedAccountId, expectedProfileId ->
             downloadRepository.cyclePriority(item.downloadId, expectedAccountId, expectedProfileId)
         }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
         return when (item.priority) {
@@ -1195,7 +1196,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    private fun submitDownloadRecordMutation(
+    private fun submitDownloadPriorityMutation(
         downloadId: Long,
         mutation: (expectedAccountId: String, expectedProfileId: String) -> ProfileDownloadMutationOutcome,
     ): Boolean {
@@ -1203,14 +1204,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val expectedAccountId = downloadRepository.activeAccountIdForCleanup() ?: return false
         val expectedProfileId = profileStore.activeProfileId()
         if (expectedProfileId.isBlank()) return false
-        val gate = downloadRecordMutationGates.getOrPut(downloadId, ::DownloadSettingsMutationGate)
-        val attempt = gate.begin()
+        val queue = downloadPriorityMutationQueues.getOrPut(downloadId, ::DownloadPriorityMutationQueue)
+        val attempt = queue.begin()
         viewModelScope.launch {
             val outcome = runDownloadSettingsPersistenceOffMain {
-                gate.writeIfCurrent(attempt) { mutation(expectedAccountId, expectedProfileId) }
-            } ?: return@launch
+                queue.write { mutation(expectedAccountId, expectedProfileId) }
+            }
             if (
-                !gate.isCurrent(attempt) ||
+                !queue.isCurrent(attempt) ||
                 session !== expectedSession ||
                 !downloadOwnerContextMatches(
                     expectedAccountId = expectedAccountId,
@@ -1297,7 +1298,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             onResult(rebuildDownload(item))
             return
         }
-        val gate = downloadRecordMutationGates.getOrPut(item.downloadId, ::DownloadSettingsMutationGate)
+        val gate = downloadResumeMutationGates.getOrPut(item.downloadId, ::DownloadSettingsMutationGate)
         val attempt = gate.begin()
         viewModelScope.launch {
             val outcome = runDownloadSettingsPersistenceOffMain {
@@ -1865,8 +1866,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onProfileChanged() {
         downloadSettingsMutationGate.invalidate()
-        downloadRecordMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadRecordMutationGates.clear()
+        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+        downloadResumeMutationGates.clear()
+        downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+        downloadPriorityMutationQueues.clear()
         invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
         invalidateDetailsRequest()
@@ -2785,8 +2788,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidateDiagnosticsForSessionChange()
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
-        downloadRecordMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-        downloadRecordMutationGates.clear()
+        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+        downloadResumeMutationGates.clear()
+        downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+        downloadPriorityMutationQueues.clear()
         mutableState.update {
             it.copy(
                 screen = HulkScreen.LOGIN,
@@ -2912,8 +2917,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             invalidateDiagnosticsForSessionChange()
             invalidatePlayerProgressPersistence()
             downloadSettingsMutationGate.invalidate()
-            downloadRecordMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-            downloadRecordMutationGates.clear()
+            downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+            downloadResumeMutationGates.clear()
+            downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+            downloadPriorityMutationQueues.clear()
             session = authenticated
             sessionRestorationComplete = true
             clearCatalogMemory()

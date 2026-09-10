@@ -1,6 +1,9 @@
 package sa.hulksa.player
 
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,7 +31,7 @@ class DownloadSettingsMutationGateTest {
     }
 
     @Test
-    fun `rapid settings intents persist only the last value`() {
+    fun `rapid settings intents persist only the last value`() = runBlocking {
         val gate = DownloadSettingsMutationGate()
         val first = gate.begin()
         val second = gate.begin()
@@ -43,7 +46,7 @@ class DownloadSettingsMutationGateTest {
     }
 
     @Test
-    fun `stale completion cannot publish over a newer mutation`() {
+    fun `stale completion cannot publish over a newer mutation`() = runBlocking {
         val gate = DownloadSettingsMutationGate()
         val older = gate.begin()
         val newer = gate.begin()
@@ -58,7 +61,7 @@ class DownloadSettingsMutationGateTest {
     }
 
     @Test
-    fun `skipped older schedule intent cannot create an extra durable revision`() {
+    fun `skipped older schedule intent cannot create an extra durable revision`() = runBlocking {
         val gate = DownloadSettingsMutationGate()
         val older = gate.begin()
         val latest = gate.begin()
@@ -68,5 +71,121 @@ class DownloadSettingsMutationGateTest {
         gate.writeIfCurrent(latest) { lifecycleRevision += 1L }
 
         assertEquals(42L, lifecycleRevision)
+    }
+
+    @Test
+    fun `begin and invalidate do not wait for durable write`() = runBlocking {
+        val gate = DownloadSettingsMutationGate()
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val persistenceExecutor = Executors.newSingleThreadExecutor()
+        val uiExecutor = Executors.newSingleThreadExecutor()
+        try {
+            val attempt = gate.begin()
+            persistenceExecutor.submit {
+                runBlocking {
+                    gate.writeIfCurrent(attempt) {
+                        started.countDown()
+                        release.await()
+                    }
+                }
+            }
+            assertTrue(started.await(1, TimeUnit.SECONDS))
+
+            val nextAttempt = uiExecutor.submit { gate.begin() }.get(1, TimeUnit.SECONDS)
+            uiExecutor.submit { gate.invalidate() }.get(1, TimeUnit.SECONDS)
+
+            assertFalse(gate.isCurrent(nextAttempt))
+        } finally {
+            release.countDown()
+            persistenceExecutor.shutdownNow()
+            uiExecutor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `newer settings write remains final after an older write is already running`() = runBlocking {
+        val gate = DownloadSettingsMutationGate()
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val writes = mutableListOf<String>()
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val older = gate.begin()
+            executor.submit {
+                runBlocking {
+                    gate.writeIfCurrent(older) {
+                        started.countDown()
+                        release.await()
+                        writes += "older"
+                    }
+                }
+            }
+            assertTrue(started.await(1, TimeUnit.SECONDS))
+            val newer = gate.begin()
+            val newerWrite = executor.submit {
+                runBlocking { gate.writeIfCurrent(newer) { writes += "newer" } }
+            }
+
+            release.countDown()
+            newerWrite.get(1, TimeUnit.SECONDS)
+
+            assertEquals(listOf("older", "newer"), writes)
+        } finally {
+            release.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `resume followed by priority does not cancel resume`() = runBlocking {
+        val resumeGate = DownloadSettingsMutationGate()
+        val priorityQueue = DownloadPriorityMutationQueue()
+        val resume = resumeGate.begin()
+        val priorityAttempt = priorityQueue.begin()
+        var resumed = false
+        var priority = 0
+
+        priorityQueue.write { priority = 1 }
+        resumeGate.writeIfCurrent(resume) { resumed = true }
+
+        assertTrue(resumed)
+        assertTrue(priorityQueue.isCurrent(priorityAttempt))
+        assertEquals(1, priority)
+    }
+
+    @Test
+    fun `priority followed by resume does not cancel priority`() = runBlocking {
+        val resumeGate = DownloadSettingsMutationGate()
+        val priorityQueue = DownloadPriorityMutationQueue()
+        val priorityAttempt = priorityQueue.begin()
+        val resume = resumeGate.begin()
+        var resumed = false
+        var priority = 0
+
+        priorityQueue.write { priority = 1 }
+        resumeGate.writeIfCurrent(resume) { resumed = true }
+
+        assertTrue(resumed)
+        assertTrue(priorityQueue.isCurrent(priorityAttempt))
+        assertEquals(1, priority)
+    }
+
+    @Test
+    fun `rapid priority cycles preserve the newest intended state`() = runBlocking {
+        val priorityQueue = DownloadPriorityMutationQueue()
+        val first = priorityQueue.begin()
+        val second = priorityQueue.begin()
+        val third = priorityQueue.begin()
+        var priority = 0
+
+        priorityQueue.write { priority = 1 }
+        priorityQueue.write { priority = -1 }
+        priorityQueue.write { priority = 0 }
+
+        assertFalse(priorityQueue.isCurrent(first))
+        assertFalse(priorityQueue.isCurrent(second))
+        assertTrue(priorityQueue.isCurrent(third))
+        assertEquals(0, priority)
     }
 }

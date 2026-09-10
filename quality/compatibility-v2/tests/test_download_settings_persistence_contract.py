@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VIEW_MODEL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/HulkViewModel.kt"
+MUTATION_GATE = REPO_ROOT / "app/src/main/java/sa/hulksa/player/DownloadSettingsMutationGate.kt"
 PROCESS_OWNER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadRepositoryProcessOwner.kt"
 REPOSITORY = REPO_ROOT / "app/src/main/java/sa/hulksa/player/data/DownloadRepository.kt"
 
@@ -19,6 +20,20 @@ class DownloadSettingsPersistenceContractTest(unittest.TestCase):
         self.assertIn("downloadSettingsMutationGate.invalidate()", source)
         self.assertIn("downloadRepository.setSettings(next, expectedAccountId, expectedProfileId)", source)
         self.assertIn("downloadRepository.resume(item.downloadId, expectedAccountId, expectedProfileId)", source)
+
+    def test_settings_gate_releases_its_state_monitor_before_durable_persistence(self) -> None:
+        source = MUTATION_GATE.read_text(encoding="utf-8")
+
+        self.assertIn("private val persistenceMutex = Mutex()", source)
+        self.assertIn("persistenceMutex.withLock", source)
+        self.assertNotIn("@Synchronized\n    fun <T> writeIfCurrent", source)
+
+    def test_priority_queue_is_independent_from_resume_generation_ownership(self) -> None:
+        source = VIEW_MODEL.read_text(encoding="utf-8")
+
+        self.assertIn("downloadResumeMutationGates", source)
+        self.assertIn("downloadPriorityMutationQueues", source)
+        self.assertIn("submitDownloadPriorityMutation", source)
 
     def test_settings_mutations_are_bound_to_the_captured_account_and_profile(self) -> None:
         source = PROCESS_OWNER.read_text(encoding="utf-8")
