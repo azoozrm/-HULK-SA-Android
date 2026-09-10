@@ -30,12 +30,41 @@ class HomeRecommendationCacheTest {
         assertTrue(before.becauseYouWatched.isEmpty())
 
         // Catalog and history identities stay unchanged; Favorites alone must invalidate the snapshot.
-        val after = store.homeModel(
-            state.copy(favorites = setOf("MOVIE:1")).homeModelInput(),
-        ).model
+        val favoritedState = state.copy(favorites = setOf("MOVIE:1"))
+        assertSame(state.catalogs, favoritedState.catalogs)
+        assertSame(state.history, favoritedState.history)
+        val after = store.homeModel(favoritedState.homeModelInput()).model
 
         assertNotSame(before, after)
         assertEquals(setOf(1, 2), after.becauseYouWatched.map(ContentItem::id).toSet())
+    }
+
+    @Test
+    fun removingFavoriteInvalidatesAndRemovesTheOldRecommendationSignal() = runBlocking {
+        val state = testState().copy(favorites = setOf("MOVIE:1"))
+        val store = NavigationMemoryStore()
+        val favorited = store.homeModel(state.homeModelInput()).model
+        assertEquals(setOf(1, 2), favorited.becauseYouWatched.map(ContentItem::id).toSet())
+
+        val withoutFavorite = store.homeModel(state.copy(favorites = emptySet()).homeModelInput()).model
+
+        assertNotSame(favorited, withoutFavorite)
+        assertTrue(withoutFavorite.becauseYouWatched.isEmpty())
+    }
+
+    @Test
+    fun profileOwnedStoresDoNotReuseAnotherProfilesFavoriteSnapshot() = runBlocking {
+        val state = testState()
+        val profileA = NavigationMemoryStore()
+        val profileB = NavigationMemoryStore()
+
+        val profileAFavorites = profileA.homeModel(
+            state.copy(favorites = setOf("MOVIE:1")).homeModelInput(),
+        ).model
+        val profileBWithoutFavorites = profileB.homeModel(state.homeModelInput()).model
+
+        assertEquals(setOf(1, 2), profileAFavorites.becauseYouWatched.map(ContentItem::id).toSet())
+        assertTrue(profileBWithoutFavorites.becauseYouWatched.isEmpty())
     }
 
     private fun HulkUiState.homeModelInput(): HomeContentModelInput = HomeContentModelInput(
