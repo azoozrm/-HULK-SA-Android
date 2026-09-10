@@ -353,6 +353,43 @@ class DownloadRepository internal constructor(
         return settings()
     }
 
+    fun setSettings(settings: DownloadSettings): DownloadSettings {
+        val next = settings.copy(
+            concurrentDownloads = settings.concurrentDownloads.coerceIn(1, MAX_CONCURRENT_DOWNLOADS),
+        )
+        val previous = this.settings()
+        preferences.edit()
+            .putBoolean(KEY_WIFI_ONLY, next.wifiOnly)
+            .putString(KEY_SCHEDULE_MODE, next.scheduleMode.name)
+            .putInt(KEY_CONCURRENT_DOWNLOADS, next.concurrentDownloads)
+            .apply()
+        if (previous.scheduleMode != next.scheduleMode) {
+            val scheduledAt = if (next.scheduleMode == DownloadScheduleMode.NIGHT) nextNightStartEpochMs() else 0L
+            synchronized(lock) {
+                cache = cache.map { item ->
+                    when (item.status) {
+                        OfflineStatus.QUEUED,
+                        OfflineStatus.WAITING_SCHEDULE,
+                        OfflineStatus.WAITING_NETWORK,
+                        OfflineStatus.WAITING_STORAGE,
+                        -> item.copy(
+                            status = if (scheduledAt > 0L) OfflineStatus.WAITING_SCHEDULE else OfflineStatus.QUEUED,
+                            scheduledAtEpochMs = scheduledAt,
+                            bytesPerSecond = 0L,
+                            etaSeconds = -1L,
+                            errorMessage = if (scheduledAt > 0L) "مجدول للتحميل الليلي." else null,
+                        )
+                        else -> item
+                    }
+                }.toMutableList()
+                normalizeQueueLocked()
+                writeStoredLocked()
+            }
+        }
+        schedule()
+        return next
+    }
+
     fun cyclePriority(downloadId: Long): List<OfflineDownload> {
         synchronized(lock) {
             mutateLocked(downloadId) { item ->

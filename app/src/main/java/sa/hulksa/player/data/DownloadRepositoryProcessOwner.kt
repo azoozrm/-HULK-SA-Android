@@ -3,7 +3,6 @@ package sa.hulksa.player.data
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
-import sa.hulksa.player.model.DownloadScheduleMode
 import sa.hulksa.player.model.DownloadSettings
 import sa.hulksa.player.model.AuthenticatedSession
 import sa.hulksa.player.model.OfflineDownload
@@ -256,6 +255,12 @@ internal data class ProfileDownloadPauseOutcome(
     val persisted: Boolean,
 )
 
+internal data class ProfileDownloadMutationOutcome(
+    val settings: DownloadSettings,
+    val downloads: List<OfflineDownload>,
+    val applied: Boolean,
+)
+
 internal class ProfileScopedDownloadRepository(context: Context) {
     private val appContext = context.applicationContext
     private val accountSessionStore = AccountSessionStore(appContext)
@@ -275,19 +280,22 @@ internal class ProfileScopedDownloadRepository(context: Context) {
 
     fun settings(): DownloadSettings = activeBinding()?.delegate?.settings() ?: DownloadSettings()
 
-    fun setWifiOnly(enabled: Boolean): DownloadSettings =
-        activeBinding()?.delegate?.setWifiOnly(enabled) ?: DownloadSettings()
+    fun setSettings(
+        settings: DownloadSettings,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): ProfileDownloadMutationOutcome = mutateForOwner(expectedAccountId, expectedProfileId) { binding ->
+        binding.delegate.setSettings(settings) to true
+    }
 
-    fun setScheduleMode(mode: DownloadScheduleMode): DownloadSettings =
-        activeBinding()?.delegate?.setScheduleMode(mode) ?: DownloadSettings()
-
-    fun setConcurrentDownloads(count: Int): DownloadSettings =
-        activeBinding()?.delegate?.setConcurrentDownloads(count) ?: DownloadSettings()
-
-    fun cyclePriority(downloadId: Long): List<OfflineDownload> {
-        val binding = activeBinding() ?: return emptyList()
-        if (owns(binding, downloadId)) binding.delegate.cyclePriority(downloadId)
-        return snapshot()
+    fun cyclePriority(
+        downloadId: Long,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): ProfileDownloadMutationOutcome = mutateForOwner(expectedAccountId, expectedProfileId) { binding ->
+        val ownsDownload = owns(binding, downloadId)
+        if (ownsDownload) binding.delegate.cyclePriority(downloadId)
+        binding.delegate.settings() to ownsDownload
     }
 
     fun enqueue(
@@ -375,9 +383,13 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         )
     }
 
-    fun resume(downloadId: Long): Boolean {
-        val binding = activeBinding() ?: return false
-        return owns(binding, downloadId) && binding.delegate.resume(downloadId)
+    fun resume(
+        downloadId: Long,
+        expectedAccountId: String,
+        expectedProfileId: String,
+    ): ProfileDownloadMutationOutcome = mutateForOwner(expectedAccountId, expectedProfileId) { binding ->
+        val resumed = owns(binding, downloadId) && binding.delegate.resume(downloadId)
+        binding.delegate.settings() to resumed
     }
 
     fun remove(downloadId: Long): List<OfflineDownload> {
@@ -459,6 +471,34 @@ internal class ProfileScopedDownloadRepository(context: Context) {
         activeAccountId = { accountId },
         activeProfileId = { profileId },
     )
+
+    private fun mutateForOwner(
+        expectedAccountId: String,
+        expectedProfileId: String,
+        mutation: (Binding) -> Pair<DownloadSettings, Boolean>,
+    ): ProfileDownloadMutationOutcome {
+        if (
+            !downloadOwnerContextMatches(
+                expectedAccountId = expectedAccountId,
+                expectedProfileId = expectedProfileId,
+                activeAccountId = activeAccountId(),
+                activeProfileId = profileStore.activeProfileId(),
+            )
+        ) {
+            return ProfileDownloadMutationOutcome(DownloadSettings(), emptyList(), applied = false)
+        }
+        val binding = activeBinding()
+            ?: return ProfileDownloadMutationOutcome(DownloadSettings(), emptyList(), applied = false)
+        if (binding.accountId != expectedAccountId) {
+            return ProfileDownloadMutationOutcome(DownloadSettings(), emptyList(), applied = false)
+        }
+        val (settings, applied) = mutation(binding)
+        return ProfileDownloadMutationOutcome(
+            settings = settings,
+            downloads = snapshotForOwner(binding, expectedAccountId, expectedProfileId),
+            applied = applied,
+        )
+    }
 
     private fun owns(binding: Binding, downloadId: Long): Boolean {
         val item = binding.delegate.record(downloadId) ?: return false
