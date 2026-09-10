@@ -222,9 +222,9 @@ internal suspend fun runDownloadPauseOffMain(
     pause()
 }
 
-internal suspend fun runDownloadSettingsPersistenceOffMain(
-    persistence: suspend () -> ProfileDownloadMutationOutcome?,
-): ProfileDownloadMutationOutcome? = withContext(Dispatchers.IO) {
+internal suspend fun <T> runDownloadSettingsPersistenceOffMain(
+    persistence: suspend () -> T,
+): T = withContext(Dispatchers.IO) {
     persistence()
 }
 

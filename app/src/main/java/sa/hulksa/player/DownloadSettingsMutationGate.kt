@@ -57,5 +57,5 @@ internal class DownloadPriorityMutationQueue {
         activeGeneration = null
     }
 
-    suspend fun <T> write(write: () -> T): T = mutex.withLock(write)
+    suspend fun <T> write(write: () -> T): T = mutex.withLock { write() }
 }
