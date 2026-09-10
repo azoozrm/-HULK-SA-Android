@@ -152,6 +152,13 @@ adb() {
   return "$process_status"
 }
 
+required_evidence_adb() {
+  if ! adb "$@"; then
+    status=1
+  fi
+  return 0
+}
+
 sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
 
 is_tv=false
@@ -497,11 +504,11 @@ if ! grep -Fq "$package" "$out/ACTIVITY-TOP.txt" && \
   status=1
 fi
 
-adb logcat -d -v threadtime > "$out/logcat.txt" 2>&1 || true
-adb shell uiautomator dump /sdcard/compatibility-v2-window.xml > /dev/null 2>&1 || true
-adb pull /sdcard/compatibility-v2-window.xml "$out/window.xml" > /dev/null 2>&1 || true
-adb exec-out screencap -p > "$out/full-window.png" || true
-adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1 || true
+required_evidence_adb logcat -d -v threadtime > "$out/logcat.txt" 2>&1
+required_evidence_adb shell uiautomator dump /sdcard/compatibility-v2-window.xml > /dev/null 2>&1
+required_evidence_adb pull /sdcard/compatibility-v2-window.xml "$out/window.xml" > /dev/null 2>&1
+required_evidence_adb exec-out screencap -p > "$out/full-window.png"
+required_evidence_adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1
 
 evidence_timeout=false
 cleanup_test_package_status="not-required"
