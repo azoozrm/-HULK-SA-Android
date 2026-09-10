@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +23,13 @@ if [[ -n "${FAKE_ADB_CALL_LOG:-}" ]]; then
 fi
 command="$*"
 hang_modes=",${FAKE_ADB_HANG:-},"
+if [[ "$command" == *"logcat -d"* && "$hang_modes" == *",logcat-hard-kill,"* ]]; then
+  trap '' TERM
+  /bin/sleep 10
+fi
+if [[ "$command" == *"logcat -d"* && "$hang_modes" == *",logcat-early-137,"* ]]; then
+  kill -KILL "$$"
+fi
 if [[ "$command" == *"logcat -d"* && "$hang_modes" == *",logcat,"* ]]; then
   /bin/sleep 10
 fi
@@ -166,17 +174,62 @@ class RuntimeEvidenceBoundednessTest(unittest.TestCase):
         )
         return result, time.monotonic() - start
 
+    def read_adb_event(self, stage: str) -> tuple[int, int, bool]:
+        execution = (self.out / "EVIDENCE-COLLECTION-EXECUTION.txt").read_text(encoding="utf-8")
+        match = re.search(
+            rf"event=adb-command\nstage={re.escape(stage)}\ncommand=[^\n]*\n"
+            rf"timeout_seconds=\d+\nelapsed_ms=(\d+)\nexit_status=(\d+)\ntimed_out=(true|false)",
+            execution,
+        )
+        self.assertIsNotNone(match, execution)
+        assert match is not None
+        return int(match.group(1)), int(match.group(2)), match.group(3) == "true"
+
     def test_logcat_waiting_for_device_is_bounded_and_explicitly_blocked(self) -> None:
         result, elapsed = self.run_collector(hang="logcat")
         self.assertEqual(3, result.returncode, result.stderr)
         self.assertLess(elapsed, 10.0)
         execution = (self.out / "EVIDENCE-COLLECTION-EXECUTION.txt").read_text(encoding="utf-8")
-        self.assertIn("stage=logcat", execution)
-        self.assertIn("timed_out=true", execution)
+        adb_elapsed_ms, adb_status, timed_out = self.read_adb_event("logcat")
+        self.assertEqual(124, adb_status)
+        self.assertTrue(timed_out)
+        self.assertGreaterEqual(adb_elapsed_ms, 0)
         self.assertIn("result=BLOCKED", execution)
         self.assertIn("timeout_exit_status=124", execution)
         self.assertTrue((self.out / "INSTRUMENTATION-EXECUTION.txt").is_file())
         self.assertTrue((self.out / "SHA256SUMS.txt").is_file())
+
+    def test_logcat_hard_kill_after_timeout_is_blocked_only_after_boundary(self) -> None:
+        result, elapsed = self.run_collector(hang="logcat-hard-kill")
+        self.assertEqual(3, result.returncode, result.stderr)
+        self.assertLess(elapsed, 10.0)
+        execution = (self.out / "EVIDENCE-COLLECTION-EXECUTION.txt").read_text(encoding="utf-8")
+        adb_elapsed_ms, adb_status, timed_out = self.read_adb_event("logcat")
+        self.assertEqual(137, adb_status)
+        self.assertTrue(timed_out)
+        self.assertGreaterEqual(adb_elapsed_ms, 1000)
+        self.assertIn("event=evidence-timeout-summary", execution)
+        self.assertIn("timeout_exit_status=137", execution)
+        self.assertIn("result=BLOCKED", execution)
+        self.assertTrue((self.out / "SHA256SUMS.txt").is_file())
+
+    def test_early_status_137_is_not_relabelled_as_evidence_timeout(self) -> None:
+        result, elapsed = self.run_collector(hang="logcat-early-137")
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertLess(elapsed, 10.0)
+        execution = (self.out / "EVIDENCE-COLLECTION-EXECUTION.txt").read_text(encoding="utf-8")
+        adb_elapsed_ms, adb_status, timed_out = self.read_adb_event("logcat")
+        self.assertEqual(137, adb_status)
+        self.assertFalse(timed_out)
+        self.assertLess(adb_elapsed_ms, 1000)
+        self.assertNotIn("event=evidence-timeout-summary", execution)
+        self.assertNotIn("result=BLOCKED", execution)
+        self.assertFalse((self.out / ".EVIDENCE-COLLECTION-ADB-TIMEOUT").exists())
+        calls = self.call_log.read_text(encoding="utf-8")
+        self.assertIn("shell uiautomator dump /sdcard/compatibility-v2-window.xml", calls)
+        self.assertIn("pull /sdcard/compatibility-v2-window.xml", calls)
+        self.assertIn("exec-out screencap -p", calls)
+        self.assertIn("shell dumpsys meminfo sa.hulksa.player.dev", calls)
 
     def test_uiautomator_hang_preserves_partial_evidence_and_cleanup_is_bounded(self) -> None:
         result, elapsed = self.run_collector(hang="uiautomator,cleanup")

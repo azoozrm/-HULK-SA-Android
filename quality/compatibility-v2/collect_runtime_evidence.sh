@@ -109,8 +109,8 @@ adb() {
   done
   local stage
   stage="$(adb_command_stage "$@")"
-  local started_us finished_us elapsed_ms process_status timed_out
-  started_us="${EPOCHREALTIME/./}"
+  local started_ns finished_ns elapsed_ms process_status timed_out
+  started_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
   local had_errexit=false
   if [[ $- == *e* ]]; then
     had_errexit=true
@@ -122,8 +122,8 @@ adb() {
   if [[ "$had_errexit" == true ]]; then
     set -e
   fi
-  finished_us="${EPOCHREALTIME/./}"
-  elapsed_ms=$(((10#$finished_us - 10#$started_us) / 1000))
+  finished_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+  elapsed_ms=$(((finished_ns - started_ns) / 1000000))
   timed_out=false
   if [[ "$process_status" -eq 124 ]] || \
      [[ "$process_status" -eq 137 && "$elapsed_ms" -ge $((adb_timeout_seconds * 1000)) ]]; then
