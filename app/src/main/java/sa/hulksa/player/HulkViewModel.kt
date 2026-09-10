@@ -55,6 +55,7 @@ import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.activePersistentOperationsAnnouncement
 import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.ProfileDownloadPauseOutcome
+import sa.hulksa.player.data.ProfileDownloadMutationOutcome
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.data.UserLibrary
 import sa.hulksa.player.data.XtreamException
@@ -221,6 +222,12 @@ internal suspend fun runDownloadPauseOffMain(
     pause()
 }
 
+internal suspend fun <T> runDownloadSettingsPersistenceOffMain(
+    persistence: suspend () -> T,
+): T = withContext(Dispatchers.IO) {
+    persistence()
+}
+
 internal suspend fun <T> runOperationsPersistenceOffMain(
     persistence: () -> T,
 ): T = withContext(Dispatchers.IO) {
@@ -306,6 +313,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val diagnosticsCoordinator = DiagnosticsCoordinator()
     private val profileLibraryStartupGate = ProfileLibraryStartupGate()
     private val detailsRequestGate = DetailsRequestGate()
+    private val downloadSettingsMutationGate = DownloadSettingsMutationGate()
+    private val downloadResumeMutationGates = mutableMapOf<Long, DownloadSettingsMutationGate>()
+    private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
@@ -1096,19 +1106,25 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             return "التنزيلات متوقفة مؤقتًا."
         }
-        val settings = downloadRepository.setWifiOnly(!mutableState.value.downloadSettings.wifiOnly)
-        mutableState.update { it.copy(downloadSettings = settings, downloads = downloadRepository.downloads()) }
-        return if (settings.wifiOnly) "تم تفعيل التحميل عبر واي فاي فقط." else "تم السماح بالتحميل عبر جميع الشبكات."
+        val next = mutableState.value.downloadSettings.copy(
+            wifiOnly = !mutableState.value.downloadSettings.wifiOnly,
+        )
+        if (!submitDownloadSettingsMutation(next) { expectedAccountId, expectedProfileId ->
+            downloadRepository.setSettings(next, expectedAccountId, expectedProfileId)
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        return if (next.wifiOnly) "تم تفعيل التحميل عبر واي فاي فقط." else "تم السماح بالتحميل عبر جميع الشبكات."
     }
 
     fun toggleDownloadSchedule(): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             return "التنزيلات متوقفة مؤقتًا."
         }
-        val current = mutableState.value.downloadSettings.scheduleMode
-        val next = if (current == DownloadScheduleMode.NOW) DownloadScheduleMode.NIGHT else DownloadScheduleMode.NOW
-        val settings = downloadRepository.setScheduleMode(next)
-        mutableState.update { it.copy(downloadSettings = settings, downloads = downloadRepository.downloads()) }
+        val current = mutableState.value.downloadSettings
+        val next = if (current.scheduleMode == DownloadScheduleMode.NOW) DownloadScheduleMode.NIGHT else DownloadScheduleMode.NOW
+        val nextSettings = current.copy(scheduleMode = next)
+        if (!submitDownloadSettingsMutation(nextSettings) { expectedAccountId, expectedProfileId ->
+            downloadRepository.setSettings(nextSettings, expectedAccountId, expectedProfileId)
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
         return if (next == DownloadScheduleMode.NIGHT) {
             "تمت جدولة التحميلات الجديدة والقائمة للساعة 2 ليلا."
         } else {
@@ -1120,25 +1136,97 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             return "التنزيلات متوقفة مؤقتًا."
         }
-        val current = mutableState.value.downloadSettings.concurrentDownloads
-        val next = if (current >= 3) 1 else current + 1
-        val settings = downloadRepository.setConcurrentDownloads(next)
-        mutableState.update { it.copy(downloadSettings = settings, downloads = downloadRepository.downloads()) }
-        return "عدد التحميلات المتزامنة الان ${settings.concurrentDownloads}."
+        val current = mutableState.value.downloadSettings
+        val next = if (current.concurrentDownloads >= 3) 1 else current.concurrentDownloads + 1
+        val nextSettings = current.copy(concurrentDownloads = next)
+        if (!submitDownloadSettingsMutation(nextSettings) { expectedAccountId, expectedProfileId ->
+            downloadRepository.setSettings(nextSettings, expectedAccountId, expectedProfileId)
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        return "عدد التحميلات المتزامنة الان $next."
     }
 
     fun cycleDownloadPriority(item: OfflineDownload): String {
         if (!mutableState.value.operations.features.downloadsEnabled) {
             return "التنزيلات متوقفة مؤقتًا."
         }
-        val downloads = downloadRepository.cyclePriority(item.downloadId)
-        val updated = downloads.firstOrNull { it.downloadId == item.downloadId }
-        mutableState.update { it.copy(downloads = downloads) }
-        return when (updated?.priority) {
-            1 -> "تم رفع اولوية التحميل."
-            -1 -> "تم خفض اولوية التحميل."
-            else -> "تم ضبط اولوية التحميل على عادية."
+        if (!submitDownloadPriorityMutation(item.downloadId) { expectedAccountId, expectedProfileId ->
+            downloadRepository.cyclePriority(item.downloadId, expectedAccountId, expectedProfileId)
+        }) return "تغير المستخدم قبل حفظ اعداد التنزيلات."
+        return when (item.priority) {
+            1 -> "تم خفض اولوية التحميل."
+            -1 -> "تم ضبط اولوية التحميل على عادية."
+            else -> "تم رفع اولوية التحميل."
         }
+    }
+
+    private fun submitDownloadSettingsMutation(
+        nextSettings: DownloadSettings,
+        mutation: (expectedAccountId: String, expectedProfileId: String) -> ProfileDownloadMutationOutcome,
+    ): Boolean {
+        val expectedSession = session ?: return false
+        val expectedAccountId = downloadRepository.activeAccountIdForCleanup() ?: return false
+        val expectedProfileId = profileStore.activeProfileId()
+        if (expectedProfileId.isBlank()) return false
+        val attempt = downloadSettingsMutationGate.begin()
+        mutableState.update { state -> state.copy(downloadSettings = nextSettings) }
+        viewModelScope.launch {
+            val outcome = runDownloadSettingsPersistenceOffMain {
+                downloadSettingsMutationGate.writeIfCurrent(attempt) {
+                    mutation(expectedAccountId, expectedProfileId)
+                }
+            } ?: return@launch
+            if (
+                !downloadSettingsMutationGate.isCurrent(attempt) ||
+                session !== expectedSession ||
+                !downloadOwnerContextMatches(
+                    expectedAccountId = expectedAccountId,
+                    expectedProfileId = expectedProfileId,
+                    activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                    activeProfileId = profileStore.activeProfileId(),
+                )
+            ) {
+                return@launch
+            }
+            if (outcome.applied) {
+                mutableState.update { state ->
+                    state.copy(downloadSettings = outcome.settings, downloads = outcome.downloads)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun submitDownloadPriorityMutation(
+        downloadId: Long,
+        mutation: (expectedAccountId: String, expectedProfileId: String) -> ProfileDownloadMutationOutcome,
+    ): Boolean {
+        val expectedSession = session ?: return false
+        val expectedAccountId = downloadRepository.activeAccountIdForCleanup() ?: return false
+        val expectedProfileId = profileStore.activeProfileId()
+        if (expectedProfileId.isBlank()) return false
+        val queue = downloadPriorityMutationQueues.getOrPut(downloadId, ::DownloadPriorityMutationQueue)
+        val attempt = queue.begin()
+        viewModelScope.launch {
+            val outcome = runDownloadSettingsPersistenceOffMain {
+                queue.write { mutation(expectedAccountId, expectedProfileId) }
+            }
+            if (
+                !queue.isCurrent(attempt) ||
+                session !== expectedSession ||
+                !downloadOwnerContextMatches(
+                    expectedAccountId = expectedAccountId,
+                    expectedProfileId = expectedProfileId,
+                    activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                    activeProfileId = profileStore.activeProfileId(),
+                )
+            ) return@launch
+            if (outcome.applied) {
+                mutableState.update { state ->
+                    state.copy(downloadSettings = outcome.settings, downloads = outcome.downloads)
+                }
+            }
+        }
+        return true
     }
 
     fun retryDownload(item: OfflineDownload, onResult: (String) -> Unit = {}) {
@@ -1188,21 +1276,53 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             OfflineStatus.WAITING_SCHEDULE,
             OfflineStatus.WAITING_NETWORK,
             OfflineStatus.WAITING_STORAGE,
-            -> {
-                if (downloadRepository.resume(item.downloadId)) {
-                    mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                    onResult("جار استئناف التحميل من اخر نقطة.")
-                } else {
-                    onResult(rebuildDownload(item))
-                }
-            }
+            -> resumeDownload(item, "جار استئناف التحميل من اخر نقطة.", onResult)
             OfflineStatus.FAILED -> {
-                if (downloadRepository.resume(item.downloadId)) {
-                    mutableState.update { it.copy(downloads = downloadRepository.downloads()) }
-                    onResult("جار اعادة المحاولة من اخر نقطة.")
-                } else {
-                    onResult(rebuildDownload(item))
+                resumeDownload(item, "جار اعادة المحاولة من اخر نقطة.", onResult)
+            }
+        }
+    }
+
+    private fun resumeDownload(
+        item: OfflineDownload,
+        successMessage: String,
+        onResult: (String) -> Unit,
+    ) {
+        val expectedSession = session ?: run {
+            onResult(rebuildDownload(item))
+            return
+        }
+        val expectedAccountId = downloadRepository.activeAccountIdForCleanup()
+        val expectedProfileId = profileStore.activeProfileId()
+        if (expectedAccountId.isNullOrBlank() || expectedProfileId.isBlank()) {
+            onResult(rebuildDownload(item))
+            return
+        }
+        val gate = downloadResumeMutationGates.getOrPut(item.downloadId, ::DownloadSettingsMutationGate)
+        val attempt = gate.begin()
+        viewModelScope.launch {
+            val outcome = runDownloadSettingsPersistenceOffMain {
+                gate.writeIfCurrent(attempt) {
+                    downloadRepository.resume(item.downloadId, expectedAccountId, expectedProfileId)
                 }
+            } ?: return@launch
+            if (
+                !gate.isCurrent(attempt) ||
+                session !== expectedSession ||
+                !downloadOwnerContextMatches(
+                    expectedAccountId = expectedAccountId,
+                    expectedProfileId = expectedProfileId,
+                    activeAccountId = downloadRepository.activeAccountIdForCleanup(),
+                    activeProfileId = profileStore.activeProfileId(),
+                )
+            ) return@launch
+            if (outcome.applied) {
+                mutableState.update { state ->
+                    state.copy(downloadSettings = outcome.settings, downloads = outcome.downloads)
+                }
+                onResult(successMessage)
+            } else {
+                onResult(rebuildDownload(item))
             }
         }
     }
@@ -1745,6 +1865,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onProfileChanged() {
+        downloadSettingsMutationGate.invalidate()
+        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+        downloadResumeMutationGates.clear()
+        downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+        downloadPriorityMutationQueues.clear()
         invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
         invalidateDetailsRequest()
@@ -1770,8 +1895,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val expectedProfileId = profileStore.activeProfileId()
         viewModelScope.launch {
             val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
+            val settings = withContext(Dispatchers.IO) { downloadRepository.settings() }
             if (profileStore.activeProfileId() == expectedProfileId) {
-                mutableState.update { state -> state.copy(downloads = downloads) }
+                mutableState.update { state ->
+                    state.copy(downloads = downloads, downloadSettings = settings)
+                }
             }
         }
         refreshNotificationState(clearPopup = true)
@@ -2659,6 +2787,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         clearCatalogMemory()
         invalidateDiagnosticsForSessionChange()
         invalidatePlayerProgressPersistence()
+        downloadSettingsMutationGate.invalidate()
+        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+        downloadResumeMutationGates.clear()
+        downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+        downloadPriorityMutationQueues.clear()
         mutableState.update {
             it.copy(
                 screen = HulkScreen.LOGIN,
@@ -2685,10 +2818,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 repository.logout()
                 session = null
                 sessionRestorationComplete = true
+                val downloadSettings = withContext(Dispatchers.IO) { downloadRepository.settings() }
                 mutableState.value = HulkUiState(
                     isStarting = false,
                     downloads = emptyList(),
-                    downloadSettings = downloadRepository.settings(),
+                    downloadSettings = downloadSettings,
                     notificationSubscribedSeriesIds = emptySet(),
                     localNotifications = emptyList(),
                     unreadNotificationCount = 0,
@@ -2782,6 +2916,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             invalidateCatalogRequests()
             invalidateDiagnosticsForSessionChange()
             invalidatePlayerProgressPersistence()
+            downloadSettingsMutationGate.invalidate()
+            downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+            downloadResumeMutationGates.clear()
+            downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+            downloadPriorityMutationQueues.clear()
             session = authenticated
             sessionRestorationComplete = true
             clearCatalogMemory()
