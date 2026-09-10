@@ -140,6 +140,7 @@ class FourDigitCredentialAttemptProtectionInstrumentedTest {
         expectLocked {
             ProfilePinCredentialStore(context).verifyPin(ProfileStore.PRIMARY_PROFILE_ID, "1357")
         }
+        Unit
     }
 
     @Test
@@ -177,6 +178,7 @@ class FourDigitCredentialAttemptProtectionInstrumentedTest {
 
         assertTrue(accountScope.bind(ACCOUNT_A))
         expectLocked { ParentalCodeCredentialStore(context).verifyCode("3333") }
+        Unit
     }
 
     @Test
