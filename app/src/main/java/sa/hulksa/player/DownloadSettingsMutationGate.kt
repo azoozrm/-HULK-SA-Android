@@ -2,6 +2,8 @@ package sa.hulksa.player
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import sa.hulksa.player.data.ProfileDownloadMutationOutcome
+import sa.hulksa.player.model.DownloadSettings
 
 /** Keeps only the newest Downloads settings intent eligible for durable storage. */
 internal class DownloadSettingsMutationGate {
@@ -40,11 +42,14 @@ internal class DownloadPriorityMutationQueue {
     private val mutex = Mutex()
     private var generation = 0L
     private var activeGeneration: Long? = null
+    private var pendingCycles = 0L
+    private var latestOutcome: ProfileDownloadMutationOutcome? = null
 
     @Synchronized
     fun begin(): Attempt {
         generation += 1L
         activeGeneration = generation
+        pendingCycles += 1L
         return Attempt(generation)
     }
 
@@ -55,7 +60,31 @@ internal class DownloadPriorityMutationQueue {
     fun invalidate() {
         generation += 1L
         activeGeneration = null
+        pendingCycles = 0L
+        latestOutcome = null
     }
 
-    suspend fun <T> write(write: () -> T): T = mutex.withLock { write() }
+    suspend fun write(
+        write: () -> ProfileDownloadMutationOutcome,
+    ): ProfileDownloadMutationOutcome = mutex.withLock {
+        var outcome = synchronized(this) { latestOutcome }
+        while (true) {
+            val hasPendingCycle = synchronized(this) {
+                if (pendingCycles <= 0L) {
+                    false
+                } else {
+                    pendingCycles -= 1L
+                    true
+                }
+            }
+            if (!hasPendingCycle) break
+            outcome = write()
+            synchronized(this) { latestOutcome = outcome }
+        }
+        outcome ?: ProfileDownloadMutationOutcome(
+            settings = DownloadSettings(),
+            downloads = emptyList(),
+            applied = false,
+        )
+    }
 }

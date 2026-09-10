@@ -11,6 +11,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.data.ProfileDownloadMutationOutcome
+import sa.hulksa.player.model.DownloadSettings
 
 class DownloadSettingsMutationGateTest {
     @Test
@@ -147,7 +149,10 @@ class DownloadSettingsMutationGateTest {
         var resumed = false
         var priority = 0
 
-        priorityQueue.write { priority = 1 }
+        priorityQueue.write {
+            priority = 1
+            priorityOutcome()
+        }
         resumeGate.writeIfCurrent(resume) { resumed = true }
 
         assertTrue(resumed)
@@ -164,7 +169,10 @@ class DownloadSettingsMutationGateTest {
         var resumed = false
         var priority = 0
 
-        priorityQueue.write { priority = 1 }
+        priorityQueue.write {
+            priority = 1
+            priorityOutcome()
+        }
         resumeGate.writeIfCurrent(resume) { resumed = true }
 
         assertTrue(resumed)
@@ -173,20 +181,40 @@ class DownloadSettingsMutationGateTest {
     }
 
     @Test
-    fun `rapid priority cycles preserve the newest intended state`() = runBlocking {
+    fun `rapid priority cycles remain correct when newest write reaches io first`() = runBlocking {
         val priorityQueue = DownloadPriorityMutationQueue()
         val first = priorityQueue.begin()
         val second = priorityQueue.begin()
         val third = priorityQueue.begin()
+        val writes = AtomicInteger(0)
         var priority = 0
 
-        priorityQueue.write { priority = 1 }
-        priorityQueue.write { priority = -1 }
-        priorityQueue.write { priority = 0 }
+        fun cycle(): ProfileDownloadMutationOutcome {
+            writes.incrementAndGet()
+            priority = when (priority) {
+                1 -> -1
+                -1 -> 0
+                else -> 1
+            }
+            return priorityOutcome()
+        }
 
+        val newestResult = priorityQueue.write(::cycle)
+        val olderFirstResult = priorityQueue.write(::cycle)
+        val olderSecondResult = priorityQueue.write(::cycle)
+
+        assertEquals(3, writes.get())
+        assertEquals(0, priority)
+        assertEquals(newestResult, olderFirstResult)
+        assertEquals(newestResult, olderSecondResult)
         assertFalse(priorityQueue.isCurrent(first))
         assertFalse(priorityQueue.isCurrent(second))
         assertTrue(priorityQueue.isCurrent(third))
-        assertEquals(0, priority)
     }
+
+    private fun priorityOutcome(): ProfileDownloadMutationOutcome = ProfileDownloadMutationOutcome(
+        settings = DownloadSettings(),
+        downloads = emptyList(),
+        applied = true,
+    )
 }
