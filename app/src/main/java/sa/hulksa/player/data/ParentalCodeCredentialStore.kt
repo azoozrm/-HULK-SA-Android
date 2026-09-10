@@ -8,6 +8,7 @@ import java.security.SecureRandom
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal const val PARENTAL_CODE_LENGTH = FOUR_DIGIT_CREDENTIAL_LENGTH
@@ -52,6 +53,11 @@ internal enum class LegacyParentalCodeMigrationResult {
  * active canonical account scope, so every Kids profile in that account shares the same parental
  * code while another account receives a completely different SharedPreferences namespace.
  *
+ * Failed verification attempts are persisted in that same canonical account scope and therefore
+ * cannot be cleared by closing the screen or recreating the store. The policy is shared with
+ * Profile PIN verification, but its persisted owner is independent: parental failures never consume
+ * a Profile PIN budget and profile failures never consume the parental-code budget.
+ *
  * Only [setCode] writes a credential and every persisted credential carries explicit user-created
  * provenance. A Profile PIN verifier is never copied, promoted, or interpreted as a parental code.
  *
@@ -66,6 +72,7 @@ class ParentalCodeCredentialStore(
     private val appContext = context.applicationContext
     private val accountScope = AccountScopeStore(appContext)
     private val secureRandom = SecureRandom()
+    private val attemptProtection = FourDigitCredentialAttemptProtection(appContext)
 
     fun hasCode(): Boolean {
         val accountId = accountScope.activeAccountId() ?: return false
@@ -110,31 +117,79 @@ class ParentalCodeCredentialStore(
 
     suspend fun verifyCode(code: String): Boolean {
         if (!isValidParentalCode(code)) return false
-        val accountId = accountScope.activeAccountId() ?: return false
-        val targetPreferences = preferencesForAccount(accountId)
-
-        val credential = try {
-            withContext(ioDispatcher) { load(targetPreferences) }
+        val accountId = try {
+            withContext(ioDispatcher) { accountScope.activeAccountId() }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            return false
+            null
         } ?: return false
+        val targetPreferences = preferencesForAccount(accountId)
+        val ownerKey = "parental-code:$accountId"
 
-        return try {
-            withContext(cpuDispatcher) {
-                val candidate = deriveParentalCodeVerifier(
-                    code = code,
-                    salt = credential.salt,
-                    iterations = credential.iterations,
-                )
-                val matches = MessageDigest.isEqual(credential.verifier, candidate)
-                accountScope.activeAccountId() == accountId && matches
+        return credentialVerificationMutex(ownerKey).withLock {
+            when (
+                val decision = withContext(ioDispatcher) {
+                    attemptProtection.check(targetPreferences, ATTEMPT_PREFIX)
+                }
+            ) {
+                FourDigitCredentialAttemptDecision.Allowed -> Unit
+                is FourDigitCredentialAttemptDecision.Locked ->
+                    throw FourDigitCredentialLockedException(decision.retryAfterMs)
+                FourDigitCredentialAttemptDecision.Unavailable ->
+                    throw FourDigitCredentialProtectionUnavailableException()
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            false
+
+            val credential = try {
+                withContext(ioDispatcher) { load(targetPreferences) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            } ?: return@withLock false
+
+            val matches = try {
+                withContext(cpuDispatcher) {
+                    val candidate = deriveParentalCodeVerifier(
+                        code = code,
+                        salt = credential.salt,
+                        iterations = credential.iterations,
+                    )
+                    MessageDigest.isEqual(credential.verifier, candidate)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+
+            if (matches) {
+                val stillCurrentOwner = try {
+                    withContext(ioDispatcher) { accountScope.activeAccountId() == accountId }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    false
+                }
+                if (!stillCurrentOwner) return@withLock false
+                val reset = withContext(ioDispatcher) {
+                    attemptProtection.reset(targetPreferences, ATTEMPT_PREFIX)
+                }
+                if (!reset) throw FourDigitCredentialProtectionUnavailableException()
+                true
+            } else {
+                when (
+                    val decision = withContext(ioDispatcher) {
+                        attemptProtection.recordFailure(targetPreferences, ATTEMPT_PREFIX)
+                    }
+                ) {
+                    FourDigitCredentialAttemptDecision.Allowed -> false
+                    is FourDigitCredentialAttemptDecision.Locked ->
+                        throw FourDigitCredentialLockedException(decision.retryAfterMs)
+                    FourDigitCredentialAttemptDecision.Unavailable ->
+                        throw FourDigitCredentialProtectionUnavailableException()
+                }
+            }
         }
     }
 
@@ -316,6 +371,7 @@ class ParentalCodeCredentialStore(
         const val DEFAULT_ITERATIONS = ProfilePinCredentialStore.DEFAULT_ITERATIONS
         internal const val PREFERENCES_NAME = "hulk_parental_code_credentials_v2"
         internal const val EXPLICIT_USER_CREATED_PROVENANCE = "EXPLICIT_USER_CREATED"
+        internal const val ATTEMPT_PREFIX = "attempt_protection"
 
         private const val KEY_VERSION = "credential_version"
         private const val KEY_ITERATIONS = "iterations"

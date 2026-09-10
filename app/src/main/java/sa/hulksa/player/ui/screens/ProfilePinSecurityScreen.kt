@@ -55,8 +55,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.FOUR_DIGIT_CREDENTIAL_LENGTH
+import sa.hulksa.player.data.FourDigitCredentialLockedException
+import sa.hulksa.player.data.FourDigitCredentialProtectionUnavailableException
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.theme.LocalHulkColors
+
+internal const val CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE =
+    "تعذر قراءة حالة الحماية بأمان."
+
+internal fun credentialLockoutMessage(retryAfterMs: Long): String {
+    val seconds = ((retryAfterMs.coerceAtLeast(1L) + 999L) / 1_000L).coerceAtLeast(1L)
+    return if (seconds < 60L) {
+        "محاولات كثيرة. انتظر $seconds ث."
+    } else {
+        val minutes = (seconds + 59L) / 60L
+        "محاولات كثيرة. انتظر $minutes د."
+    }
+}
 
 @Composable
 fun ProfilePinUnlockScreen(
@@ -120,9 +135,19 @@ fun ProfilePinUnlockScreen(
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
+                    } catch (locked: FourDigitCredentialLockedException) {
+                        if (operationGuard.isCurrent(token)) {
+                            error = credentialLockoutMessage(locked.retryAfterMs)
+                            resetToken++
+                        }
+                    } catch (_: FourDigitCredentialProtectionUnavailableException) {
+                        if (operationGuard.isCurrent(token)) {
+                            error = CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE
+                            resetToken++
+                        }
                     } catch (_: Exception) {
                         if (operationGuard.isCurrent(token)) {
-                            error = "رمز PIN غير صحيح"
+                            error = "تعذر التحقق من رمز PIN. حاول مرة أخرى."
                             resetToken++
                         }
                     } finally {
@@ -179,6 +204,16 @@ fun ProfilePinProtectionScreen(
                 block(token)
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (locked: FourDigitCredentialLockedException) {
+                if (operationGuard.isCurrent(token)) {
+                    error = credentialLockoutMessage(locked.retryAfterMs)
+                    resetToken++
+                }
+            } catch (_: FourDigitCredentialProtectionUnavailableException) {
+                if (operationGuard.isCurrent(token)) {
+                    error = CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE
+                    resetToken++
+                }
             } catch (_: Exception) {
                 if (operationGuard.isCurrent(token)) {
                     error = "تعذر إتمام العملية. حاول مرة أخرى."

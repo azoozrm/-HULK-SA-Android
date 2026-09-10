@@ -22,6 +22,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import sa.hulksa.player.data.FourDigitCredentialLockedException
+import sa.hulksa.player.data.FourDigitCredentialProtectionUnavailableException
 import sa.hulksa.player.data.ProfilePinCredentialStore
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.ProfileKind
@@ -189,6 +191,16 @@ fun ParentalCodeBootstrapScreen(
                                     }
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
+                                } catch (locked: FourDigitCredentialLockedException) {
+                                    if (operationGuard.isCurrent(token)) {
+                                        error = credentialLockoutMessage(locked.retryAfterMs)
+                                        resetToken++
+                                    }
+                                } catch (_: FourDigitCredentialProtectionUnavailableException) {
+                                    if (operationGuard.isCurrent(token)) {
+                                        error = CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE
+                                        resetToken++
+                                    }
                                 } catch (_: Exception) {
                                     if (operationGuard.isCurrent(token)) {
                                         error = "تعذر التحقق من رمز PIN للملف البالغ. حاول مرة أخرى."
@@ -323,9 +335,19 @@ fun ParentalCodeUnlockScreen(
                         }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
+                    } catch (locked: FourDigitCredentialLockedException) {
+                        if (operationGuard.isCurrent(token)) {
+                            error = credentialLockoutMessage(locked.retryAfterMs)
+                            resetToken++
+                        }
+                    } catch (_: FourDigitCredentialProtectionUnavailableException) {
+                        if (operationGuard.isCurrent(token)) {
+                            error = CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE
+                            resetToken++
+                        }
                     } catch (_: Exception) {
                         if (operationGuard.isCurrent(token)) {
-                            error = "رمز الوالدين غير صحيح"
+                            error = "تعذر التحقق من رمز الوالدين. حاول مرة أخرى."
                             resetToken++
                         }
                     } finally {
