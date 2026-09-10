@@ -260,6 +260,11 @@ internal fun seriesNotificationPublicationAllowed(
         screen == HulkScreen.SERIES &&
         selectedSeriesId == expectedSeriesId
 
+internal fun playerProgressProfileOwnerAllowed(
+    expectedProfileId: String,
+    activeProfileId: String,
+): Boolean = expectedProfileId == activeProfileId
+
 class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFavoriteToggleAtMs: Long = 0L
     private val repository = HulkRepository(application)
@@ -312,6 +317,8 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private var accountRefreshJob: Job? = null
     private var diagnosticsJob: Job? = null
     private var profileLibraryRefreshJob: Job? = null
+    private var playerProgressPersistenceJob: Job? = null
+    private var playerProgressProfileOwner: String? = null
     private var notificationScanJob: Job? = null
     private var notificationPopupActionJob: Job? = null
     private var operationsRefreshJob: Job? = null
@@ -501,6 +508,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         profile: UserProfile,
     ) {
         val activeSession = session ?: return
+        invalidatePlayerProgressPersistence()
         profileLibraryRefreshJob?.cancel()
         val attempt = profileLibraryStartupGate.start(
             session = activeSession,
@@ -1236,8 +1244,33 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onPlaybackProgress(request: PlaybackRequest, positionMs: Long, durationMs: Long) {
         if (request.isLive) return
-        val updated = userLibrary.updateProgress(request, positionMs, durationMs)
-        mutableState.update { it.copy(history = updated) }
+        val owner = AuthenticatedSessionRegistry.currentOwner() ?: return
+        if (owner.session !== session) return
+        val profileId = playerProgressProfileOwner ?: return
+        playerProgressPersistenceJob?.cancel()
+        val attempt = userLibrary.beginProgressMutation()
+        playerProgressPersistenceJob = viewModelScope.launch {
+            if (
+                !userLibrary.isCurrentProgressMutation(attempt) ||
+                !AuthenticatedSessionRegistry.isCurrent(owner) ||
+                session !== owner.session
+            ) return@launch
+            val updated = userLibrary.updateProgressForOwner(
+                expectedOwner = owner,
+                expectedProfileId = profileId,
+                request = request,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                historyAttempt = attempt,
+                isCurrentAttempt = { userLibrary.isCurrentProgressMutation(attempt) },
+            ) ?: return@launch
+            if (
+                !userLibrary.isCurrentProgressMutation(attempt) ||
+                !AuthenticatedSessionRegistry.isCurrent(owner) ||
+                session !== owner.session
+            ) return@launch
+            mutableState.update { it.copy(history = updated) }
+        }
         val lastSyncedPositionMs = tvLastSyncedPositions[request.historyKey] ?: 0L
         if (
             operationsDeviceIsTv &&
@@ -1712,6 +1745,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onProfileChanged() {
+        invalidatePlayerProgressPersistence()
         notificationScanJob?.cancel()
         invalidateDetailsRequest()
         invalidateVoiceSearchContext()
@@ -2422,6 +2456,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     accountRefreshJob = null
                     val refreshed = outcome.value
                     invalidateDiagnosticsForSessionChange()
+                    invalidatePlayerProgressPersistence()
                     session = refreshed
                     mutableState.update {
                         it.copy(
@@ -2538,6 +2573,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         when (currentScreen) {
             HulkScreen.PLAYER -> {
+                playerProgressProfileOwner = null
                 mutableState.update {
                     it.copy(screen = playerReturnScreen, playback = null, errorMessage = null)
                 }
@@ -2622,6 +2658,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidateCatalogRequests()
         clearCatalogMemory()
         invalidateDiagnosticsForSessionChange()
+        invalidatePlayerProgressPersistence()
         mutableState.update {
             it.copy(
                 screen = HulkScreen.LOGIN,
@@ -2744,6 +2781,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
             invalidateCatalogRequests()
             invalidateDiagnosticsForSessionChange()
+            invalidatePlayerProgressPersistence()
             session = authenticated
             sessionRestorationComplete = true
             clearCatalogMemory()
@@ -3010,6 +3048,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = message,
             )
         }
+        playerProgressProfileOwner = null
         ensureDestinationCatalogs(MainDestination.HOME)
     }
 
@@ -3110,6 +3149,12 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun invalidatePlayerProgressPersistence() {
+        userLibrary.invalidateProgressMutations()
+        playerProgressPersistenceJob?.cancel()
+        playerProgressPersistenceJob = null
+    }
+
     private fun startPlayback(request: PlaybackRequest) {
         if (playerReturnScreen == HulkScreen.MAIN) {
             invalidateDetailsRequest()
@@ -3118,6 +3163,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         if (operationsDeviceIsTv && !request.isLive) {
             tvLastSyncedPositions.remove(request.historyKey)
         }
+        playerProgressProfileOwner = profileStore.activeProfileId()
         val resumable = request.copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
         val updatedHistory = userLibrary.recordStart(resumable)
         mutableState.update {
