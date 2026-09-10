@@ -85,6 +85,23 @@ INSTRUMENTATION_STATUS_CODE: 1
         self.assertEqual("FAIL", cases[0].status)
         self.assertIn("before a terminal result", cases[0].detail)
 
+    def test_timeout_is_explicit_failure_even_with_partial_output(self) -> None:
+        raw = """
+INSTRUMENTATION_STATUS: class=sample.Tests
+INSTRUMENTATION_STATUS: test=neverFinishes
+INSTRUMENTATION_STATUS_CODE: 1
+"""
+        cases = MODULE.parse_instrumentation(
+            raw,
+            124,
+            timed_out=True,
+            timeout_seconds=600,
+        )
+        statuses = {case.name: case for case in cases}
+        self.assertEqual("FAIL", statuses["neverFinishes"].status)
+        self.assertEqual("FAIL", statuses["instrumentation-timeout"].status)
+        self.assertIn("600 seconds", statuses["instrumentation-timeout"].detail)
+
     def test_valid_terminal_success_failure_and_skipped_are_preserved(self) -> None:
         raw = """
 INSTRUMENTATION_STATUS: class=sample.Tests
