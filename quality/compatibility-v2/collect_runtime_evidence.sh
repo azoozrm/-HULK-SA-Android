@@ -10,8 +10,156 @@ package="sa.hulksa.player.dev"
 test_package="sa.hulksa.player.dev.test"
 runner="androidx.test.runner.AndroidJUnitRunner"
 status=0
-sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
 instrumentation_timeout_seconds=600
+collector_timeout_seconds="${COMPAT_V2_COLLECTOR_TIMEOUT_SECONDS:-900}"
+collector_kill_after_seconds="${COMPAT_V2_COLLECTOR_KILL_AFTER_SECONDS:-15}"
+adb_timeout_seconds="${COMPAT_V2_ADB_TIMEOUT_SECONDS:-30}"
+adb_kill_after_seconds="${COMPAT_V2_ADB_KILL_AFTER_SECONDS:-5}"
+cleanup_timeout_seconds="${COMPAT_V2_CLEANUP_TIMEOUT_SECONDS:-15}"
+execution_file="$out/EVIDENCE-COLLECTION-EXECUTION.txt"
+adb_timeout_marker="$out/.EVIDENCE-COLLECTION-ADB-TIMEOUT"
+adb_binary="$(command -v adb)"
+
+collector_started_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+collector_timeout_ms=$((collector_timeout_seconds * 1000))
+
+bounded_cleanup() {
+  local target="$1"
+  timeout --signal=TERM --kill-after=5s "${cleanup_timeout_seconds}s" \
+    "$adb_binary" shell am force-stop "$target" >/dev/null 2>&1
+}
+
+if [[ "${COMPAT_V2_COLLECTOR_BOUNDED_CHILD:-false}" != true ]]; then
+  rm -f "$adb_timeout_marker"
+  {
+    echo "schema_version=1"
+    echo "owner=collect_runtime_evidence.sh"
+    echo "collector_timeout_seconds=$collector_timeout_seconds"
+    echo "collector_kill_after_seconds=$collector_kill_after_seconds"
+    echo "adb_timeout_seconds=$adb_timeout_seconds"
+    echo "adb_kill_after_seconds=$adb_kill_after_seconds"
+    echo "cleanup_timeout_seconds=$cleanup_timeout_seconds"
+    echo "outer_guard_armed=true"
+  } > "$execution_file"
+
+  set +e
+  COMPAT_V2_COLLECTOR_BOUNDED_CHILD=true \
+    timeout --signal=TERM --kill-after="${collector_kill_after_seconds}s" "${collector_timeout_seconds}s" \
+    bash "$0" "$@"
+  collector_process_status=$?
+  set -e
+  collector_finished_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+  collector_elapsed_ms=$(((collector_finished_ns - collector_started_ns) / 1000000))
+  outer_timed_out=false
+  if [[ "$collector_process_status" -eq 124 ]] || \
+     [[ "$collector_process_status" -eq 137 && "$collector_elapsed_ms" -ge "$collector_timeout_ms" ]]; then
+    outer_timed_out=true
+  fi
+
+  if [[ "$outer_timed_out" == true ]]; then
+    set +e
+    bounded_cleanup "$test_package"
+    outer_test_cleanup_status=$?
+    bounded_cleanup "$package"
+    outer_app_cleanup_status=$?
+    set -e
+    {
+      echo "event=outer-collector-timeout"
+      echo "stage=collector-owner"
+      echo "timeout_seconds=$collector_timeout_seconds"
+      echo "elapsed_ms=$collector_elapsed_ms"
+      echo "exit_status=$collector_process_status"
+      echo "timed_out=true"
+      echo "outer_timed_out=true"
+      echo "cleanup_test_package_status=$outer_test_cleanup_status"
+      echo "cleanup_app_package_status=$outer_app_cleanup_status"
+      echo "result=BLOCKED"
+      echo "failure_reason=runtime evidence collector exceeded bounded execution timeout"
+    } >> "$execution_file"
+    exit 3
+  fi
+  exit "$collector_process_status"
+fi
+
+adb_command_stage() {
+  local command="$*"
+  case "$command" in
+    *"uiautomator dump"*) echo "uiautomator-dump" ;;
+    pull\ *) echo "adb-pull" ;;
+    *"exec-out screencap"*) echo "screencap" ;;
+    *"logcat -d"*) echo "logcat" ;;
+    *"dumpsys meminfo"*) echo "meminfo" ;;
+    *"am force-stop"*) echo "force-stop" ;;
+    *"am start"*) echo "activity-start" ;;
+    *"dumpsys"*) echo "dumpsys" ;;
+    *) echo "adb-command" ;;
+  esac
+}
+
+adb() {
+  if [[ -f "$adb_timeout_marker" ]]; then
+    return 0
+  fi
+
+  local command_text="adb"
+  local argument
+  for argument in "$@"; do
+    printf -v argument '%q' "$argument"
+    command_text+=" $argument"
+  done
+  local stage
+  stage="$(adb_command_stage "$@")"
+  local started_ns finished_ns elapsed_ms process_status timed_out
+  started_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+  local had_errexit=false
+  if [[ $- == *e* ]]; then
+    had_errexit=true
+  fi
+  set +e
+  timeout --signal=TERM --kill-after="${adb_kill_after_seconds}s" "${adb_timeout_seconds}s" \
+    "$adb_binary" "$@"
+  process_status=$?
+  if [[ "$had_errexit" == true ]]; then
+    set -e
+  fi
+  finished_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+  elapsed_ms=$(((finished_ns - started_ns) / 1000000))
+  timed_out=false
+  if [[ "$process_status" -eq 124 ]] || \
+     [[ "$process_status" -eq 137 && "$elapsed_ms" -ge $((adb_timeout_seconds * 1000)) ]]; then
+    timed_out=true
+  fi
+  {
+    echo "event=adb-command"
+    echo "stage=$stage"
+    echo "command=$command_text"
+    echo "timeout_seconds=$adb_timeout_seconds"
+    echo "elapsed_ms=$elapsed_ms"
+    echo "exit_status=$process_status"
+    echo "timed_out=$timed_out"
+  } >> "$execution_file"
+
+  if [[ "$timed_out" == true ]]; then
+    {
+      echo "stage=$stage"
+      echo "command=$command_text"
+      echo "timeout_seconds=$adb_timeout_seconds"
+      echo "elapsed_ms=$elapsed_ms"
+      echo "exit_status=$process_status"
+    } > "$adb_timeout_marker"
+    return 0
+  fi
+  return "$process_status"
+}
+
+required_evidence_adb() {
+  if ! adb "$@"; then
+    status=1
+  fi
+  return 0
+}
+
+sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
 
 is_tv=false
 category="android.intent.category.LAUNCHER"
@@ -356,15 +504,55 @@ if ! grep -Fq "$package" "$out/ACTIVITY-TOP.txt" && \
   status=1
 fi
 
-adb logcat -d -v threadtime > "$out/logcat.txt" 2>&1 || true
-adb shell uiautomator dump /sdcard/compatibility-v2-window.xml > /dev/null 2>&1 || true
-adb pull /sdcard/compatibility-v2-window.xml "$out/window.xml" > /dev/null 2>&1 || true
-adb exec-out screencap -p > "$out/full-window.png" || true
-adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1 || true
+required_evidence_adb logcat -d -v threadtime > "$out/logcat.txt" 2>&1
+required_evidence_adb shell uiautomator dump /sdcard/compatibility-v2-window.xml > /dev/null 2>&1
+required_evidence_adb pull /sdcard/compatibility-v2-window.xml "$out/window.xml" > /dev/null 2>&1
+required_evidence_adb exec-out screencap -p > "$out/full-window.png"
+required_evidence_adb shell dumpsys meminfo "$package" > "$out/MEMINFO.txt" 2>&1
+
+evidence_timeout=false
+cleanup_test_package_status="not-required"
+cleanup_app_package_status="not-required"
+if [[ -f "$adb_timeout_marker" ]]; then
+  evidence_timeout=true
+  status=3
+  set +e
+  bounded_cleanup "$test_package"
+  cleanup_test_package_status=$?
+  bounded_cleanup "$package"
+  cleanup_app_package_status=$?
+  set -e
+  {
+    echo "event=evidence-timeout-summary"
+    while IFS= read -r line; do
+      echo "timeout_$line"
+    done < "$adb_timeout_marker"
+    echo "cleanup_test_package_status=$cleanup_test_package_status"
+    echo "cleanup_app_package_status=$cleanup_app_package_status"
+    echo "outer_timed_out=false"
+    echo "result=BLOCKED"
+    echo "failure_reason=ADB could not produce required runtime evidence within the bounded command timeout"
+  } >> "$execution_file"
+else
+  {
+    echo "event=evidence-collection-summary"
+    echo "elapsed_ms=$((($(python3 -c 'import time; print(time.monotonic_ns())') - collector_started_ns) / 1000000))"
+    echo "evidence_timed_out=false"
+    echo "outer_timed_out=false"
+    if [[ "$status" -eq 0 ]]; then
+      echo "result=PASS"
+    else
+      echo "result=FAIL"
+      echo "failure_reason=runtime collection completed with one or more failed checks"
+    fi
+  } >> "$execution_file"
+fi
 
 if [[ -s "$out/window.xml" ]] && ! grep -Fq "package=\"$package\"" "$out/window.xml"; then
   echo "Window hierarchy does not contain the HULK SA package" >> "$out/FOREGROUND-APP.txt"
-  status=1
+  if [[ "$evidence_timeout" != true ]]; then
+    status=1
+  fi
 fi
 
 for required in \
@@ -381,6 +569,7 @@ for required in \
   INSTRUMENTATION.txt \
   INSTRUMENTATION.xml \
   INSTRUMENTATION-EXECUTION.txt \
+  EVIDENCE-COLLECTION-EXECUTION.txt \
   FOREGROUND-APP.txt \
   IME-STATE.txt \
   ACTIVITY-TOP.txt \
@@ -392,7 +581,9 @@ for required in \
   MEMINFO.txt; do
   if [[ ! -s "$out/$required" ]]; then
     echo "Missing mandatory runtime evidence: $required" >&2
-    status=1
+    if [[ "$evidence_timeout" != true ]]; then
+      status=1
+    fi
   fi
 done
 
@@ -405,7 +596,9 @@ if [[ "$portrait_evidence_required" == true ]]; then
     portrait-login-ime-actions-reachable.xml; do
     if [[ ! -s "$out/$portrait_required" ]]; then
       echo "Missing mandatory portrait runtime evidence: $portrait_required" >&2
-      status=1
+      if [[ "$evidence_timeout" != true ]]; then
+        status=1
+      fi
     fi
   done
 fi
@@ -414,15 +607,18 @@ if [[ "$adaptive_evidence_required" == true ]]; then
   for adaptive_required in     ADAPTIVE-EVIDENCE-PULL.txt     phone-portrait-bottom-navigation.png     phone-portrait-bottom-navigation.xml     phone-short-landscape-bottom-navigation.png     phone-short-landscape-bottom-navigation.xml     tablet-navigation-rail.png     tablet-navigation-rail.xml; do
     if [[ ! -s "$out/$adaptive_required" ]]; then
       echo "Missing mandatory adaptive runtime evidence: $adaptive_required" >&2
-      status=1
+      if [[ "$evidence_timeout" != true ]]; then
+        status=1
+      fi
     fi
   done
 fi
 
 (
   cd "$out"
-  find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+  find . -maxdepth 1 -type f ! -name SHA256SUMS.txt ! -name '.EVIDENCE-COLLECTION-ADB-TIMEOUT' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
   sha256sum -c SHA256SUMS.txt
 )
 
+rm -f "$adb_timeout_marker"
 exit "$status"
