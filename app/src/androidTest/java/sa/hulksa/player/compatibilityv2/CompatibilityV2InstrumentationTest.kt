@@ -621,7 +621,7 @@ class CompatibilityV2InstrumentationTest {
     }
 
     @Test
-    fun loginFieldsAppearInRequiredResellerOrder() {
+    fun loginFieldsRemainReachableAcrossScrollableLayouts() {
         assertTrue("Application package did not become visible", launchMainPackage())
         assertTrue("Access-code field was not reachable", clickLoginFieldResolved(By.text("كود الدخول")))
         assertTrue("Username field was not reachable", clickLoginFieldResolved(By.text("اسم المستخدم")))

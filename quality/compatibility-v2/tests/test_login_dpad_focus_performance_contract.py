@@ -111,7 +111,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         portrait = self.section(
             self.instrumentation_source,
             "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
-            "fun loginFieldsAppearInRequiredResellerOrder()",
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
         )
         landscape = self.section(
             self.instrumentation_source,
@@ -138,11 +138,11 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         portrait = self.section(
             self.instrumentation_source,
             "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
-            "fun loginFieldsAppearInRequiredResellerOrder()",
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
         )
-        order = self.section(
+        reachability = self.section(
             self.instrumentation_source,
-            "fun loginFieldsAppearInRequiredResellerOrder()",
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
             "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
         )
 
@@ -155,7 +155,23 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
             selector = f'clickLoginFieldResolved(By.text("{label}"))'
             self.assertIn(selector, portrait)
-            self.assertIn(selector, order)
+            self.assertIn(selector, reachability)
+
+    def test_reseller_field_order_is_static_while_runtime_checks_reachability(self) -> None:
+        static_validator = (REPO_ROOT / "quality/compatibility-v2/static_validate.py").read_text(encoding="utf-8")
+        reachability = self.section(
+            self.instrumentation_source,
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
+            "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
+        )
+
+        self.assertIn('"reseller-access-login-order"', static_validator)
+        self.assertIn(
+            "-1 < access_code_position < username_position < password_position",
+            static_validator,
+        )
+        self.assertNotIn("fun loginFieldsAppearInRequiredResellerOrder()", self.instrumentation_source)
+        self.assertNotIn("must appear before", reachability)
 
     def test_tv_login_does_not_observe_ime_inset_state(self) -> None:
         screen = self.section(

@@ -78,6 +78,8 @@ class DeviceMatrixExpansionTest(unittest.TestCase):
         source = Path(".github/workflows/compatibility-v2-full.yml").read_text(encoding="utf-8")
         self.assertIn("'phone-small-api29': ','.join([", source)
         self.assertIn("#phonePortraitOrientationRestoresAfterLandscapePlayback", source)
+        self.assertIn("#loginFieldsRemainReachableAcrossScrollableLayouts", source)
+        self.assertNotIn("#loginFieldsAppearInRequiredResellerOrder", source)
         self.assertNotIn(
             "compatibility_class + '#phonePortraitLoginFieldsAcceptTypingWithoutCrash',\n                  compatibility_class + '#phonePortraitOrientationRestoresAfterLandscapePlayback'",
             source,
