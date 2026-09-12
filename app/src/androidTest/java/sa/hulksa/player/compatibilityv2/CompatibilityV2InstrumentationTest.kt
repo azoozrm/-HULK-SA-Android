@@ -502,7 +502,7 @@ class CompatibilityV2InstrumentationTest {
             var subscribeBounds: Rect? = null
             repeat(6) {
                 loginBounds = resolvedVisibleBounds(By.text("دخول الى HULK"), 500L)
-                subscribeBounds = resolvedVisibleBounds(By.text("اشتراك او تجديد"), 500L)
+                subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
                 val loginVisible = loginBounds?.height()?.let { it > 0 } == true
                 val subscribeVisible = subscribeBounds?.height()?.let { it > 0 } == true
                 if (!loginVisible || !subscribeVisible) {
@@ -645,7 +645,7 @@ class CompatibilityV2InstrumentationTest {
         assertTrue("Application package did not become visible", launchMainPackage())
 
         val loginSelector = By.textContains("دخول")
-        val subscribeSelector = By.textContains("اشترك")
+        val subscribeSelector = By.text("اشتراك جديد")
         var loginBounds = resolvedVisibleBounds(loginSelector, 500L)
         var subscribeBounds = resolvedVisibleBounds(subscribeSelector, 500L)
 
