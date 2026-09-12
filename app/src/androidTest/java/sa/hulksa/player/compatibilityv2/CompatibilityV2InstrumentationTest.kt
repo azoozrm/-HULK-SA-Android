@@ -307,6 +307,46 @@ class CompatibilityV2InstrumentationTest {
         assertEquals(1_000L, nowMs)
     }
 
+    private fun resolveImeLoginActionBounds(
+        resolveLogin: () -> Rect?,
+        resolveSubscribe: () -> Rect?,
+        semanticScroll: () -> Unit,
+    ): Pair<Rect?, Rect?> {
+        var loginBounds = resolveLogin()
+        var subscribeBounds = resolveSubscribe()
+        if (subscribeBounds?.height()?.let { it > 0 } != true) {
+            semanticScroll()
+            loginBounds = resolveLogin()
+            subscribeBounds = resolveSubscribe()
+        }
+        return loginBounds to subscribeBounds
+    }
+
+    @Test
+    fun imeLoginActionBoundsReResolveBothActionsAfterSemanticScroll() {
+        var loginResolveCount = 0
+        var subscribeResolveCount = 0
+        var scrollCount = 0
+
+        val (loginBounds, subscribeBounds) = resolveImeLoginActionBounds(
+            resolveLogin = {
+                loginResolveCount += 1
+                if (loginResolveCount == 1) null else Rect(0, 0, 120, 48)
+            },
+            resolveSubscribe = {
+                subscribeResolveCount += 1
+                if (subscribeResolveCount == 1) null else Rect(0, 48, 120, 96)
+            },
+            semanticScroll = { scrollCount += 1 },
+        )
+
+        assertEquals(1, scrollCount)
+        assertEquals(2, loginResolveCount)
+        assertEquals(2, subscribeResolveCount)
+        assertTrue(loginBounds?.height()?.let { it > 0 } == true)
+        assertTrue(subscribeBounds?.height()?.let { it > 0 } == true)
+    }
+
     private fun clickResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
@@ -537,14 +577,15 @@ class CompatibilityV2InstrumentationTest {
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
-            val loginBounds = resolvedVisibleBounds(By.text("دخول الى HULK"), 500L)
-            var subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
-            if (subscribeBounds?.height()?.let { it > 0 } != true) {
-                val direction =
-                    if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
-                scrollLoginPageOnce(direction)
-                subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
-            }
+            val (loginBounds, subscribeBounds) = resolveImeLoginActionBounds(
+                resolveLogin = { resolvedVisibleBounds(By.text("دخول الى HULK"), 500L) },
+                resolveSubscribe = { resolvedVisibleBounds(By.text("اشتراك جديد"), 500L) },
+                semanticScroll = {
+                    val direction =
+                        if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
+                    scrollLoginPageOnce(direction)
+                },
+            )
             assertNotNull("Login action was not exposed while the IME was active", loginBounds)
             assertNotNull("Subscribe action was not exposed while the IME was active", subscribeBounds)
             assertTrue(
