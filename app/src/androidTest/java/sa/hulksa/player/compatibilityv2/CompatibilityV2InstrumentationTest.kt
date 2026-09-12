@@ -20,8 +20,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
-import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
@@ -52,6 +50,14 @@ class CompatibilityV2InstrumentationTest {
         val clickable: Boolean,
         val parent: FakeAccessibilityNode? = null,
     )
+
+    private enum class LoginField(
+        val label: String,
+    ) {
+        ACCESS_CODE("كود الدخول"),
+        USERNAME("اسم المستخدم"),
+        PASSWORD("كلمة المرور"),
+    }
 
     private class FakeStaleObjectException : RuntimeException()
 
@@ -397,81 +403,95 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
-    private fun currentTargetWindowImeBottomInset(): Int {
-        var imeBottomInset = 0
-        instrumentation.runOnMainSync {
-            val targetActivity =
-                ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)
-                    .firstOrNull { it.packageName == targetContext.packageName }
-            val insets = targetActivity?.window?.decorView?.let(ViewCompat::getRootWindowInsets)
-            imeBottomInset = insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
-        }
-        return imeBottomInset
-    }
-
-    private fun bottomObscuredGestureMargin(
-        pageBounds: Rect,
-        displayHeight: Int,
-        imeBottomInset: Int,
-    ): Int {
-        val usablePageHeight = (pageBounds.height() - 1).coerceAtLeast(0)
-        val imeTop = displayHeight - imeBottomInset.coerceAtLeast(0)
-        return (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
-    }
-
-    @Test
-    fun loginScrollKeepsGestureInsideCurrentImeViewport() {
-        val pageBounds = Rect(36, 80, 324, 536)
-
-        assertEquals(0, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 0))
-        assertEquals(179, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 283))
-        assertEquals(455, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 640))
-    }
-
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
         return try {
             val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0)) ?: return false
             val page = appWindow.findObject(By.scrollable(true)) ?: return false
-            val bottomGestureMargin =
-                bottomObscuredGestureMargin(
-                    pageBounds = Rect(page.visibleBounds),
-                    displayHeight = device.displayHeight,
-                    imeBottomInset = currentTargetWindowImeBottomInset(),
-                )
-            if (bottomGestureMargin > 0) {
-                page.setGestureMargins(0, 0, 0, bottomGestureMargin)
+            val didScroll = page.scroll(direction, 1f)
+            if (didScroll) {
+                instrumentation.waitForIdleSync()
             }
-            page.scroll(direction, 1f)
-            instrumentation.waitForIdleSync()
-            true
+            didScroll
         } catch (_: StaleObjectException) {
             false
         }
     }
 
-    private fun clickLoginFieldResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
+    private fun loginFieldIsFocused(field: LoginField): Boolean {
+        return try {
+            val node = device.findObject(By.desc(field.label)) ?: return false
+            node.isFocused || node.parent?.isFocused == true
+        } catch (_: StaleObjectException) {
+            false
+        }
+    }
+
+    private fun currentFocusedLoginField(): LoginField? =
+        LoginField.values().firstOrNull(::loginFieldIsFocused)
+
+    private fun canAdvanceLoginFieldFocus(
+        current: LoginField?,
+        target: LoginField,
+    ): Boolean = current != null && current.ordinal < target.ordinal
+
+    private fun fieldReachabilityAfterScroll(
+        didScroll: Boolean,
+        targetIsExposed: Boolean,
+    ): Boolean = didScroll && targetIsExposed
+
+    @Test
+    fun loginFieldReachabilityUsesProductFocusOrderBeforeFallbackScroll() {
+        assertTrue(canAdvanceLoginFieldFocus(LoginField.ACCESS_CODE, LoginField.USERNAME))
+        assertTrue(canAdvanceLoginFieldFocus(LoginField.USERNAME, LoginField.PASSWORD))
+        assertFalse(canAdvanceLoginFieldFocus(LoginField.PASSWORD, LoginField.USERNAME))
+        assertFalse(canAdvanceLoginFieldFocus(null, LoginField.PASSWORD))
+    }
+
+    @Test
+    fun failedLoginScrollIsNotReportedAsFieldReachability() {
+        assertFalse(fieldReachabilityAfterScroll(didScroll = false, targetIsExposed = true))
+        assertFalse(fieldReachabilityAfterScroll(didScroll = true, targetIsExposed = false))
+        assertTrue(fieldReachabilityAfterScroll(didScroll = true, targetIsExposed = true))
+    }
+
+    private fun focusLoginFieldResolved(field: LoginField, timeoutMs: Long = 6_000L): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
-        var didScroll = false
         while (SystemClock.uptimeMillis() < deadline) {
             if (!dismissOptionalUpdateIfPresent()) return false
+            var targetWasPresent = false
             try {
-                val node = device.findObject(selector)
+                val node = device.findObject(By.desc(field.label))
                 if (node != null) {
+                    targetWasPresent = true
                     node.click()
                     instrumentation.waitForIdleSync()
-                    if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
-                } else if (!didScroll) {
-                    didScroll = true
-                    scrollLoginPageOnce()
+                    if (loginFieldIsFocused(field) && !device.hasObject(By.text("يتوفر تحديث جديد"))) {
+                        return true
+                    }
                 }
             } catch (_: StaleObjectException) {
                 // Resolve from the current accessibility tree on the next bounded probe.
             }
-            val remaining = deadline - SystemClock.uptimeMillis()
-            if (remaining > 0L) {
-                device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+
+            if (!isTelevision() && canAdvanceLoginFieldFocus(currentFocusedLoginField(), field)) {
+                device.pressDPadDown()
+                instrumentation.waitForIdleSync()
+                return loginFieldIsFocused(field) && !device.hasObject(By.text("يتوفر تحديث جديد"))
             }
+
+            if (!targetWasPresent) {
+                val didScroll = scrollLoginPageOnce()
+                val remaining = deadline - SystemClock.uptimeMillis()
+                val targetIsExposed =
+                    remaining > 0L &&
+                        device.wait(Until.hasObject(By.desc(field.label)), minOf(remaining, 500L))
+                if (!fieldReachabilityAfterScroll(didScroll, targetIsExposed)) {
+                    return false
+                }
+                continue
+            }
+
+            return false
         }
         return false
     }
@@ -594,7 +614,7 @@ class CompatibilityV2InstrumentationTest {
             )
             assertTrue(
                 "Access-code field was not exposed",
-                clickLoginFieldResolved(By.text("كود الدخول")),
+                focusLoginFieldResolved(LoginField.ACCESS_CODE),
             )
             device.executeShellCommand("input text HULK-ABCD-EFGH-JKMN-PQRS")
             instrumentation.waitForIdleSync()
@@ -610,14 +630,14 @@ class CompatibilityV2InstrumentationTest {
 
             assertTrue(
                 "Username field was not exposed",
-                clickLoginFieldResolved(By.text("اسم المستخدم")),
+                focusLoginFieldResolved(LoginField.USERNAME),
             )
             device.executeShellCommand("input text portraituser")
             instrumentation.waitForIdleSync()
 
             assertTrue(
                 "Password field was not exposed",
-                clickLoginFieldResolved(By.text("كلمة المرور")),
+                focusLoginFieldResolved(LoginField.PASSWORD),
             )
             device.executeShellCommand("input text portraitpass")
             instrumentation.waitForIdleSync()
@@ -715,9 +735,9 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun loginFieldsRemainReachableAcrossScrollableLayouts() {
         assertTrue("Application package did not become visible", launchMainPackage())
-        assertTrue("Access-code field was not reachable", clickLoginFieldResolved(By.text("كود الدخول")))
-        assertTrue("Username field was not reachable", clickLoginFieldResolved(By.text("اسم المستخدم")))
-        assertTrue("Password field was not reachable", clickLoginFieldResolved(By.text("كلمة المرور")))
+        assertTrue("Access-code field was not reachable", focusLoginFieldResolved(LoginField.ACCESS_CODE))
+        assertTrue("Username field was not reachable", focusLoginFieldResolved(LoginField.USERNAME))
+        assertTrue("Password field was not reachable", focusLoginFieldResolved(LoginField.PASSWORD))
     }
 
     @Test
