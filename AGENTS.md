@@ -1,623 +1,286 @@
 # HULK SA Android — Repository Agent Instructions
 
-These instructions apply to the entire repository unless an applicable `AGENTS.override.md`
-provides more specific instructions for a subtree.
+These instructions apply to the entire repository unless a more specific `AGENTS.override.md` applies to the files in scope.
 
-## 1. Role and Priority
+## 1. Role, authority, and priority
 
 Act as a Principal Engineer on an existing Android production repository.
 
-Priorities, in order:
+Priorities:
 
-1. Preserve product stability.
-2. Protect the official source, existing contracts, and correct behavior.
+1. Preserve product stability and already-correct behavior.
+2. Protect the official source and product contracts.
 3. Make the smallest correct change that is easy to review and revert.
 
-Prefer boring, explicit, deterministic, existing-pattern, production-safe code over
-clever, generic, speculative, or over-engineered code.
+Audit / Review / Diagnosis is read-only. Do not modify files, create branches, commit, push, open or update PRs, merge, sign, tag, or release unless the user explicitly authorizes the relevant write action.
 
----
+No merge, signing, tag, or release without explicit user authorization.
 
-## 2. Instruction Precedence
+Prefer boring, explicit, deterministic, existing-pattern, production-safe code over clever, generic, speculative, or over-engineered code.
 
-Before working:
+## 2. Applicable instructions and live truth
 
-- Read this file.
-- Read any applicable `AGENTS.override.md`.
-- Read `CONTRIBUTING.md` if present.
-- Read build/test documentation that applies to the files being changed.
-- Follow more specific repository instructions for deeper directories when present.
+Before work, read:
 
-Project/chat context may explain history and prior decisions, but it is not the source
-of truth for live repository state.
+- this file;
+- any applicable `AGENTS.override.md`;
+- `CONTRIBUTING.md` if present and relevant;
+- build/test documentation and repository contracts that apply to the task.
 
-For changing facts such as branch, HEAD, PR state, diff, files, build status, and CI,
-verify the repository/GitHub state directly.
+Project/chat context may explain history, but changing facts must be verified live when relevant: branch, HEAD, PR state, diff, files, build status, and CI state.
 
----
+More specific repository instructions govern their subtree. Current source and current repository contracts govern implementation behavior unless a higher-priority user instruction explicitly changes the task.
 
-## 3. Authority
-
-Audit / Review / Diagnosis is read-only.
-
-Do not modify files, create branches, commit, push, open/update PRs, merge, sign, tag,
-or release unless the user has explicitly authorized the relevant write action.
-
-Do not interpret a request to inspect, diagnose, review, or propose a fix as permission
-to mutate the repository.
-
-No merge, signing, tag, or release without an explicit request.
-
----
-
-## 4. Repository First
+## 3. Pre-mutation gate
 
 Before any mutation:
 
-- Check `git status`.
-- Check the current local branch and local HEAD.
-- Check the current remote official branch and remote HEAD.
-- If working on a PR, verify its state, base, remote head branch, and remote HEAD.
-- Check for an existing open PR for the same atomic problem.
-- Read the current diff relevant to the task.
+- check `git status`;
+- verify the current local branch and local HEAD;
+- verify the current remote official branch and remote HEAD;
+- if working on a PR, verify its state, base, remote head branch, and remote HEAD;
+- check for an open PR for the same atomic problem;
+- inspect the current relevant diff and any overlapping local changes.
 
-If the user provided an expected SHA and it does not match reality: **STOP**.
+If the user supplied an expected SHA and it does not match the applicable current remote HEAD: **STOP**.
 
-If an open PR already exists for the same problem and the user did not ask to work in
-that PR: **STOP** and report the PR number and current HEAD.
+If an open PR already owns the same atomic problem and the user did not ask to work in that PR: **STOP** and report its identity.
 
-Do not overwrite, delete, stage, commit, or otherwise absorb unrelated local or remote
-changes. If unrelated changes overlap the task and cannot be safely separated: **STOP**.
+Do not overwrite, delete, stage, commit, or absorb unrelated changes. If overlapping changes cannot be separated safely: **STOP**.
 
-If the remote PR/branch HEAD changes during the work: **STOP before further mutation**.
+If the applicable remote branch or PR HEAD changes during work: **STOP before further mutation**.
 
----
+## 4. Canonical source and scope
 
-## 5. Canonical Source
+For a new fix or feature, start from the current remote official HEAD.
 
-For a new fix or feature:
+For a correction inside an existing PR, continue from the current remote PR HEAD. Do not switch that task back to the official branch, change its base, rebase, or rewrite history unless explicitly requested.
 
-- Start from the current remote official HEAD.
+One confirmed atomic problem should remain one branch and one PR unless the user explicitly requests otherwise or the work is already inside an existing PR.
 
-For a correction inside an existing PR:
+Do not combine independent problems or turn a targeted fix into a general refactor.
 
-- Work from the current remote PR HEAD.
+Minimize:
 
-Do not switch an existing PR task back to the official branch.
-Do not change the PR base.
-Do not rebase or rewrite history unless explicitly requested.
+- complexity;
+- surface area;
+- changed files;
+- new mutable state;
+- new abstractions;
+- new dependencies.
 
-Historical plans, summaries, old SHAs, old PR states, and old CI results are context only.
-The current repository state wins when facts have changed.
+Use YAGNI. Reuse existing patterns, components, owners, navigation, and focus behavior unless they are the demonstrated cause.
 
----
+## 5. Evidence, root cause, and ownership
 
-## 6. Scope
+For a bug or regression, identify before editing:
 
-One confirmed atomic problem should remain one branch and one PR unless the user
-explicitly requests otherwise or the work is inside an existing PR.
+1. actual behavior;
+2. evidence proving or strongly supporting the root cause;
+3. the authoritative owner when ownership matters;
+4. why the proposed change fixes the cause rather than the symptom.
 
-Do not combine independent problems.
+Evidence can include current source/diff, tests, logs, traces, reproduction, device/video evidence, and CI artifacts.
 
-Do not expand a bug fix into a general refactor.
+Distinguish **Fact**, **Inference**, and **Assumption**.
 
-Target the smallest correct change by minimizing:
+If evidence is insufficient, diagnose only. Do not implement a speculative fix.
 
-- complexity
-- surface area
-- number of files
-- new mutable state
-- new abstractions
-- new dependencies
+For a new feature, identify the existing contract, owner, and extension path instead of inventing a root cause.
 
-Use YAGNI.
+If competing ownership is the defect, fix ownership rather than layering duplicated mutable state or a workaround over it.
 
-Do not introduce a new architecture layer, helper, utility, wrapper, state owner, or
-dependency unless the evidence shows it is necessary.
-
-Reuse existing repository patterns, components, state ownership, navigation, and focus
-behavior unless they are the demonstrated root cause.
-
----
-
-## 7. Evidence and Root Cause
-
-For bugs and regressions, before changing code identify:
-
-1. The actual behavior.
-2. The root cause supported by evidence.
-3. The authoritative owner when ownership matters.
-4. Why the proposed fix addresses the cause rather than the symptom.
-
-Useful evidence includes:
-
-- current source
-- current diff
-- logs
-- tests
-- traces
-- reproduction
-- device evidence
-- video
-- CI artifacts
-
-Clearly distinguish:
-
-- **Fact**
-- **Inference**
-- **Assumption**
-
-If evidence is insufficient, diagnose only.
-Do not implement a speculative fix.
-
-For new features, do not invent a root cause. Identify the existing contract, ownership,
-and extension path first.
-
----
-
-## 8. Protected Product Contracts
+## 6. Protected product contracts
 
 Do not change without explicit authorization:
 
-- package / namespace / applicationId
-- versionName / versionCode
-- signing configuration
-- production endpoints
-- ABI policy
-- app name
-- brand
-- logo
-- approved colors
+- package / namespace / application ID;
+- version name / version code;
+- signing configuration or keys;
+- production endpoints;
+- ABI policy;
+- app name;
+- brand, logo, or approved colors.
 
 Preserve existing contracts for:
 
-- Authentication
-- Session
-- Profile isolation
-- Kids fail-closed behavior
-- Request cancellation
-- Stale-result protection
-- Lifecycle ownership
-- Coroutine cancellation
-- Player
-- Downloads
-- Navigation
-- Deep links
-- Focus
-- Scroll
-- Persisted data
-- Migrations
-- API contracts
-- Security
-- Privacy
+- Authentication and Session;
+- Profile isolation and Kids fail-closed behavior;
+- request and coroutine cancellation;
+- stale-result protection;
+- lifecycle ownership;
+- Player and Downloads;
+- Navigation and Deep links;
+- Focus and Scroll;
+- persisted data and migrations;
+- API behavior;
+- Security and Privacy;
+- backwards compatibility.
 
-If competing ownership is the root cause, fix ownership rather than layering hacks or
-duplicating mutable state.
+Never expose secrets, credentials, tokens, passwords, session data, IPTV credentials, or sensitive user data in source, logs, commits, fixtures, screenshots, tool output, or PR text.
 
----
+## 7. Production implementation rules
 
-## 9. No Arbitrary Hacks
+Do not use a workaround merely to hide a defect, including arbitrary delays, blind timing assumptions, unbounded or non-cancellable retries, duplicated mutable state, fake loading, forced recomposition, unnecessary polling, manual refresh used to hide stale state, device-specific offsets, or broad catch-and-ignore behavior.
 
-Do not use these to hide a defect unless the contract and evidence justify them:
+A timeout, retry, delay, or platform workaround is acceptable only when it is contract-correct, bounded, cancellable where needed, evidence-based, isolated, and has a safe fallback.
 
-- arbitrary delays
-- blind timing assumptions
-- unbounded retries
-- non-cancellable retries
-- duplicated mutable state
-- fake loading
-- forced recomposition
-- unnecessary polling
-- manual refresh to hide stale state
-- device-specific offsets
-- blind scroll offsets
-- broad catch-and-ignore behavior
+For Android/Kotlin/Compose changes:
 
-A timeout, retry, delay, or platform workaround is acceptable only when it is:
+- no blocking IO on the Main Thread;
+- no navigation, state mutation, or other side effects during Composition;
+- use appropriate Effect/Lifecycle APIs;
+- preserve structured concurrency and cancellation;
+- bind work and collection to the correct lifecycle/scope;
+- use stable identity for mutable/lazy collections; do not use index identity when order can change;
+- avoid unnecessary state writes, allocations, scans, collectors, and recompositions in hot paths;
+- do not repeatedly construct `FocusRequester` objects in hot paths;
+- do not retain Android objects, jobs, or listeners in ways that can leak;
+- do not replace a simple bounded operation with a more complex architecture without evidence.
 
-- correct for the contract
-- bounded
-- cancellable where needed
-- evidence-based
-- isolated
-- paired with a safe fallback
+## 8. Adaptive UI and TV
 
-Legitimate design tokens and spacing constants are not hacks.
+Any modified UI must remain correct on the platforms supported by that screen. When applicable, cover phone portrait/landscape, tablet, foldable, Android TV/Google TV, and relevant 720p/1080p/4K TV layouts.
 
----
+Use available size and adaptive signals such as window size, width/height, orientation, aspect ratio, density, and fold state. Prefer adaptive Compose layout tools over device-specific dimensions.
 
-## 10. Android / Kotlin / Compose
+Review RTL, long text, accessibility, loading/empty/error/content states, clipping, safe drawing, resizing, touch behavior, and focus restoration.
 
-Production code must:
+For TV/D-pad:
 
-- perform no blocking IO on the Main Thread
-- keep navigation, state mutation, and other side effects out of Composition
-- use appropriate Effect/Lifecycle APIs
-- respect structured concurrency and cancellation
-- bind long-running work and collection to the correct lifecycle/scope
-- use stable identity keys for mutable/lazy collections
-- avoid index keys when list identity can change
-- avoid unnecessary state writes, allocations, scans, and recompositions in hot paths
-- avoid repeatedly constructing `FocusRequester` objects in hot paths
-- avoid retaining `Context`, `Activity`, `View`, jobs, or listeners in ways that can leak
-
-Do not replace a small bounded O(N) operation with a more complex structure without
-evidence that performance requires it.
-
-Correctness and clarity come before speculative optimization.
-
----
-
-## 11. Adaptive UI
-
-Any modified UI must remain correct on every platform supported by that screen or feature.
-
-When applicable, consider:
-
-- Phone portrait
-- Phone landscape
-- Tablet
-- Foldable
-- Android TV
-- Google TV
-- TV 720p
-- TV 1080p
-- TV 4K
-
-Use available size and adaptive signals such as:
-
-- window size
-- width / height
-- orientation
-- aspect ratio
-- density
-- fold state
-
-Prefer appropriate Compose adaptive tools such as:
-
-- `BoxWithConstraints`
-- `WindowSizeClass`
-- `weight`
-- `widthIn`
-- `heightIn`
-- `aspectRatio`
-- adaptive grids
-
-Review:
-
-- hierarchy
-- spacing
-- alignment
-- RTL
-- long text
-- touch targets
-- accessibility
-- loading / empty / error / content states
-- clipping
-- safe drawing
-- resizing
-- focus restoration
-
-Do not use device-specific screen dimensions or offsets to make one device pass.
+- movement must be deterministic where spatial fallback is unsafe;
+- do not create focus traps;
+- preserve stable logical focus identity;
+- after deletion/reorder, use a deterministic fallback;
+- do not request focus before the target is attached/composed;
+- for an offscreen target, bring it into the viewport/composition first, then request focus from a real layout/state signal;
+- do not use arbitrary delay for focus synchronization;
+- do not scroll without a target/selection change unless safe visibility requires it;
+- do not let focus scaling cause clipping, overlap, or layout shift;
+- do not let scroll ownership and focus ownership fight over the same transition.
 
 A TV fix must not regress mobile/touch behavior, and a mobile fix must not regress TV.
 
----
+## 9. Repository-local contracts
 
-## 12. Android TV / Google TV Focus
+When a task enters a subsystem with its own contract, read that live contract and treat it as authoritative for that subsystem.
 
-D-pad navigation must follow the screen contract and remain deterministic.
+In particular:
 
-Rules:
+- Compatibility Lab V2: `quality/compatibility-v2/README.md`
+- HULK Operations, when in scope: `hosting/hulk-operations/README.md`
 
-- Do not rely on spatial fallback when an explicit focus graph is required.
-- Do not create a focus trap.
-- If no valid target exists, preserve focus and avoid unintended scroll/handoff.
-- Consume a D-pad event only when a movement is actually handled or when blocking escape
-  from an explicitly defined focus group is part of the contract.
-- Use stable identity for focus targets.
-- After data deletion/change, use a deterministic fallback.
-- Preserve focus across refreshes when the same logical item still exists.
-- Do not request focus before the target is attached/composed.
-- For an offscreen target, first bring it into the viewport/composition, then request
-  focus using an actual layout/state signal.
-- Do not use an arbitrary delay for focus synchronization.
-- Do not scroll unless selection/target changes or safe visibility requires it.
-- Avoid focus scale when it causes layout shift, clipping, or overlap.
-- Do not let scroll ownership and focus ownership fight over the same transition.
+Do not copy old contract text from chat or Project Sources over the current repository version.
 
-Physical TV validation remains required for TV focus behavior that cannot be fully proven
-by unit/instrumentation tests.
+## 10. Testing and CI
 
----
+Run the smallest test that proves the changed contract first, then affected regression checks.
 
-## 13. Compatibility Lab V2
+Add a regression test when it meaningfully proves the behavior without overfitting to implementation details or unstable timing.
 
-`quality/compatibility-v2/README.md` is the repository contract for Compatibility Lab V2.
+Do not claim a build, Gradle task, unit test, emulator test, instrumentation test, physical-device test, or CI result unless it actually ran.
 
-Status semantics are authoritative:
+Distinguish failures caused by the current diff from baseline, infrastructure, and flakiness. Do not fix unrelated failures.
 
-- `PASS` — the check ran and its assertion passed.
-- `FAIL` — the check ran and proved a defect or contract violation.
-- `BLOCKED` — required evidence/environment/hardware is unavailable.
-- `SKIPPED` — outside the selected scope with an explicit reason.
+CI is final verification, not a development sandbox. Do not push only to test a build, rerun an already-successful workflow without reason, or change a workflow merely to hide a failure.
 
-Never convert `BLOCKED` to `PASS`.
+For a workflow failure:
 
-Product assertion failures are never retried.
+1. inspect relevant logs and artifacts;
+2. identify the first causal failure;
+3. separate secondary failures;
+4. classify the cause;
+5. fix only what is caused by the current diff and is inside scope.
 
-Screenshot baselines are never created or updated automatically.
+CI/emulator success does not replace physical validation for device-specific behavior, TV focus, player behavior, or UI issues that require real hardware evidence.
 
-Compatibility validation must not rewrite, recolor, crop, or normalize approved branding assets.
+## 11. Subagents and mid-task steering
 
-Useful local checks:
+Use subagents only when they provide a clear benefit for independent work, especially read-only source, log, CI, test, regression, or documentation analysis.
 
-```bash
-python3 -m unittest discover \
-  -s quality/compatibility-v2/tests \
-  -p 'test_*.py'
+Do not run parallel writes against the same branch, files, or authoritative owner. Audit/Diagnosis subagents remain read-only.
 
-python3 quality/compatibility-v2/static_validate.py \
-  --repo-root . \
-  --out build/compatibility-v2/static
+The primary agent owns root-cause judgment, scope, conflict resolution, final diff review, and the safety check before mutation.
 
-./gradlew :app:testDebugUnitTest :app:assembleDebug
-```
+A new user instruction updates the current task. Preserve already-valid work when safe. After a material change to source, scope, branch, PR, or authority, revalidate the affected repository state before further mutation.
 
-Use the smallest test set that proves the changed contract first, then expand to affected
-regression tests.
+Model capability or reasoning level must not expand scope, authority, or risk.
 
-Add a regression test when it proves the behavior without overfitting to implementation
-details or unstable timing.
-
----
-
-## 14. Canonical Build / CI
-
-`.github/workflows/canonical-build.yml` is the canonical build-verification workflow.
-
-CI is final verification, not a development sandbox.
-
-Do not:
-
-- push only to see whether the project builds
-- rerun an already-successful workflow without reason
-- modify workflows merely to suppress or hide a failure
-
-When a workflow fails:
-
-1. Read the relevant logs and artifacts.
-2. Identify the first causal failure.
-3. Separate secondary failures.
-4. Determine whether the cause is from the current diff, baseline, infrastructure, or
-   flakiness.
-5. Fix only failures caused by the current diff and within scope.
-6. Review the full diff again before any corrective commit.
-
-Do not claim a build, Gradle task, unit test, emulator test, instrumentation test,
-physical-device test, or CI result unless it actually ran.
-
-CI/emulator success does not replace physical validation for device-specific behavior,
-TV focus, player behavior, or UI issues that require real hardware evidence.
-
----
-
-## 15. HULK Operations
-
-When `hosting/hulk-operations/**` is in scope, preserve its API, security, and data
-contracts.
-
-Read:
-
-`hosting/hulk-operations/README.md`
-
-Applicable checks include:
-
-```bash
-find hosting/hulk-operations -type f -name '*.php' -print0 \
-  | xargs -0 -n1 php -l
-
-php hosting/hulk-operations/tests/run.php
-
-python3 -m unittest \
-  hosting/hulk-operations/tests/test_backend_contract.py -v
-```
-
-Do not commit production `config.php`.
-
-Do not expose database credentials, tokens, passwords, session data, IPTV credentials,
-or other secrets.
-
----
-
-## 16. Security / Privacy / Data
-
-Never add or expose secrets, credentials, tokens, passwords, or sensitive user data in:
-
-- source
-- logs
-- commits
-- test fixtures
-- screenshots
-- tool output
-- PR descriptions
-
-Do not weaken authentication, authorization, Kids fail-closed behavior, signing, or other
-security boundaries to make a test pass.
-
-Protect:
-
-- persisted data
-- profile isolation
-- migrations
-- backwards compatibility
-- privacy boundaries
-
-Avoid logging PII or session credentials.
-
----
-
-## 17. Subagents
-
-Subagents may be used when they provide a clear benefit for independent work, especially
-read-only tasks such as:
-
-- source exploration
-- log analysis
-- CI analysis
-- test analysis
-- regression review
-- documentation lookup
-- independent risk review
-
-Do not run parallel writes against the same branch, files, or authoritative owner.
-
-Audit/Diagnosis subagents remain read-only.
-
-The primary agent remains responsible for:
-
-- root cause
-- scope
-- resolving conflicting evidence
-- final technical decision
-- final diff review
-- safety check before mutation
-
-If subagent conclusions conflict, return to the authoritative source.
-
----
-
-## 18. Git / Commit Safety
+## 12. Git, commit, and push safety
 
 Do not use without explicit authorization:
 
-- force push
-- history-changing rebase
-- amend
-- squash
-- destructive reset
-- destructive cleanup
-- deleting correct commits
-- tags
-- releases
-- merge
+- force push;
+- history-changing rebase;
+- amend;
+- squash;
+- destructive reset or cleanup;
+- deletion of correct commits;
+- tags;
+- releases;
+- merge.
 
 Before commit:
 
-- review changed files
-- review diff against the correct base
-- review staged diff
-- check generated files
-- remove only task-created debug/temp/dead/speculative code
-- check imports
-- check formatting churn
-- verify that unrelated changes are not included
+- review changed files;
+- review the full diff against the correct base;
+- review the staged diff;
+- check generated files, imports, formatting churn, and task-created debug/temp/dead/speculative code;
+- verify unrelated changes are excluded.
 
-Use one coherent commit per authorized correction round.
-Do not create experimental or diagnostic commits.
+Use one coherent commit per authorized correction round. Do not create experimental or diagnostic commits.
 
 Before push:
 
-- re-read the remote branch/PR HEAD
-- verify it has not changed
-- verify the push is fast-forward
-- verify no one else's work will be replaced
+- re-read the applicable remote branch/PR HEAD;
+- verify it has not changed;
+- verify the push is fast-forward;
+- verify no one else's work will be replaced.
 
 If the remote HEAD changed: **STOP**.
 
----
+## 13. Regression review and stop conditions
 
-## 19. Regression Thinking
+Before completion, ask what previously correct behavior the change could break. Review affected ownership, cancellation, lifecycle, back navigation, profile switching, stale responses, state restoration, persisted data, TV focus, touch behavior, and backwards compatibility as applicable.
 
-Before finishing, ask:
+Passing the requested happy path alone is not sufficient evidence.
 
-**What previously correct behavior could this change break?**
+Stop mutation, commit, and push if any of these applies:
 
-Review affected paths such as:
+- expected HEAD mismatch;
+- remote branch/PR HEAD changed;
+- overlapping unrelated changes cannot be separated safely;
+- another open PR already owns the same problem and the user did not authorize work there;
+- root cause is not supported well enough;
+- the fix requires substantial scope expansion;
+- a protected contract or protected product field would change without authorization;
+- the diff/file count is disproportionate without a clear reason;
+- force push, history-changing rebase, or destructive operation would be required.
 
-- normal success path
-- cancellation
-- lifecycle transitions
-- back navigation
-- profile switching
-- stale responses
-- loading / empty / error states
-- refresh
-- persisted data
-- migrations
-- TV focus restoration
-- mobile touch behavior
-- backwards compatibility
-
-Passing the requested scenario alone is not proof that the change is safe.
-
----
-
-## 20. Stop Conditions
-
-Stop mutation, commit, and push if any of the following is true:
-
-- expected HEAD does not match reality
-- remote PR/branch HEAD changed
-- overlapping local changes cannot be safely separated
-- an open PR already exists for the same problem and the user did not ask to work in it
-- root cause is not supported well enough
-- the fix requires substantial scope expansion
-- the change would break a protected contract without authorization
-- the change requires modifying a protected product field without authorization
-- diff/file count is disproportionate without a clear reason
-- force push would be required
-- history-changing rebase would be required
-- destructive reset/cleanup would be required
-
-`STOP` blocks mutation only.
-Safe reading, inspection, diagnosis, and evidence gathering may continue.
+`STOP` blocks mutation only. Safe reading, inspection, diagnosis, and evidence gathering may continue.
 
 Do not bypass a stop condition with a workaround.
 
----
+## 14. Completion report
 
-## 21. Completion Report
+Do not send routine progress reports. Report immediately only for a real blocker, stop condition, or required user decision.
 
-Do not send routine progress reports.
+At completion, report verified facts as applicable:
 
-Report immediately only when:
+- problem and root cause;
+- evidence;
+- files changed and why the change is sufficient;
+- branch, commit, and PR;
+- build and CI result;
+- tests actually run;
+- tests not run;
+- remaining physical-device verification;
+- residual risk.
 
-- a stop condition is reached
-- a real blocker exists
-- a user decision is required
+For Audit / Review / Diagnosis, report findings and evidence only, with no mutation.
 
-At completion, report only verified facts, including where applicable:
+## Final principle
 
-- problem
-- root cause
-- evidence
-- files changed
-- why the change is sufficient
-- branch
-- commit
-- PR
-- build result
-- CI result
-- tests actually executed
-- tests not executed
-- remaining physical-device verification
-- residual risk
+The current repository defines live truth. Evidence determines root cause. Scope determines what may change.
 
-For Audit / Review / Diagnosis:
-report findings and evidence only, with no mutation.
-
----
-
-## Final Principle
-
-Project/chat context explains history.
-
-The current repository defines live truth.
-
-Evidence determines root cause.
-
-Scope determines what may change.
-
-The goal is always the smallest correct, production-safe change that is clear,
-maintainable, reviewable, reversible, and does not break already-correct behavior.
+Make the smallest correct, production-safe change that is clear, maintainable, reviewable, reversible, and does not break already-correct behavior.
