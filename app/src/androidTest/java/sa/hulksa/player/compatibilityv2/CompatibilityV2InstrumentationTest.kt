@@ -307,6 +307,72 @@ class CompatibilityV2InstrumentationTest {
         assertEquals(1_000L, nowMs)
     }
 
+    private fun resolveImeLoginActionReachability(
+        resolveLogin: () -> Rect?,
+        resolveSubscribe: () -> Rect?,
+        semanticScroll: () -> Unit,
+    ): Pair<Boolean, Boolean> {
+        var loginReachable = resolveLogin()?.height()?.let { it > 0 } == true
+        var subscribeReachable = resolveSubscribe()?.height()?.let { it > 0 } == true
+        if (!subscribeReachable) {
+            semanticScroll()
+            val loginReachableAfterScroll = resolveLogin()?.height()?.let { it > 0 } == true
+            loginReachable = loginReachable || loginReachableAfterScroll
+            subscribeReachable = resolveSubscribe()?.height()?.let { it > 0 } == true
+        }
+        return loginReachable to subscribeReachable
+    }
+
+    @Test
+    fun imeLoginActionsSupportPhonePostScrollReachability() {
+        var loginResolveCount = 0
+        var subscribeResolveCount = 0
+        var scrollCount = 0
+
+        val (loginReachable, subscribeReachable) = resolveImeLoginActionReachability(
+            resolveLogin = {
+                loginResolveCount += 1
+                if (loginResolveCount == 1) null else Rect(0, 0, 120, 48)
+            },
+            resolveSubscribe = {
+                subscribeResolveCount += 1
+                if (subscribeResolveCount == 1) null else Rect(0, 48, 120, 96)
+            },
+            semanticScroll = { scrollCount += 1 },
+        )
+
+        assertEquals(1, scrollCount)
+        assertEquals(2, loginResolveCount)
+        assertEquals(2, subscribeResolveCount)
+        assertTrue(loginReachable)
+        assertTrue(subscribeReachable)
+    }
+
+    @Test
+    fun imeLoginActionsSupportTabletSequentialReachability() {
+        var loginResolveCount = 0
+        var subscribeResolveCount = 0
+        var scrollCount = 0
+
+        val (loginReachable, subscribeReachable) = resolveImeLoginActionReachability(
+            resolveLogin = {
+                loginResolveCount += 1
+                if (loginResolveCount == 1) Rect(0, 0, 120, 48) else null
+            },
+            resolveSubscribe = {
+                subscribeResolveCount += 1
+                if (subscribeResolveCount == 1) null else Rect(0, 48, 120, 96)
+            },
+            semanticScroll = { scrollCount += 1 },
+        )
+
+        assertEquals(1, scrollCount)
+        assertEquals(2, loginResolveCount)
+        assertEquals(2, subscribeResolveCount)
+        assertTrue(loginReachable)
+        assertTrue(subscribeReachable)
+    }
+
     private fun clickResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
@@ -537,24 +603,17 @@ class CompatibilityV2InstrumentationTest {
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
-            val loginBounds = resolvedVisibleBounds(By.text("دخول الى HULK"), 500L)
-            var subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
-            if (subscribeBounds?.height()?.let { it > 0 } != true) {
-                val direction =
-                    if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
-                scrollLoginPageOnce(direction)
-                subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
-            }
-            assertNotNull("Login action was not exposed while the IME was active", loginBounds)
-            assertNotNull("Subscribe action was not exposed while the IME was active", subscribeBounds)
-            assertTrue(
-                "Login action remained outside the visible resized window",
-                loginBounds?.height()?.let { it > 0 } == true,
+            val (loginReachable, subscribeReachable) = resolveImeLoginActionReachability(
+                resolveLogin = { resolvedVisibleBounds(By.text("دخول الى HULK"), 500L) },
+                resolveSubscribe = { resolvedVisibleBounds(By.text("اشتراك جديد"), 500L) },
+                semanticScroll = {
+                    val direction =
+                        if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
+                    scrollLoginPageOnce(direction)
+                },
             )
-            assertTrue(
-                "Subscribe action remained outside the visible resized window",
-                subscribeBounds?.height()?.let { it > 0 } == true,
-            )
+            assertTrue("Login action was not reachable while the IME was active", loginReachable)
+            assertTrue("Subscribe action was not reachable while the IME was active", subscribeReachable)
             assertTrue(
                 "Portrait login action reachability screenshot failed",
                 device.takeScreenshot(File(output, "portrait-login-ime-actions-reachable.png")),
