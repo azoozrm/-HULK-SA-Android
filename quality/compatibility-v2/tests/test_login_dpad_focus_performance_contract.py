@@ -124,6 +124,39 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
+    def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
+        scroll_helper = self.section(
+            self.instrumentation_source,
+            "private fun scrollLoginPageOnce()",
+            "private fun clickLoginFieldResolved(",
+        )
+        field_click = self.section(
+            self.instrumentation_source,
+            "private fun clickLoginFieldResolved(",
+            "private fun resolvedVisibleBounds(",
+        )
+        portrait = self.section(
+            self.instrumentation_source,
+            "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
+            "fun loginFieldsAppearInRequiredResellerOrder()",
+        )
+        order = self.section(
+            self.instrumentation_source,
+            "fun loginFieldsAppearInRequiredResellerOrder()",
+            "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
+        )
+
+        self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
+        self.assertIn("page.scroll(Direction.DOWN, 1f)", scroll_helper)
+        self.assertNotIn("device.swipe(", scroll_helper)
+        self.assertIn("var didScroll = false", field_click)
+        self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
+        self.assertIn("if (!didScroll)", field_click)
+        for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
+            selector = f'clickLoginFieldResolved(By.text("{label}"))'
+            self.assertIn(selector, portrait)
+            self.assertIn(selector, order)
+
     def test_tv_login_does_not_observe_ime_inset_state(self) -> None:
         screen = self.section(
             self.source,
