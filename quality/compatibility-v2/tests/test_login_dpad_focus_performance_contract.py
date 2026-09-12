@@ -5,12 +5,17 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LOGIN_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LoginScreen.kt"
+COMPATIBILITY_INSTRUMENTATION = (
+    REPO_ROOT
+    / "app/src/androidTest/java/sa/hulksa/player/compatibilityv2/CompatibilityV2InstrumentationTest.kt"
+)
 
 
 class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.source = LOGIN_SCREEN.read_text(encoding="utf-8")
+        cls.instrumentation_source = COMPATIBILITY_INSTRUMENTATION.read_text(encoding="utf-8")
 
     @staticmethod
     def section(source: str, start: str, end: str) -> str:
@@ -101,6 +106,23 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         )
         positions = [panel.index(label) for label in labels]
         self.assertEqual(sorted(positions), positions)
+
+    def test_compatibility_subscription_selectors_match_product_label(self) -> None:
+        portrait = self.section(
+            self.instrumentation_source,
+            "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
+            "fun loginFieldsAppearInRequiredResellerOrder()",
+        )
+        landscape = self.section(
+            self.instrumentation_source,
+            "fun shortLandscapePhoneCanScrollToPrimaryLoginActions()",
+            "fun phoneWindowUsesTransparentEdgeToEdgeSystemBars()",
+        )
+
+        self.assertIn('resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)', portrait)
+        self.assertIn('val subscribeSelector = By.text("اشتراك جديد")', landscape)
+        self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
+        self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
     def test_tv_login_does_not_observe_ime_inset_state(self) -> None:
         screen = self.section(
