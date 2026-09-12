@@ -111,7 +111,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         portrait = self.section(
             self.instrumentation_source,
             "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
-            "fun loginFieldsAppearInRequiredResellerOrder()",
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
         )
         landscape = self.section(
             self.instrumentation_source,
@@ -123,6 +123,55 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn('val subscribeSelector = By.text("اشتراك جديد")', landscape)
         self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
+
+    def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
+        scroll_helper = self.section(
+            self.instrumentation_source,
+            "private fun scrollLoginPageOnce()",
+            "private fun clickLoginFieldResolved(",
+        )
+        field_click = self.section(
+            self.instrumentation_source,
+            "private fun clickLoginFieldResolved(",
+            "private fun resolvedVisibleBounds(",
+        )
+        portrait = self.section(
+            self.instrumentation_source,
+            "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
+        )
+        reachability = self.section(
+            self.instrumentation_source,
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
+            "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
+        )
+
+        self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
+        self.assertIn("page.scroll(Direction.DOWN, 1f)", scroll_helper)
+        self.assertNotIn("device.swipe(", scroll_helper)
+        self.assertIn("var didScroll = false", field_click)
+        self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
+        self.assertIn("if (!didScroll)", field_click)
+        for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
+            selector = f'clickLoginFieldResolved(By.text("{label}"))'
+            self.assertIn(selector, portrait)
+            self.assertIn(selector, reachability)
+
+    def test_reseller_field_order_is_static_while_runtime_checks_reachability(self) -> None:
+        static_validator = (REPO_ROOT / "quality/compatibility-v2/static_validate.py").read_text(encoding="utf-8")
+        reachability = self.section(
+            self.instrumentation_source,
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
+            "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
+        )
+
+        self.assertIn('"reseller-access-login-order"', static_validator)
+        self.assertIn(
+            "-1 < access_code_position < username_position < password_position",
+            static_validator,
+        )
+        self.assertNotIn("fun loginFieldsAppearInRequiredResellerOrder()", self.instrumentation_source)
+        self.assertNotIn("must appear before", reachability)
 
     def test_tv_login_does_not_observe_ime_inset_state(self) -> None:
         screen = self.section(
