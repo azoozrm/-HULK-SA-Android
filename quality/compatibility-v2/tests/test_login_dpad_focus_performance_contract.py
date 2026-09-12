@@ -127,7 +127,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
     def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
         scroll_helper = self.section(
             self.instrumentation_source,
-            "private fun scrollLoginPageOnce()",
+            "private fun scrollLoginPageOnce(",
             "private fun clickLoginFieldResolved(",
         )
         field_click = self.section(
@@ -147,7 +147,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         )
 
         self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
-        self.assertIn("page.scroll(Direction.DOWN, 1f)", scroll_helper)
+        self.assertIn("page.scroll(direction, 1f)", scroll_helper)
         self.assertNotIn("device.swipe(", scroll_helper)
         self.assertIn("var didScroll = false", field_click)
         self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
@@ -156,6 +156,28 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             selector = f'clickLoginFieldResolved(By.text("{label}"))'
             self.assertIn(selector, portrait)
             self.assertIn(selector, reachability)
+
+    def test_ime_subscription_reachability_uses_one_adaptive_semantic_scroll(self) -> None:
+        screen = self.section(
+            self.source,
+            "fun LoginScreen(",
+            "private fun PremiumCinematicBackground(",
+        )
+        portrait = self.section(
+            self.instrumentation_source,
+            "fun phonePortraitLoginFieldsAcceptTypingWithoutCrash()",
+            "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
+        )
+
+        self.assertIn("val secondaryInBrand = isTv || maxWidth >= 600.dp", screen)
+        self.assertIn(
+            "targetContext.resources.configuration.screenWidthDp >= 600",
+            portrait,
+        )
+        self.assertIn("Direction.UP else Direction.DOWN", portrait)
+        self.assertEqual(1, portrait.count("scrollLoginPageOnce(direction)"))
+        self.assertNotIn("device.swipe(", portrait)
+        self.assertNotIn("repeat(6)", portrait)
 
     def test_reseller_field_order_is_static_while_runtime_checks_reachability(self) -> None:
         static_validator = (REPO_ROOT / "quality/compatibility-v2/static_validate.py").read_text(encoding="utf-8")

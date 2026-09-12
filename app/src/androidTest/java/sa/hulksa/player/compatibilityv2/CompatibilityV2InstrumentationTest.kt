@@ -329,11 +329,11 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
-    private fun scrollLoginPageOnce(): Boolean {
+    private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
         return try {
             val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0)) ?: return false
             val page = appWindow.findObject(By.scrollable(true)) ?: return false
-            page.scroll(Direction.DOWN, 1f)
+            page.scroll(direction, 1f)
             instrumentation.waitForIdleSync()
             true
         } catch (_: StaleObjectException) {
@@ -537,23 +537,13 @@ class CompatibilityV2InstrumentationTest {
             )
             device.dumpWindowHierarchy(File(output, "portrait-login-ime-stable.xml"))
 
-            var loginBounds: Rect? = null
-            var subscribeBounds: Rect? = null
-            repeat(6) {
-                loginBounds = resolvedVisibleBounds(By.text("دخول الى HULK"), 500L)
+            val loginBounds = resolvedVisibleBounds(By.text("دخول الى HULK"), 500L)
+            var subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
+            if (subscribeBounds?.height()?.let { it > 0 } != true) {
+                val direction =
+                    if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
+                scrollLoginPageOnce(direction)
                 subscribeBounds = resolvedVisibleBounds(By.text("اشتراك جديد"), 500L)
-                val loginVisible = loginBounds?.height()?.let { it > 0 } == true
-                val subscribeVisible = subscribeBounds?.height()?.let { it > 0 } == true
-                if (!loginVisible || !subscribeVisible) {
-                    device.swipe(
-                        device.displayWidth / 2,
-                        device.displayHeight * 44 / 100,
-                        device.displayWidth / 2,
-                        device.displayHeight * 14 / 100,
-                        30,
-                    )
-                    instrumentation.waitForIdleSync()
-                }
             }
             assertNotNull("Login action was not exposed while the IME was active", loginBounds)
             assertNotNull("Subscribe action was not exposed while the IME was active", subscribeBounds)
