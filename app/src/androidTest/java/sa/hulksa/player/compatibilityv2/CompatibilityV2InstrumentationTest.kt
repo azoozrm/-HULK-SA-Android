@@ -20,6 +20,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
@@ -395,10 +397,51 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
+    private fun currentTargetWindowImeBottomInset(): Int {
+        var imeBottomInset = 0
+        instrumentation.runOnMainSync {
+            val targetActivity =
+                ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)
+                    .firstOrNull { it.packageName == targetContext.packageName }
+            val insets = targetActivity?.window?.decorView?.let(ViewCompat::getRootWindowInsets)
+            imeBottomInset = insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+        }
+        return imeBottomInset
+    }
+
+    private fun bottomObscuredGestureMargin(
+        pageBounds: Rect,
+        displayHeight: Int,
+        imeBottomInset: Int,
+    ): Int {
+        val usablePageHeight = (pageBounds.height() - 1).coerceAtLeast(0)
+        val imeTop = displayHeight - imeBottomInset.coerceAtLeast(0)
+        return (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
+    }
+
+    @Test
+    fun loginScrollKeepsGestureInsideCurrentImeViewport() {
+        val pageBounds = Rect(36, 80, 324, 536)
+
+        assertEquals(0, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 0))
+        assertEquals(179, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 283))
+        assertEquals(455, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 640))
+    }
+
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
         return try {
             val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0)) ?: return false
             val page = appWindow.findObject(By.scrollable(true)) ?: return false
+            val bottomGestureMargin =
+                bottomObscuredGestureMargin(
+                    pageBounds = Rect(page.visibleBounds),
+                    displayHeight = device.displayHeight,
+                    imeBottomInset = currentTargetWindowImeBottomInset(),
+                )
+            if (bottomGestureMargin > 0) {
+                page.setGestureMargins(0, 0, 0, bottomGestureMargin)
+            }
             page.scroll(direction, 1f)
             instrumentation.waitForIdleSync()
             true
