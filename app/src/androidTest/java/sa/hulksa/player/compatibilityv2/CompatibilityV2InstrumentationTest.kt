@@ -11,6 +11,7 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
@@ -152,11 +153,47 @@ class CompatibilityV2InstrumentationTest {
         return !isOverlayPresent()
     }
 
+    private fun requestTargetImeHide(): Boolean {
+        var requested = false
+        instrumentation.runOnMainSync {
+            val targetActivity =
+                ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)
+                    .firstOrNull { it.packageName == targetContext.packageName }
+            val decorView = targetActivity?.window?.decorView
+            val controller = decorView?.let(ViewCompat::getWindowInsetsController)
+            if (controller != null) {
+                controller.hide(WindowInsetsCompat.Type.ime())
+                requested = true
+            }
+        }
+        return requested
+    }
+
+    private fun waitForOptionalUpdateTouchOwnership(deadlineMs: Long): Boolean {
+        if (!isTelevision() || !imeWindowIsActuallyVisible()) return true
+        if (!requestTargetImeHide()) return false
+
+        while (SystemClock.uptimeMillis() < deadlineMs) {
+            if (!imeWindowIsActuallyVisible()) return true
+            val remaining = deadlineMs - SystemClock.uptimeMillis()
+            if (remaining <= 0L || !device.waitForWindowUpdate(null, remaining)) break
+        }
+        return !imeWindowIsActuallyVisible()
+    }
+
     private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
         val titleSelector = By.text("يتوفر تحديث جديد")
         val laterSelector = By.text("لاحقًا")
+        if (!device.hasObject(titleSelector)) return true
+
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        if (!waitForOptionalUpdateTouchOwnership(deadline)) return false
+        val remaining = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L)
+        if (remaining <= 0L) return !device.hasObject(titleSelector)
+
         return dismissOptionalUpdateWithinDeadline(
-            timeoutMs = timeoutMs,
+            timeoutMs = remaining,
             nowMs = { SystemClock.uptimeMillis() },
             isOverlayPresent = { device.hasObject(titleSelector) },
             resolveLaterAction = { device.findObject(laterSelector) },
@@ -472,30 +509,124 @@ class CompatibilityV2InstrumentationTest {
         }
     }
 
+    private fun traceLoginReachability(selector: BySelector, phase: String) {
+        Log.i(
+            "HULK_COMPAT_V2",
+            "login-reachability phase=$phase selector=$selector uptimeMs=${SystemClock.uptimeMillis()} " +
+                "thread=${Thread.currentThread().name}:${Thread.currentThread().state}",
+        )
+    }
+
+    private fun captureLoginReachabilityFailure(selector: BySelector, timeoutMs: Long): Nothing {
+        val hierarchyFile = File(targetContext.cacheDir, "compatibility-v2-login-reachability-failure.xml")
+        val hierarchy =
+            runCatching {
+                device.dumpWindowHierarchy(hierarchyFile)
+                hierarchyFile.readText()
+            }.getOrElse { error ->
+                "<hierarchy-unavailable error=${error::class.java.simpleName}:${error.message}>"
+            }
+        hierarchyFile.delete()
+
+        val windowSummary =
+            runCatching {
+                device.executeShellCommand("dumpsys window windows")
+                    .lineSequence()
+                    .filter { line ->
+                        line.contains("mCurrentFocus") ||
+                            line.contains("mFocusedApp") ||
+                            line.contains("InputMethod") ||
+                            line.contains("mIme") ||
+                            line.contains("mViewVisibility") ||
+                            line.contains("mHasSurface") ||
+                            line.contains("isOnScreen") ||
+                            line.contains("isVisible")
+                    }
+                    .take(160)
+                    .joinToString("\n")
+            }.getOrElse { error ->
+                "<window-summary-unavailable error=${error::class.java.simpleName}:${error.message}>"
+            }
+
+        val logcatTail =
+            runCatching {
+                device.executeShellCommand("logcat -d -t 300 -v threadtime")
+            }.getOrElse { error ->
+                "<logcat-unavailable error=${error::class.java.simpleName}:${error.message}>"
+            }
+
+        val packageRootPresent =
+            runCatching { device.hasObject(By.pkg(targetContext.packageName).depth(0)) }
+                .getOrDefault(false)
+        val optionalUpdateTitlePresent =
+            runCatching { device.hasObject(By.text("يتوفر تحديث جديد")) }
+                .getOrDefault(false)
+        val optionalUpdateLaterPresent =
+            runCatching { device.hasObject(By.text("لاحقًا")) }
+                .getOrDefault(false)
+
+        throw AssertionError(
+            buildString {
+                appendLine("Compatibility V2 login reachability exhausted")
+                appendLine("selector=$selector")
+                appendLine("timeoutMs=$timeoutMs")
+                appendLine("uptimeMs=${SystemClock.uptimeMillis()}")
+                appendLine("thread=${Thread.currentThread().name}:${Thread.currentThread().state}")
+                appendLine("display=${device.displayWidth}x${device.displayHeight}")
+                appendLine("isTelevision=${isTelevision()}")
+                appendLine("packageRootPresent=$packageRootPresent")
+                appendLine("optionalUpdateTitlePresent=$optionalUpdateTitlePresent")
+                appendLine("optionalUpdateLaterPresent=$optionalUpdateLaterPresent")
+                appendLine("--- WINDOW SUMMARY ---")
+                appendLine(windowSummary)
+                appendLine("--- ACCESSIBILITY HIERARCHY ---")
+                appendLine(hierarchy)
+                appendLine("--- LOGCAT TAIL ---")
+                append(logcatTail)
+            },
+        )
+    }
+
     private fun clickLoginFieldResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         var didScroll = false
         while (SystemClock.uptimeMillis() < deadline) {
-            if (!dismissOptionalUpdateIfPresent()) return false
+            traceLoginReachability(selector, "before-optional-update-dismissal")
+            val optionalUpdateDismissed = dismissOptionalUpdateIfPresent()
+            traceLoginReachability(selector, "after-optional-update-dismissal:$optionalUpdateDismissed")
+            if (!optionalUpdateDismissed) {
+                captureLoginReachabilityFailure(selector, timeoutMs)
+            }
             try {
+                traceLoginReachability(selector, "before-find")
                 val node = device.findObject(selector)
+                traceLoginReachability(selector, "after-find:present=${node != null}")
                 if (node != null) {
+                    traceLoginReachability(selector, "before-click")
                     node.click()
+                    traceLoginReachability(selector, "after-click")
+                    traceLoginReachability(selector, "before-wait-for-idle")
                     instrumentation.waitForIdleSync()
+                    traceLoginReachability(selector, "after-wait-for-idle")
                     if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
                 } else if (!didScroll) {
                     didScroll = true
+                    traceLoginReachability(selector, "before-semantic-scroll")
                     scrollLoginPageOnce()
+                    traceLoginReachability(selector, "after-semantic-scroll")
                 }
             } catch (_: StaleObjectException) {
+                traceLoginReachability(selector, "stale-accessibility-node")
                 // Resolve from the current accessibility tree on the next bounded probe.
             }
             val remaining = deadline - SystemClock.uptimeMillis()
             if (remaining > 0L) {
+                traceLoginReachability(selector, "before-selector-wait:$remaining")
                 device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+                traceLoginReachability(selector, "after-selector-wait")
             }
         }
-        return false
+        captureLoginReachabilityFailure(selector, timeoutMs)
     }
 
     private fun resolvedVisibleBounds(selector: BySelector, timeoutMs: Long = 6_000L): Rect? {
@@ -521,7 +652,7 @@ class CompatibilityV2InstrumentationTest {
         var inImeWindow = false
         for (line in dump.lineSequence()) {
             val startsWindow = line.startsWith("  Window #") && line.contains(" Window{")
-            if (!inImeWindow && startsWindow && line.contains(" InputMethod}:")) {
+            if (!inImeWindow && startsWindow && line.contains(" InputMethod}:") ) {
                 inImeWindow = true
             } else if (inImeWindow && startsWindow) {
                 break
