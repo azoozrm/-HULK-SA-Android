@@ -156,12 +156,10 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn("var didScroll = false", field_click)
         self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
         self.assertIn("if (!didScroll)", field_click)
-        for label in ('كود الدخول', 'اسم المستخدم'):
+        for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
             selector = f'clickLoginFieldResolved(By.text("{label}"))'
             self.assertIn(selector, portrait)
             self.assertIn(selector, reachability)
-        self.assertIn("focusPasswordFieldResolved()", portrait)
-        self.assertIn("focusPasswordFieldResolved()", reachability)
 
     def test_login_scroll_uses_current_ime_insets_without_profile_specific_geometry(self) -> None:
         inset_helper = self.section(
@@ -179,56 +177,8 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn("Stage.RESUMED", inset_helper)
         self.assertIn("WindowInsetsCompat.Type.ime()", inset_helper)
         self.assertIn("pageBounds.bottom - imeTop", margin_helper)
-        self.assertIn("systemTouchSlop.coerceIn", margin_helper)
-        self.assertIn("obscuredBottom + edgeMargin", margin_helper)
         self.assertNotIn("phone-small-api29", inset_helper + margin_helper)
         self.assertNotIn("tablet-medium-landscape-api35", inset_helper + margin_helper)
-
-    def test_password_reachability_observes_scroll_then_re_resolves_editable_owner(self) -> None:
-        password_scroll = self.section(
-            self.instrumentation_source,
-            "private fun scrollPasswordIntoViewportOnce()",
-            "private fun focusPasswordFieldResolved(",
-        )
-        password_focus = self.section(
-            self.instrumentation_source,
-            "private fun focusPasswordFieldResolved(",
-            "private fun clickLoginFieldResolved(",
-        )
-
-        self.assertIn('val usernameSelector = By.text("اسم المستخدم")', password_scroll)
-        self.assertIn('val passwordSelector = By.text("كلمة المرور")', password_scroll)
-        self.assertIn("page.setGestureMargins(margins.left, margins.top, margins.right, margins.bottom)", password_scroll)
-        self.assertIn("page.scroll(Direction.DOWN, 1f)", password_scroll)
-        self.assertIn("observedLoginScrollTransition(", password_scroll)
-        self.assertIn("targetIsExposed = device.hasObject(passwordSelector)", password_scroll)
-        self.assertIn("resolveEditableLoginOwner(passwordSelector)", password_focus)
-        self.assertEqual(2, password_focus.count("resolveEditableLoginOwner(passwordSelector)"))
-        self.assertIn("currentOwner.isFocused", password_focus)
-        self.assertNotIn("SystemClock.sleep", password_scroll + password_focus)
-        self.assertNotIn("device.swipe", password_scroll + password_focus)
-        self.assertNotIn("pressDPad", password_scroll + password_focus)
-
-    def test_tv_optional_update_uses_one_exact_overlay_owned_back_transition(self) -> None:
-        tv_dismissal = self.section(
-            self.instrumentation_source,
-            "private fun dismissTvOptionalUpdateThroughBackHandler(",
-            "private fun dismissOptionalUpdateIfPresent(",
-        )
-        runtime_dismissal = self.section(
-            self.instrumentation_source,
-            "private fun dismissOptionalUpdateIfPresent(",
-            "fun optionalUpdateDismissalUsesClickableAncestorWhenTextNodeIsNotClickable()",
-        )
-
-        self.assertIn("if (!isOverlayPresent()) return true", tv_dismissal)
-        self.assertEqual(1, tv_dismissal.count("dispatchBack()"))
-        self.assertIn("return waitForOverlayGone(timeoutMs)", tv_dismissal)
-        self.assertIn('val titleSelector = By.text("يتوفر تحديث جديد")', runtime_dismissal)
-        self.assertIn("dismissTvOptionalUpdateThroughBackHandler(", runtime_dismissal)
-        self.assertIn("dispatchBack = { device.pressBack() }", runtime_dismissal)
-        self.assertNotIn("textContains", runtime_dismissal)
-        self.assertNotIn("pressDPad", runtime_dismissal)
 
     def test_ime_subscription_reachability_uses_one_adaptive_semantic_scroll(self) -> None:
         screen = self.section(

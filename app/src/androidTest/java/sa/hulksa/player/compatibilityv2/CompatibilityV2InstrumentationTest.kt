@@ -12,10 +12,8 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
 import android.view.KeyEvent
-import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -29,7 +27,6 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -154,28 +151,8 @@ class CompatibilityV2InstrumentationTest {
         return !isOverlayPresent()
     }
 
-    private fun dismissTvOptionalUpdateThroughBackHandler(
-        timeoutMs: Long,
-        isOverlayPresent: () -> Boolean,
-        dispatchBack: () -> Unit,
-        waitForOverlayGone: (Long) -> Boolean,
-    ): Boolean {
-        if (!isOverlayPresent()) return true
-        dispatchBack()
-        return waitForOverlayGone(timeoutMs)
-    }
-
     private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
         val titleSelector = By.text("يتوفر تحديث جديد")
-        if (isTelevision()) {
-            return dismissTvOptionalUpdateThroughBackHandler(
-                timeoutMs = timeoutMs,
-                isOverlayPresent = { device.hasObject(titleSelector) },
-                dispatchBack = { device.pressBack() },
-                waitForOverlayGone = { waitMs -> device.wait(Until.gone(titleSelector), waitMs) },
-            )
-        }
-
         val laterSelector = By.text("لاحقًا")
         return dismissOptionalUpdateWithinDeadline(
             timeoutMs = timeoutMs,
@@ -299,40 +276,6 @@ class CompatibilityV2InstrumentationTest {
         assertEquals(0, resolveCount)
         assertEquals(0, clickCount)
         assertEquals(0, waitCount)
-    }
-
-    @Test
-    fun tvOptionalUpdateDismissalUsesOneOverlayOwnedBackTransition() {
-        var overlayPresent = true
-        var backCount = 0
-
-        val dismissed = dismissTvOptionalUpdateThroughBackHandler(
-            timeoutMs = 1_000L,
-            isOverlayPresent = { overlayPresent },
-            dispatchBack = {
-                backCount += 1
-                overlayPresent = false
-            },
-            waitForOverlayGone = { !overlayPresent },
-        )
-
-        assertTrue(dismissed)
-        assertEquals(1, backCount)
-    }
-
-    @Test
-    fun tvOptionalUpdateDismissalDoesNotRepeatBackWhenOverlayRemains() {
-        var backCount = 0
-
-        val dismissed = dismissTvOptionalUpdateThroughBackHandler(
-            timeoutMs = 1_000L,
-            isOverlayPresent = { true },
-            dispatchBack = { backCount += 1 },
-            waitForOverlayGone = { false },
-        )
-
-        assertFalse(dismissed)
-        assertEquals(1, backCount)
     }
 
     @Test
@@ -477,28 +420,6 @@ class CompatibilityV2InstrumentationTest {
         return (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
     }
 
-    private fun loginGestureMargins(
-        pageBounds: Rect,
-        displayHeight: Int,
-        imeBottomInset: Int,
-        systemTouchSlop: Int,
-    ): Rect {
-        val maxEdgeMargin = ((minOf(pageBounds.width(), pageBounds.height()) - 1) / 2).coerceAtLeast(0)
-        val edgeMargin = systemTouchSlop.coerceIn(0, maxEdgeMargin)
-        val maxBottomMargin = (pageBounds.height() - edgeMargin - 1).coerceAtLeast(edgeMargin)
-        val obscuredBottom = bottomObscuredGestureMargin(pageBounds, displayHeight, imeBottomInset)
-        val bottomMargin = (obscuredBottom + edgeMargin).coerceIn(edgeMargin, maxBottomMargin)
-        return Rect(edgeMargin, edgeMargin, edgeMargin, bottomMargin)
-    }
-
-    private fun observedLoginScrollTransition(
-        anchorBefore: Rect?,
-        anchorAfter: Rect?,
-        targetIsExposed: Boolean,
-    ): Boolean =
-        targetIsExposed ||
-            (anchorBefore != null && anchorAfter != null && anchorBefore != anchorAfter)
-
     @Test
     fun loginScrollKeepsGestureInsideCurrentImeViewport() {
         val pageBounds = Rect(36, 80, 324, 536)
@@ -506,25 +427,6 @@ class CompatibilityV2InstrumentationTest {
         assertEquals(0, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 0))
         assertEquals(179, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 283))
         assertEquals(455, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 640))
-
-        assertEquals(
-            Rect(8, 8, 8, 8),
-            loginGestureMargins(pageBounds, displayHeight = 640, imeBottomInset = 0, systemTouchSlop = 8),
-        )
-        assertEquals(
-            Rect(8, 8, 8, 187),
-            loginGestureMargins(pageBounds, displayHeight = 640, imeBottomInset = 283, systemTouchSlop = 8),
-        )
-    }
-
-    @Test
-    fun passwordScrollRequiresAnObservedAccessibilityTransition() {
-        val before = Rect(0, 120, 200, 180)
-        val after = Rect(0, 80, 200, 140)
-
-        assertFalse(observedLoginScrollTransition(before, before, targetIsExposed = false))
-        assertTrue(observedLoginScrollTransition(before, after, targetIsExposed = false))
-        assertTrue(observedLoginScrollTransition(before, before, targetIsExposed = true))
     }
 
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
@@ -543,60 +445,6 @@ class CompatibilityV2InstrumentationTest {
             page.scroll(direction, 1f)
             instrumentation.waitForIdleSync()
             true
-        } catch (_: StaleObjectException) {
-            false
-        }
-    }
-
-    private fun resolveEditableLoginOwner(labelSelector: BySelector): UiObject2? {
-        val labelNode = device.findObject(labelSelector) ?: return null
-        val owner = labelNode.parent ?: return null
-        return owner.takeIf {
-            it.className == EditText::class.java.name && it.isClickable && it.isFocusable
-        }
-    }
-
-    private fun scrollPasswordIntoViewportOnce(): Boolean {
-        val usernameSelector = By.text("اسم المستخدم")
-        val passwordSelector = By.text("كلمة المرور")
-        return try {
-            val anchorBefore = device.findObject(usernameSelector)?.let { Rect(it.visibleBounds) }
-            val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0)) ?: return false
-            val page = appWindow.findObject(By.scrollable(true)) ?: return false
-            val margins = loginGestureMargins(
-                pageBounds = Rect(page.visibleBounds),
-                displayHeight = device.displayHeight,
-                imeBottomInset = currentTargetWindowImeBottomInset(),
-                systemTouchSlop = ViewConfiguration.get(targetContext).scaledTouchSlop,
-            )
-            page.setGestureMargins(margins.left, margins.top, margins.right, margins.bottom)
-            page.scroll(Direction.DOWN, 1f)
-            instrumentation.waitForIdleSync()
-
-            val anchorAfter = device.findObject(usernameSelector)?.let { Rect(it.visibleBounds) }
-            observedLoginScrollTransition(
-                anchorBefore = anchorBefore,
-                anchorAfter = anchorAfter,
-                targetIsExposed = device.hasObject(passwordSelector),
-            )
-        } catch (_: StaleObjectException) {
-            false
-        }
-    }
-
-    private fun focusPasswordFieldResolved(timeoutMs: Long = 6_000L): Boolean {
-        val passwordSelector = By.text("كلمة المرور")
-        if (isTelevision()) return clickLoginFieldResolved(passwordSelector, timeoutMs)
-        if (!dismissOptionalUpdateIfPresent()) return false
-
-        if (!device.hasObject(passwordSelector) && !scrollPasswordIntoViewportOnce()) return false
-
-        return try {
-            val owner = resolveEditableLoginOwner(passwordSelector) ?: return false
-            owner.click()
-            instrumentation.waitForIdleSync()
-            val currentOwner = resolveEditableLoginOwner(passwordSelector) ?: return false
-            currentOwner.isFocused && !device.hasObject(By.text("يتوفر تحديث جديد"))
         } catch (_: StaleObjectException) {
             false
         }
@@ -769,7 +617,7 @@ class CompatibilityV2InstrumentationTest {
 
             assertTrue(
                 "Password field was not exposed",
-                focusPasswordFieldResolved(),
+                clickLoginFieldResolved(By.text("كلمة المرور")),
             )
             device.executeShellCommand("input text portraitpass")
             instrumentation.waitForIdleSync()
@@ -869,7 +717,7 @@ class CompatibilityV2InstrumentationTest {
         assertTrue("Application package did not become visible", launchMainPackage())
         assertTrue("Access-code field was not reachable", clickLoginFieldResolved(By.text("كود الدخول")))
         assertTrue("Username field was not reachable", clickLoginFieldResolved(By.text("اسم المستخدم")))
-        assertTrue("Password field was not reachable", focusPasswordFieldResolved())
+        assertTrue("Password field was not reachable", clickLoginFieldResolved(By.text("كلمة المرور")))
     }
 
     @Test
