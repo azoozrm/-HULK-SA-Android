@@ -151,58 +151,8 @@ class CompatibilityV2InstrumentationTest {
         return !isOverlayPresent()
     }
 
-    private fun awaitFocusedClickableActionOwner(
-        labelSelector: BySelector,
-        timeoutMs: Long,
-    ): Boolean {
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        while (SystemClock.uptimeMillis() < deadline) {
-            try {
-                val actionOwner = device.findObject(labelSelector)?.let { labelNode ->
-                    nearestClickableOwner(
-                        actionNode = labelNode,
-                        parentOf = { node -> node.parent },
-                        isClickable = { node -> node.isClickable },
-                    )
-                }
-                if (actionOwner?.isFocused == true) return true
-            } catch (_: StaleObjectException) {
-                // Discard stale ownership and resolve the current accessibility tree again.
-            }
-
-            val remaining = deadline - SystemClock.uptimeMillis()
-            if (remaining > 0L) {
-                device.waitForWindowUpdate(targetContext.packageName, minOf(remaining, 500L))
-            }
-        }
-        return false
-    }
-
-    private fun dismissTvOptionalUpdateIfPresent(
-        titleSelector: BySelector,
-        timeoutMs: Long,
-    ): Boolean {
-        if (!device.hasObject(titleSelector)) return true
-
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        fun remaining(): Long = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L)
-
-        if (!awaitFocusedClickableActionOwner(By.text("تحديث الآن"), remaining())) return false
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_LEFT)
-
-        if (!awaitFocusedClickableActionOwner(By.text("لاحقًا"), remaining())) return false
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER)
-
-        val waitMs = remaining()
-        return waitMs > 0L && device.wait(Until.gone(titleSelector), waitMs)
-    }
-
     private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
         val titleSelector = By.text("يتوفر تحديث جديد")
-        if (isTelevision()) {
-            return dismissTvOptionalUpdateIfPresent(titleSelector, timeoutMs)
-        }
-
         val laterSelector = By.text("لاحقًا")
         return dismissOptionalUpdateWithinDeadline(
             timeoutMs = timeoutMs,
