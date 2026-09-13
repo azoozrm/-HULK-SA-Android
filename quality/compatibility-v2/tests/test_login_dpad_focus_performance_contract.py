@@ -161,6 +161,48 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             self.assertIn(selector, portrait)
             self.assertIn(selector, reachability)
 
+    def test_tv_optional_update_uses_product_focus_owners_before_login_lookup(self) -> None:
+        focused_owner = self.section(
+            self.instrumentation_source,
+            "private fun awaitFocusedClickableActionOwner(",
+            "private fun dismissTvOptionalUpdateIfPresent(",
+        )
+        runtime = self.section(
+            self.instrumentation_source,
+            "private fun dismissTvOptionalUpdateIfPresent(",
+            "private fun dismissOptionalUpdateIfPresent(",
+        )
+        field_click = self.section(
+            self.instrumentation_source,
+            "private fun clickLoginFieldResolved(",
+            "private fun resolvedVisibleBounds(",
+        )
+        bounds_lookup = self.section(
+            self.instrumentation_source,
+            "private fun resolvedVisibleBounds(",
+            "private fun imeWindowIsActuallyVisible(",
+        )
+
+        self.assertIn("nearestClickableOwner(", focused_owner)
+        self.assertIn("actionOwner?.isFocused == true", focused_owner)
+        self.assertIn("waitForWindowUpdate", focused_owner)
+        self.assertIn('By.text("تحديث الآن")', runtime)
+        self.assertIn('By.text("لاحقًا")', runtime)
+        self.assertEqual(1, runtime.count("KeyEvent.KEYCODE_DPAD_LEFT"))
+        self.assertEqual(1, runtime.count("KeyEvent.KEYCODE_DPAD_CENTER"))
+        self.assertNotIn("pressBack", runtime)
+        self.assertNotIn("SystemClock.sleep", runtime)
+        self.assertNotIn("device.click", runtime)
+        self.assertIn("Until.gone(titleSelector)", runtime)
+        self.assertLess(
+            field_click.index("dismissOptionalUpdateIfPresent()"),
+            field_click.index("device.findObject(selector)"),
+        )
+        self.assertLess(
+            bounds_lookup.index("dismissOptionalUpdateIfPresent()"),
+            bounds_lookup.index("device.findObject(selector)"),
+        )
+
     def test_login_scroll_uses_current_ime_insets_without_profile_specific_geometry(self) -> None:
         inset_helper = self.section(
             self.instrumentation_source,
