@@ -12,6 +12,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.core.view.ViewCompat
@@ -414,10 +415,12 @@ class CompatibilityV2InstrumentationTest {
         pageBounds: Rect,
         displayHeight: Int,
         imeBottomInset: Int,
+        edgeSafetyMargin: Int = 0,
     ): Int {
         val usablePageHeight = (pageBounds.height() - 1).coerceAtLeast(0)
         val imeTop = displayHeight - imeBottomInset.coerceAtLeast(0)
-        return (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
+        val obscuredBottom = (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
+        return (obscuredBottom + edgeSafetyMargin.coerceAtLeast(0)).coerceIn(0, usablePageHeight)
     }
 
     @Test
@@ -427,6 +430,24 @@ class CompatibilityV2InstrumentationTest {
         assertEquals(0, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 0))
         assertEquals(179, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 283))
         assertEquals(455, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 640))
+        assertEquals(
+            8,
+            bottomObscuredGestureMargin(
+                pageBounds,
+                displayHeight = 640,
+                imeBottomInset = 0,
+                edgeSafetyMargin = 8,
+            ),
+        )
+        assertEquals(
+            187,
+            bottomObscuredGestureMargin(
+                pageBounds,
+                displayHeight = 640,
+                imeBottomInset = 283,
+                edgeSafetyMargin = 8,
+            ),
+        )
     }
 
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
@@ -438,6 +459,7 @@ class CompatibilityV2InstrumentationTest {
                     pageBounds = Rect(page.visibleBounds),
                     displayHeight = device.displayHeight,
                     imeBottomInset = currentTargetWindowImeBottomInset(),
+                    edgeSafetyMargin = ViewConfiguration.get(targetContext).scaledTouchSlop,
                 )
             if (bottomGestureMargin > 0) {
                 page.setGestureMargins(0, 0, 0, bottomGestureMargin)
