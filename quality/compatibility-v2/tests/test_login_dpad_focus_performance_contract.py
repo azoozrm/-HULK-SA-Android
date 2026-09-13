@@ -124,20 +124,15 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
-    def test_login_field_reachability_resolves_the_editable_owner_from_semantics(self) -> None:
-        ownership = self.section(
+    def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
+        scroll_helper = self.section(
             self.instrumentation_source,
-            "private fun resolveEditableLoginFieldOwner(",
-            "private fun loginFieldIsFocused(",
+            "private fun scrollLoginPageOnce(",
+            "private fun clickLoginFieldResolved(",
         )
-        field_scroll = self.section(
+        field_click = self.section(
             self.instrumentation_source,
-            "private fun loginFieldScrollOwner(",
-            "private fun focusLoginFieldResolved(",
-        )
-        field_focus = self.section(
-            self.instrumentation_source,
-            "private fun clickCurrentEditableLoginField(",
+            "private fun clickLoginFieldResolved(",
             "private fun resolvedVisibleBounds(",
         )
         portrait = self.section(
@@ -151,37 +146,39 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
         )
 
-        self.assertIn("var candidate = device.findObject(By.desc(field.label))", ownership)
-        self.assertIn("candidate.className == EditText::class.java.name", ownership)
-        self.assertIn("candidate.isClickable", ownership)
-        self.assertIn("candidate.isFocusable", ownership)
-        self.assertNotIn("semanticNode.click()", ownership)
-        self.assertIn("currentFocusedEditableLoginFieldOwner()", field_scroll)
-        self.assertIn("candidate.isScrollable", field_scroll)
-        self.assertIn("scrollOwner.scroll(Direction.DOWN, 1f)", field_scroll)
-        self.assertNotIn("appWindow.findObject(By.scrollable(true))", field_scroll)
-        self.assertNotIn("device.swipe(", field_scroll)
-        self.assertNotIn("setGestureMargins", field_scroll)
-        self.assertIn("editableOwner.click()", field_focus)
-        self.assertIn("actionDelivered &&", field_focus)
-        self.assertIn("loginFieldIsFocused(field)", field_focus)
-        self.assertIn("if (!didScroll || !editableOwnerWasExposed) return false", field_focus)
-        self.assertNotIn("device.pressDPadDown()", field_focus)
-        self.assertNotIn("By.text(field.label)", field_focus)
-        self.assertNotIn("isTelevision()", field_focus)
-        self.assertNotIn("scrollLoginPageOnce()", field_focus)
-        for field in ("ACCESS_CODE", "USERNAME", "PASSWORD"):
-            selector = f"focusLoginFieldResolved(LoginField.{field})"
+        self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
+        self.assertIn("currentTargetWindowImeBottomInset()", scroll_helper)
+        self.assertIn("bottomObscuredGestureMargin(", scroll_helper)
+        self.assertIn("page.setGestureMargins(0, 0, 0, bottomGestureMargin)", scroll_helper)
+        self.assertIn("page.scroll(direction, 1f)", scroll_helper)
+        self.assertNotIn("device.swipe(", scroll_helper)
+        self.assertNotIn("pressBack()", scroll_helper)
+        self.assertIn("var didScroll = false", field_click)
+        self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
+        self.assertIn("if (!didScroll)", field_click)
+        for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
+            selector = f'clickLoginFieldResolved(By.text("{label}"))'
             self.assertIn(selector, portrait)
             self.assertIn(selector, reachability)
-        for profile in (
-            "phone-small-api29",
-            "phone-320x568-api35",
-            "tablet-medium-landscape-api35",
-            "tablet-resizable-medium-api35",
-            "foldable-unfolded-api35",
-        ):
-            self.assertNotIn(profile, self.instrumentation_source)
+
+    def test_login_scroll_uses_current_ime_insets_without_profile_specific_geometry(self) -> None:
+        inset_helper = self.section(
+            self.instrumentation_source,
+            "private fun currentTargetWindowImeBottomInset()",
+            "private fun bottomObscuredGestureMargin(",
+        )
+        margin_helper = self.section(
+            self.instrumentation_source,
+            "private fun bottomObscuredGestureMargin(",
+            "fun loginScrollKeepsGestureInsideCurrentImeViewport()",
+        )
+
+        self.assertIn("ActivityLifecycleMonitorRegistry", inset_helper)
+        self.assertIn("Stage.RESUMED", inset_helper)
+        self.assertIn("WindowInsetsCompat.Type.ime()", inset_helper)
+        self.assertIn("pageBounds.bottom - imeTop", margin_helper)
+        self.assertNotIn("phone-small-api29", inset_helper + margin_helper)
+        self.assertNotIn("tablet-medium-landscape-api35", inset_helper + margin_helper)
 
     def test_ime_subscription_reachability_uses_one_adaptive_semantic_scroll(self) -> None:
         screen = self.section(

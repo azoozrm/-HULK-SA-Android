@@ -14,19 +14,19 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -52,14 +52,6 @@ class CompatibilityV2InstrumentationTest {
         val clickable: Boolean,
         val parent: FakeAccessibilityNode? = null,
     )
-
-    private enum class LoginField(
-        val label: String,
-    ) {
-        ACCESS_CODE("كود الدخول"),
-        USERNAME("اسم المستخدم"),
-        PASSWORD("كلمة المرور"),
-    }
 
     private class FakeStaleObjectException : RuntimeException()
 
@@ -405,98 +397,83 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
+    private fun currentTargetWindowImeBottomInset(): Int {
+        var imeBottomInset = 0
+        instrumentation.runOnMainSync {
+            val targetActivity =
+                ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)
+                    .firstOrNull { it.packageName == targetContext.packageName }
+            val insets = targetActivity?.window?.decorView?.let(ViewCompat::getRootWindowInsets)
+            imeBottomInset = insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+        }
+        return imeBottomInset
+    }
+
+    private fun bottomObscuredGestureMargin(
+        pageBounds: Rect,
+        displayHeight: Int,
+        imeBottomInset: Int,
+    ): Int {
+        val usablePageHeight = (pageBounds.height() - 1).coerceAtLeast(0)
+        val imeTop = displayHeight - imeBottomInset.coerceAtLeast(0)
+        return (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
+    }
+
+    @Test
+    fun loginScrollKeepsGestureInsideCurrentImeViewport() {
+        val pageBounds = Rect(36, 80, 324, 536)
+
+        assertEquals(0, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 0))
+        assertEquals(179, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 283))
+        assertEquals(455, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 640))
+    }
+
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
         return try {
             val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0)) ?: return false
             val page = appWindow.findObject(By.scrollable(true)) ?: return false
-            val didScroll = page.scroll(direction, 1f)
-            if (didScroll) {
-                instrumentation.waitForIdleSync()
+            val bottomGestureMargin =
+                bottomObscuredGestureMargin(
+                    pageBounds = Rect(page.visibleBounds),
+                    displayHeight = device.displayHeight,
+                    imeBottomInset = currentTargetWindowImeBottomInset(),
+                )
+            if (bottomGestureMargin > 0) {
+                page.setGestureMargins(0, 0, 0, bottomGestureMargin)
             }
-            didScroll
+            page.scroll(direction, 1f)
+            instrumentation.waitForIdleSync()
+            true
         } catch (_: StaleObjectException) {
             false
         }
     }
 
-    private fun resolveEditableLoginFieldOwner(field: LoginField): UiObject2? {
-        return try {
-            var candidate = device.findObject(By.desc(field.label)) ?: return null
-            repeat(7) {
-                if (
-                    candidate.className == EditText::class.java.name &&
-                        candidate.isClickable &&
-                        candidate.isFocusable
-                ) {
-                    return candidate
-                }
-                candidate = candidate.parent ?: return null
-            }
-            null
-        } catch (_: StaleObjectException) {
-            null
-        }
-    }
-
-    private fun loginFieldIsFocused(field: LoginField): Boolean =
-        resolveEditableLoginFieldOwner(field)?.isFocused == true
-
-    private fun currentFocusedEditableLoginFieldOwner(): UiObject2? {
-        for (field in LoginField.values()) {
-            val owner = resolveEditableLoginFieldOwner(field)
-            if (owner?.isFocused == true) return owner
-        }
-        return null
-    }
-
-    private fun clickCurrentEditableLoginField(field: LoginField): Boolean? {
-        val editableOwner = resolveEditableLoginFieldOwner(field) ?: return null
-        val actionDelivered =
+    private fun clickLoginFieldResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        var didScroll = false
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (!dismissOptionalUpdateIfPresent()) return false
             try {
-                editableOwner.click()
-                true
+                val node = device.findObject(selector)
+                if (node != null) {
+                    node.click()
+                    instrumentation.waitForIdleSync()
+                    if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
+                } else if (!didScroll) {
+                    didScroll = true
+                    scrollLoginPageOnce()
+                }
             } catch (_: StaleObjectException) {
-                false
+                // Resolve from the current accessibility tree on the next bounded probe.
             }
-        if (actionDelivered) instrumentation.waitForIdleSync()
-        return actionDelivered &&
-            loginFieldIsFocused(field) &&
-            !device.hasObject(By.text("يتوفر تحديث جديد"))
-    }
-
-    private fun loginFieldScrollOwner(field: LoginField): UiObject2? {
-        var candidate = resolveEditableLoginFieldOwner(field) ?: currentFocusedEditableLoginFieldOwner()
-            ?: return null
-        repeat(9) {
-            if (candidate.isScrollable) return candidate
-            candidate = candidate.parent ?: return null
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0L) {
+                device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+            }
         }
-        return null
-    }
-
-    private fun scrollLoginFieldOwnerOnce(field: LoginField): Boolean {
-        return try {
-            val scrollOwner = loginFieldScrollOwner(field) ?: return false
-            val didScroll = scrollOwner.scroll(Direction.DOWN, 1f)
-            if (didScroll) instrumentation.waitForIdleSync()
-            didScroll
-        } catch (_: StaleObjectException) {
-            false
-        }
-    }
-
-    private fun focusLoginFieldResolved(field: LoginField, timeoutMs: Long = 6_000L): Boolean {
-        if (!dismissOptionalUpdateIfPresent()) return false
-        clickCurrentEditableLoginField(field)?.let { return it }
-
-        val didScroll = scrollLoginFieldOwnerOnce(field)
-        val semanticTargetWasExposed =
-            timeoutMs > 0L &&
-                device.wait(Until.hasObject(By.desc(field.label)), minOf(timeoutMs, 500L))
-        val editableOwnerWasExposed = semanticTargetWasExposed && resolveEditableLoginFieldOwner(field) != null
-        if (!didScroll || !editableOwnerWasExposed) return false
-
-        return clickCurrentEditableLoginField(field) == true
+        return false
     }
 
     private fun resolvedVisibleBounds(selector: BySelector, timeoutMs: Long = 6_000L): Rect? {
@@ -617,7 +594,7 @@ class CompatibilityV2InstrumentationTest {
             )
             assertTrue(
                 "Access-code field was not exposed",
-                focusLoginFieldResolved(LoginField.ACCESS_CODE),
+                clickLoginFieldResolved(By.text("كود الدخول")),
             )
             device.executeShellCommand("input text HULK-ABCD-EFGH-JKMN-PQRS")
             instrumentation.waitForIdleSync()
@@ -633,14 +610,14 @@ class CompatibilityV2InstrumentationTest {
 
             assertTrue(
                 "Username field was not exposed",
-                focusLoginFieldResolved(LoginField.USERNAME),
+                clickLoginFieldResolved(By.text("اسم المستخدم")),
             )
             device.executeShellCommand("input text portraituser")
             instrumentation.waitForIdleSync()
 
             assertTrue(
                 "Password field was not exposed",
-                focusLoginFieldResolved(LoginField.PASSWORD),
+                clickLoginFieldResolved(By.text("كلمة المرور")),
             )
             device.executeShellCommand("input text portraitpass")
             instrumentation.waitForIdleSync()
@@ -738,9 +715,9 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun loginFieldsRemainReachableAcrossScrollableLayouts() {
         assertTrue("Application package did not become visible", launchMainPackage())
-        assertTrue("Access-code field was not reachable", focusLoginFieldResolved(LoginField.ACCESS_CODE))
-        assertTrue("Username field was not reachable", focusLoginFieldResolved(LoginField.USERNAME))
-        assertTrue("Password field was not reachable", focusLoginFieldResolved(LoginField.PASSWORD))
+        assertTrue("Access-code field was not reachable", clickLoginFieldResolved(By.text("كود الدخول")))
+        assertTrue("Username field was not reachable", clickLoginFieldResolved(By.text("اسم المستخدم")))
+        assertTrue("Password field was not reachable", clickLoginFieldResolved(By.text("كلمة المرور")))
     }
 
     @Test
