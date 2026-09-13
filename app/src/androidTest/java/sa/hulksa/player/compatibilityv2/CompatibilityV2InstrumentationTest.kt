@@ -153,47 +153,11 @@ class CompatibilityV2InstrumentationTest {
         return !isOverlayPresent()
     }
 
-    private fun requestTargetImeHide(): Boolean {
-        var requested = false
-        instrumentation.runOnMainSync {
-            val targetActivity =
-                ActivityLifecycleMonitorRegistry.getInstance()
-                    .getActivitiesInStage(Stage.RESUMED)
-                    .firstOrNull { it.packageName == targetContext.packageName }
-            val decorView = targetActivity?.window?.decorView
-            val controller = decorView?.let(ViewCompat::getWindowInsetsController)
-            if (controller != null) {
-                controller.hide(WindowInsetsCompat.Type.ime())
-                requested = true
-            }
-        }
-        return requested
-    }
-
-    private fun waitForOptionalUpdateTouchOwnership(deadlineMs: Long): Boolean {
-        if (!isTelevision() || !imeWindowIsActuallyVisible()) return true
-        if (!requestTargetImeHide()) return false
-
-        while (SystemClock.uptimeMillis() < deadlineMs) {
-            if (!imeWindowIsActuallyVisible()) return true
-            val remaining = deadlineMs - SystemClock.uptimeMillis()
-            if (remaining <= 0L || !device.waitForWindowUpdate(null, remaining)) break
-        }
-        return !imeWindowIsActuallyVisible()
-    }
-
     private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
         val titleSelector = By.text("يتوفر تحديث جديد")
         val laterSelector = By.text("لاحقًا")
-        if (!device.hasObject(titleSelector)) return true
-
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        if (!waitForOptionalUpdateTouchOwnership(deadline)) return false
-        val remaining = (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L)
-        if (remaining <= 0L) return !device.hasObject(titleSelector)
-
         return dismissOptionalUpdateWithinDeadline(
-            timeoutMs = remaining,
+            timeoutMs = timeoutMs,
             nowMs = { SystemClock.uptimeMillis() },
             isOverlayPresent = { device.hasObject(titleSelector) },
             resolveLaterAction = { device.findObject(laterSelector) },
@@ -518,53 +482,6 @@ class CompatibilityV2InstrumentationTest {
     }
 
     private fun captureLoginReachabilityFailure(selector: BySelector, timeoutMs: Long): Nothing {
-        val hierarchyFile = File(targetContext.cacheDir, "compatibility-v2-login-reachability-failure.xml")
-        val hierarchy =
-            runCatching {
-                device.dumpWindowHierarchy(hierarchyFile)
-                hierarchyFile.readText()
-            }.getOrElse { error ->
-                "<hierarchy-unavailable error=${error::class.java.simpleName}:${error.message}>"
-            }
-        hierarchyFile.delete()
-
-        val windowSummary =
-            runCatching {
-                device.executeShellCommand("dumpsys window windows")
-                    .lineSequence()
-                    .filter { line ->
-                        line.contains("mCurrentFocus") ||
-                            line.contains("mFocusedApp") ||
-                            line.contains("InputMethod") ||
-                            line.contains("mIme") ||
-                            line.contains("mViewVisibility") ||
-                            line.contains("mHasSurface") ||
-                            line.contains("isOnScreen") ||
-                            line.contains("isVisible")
-                    }
-                    .take(160)
-                    .joinToString("\n")
-            }.getOrElse { error ->
-                "<window-summary-unavailable error=${error::class.java.simpleName}:${error.message}>"
-            }
-
-        val logcatTail =
-            runCatching {
-                device.executeShellCommand("logcat -d -t 300 -v threadtime")
-            }.getOrElse { error ->
-                "<logcat-unavailable error=${error::class.java.simpleName}:${error.message}>"
-            }
-
-        val packageRootPresent =
-            runCatching { device.hasObject(By.pkg(targetContext.packageName).depth(0)) }
-                .getOrDefault(false)
-        val optionalUpdateTitlePresent =
-            runCatching { device.hasObject(By.text("يتوفر تحديث جديد")) }
-                .getOrDefault(false)
-        val optionalUpdateLaterPresent =
-            runCatching { device.hasObject(By.text("لاحقًا")) }
-                .getOrDefault(false)
-
         throw AssertionError(
             buildString {
                 appendLine("Compatibility V2 login reachability exhausted")
@@ -572,17 +489,6 @@ class CompatibilityV2InstrumentationTest {
                 appendLine("timeoutMs=$timeoutMs")
                 appendLine("uptimeMs=${SystemClock.uptimeMillis()}")
                 appendLine("thread=${Thread.currentThread().name}:${Thread.currentThread().state}")
-                appendLine("display=${device.displayWidth}x${device.displayHeight}")
-                appendLine("isTelevision=${isTelevision()}")
-                appendLine("packageRootPresent=$packageRootPresent")
-                appendLine("optionalUpdateTitlePresent=$optionalUpdateTitlePresent")
-                appendLine("optionalUpdateLaterPresent=$optionalUpdateLaterPresent")
-                appendLine("--- WINDOW SUMMARY ---")
-                appendLine(windowSummary)
-                appendLine("--- ACCESSIBILITY HIERARCHY ---")
-                appendLine(hierarchy)
-                appendLine("--- LOGCAT TAIL ---")
-                append(logcatTail)
             },
         )
     }
