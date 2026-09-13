@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
@@ -25,6 +26,7 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -417,83 +419,84 @@ class CompatibilityV2InstrumentationTest {
         }
     }
 
-    private fun loginFieldIsFocused(field: LoginField): Boolean {
+    private fun resolveEditableLoginFieldOwner(field: LoginField): UiObject2? {
         return try {
-            val node = device.findObject(By.desc(field.label)) ?: return false
-            node.isFocused || node.parent?.isFocused == true
+            var candidate = device.findObject(By.desc(field.label)) ?: return null
+            repeat(7) {
+                if (
+                    candidate.className == EditText::class.java.name &&
+                        candidate.isClickable &&
+                        candidate.isFocusable
+                ) {
+                    return candidate
+                }
+                candidate = candidate.parent ?: return null
+            }
+            null
+        } catch (_: StaleObjectException) {
+            null
+        }
+    }
+
+    private fun loginFieldIsFocused(field: LoginField): Boolean =
+        resolveEditableLoginFieldOwner(field)?.isFocused == true
+
+    private fun currentFocusedEditableLoginFieldOwner(): UiObject2? {
+        for (field in LoginField.values()) {
+            val owner = resolveEditableLoginFieldOwner(field)
+            if (owner?.isFocused == true) return owner
+        }
+        return null
+    }
+
+    private fun clickCurrentEditableLoginField(field: LoginField): Boolean? {
+        val editableOwner = resolveEditableLoginFieldOwner(field) ?: return null
+        val actionDelivered =
+            try {
+                editableOwner.click()
+                true
+            } catch (_: StaleObjectException) {
+                false
+            }
+        if (actionDelivered) instrumentation.waitForIdleSync()
+        return actionDelivered &&
+            loginFieldIsFocused(field) &&
+            !device.hasObject(By.text("يتوفر تحديث جديد"))
+    }
+
+    private fun loginFieldScrollOwner(field: LoginField): UiObject2? {
+        var candidate = resolveEditableLoginFieldOwner(field) ?: currentFocusedEditableLoginFieldOwner()
+            ?: return null
+        repeat(9) {
+            if (candidate.isScrollable) return candidate
+            candidate = candidate.parent ?: return null
+        }
+        return null
+    }
+
+    private fun scrollLoginFieldOwnerOnce(field: LoginField): Boolean {
+        return try {
+            val scrollOwner = loginFieldScrollOwner(field) ?: return false
+            val didScroll = scrollOwner.scroll(Direction.DOWN, 1f)
+            if (didScroll) instrumentation.waitForIdleSync()
+            didScroll
         } catch (_: StaleObjectException) {
             false
         }
     }
 
-    private fun currentFocusedLoginField(): LoginField? =
-        LoginField.values().firstOrNull(::loginFieldIsFocused)
-
-    private fun canAdvanceLoginFieldFocus(
-        current: LoginField?,
-        target: LoginField,
-    ): Boolean = current != null && current.ordinal < target.ordinal
-
-    private fun fieldReachabilityAfterScroll(
-        didScroll: Boolean,
-        targetIsExposed: Boolean,
-    ): Boolean = didScroll && targetIsExposed
-
-    @Test
-    fun loginFieldReachabilityUsesProductFocusOrderBeforeFallbackScroll() {
-        assertTrue(canAdvanceLoginFieldFocus(LoginField.ACCESS_CODE, LoginField.USERNAME))
-        assertTrue(canAdvanceLoginFieldFocus(LoginField.USERNAME, LoginField.PASSWORD))
-        assertFalse(canAdvanceLoginFieldFocus(LoginField.PASSWORD, LoginField.USERNAME))
-        assertFalse(canAdvanceLoginFieldFocus(null, LoginField.PASSWORD))
-    }
-
-    @Test
-    fun failedLoginScrollIsNotReportedAsFieldReachability() {
-        assertFalse(fieldReachabilityAfterScroll(didScroll = false, targetIsExposed = true))
-        assertFalse(fieldReachabilityAfterScroll(didScroll = true, targetIsExposed = false))
-        assertTrue(fieldReachabilityAfterScroll(didScroll = true, targetIsExposed = true))
-    }
-
     private fun focusLoginFieldResolved(field: LoginField, timeoutMs: Long = 6_000L): Boolean {
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        while (SystemClock.uptimeMillis() < deadline) {
-            if (!dismissOptionalUpdateIfPresent()) return false
-            var targetWasPresent = false
-            try {
-                val node = device.findObject(By.desc(field.label))
-                if (node != null) {
-                    targetWasPresent = true
-                    node.click()
-                    instrumentation.waitForIdleSync()
-                    if (loginFieldIsFocused(field) && !device.hasObject(By.text("يتوفر تحديث جديد"))) {
-                        return true
-                    }
-                }
-            } catch (_: StaleObjectException) {
-                // Resolve from the current accessibility tree on the next bounded probe.
-            }
+        if (!dismissOptionalUpdateIfPresent()) return false
+        clickCurrentEditableLoginField(field)?.let { return it }
 
-            if (!isTelevision() && canAdvanceLoginFieldFocus(currentFocusedLoginField(), field)) {
-                device.pressDPadDown()
-                instrumentation.waitForIdleSync()
-                return loginFieldIsFocused(field) && !device.hasObject(By.text("يتوفر تحديث جديد"))
-            }
+        val didScroll = scrollLoginFieldOwnerOnce(field)
+        val semanticTargetWasExposed =
+            timeoutMs > 0L &&
+                device.wait(Until.hasObject(By.desc(field.label)), minOf(timeoutMs, 500L))
+        val editableOwnerWasExposed = semanticTargetWasExposed && resolveEditableLoginFieldOwner(field) != null
+        if (!didScroll || !editableOwnerWasExposed) return false
 
-            if (!targetWasPresent) {
-                val didScroll = scrollLoginPageOnce()
-                val remaining = deadline - SystemClock.uptimeMillis()
-                val targetIsExposed =
-                    remaining > 0L &&
-                        device.wait(Until.hasObject(By.desc(field.label)), minOf(remaining, 500L))
-                if (!fieldReachabilityAfterScroll(didScroll, targetIsExposed)) {
-                    return false
-                }
-                continue
-            }
-
-            return false
-        }
-        return false
+        return clickCurrentEditableLoginField(field) == true
     }
 
     private fun resolvedVisibleBounds(selector: BySelector, timeoutMs: Long = 6_000L): Rect? {
