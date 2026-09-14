@@ -692,6 +692,8 @@ class CompatibilityV2InstrumentationTest {
         )
     }
 
+    private fun credentialFieldSelector(label: String): BySelector = By.desc(label)
+
     private fun clickLoginFieldResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         var didScroll = false
@@ -1070,9 +1072,9 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun loginFieldsRemainReachableAcrossScrollableLayouts() {
         assertTrue("Application package did not become visible", launchMainPackage())
-        assertTrue("Access-code field was not reachable", clickLoginFieldResolved(By.text("كود الدخول")))
-        assertTrue("Username field was not reachable", clickLoginFieldResolved(By.text("اسم المستخدم")))
-        assertTrue("Password field was not reachable", clickLoginFieldResolved(By.text("كلمة المرور")))
+        assertTrue("Access-code field was not reachable", clickLoginFieldResolved(credentialFieldSelector("كود الدخول")))
+        assertTrue("Username field was not reachable", clickLoginFieldResolved(credentialFieldSelector("اسم المستخدم")))
+        assertTrue("Password field was not reachable", clickLoginFieldResolved(credentialFieldSelector("كلمة المرور")))
     }
 
     @Test

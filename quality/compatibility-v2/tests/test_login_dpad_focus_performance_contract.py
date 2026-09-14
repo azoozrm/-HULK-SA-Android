@@ -150,6 +150,11 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
             "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
         )
+        credential_selector = self.section(
+            self.instrumentation_source,
+            "private fun credentialFieldSelector(",
+            "private fun clickLoginFieldResolved(",
+        )
 
         self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
         self.assertIn("currentTargetWindowImeBottomInset()", scroll_helper)
@@ -172,10 +177,13 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn("var didScroll = false", field_click)
         self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
         self.assertIn("if (!didScroll)", field_click)
+        self.assertIn("By.desc(label)", credential_selector)
         for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
-            selector = f'clickLoginFieldResolved(By.text("{label}"))'
-            self.assertIn(selector, portrait)
-            self.assertIn(selector, reachability)
+            text_selector = f'clickLoginFieldResolved(By.text("{label}"))'
+            semantic_selector = f'clickLoginFieldResolved(credentialFieldSelector("{label}"))'
+            self.assertIn(text_selector, portrait)
+            self.assertNotIn(f'By.text("{label}")', reachability)
+            self.assertIn(semantic_selector, reachability)
 
     def test_login_scroll_uses_current_ime_insets_without_profile_specific_geometry(self) -> None:
         inset_helper = self.section(
