@@ -706,8 +706,19 @@ class CompatibilityV2InstrumentationTest {
             }
             try {
                 traceLoginReachability(selector, "before-find")
-                val node = device.findObject(selector)
+                var node = device.findObject(selector)
                 traceLoginReachability(selector, "after-find:present=${node != null}")
+                if (node == null && !didScroll) {
+                    didScroll = true
+                    traceSemanticSelector(selector, "before", null)
+                    scrollLoginPageOnce()
+                    node = device.findObject(selector)
+                    traceSemanticSelector(
+                        selector,
+                        "immediately-after",
+                        node?.let { Rect(it.visibleBounds) },
+                    )
+                }
                 if (node != null) {
                     traceLoginReachability(selector, "before-click")
                     node.click()
@@ -716,11 +727,6 @@ class CompatibilityV2InstrumentationTest {
                     instrumentation.waitForIdleSync()
                     traceLoginReachability(selector, "after-wait-for-idle")
                     if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
-                } else if (!didScroll) {
-                    didScroll = true
-                    traceSemanticSelector(selector, "before", null)
-                    scrollLoginPageOnce()
-                    traceSemanticSelector(selector, "immediately-after", immediateVisibleBounds(selector))
                 }
             } catch (_: StaleObjectException) {
                 traceLoginReachability(selector, "stale-accessibility-node")
