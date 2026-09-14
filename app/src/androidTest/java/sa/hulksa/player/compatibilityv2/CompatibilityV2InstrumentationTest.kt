@@ -262,7 +262,7 @@ class CompatibilityV2InstrumentationTest {
 
     private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
         val titleSelector = By.text("يتوفر تحديث جديد")
-        val laterSelector = By.desc("لاحقًا")
+        val laterSelector = By.text("لاحقًا")
         return dismissOptionalUpdateWithinDeadline(
             timeoutMs = timeoutMs,
             nowMs = { SystemClock.uptimeMillis() },

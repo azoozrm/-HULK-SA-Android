@@ -124,7 +124,7 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
-    def test_optional_update_action_uses_product_semantics_and_clickable_owner(self) -> None:
+    def test_optional_update_action_uses_runtime_text_selector_and_clickable_owner(self) -> None:
         deadline_helper = self.section(
             self.instrumentation_source,
             "private fun <Node> dismissOptionalUpdateWithinDeadline(",
@@ -137,8 +137,8 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         )
 
         self.assertIn('val titleSelector = By.text("يتوفر تحديث جديد")', dismissal)
-        self.assertIn('val laterSelector = By.desc("لاحقًا")', dismissal)
-        self.assertNotIn('By.text("لاحقًا")', dismissal)
+        self.assertIn('val laterSelector = By.text("لاحقًا")', dismissal)
+        self.assertNotIn('By.desc("لاحقًا")', dismissal)
         self.assertIn("resolveLaterAction = { device.findObject(laterSelector) }", dismissal)
         self.assertIn("nearestClickableOwner(", deadline_helper)
         self.assertEqual(1, deadline_helper.count("click(clickableOwner)"))
