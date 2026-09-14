@@ -119,7 +119,7 @@ class CompatibilityV2InstrumentationTest {
         resolveLaterAction: () -> Node?,
         parentOf: (Node) -> Node?,
         isClickable: (Node) -> Boolean,
-        click: (Node) -> Boolean,
+        click: (Node) -> Unit,
         waitForOverlayGone: (Long) -> Boolean,
         isStaleObject: (Throwable) -> Boolean,
         describeClickableOwner: (Node) -> String = { "clickable=true" },
@@ -188,11 +188,11 @@ class CompatibilityV2InstrumentationTest {
                     activeOperation = "click"
                     val clickStartedAt = nowMs()
                     trace("optional-update click cycle=$cycle startMs=$clickStartedAt")
-                    val clickResult = click(clickableOwner)
+                    click(clickableOwner)
                     val clickEndedAt = nowMs()
                     trace(
                         "optional-update click cycle=$cycle endMs=$clickEndedAt " +
-                            "elapsedMs=${clickEndedAt - clickStartedAt} result=$clickResult",
+                            "elapsedMs=${clickEndedAt - clickStartedAt} result=completed",
                     )
                 } else {
                     trace("optional-update click cycle=$cycle result=skipped-no-clickable-owner")
@@ -312,7 +312,6 @@ class CompatibilityV2InstrumentationTest {
             click = { node ->
                 clickedNode = node
                 overlayPresent = false
-                true
             },
             waitForOverlayGone = { waitMs ->
                 nowMs += waitMs
@@ -359,7 +358,6 @@ class CompatibilityV2InstrumentationTest {
             click = { node ->
                 clickedNode = node
                 overlayPresent = false
-                true
             },
             waitForOverlayGone = { waitMs ->
                 nowMs += waitMs
@@ -391,7 +389,6 @@ class CompatibilityV2InstrumentationTest {
             isClickable = { node -> node.clickable },
             click = {
                 clickCount += 1
-                true
             },
             waitForOverlayGone = {
                 waitCount += 1
@@ -426,7 +423,6 @@ class CompatibilityV2InstrumentationTest {
             isClickable = { node -> node.clickable },
             click = {
                 clickCount += 1
-                true
             },
             waitForOverlayGone = { waitMs ->
                 nowMs += waitMs
