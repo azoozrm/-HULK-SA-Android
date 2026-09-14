@@ -124,6 +124,27 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
+    def test_optional_update_action_uses_product_semantics_and_clickable_owner(self) -> None:
+        deadline_helper = self.section(
+            self.instrumentation_source,
+            "private fun <Node> dismissOptionalUpdateWithinDeadline(",
+            "private fun traceRuntimeOwner(",
+        )
+        dismissal = self.section(
+            self.instrumentation_source,
+            "private fun dismissOptionalUpdateIfPresent(",
+            "fun optionalUpdateDismissalUsesClickableAncestorWhenTextNodeIsNotClickable()",
+        )
+
+        self.assertIn('val titleSelector = By.text("يتوفر تحديث جديد")', dismissal)
+        self.assertIn('val laterSelector = By.desc("لاحقًا")', dismissal)
+        self.assertNotIn('By.text("لاحقًا")', dismissal)
+        self.assertIn("resolveLaterAction = { device.findObject(laterSelector) }", dismissal)
+        self.assertIn("nearestClickableOwner(", deadline_helper)
+        self.assertEqual(1, deadline_helper.count("click(clickableOwner)"))
+        for fallback in ("pressBack(", "pressDPad", "device.click(", "device.swipe("):
+            self.assertNotIn(fallback, deadline_helper + dismissal)
+
     def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
         top_margin_helper = self.section(
             self.instrumentation_source,
