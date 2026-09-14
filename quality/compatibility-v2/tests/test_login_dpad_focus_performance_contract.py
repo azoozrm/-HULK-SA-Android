@@ -125,6 +125,11 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
     def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
+        top_margin_helper = self.section(
+            self.instrumentation_source,
+            "private fun topGestureMarginForLoginScroll(",
+            "fun loginScrollKeepsGestureInsideCurrentImeViewport()",
+        )
         scroll_helper = self.section(
             self.instrumentation_source,
             "private fun scrollLoginPageOnce(",
@@ -149,8 +154,19 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
         self.assertIn("currentTargetWindowImeBottomInset()", scroll_helper)
         self.assertIn("bottomObscuredGestureMargin(", scroll_helper)
-        self.assertIn("page.setGestureMargins(0, 0, 0, bottomGestureMargin)", scroll_helper)
-        self.assertIn("page.scroll(direction, 1f)", scroll_helper)
+        self.assertIn(
+            "if (direction == Direction.UP) scaledTouchSlop.coerceAtLeast(0) else 0",
+            top_margin_helper,
+        )
+        self.assertIn(
+            "val topGestureMargin = topGestureMarginForLoginScroll(direction, scaledTouchSlop)",
+            scroll_helper,
+        )
+        self.assertIn(
+            "page.setGestureMargins(0, topGestureMargin, 0, bottomGestureMargin)",
+            scroll_helper,
+        )
+        self.assertEqual(1, scroll_helper.count("page.scroll(direction, 1f)"))
         self.assertNotIn("device.swipe(", scroll_helper)
         self.assertNotIn("pressBack()", scroll_helper)
         self.assertIn("var didScroll = false", field_click)

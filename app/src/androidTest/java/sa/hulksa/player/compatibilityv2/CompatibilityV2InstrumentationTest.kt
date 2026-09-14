@@ -556,6 +556,9 @@ class CompatibilityV2InstrumentationTest {
         return (obscuredBottom + edgeSafetyMargin.coerceAtLeast(0)).coerceIn(0, usablePageHeight)
     }
 
+    private fun topGestureMarginForLoginScroll(direction: Direction, scaledTouchSlop: Int): Int =
+        if (direction == Direction.UP) scaledTouchSlop.coerceAtLeast(0) else 0
+
     @Test
     fun loginScrollKeepsGestureInsideCurrentImeViewport() {
         val pageBounds = Rect(36, 80, 324, 536)
@@ -583,6 +586,12 @@ class CompatibilityV2InstrumentationTest {
         )
     }
 
+    @Test
+    fun loginScrollProtectsTopSystemEdgeOnlyForUpwardGesture() {
+        assertEquals(16, topGestureMarginForLoginScroll(Direction.UP, scaledTouchSlop = 16))
+        assertEquals(0, topGestureMarginForLoginScroll(Direction.DOWN, scaledTouchSlop = 16))
+    }
+
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
         return try {
             val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0))
@@ -598,6 +607,7 @@ class CompatibilityV2InstrumentationTest {
             val pageBoundsBeforeScroll = Rect(page.visibleBounds)
             val imeBottomInset = currentTargetWindowImeBottomInset()
             val scaledTouchSlop = ViewConfiguration.get(targetContext).scaledTouchSlop
+            val topGestureMargin = topGestureMarginForLoginScroll(direction, scaledTouchSlop)
             val bottomGestureMargin =
                 bottomObscuredGestureMargin(
                     pageBounds = pageBoundsBeforeScroll,
@@ -608,11 +618,12 @@ class CompatibilityV2InstrumentationTest {
             traceRuntimeOwner(
                 "semantic-scroll phase=before direction=$direction pageBounds=$pageBoundsBeforeScroll " +
                     "displayHeight=${device.displayHeight} imeBottomInset=$imeBottomInset " +
-                    "scaledTouchSlop=$scaledTouchSlop bottomGestureMargin=$bottomGestureMargin " +
+                    "scaledTouchSlop=$scaledTouchSlop topGestureMargin=$topGestureMargin " +
+                    "bottomGestureMargin=$bottomGestureMargin " +
                     runtimeOwnerExposure(),
             )
-            if (bottomGestureMargin > 0) {
-                page.setGestureMargins(0, 0, 0, bottomGestureMargin)
+            if (topGestureMargin > 0 || bottomGestureMargin > 0) {
+                page.setGestureMargins(0, topGestureMargin, 0, bottomGestureMargin)
             }
             val scrollStartedAt = SystemClock.uptimeMillis()
             traceRuntimeOwner(
