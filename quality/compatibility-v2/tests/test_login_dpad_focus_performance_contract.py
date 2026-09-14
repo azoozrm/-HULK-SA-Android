@@ -124,7 +124,33 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
         self.assertNotIn('By.text("اشتراك او تجديد")', self.instrumentation_source)
         self.assertNotIn('By.textContains("اشترك")', self.instrumentation_source)
 
+    def test_optional_update_action_uses_runtime_text_selector_and_clickable_owner(self) -> None:
+        deadline_helper = self.section(
+            self.instrumentation_source,
+            "private fun <Node> dismissOptionalUpdateWithinDeadline(",
+            "private fun traceRuntimeOwner(",
+        )
+        dismissal = self.section(
+            self.instrumentation_source,
+            "private fun dismissOptionalUpdateIfPresent(",
+            "fun optionalUpdateDismissalUsesClickableAncestorWhenTextNodeIsNotClickable()",
+        )
+
+        self.assertIn('val titleSelector = By.text("يتوفر تحديث جديد")', dismissal)
+        self.assertIn('val laterSelector = By.text("لاحقًا")', dismissal)
+        self.assertNotIn('By.desc("لاحقًا")', dismissal)
+        self.assertIn("resolveLaterAction = { device.findObject(laterSelector) }", dismissal)
+        self.assertIn("nearestClickableOwner(", deadline_helper)
+        self.assertEqual(1, deadline_helper.count("click(clickableOwner)"))
+        for fallback in ("pressBack(", "pressDPad", "device.click(", "device.swipe("):
+            self.assertNotIn(fallback, deadline_helper + dismissal)
+
     def test_login_field_reachability_uses_one_semantic_page_scroll(self) -> None:
+        top_margin_helper = self.section(
+            self.instrumentation_source,
+            "private fun topGestureMarginForLoginScroll(",
+            "fun loginScrollKeepsGestureInsideCurrentImeViewport()",
+        )
         scroll_helper = self.section(
             self.instrumentation_source,
             "private fun scrollLoginPageOnce(",
@@ -145,17 +171,71 @@ class LoginDpadFocusPerformanceContractTest(unittest.TestCase):
             "fun loginFieldsRemainReachableAcrossScrollableLayouts()",
             "fun phonePortraitOrientationRestoresAfterLandscapePlayback()",
         )
+        credential_selector = self.section(
+            self.instrumentation_source,
+            "private fun credentialFieldSelector(",
+            "private fun clickLoginFieldResolved(",
+        )
 
         self.assertIn("appWindow.findObject(By.scrollable(true))", scroll_helper)
-        self.assertIn("page.scroll(direction, 1f)", scroll_helper)
+        self.assertIn("currentTargetWindowImeBottomInset()", scroll_helper)
+        self.assertIn("bottomObscuredGestureMargin(", scroll_helper)
+        self.assertIn(
+            "if (direction == Direction.UP) scaledTouchSlop.coerceAtLeast(0) else 0",
+            top_margin_helper,
+        )
+        self.assertIn(
+            "val topGestureMargin = topGestureMarginForLoginScroll(direction, scaledTouchSlop)",
+            scroll_helper,
+        )
+        self.assertIn(
+            "page.setGestureMargins(0, topGestureMargin, 0, bottomGestureMargin)",
+            scroll_helper,
+        )
+        self.assertEqual(1, scroll_helper.count("page.scroll(direction, 1f)"))
         self.assertNotIn("device.swipe(", scroll_helper)
+        self.assertNotIn("pressBack()", scroll_helper)
         self.assertIn("var didScroll = false", field_click)
         self.assertEqual(1, field_click.count("scrollLoginPageOnce()"))
-        self.assertIn("if (!didScroll)", field_click)
+        self.assertIn("if (node == null && !didScroll)", field_click)
+        self.assertEqual(2, field_click.count("device.findObject(selector)"))
+        pre_scroll_resolve = field_click.index("var node = device.findObject(selector)")
+        semantic_scroll = field_click.index("scrollLoginPageOnce()")
+        post_scroll_resolve = field_click.index("node = device.findObject(selector)", semantic_scroll)
+        click = field_click.index('traceLoginReachability(selector, "before-click")')
+        self.assertLess(pre_scroll_resolve, semantic_scroll)
+        self.assertLess(semantic_scroll, post_scroll_resolve)
+        self.assertLess(post_scroll_resolve, click)
+        self.assertIn("val deadline = SystemClock.uptimeMillis() + timeoutMs", field_click)
+        self.assertEqual(1, field_click.count("val deadline ="))
+        self.assertNotIn("SystemClock.sleep", field_click)
+        self.assertEqual(1, field_click.count("device.wait("))
+        self.assertIn("By.desc(label)", credential_selector)
         for label in ('كود الدخول', 'اسم المستخدم', 'كلمة المرور'):
-            selector = f'clickLoginFieldResolved(By.text("{label}"))'
-            self.assertIn(selector, portrait)
-            self.assertIn(selector, reachability)
+            text_selector = f'clickLoginFieldResolved(By.text("{label}"))'
+            semantic_selector = f'clickLoginFieldResolved(credentialFieldSelector("{label}"))'
+            self.assertIn(text_selector, portrait)
+            self.assertNotIn(f'By.text("{label}")', reachability)
+            self.assertIn(semantic_selector, reachability)
+
+    def test_login_scroll_uses_current_ime_insets_without_profile_specific_geometry(self) -> None:
+        inset_helper = self.section(
+            self.instrumentation_source,
+            "private fun currentTargetWindowImeBottomInset()",
+            "private fun bottomObscuredGestureMargin(",
+        )
+        margin_helper = self.section(
+            self.instrumentation_source,
+            "private fun bottomObscuredGestureMargin(",
+            "fun loginScrollKeepsGestureInsideCurrentImeViewport()",
+        )
+
+        self.assertIn("ActivityLifecycleMonitorRegistry", inset_helper)
+        self.assertIn("Stage.RESUMED", inset_helper)
+        self.assertIn("WindowInsetsCompat.Type.ime()", inset_helper)
+        self.assertIn("pageBounds.bottom - imeTop", margin_helper)
+        self.assertNotIn("phone-small-api29", inset_helper + margin_helper)
+        self.assertNotIn("tablet-medium-landscape-api35", inset_helper + margin_helper)
 
     def test_ime_subscription_reachability_uses_one_adaptive_semantic_scroll(self) -> None:
         screen = self.section(

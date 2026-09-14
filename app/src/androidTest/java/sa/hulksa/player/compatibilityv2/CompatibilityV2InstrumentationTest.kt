@@ -11,7 +11,9 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.core.view.ViewCompat
@@ -20,6 +22,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
@@ -118,14 +122,54 @@ class CompatibilityV2InstrumentationTest {
         click: (Node) -> Unit,
         waitForOverlayGone: (Long) -> Boolean,
         isStaleObject: (Throwable) -> Boolean,
+        describeClickableOwner: (Node) -> String = { "clickable=true" },
+        trace: (String) -> Unit = {},
     ): Boolean {
-        if (!isOverlayPresent()) return true
+        var cycle = 0
+        val initialProbeStartedAt = nowMs()
+        trace("optional-update overlay-probe phase=initial startMs=$initialProbeStartedAt")
+        val initiallyPresent = isOverlayPresent()
+        val initialProbeEndedAt = nowMs()
+        trace(
+            "optional-update overlay-probe phase=initial endMs=$initialProbeEndedAt " +
+                "elapsedMs=${initialProbeEndedAt - initialProbeStartedAt} present=$initiallyPresent",
+        )
+        if (!initiallyPresent) {
+            trace(
+                "optional-update final result=already-absent " +
+                    "elapsedMs=${initialProbeEndedAt - initialProbeStartedAt}",
+            )
+            return true
+        }
 
         val deadline = nowMs() + timeoutMs
         while (nowMs() < deadline) {
-            if (!isOverlayPresent()) return true
+            cycle += 1
+            val overlayProbeStartedAt = nowMs()
+            trace("optional-update overlay-probe phase=cycle cycle=$cycle startMs=$overlayProbeStartedAt")
+            val overlayPresent = isOverlayPresent()
+            val overlayProbeEndedAt = nowMs()
+            trace(
+                "optional-update overlay-probe phase=cycle cycle=$cycle endMs=$overlayProbeEndedAt " +
+                    "elapsedMs=${overlayProbeEndedAt - overlayProbeStartedAt} present=$overlayPresent",
+            )
+            if (!overlayPresent) {
+                trace("optional-update final cycle=$cycle result=gone-before-action")
+                return true
+            }
+            var activeOperation = "resolve-later"
             try {
+                val resolveStartedAt = nowMs()
+                trace("optional-update resolve-later cycle=$cycle startMs=$resolveStartedAt")
                 val actionNode = resolveLaterAction()
+                val resolveEndedAt = nowMs()
+                trace(
+                    "optional-update resolve-later cycle=$cycle endMs=$resolveEndedAt " +
+                        "elapsedMs=${resolveEndedAt - resolveStartedAt} present=${actionNode != null}",
+                )
+                activeOperation = "resolve-clickable-owner"
+                val ownerResolveStartedAt = nowMs()
+                trace("optional-update resolve-clickable-owner cycle=$cycle startMs=$ownerResolveStartedAt")
                 val clickableOwner = actionNode?.let { node ->
                     nearestClickableOwner(
                         actionNode = node,
@@ -133,21 +177,88 @@ class CompatibilityV2InstrumentationTest {
                         isClickable = isClickable,
                     )
                 }
+                val ownerResolveEndedAt = nowMs()
+                val ownerDescription = clickableOwner?.let(describeClickableOwner)
+                trace(
+                    "optional-update resolve-clickable-owner cycle=$cycle endMs=$ownerResolveEndedAt " +
+                        "elapsedMs=${ownerResolveEndedAt - ownerResolveStartedAt} " +
+                        "present=${clickableOwner != null} owner=${ownerDescription ?: "none"}",
+                )
                 if (clickableOwner != null) {
+                    activeOperation = "click"
+                    val clickStartedAt = nowMs()
+                    trace("optional-update click cycle=$cycle startMs=$clickStartedAt")
                     click(clickableOwner)
+                    val clickEndedAt = nowMs()
+                    trace(
+                        "optional-update click cycle=$cycle endMs=$clickEndedAt " +
+                            "elapsedMs=${clickEndedAt - clickStartedAt} result=completed",
+                    )
+                } else {
+                    trace("optional-update click cycle=$cycle result=skipped-no-clickable-owner")
                 }
             } catch (error: Throwable) {
-                if (!isStaleObject(error)) throw error
+                val staleHandledAt = nowMs()
+                if (!isStaleObject(error)) {
+                    trace(
+                        "optional-update operation-failure cycle=$cycle operation=$activeOperation " +
+                            "endMs=$staleHandledAt error=${error.javaClass.simpleName}",
+                    )
+                    throw error
+                }
+                trace(
+                    "optional-update stale-node cycle=$cycle operation=$activeOperation " +
+                        "startMs=$staleHandledAt endMs=$staleHandledAt elapsedMs=0 result=re-resolve",
+                )
                 // Re-resolve the action from the current tree on the next bounded probe.
             }
 
             val remaining = deadline - nowMs()
-            if (remaining > 0L && waitForOverlayGone(minOf(remaining, 500L))) {
-                return true
+            if (remaining > 0L) {
+                val waitBudgetMs = minOf(remaining, 500L)
+                val waitStartedAt = nowMs()
+                trace(
+                    "optional-update wait-overlay-gone cycle=$cycle startMs=$waitStartedAt " +
+                        "budgetMs=$waitBudgetMs",
+                )
+                val overlayGone = waitForOverlayGone(waitBudgetMs)
+                val waitEndedAt = nowMs()
+                trace(
+                    "optional-update wait-overlay-gone cycle=$cycle endMs=$waitEndedAt " +
+                        "elapsedMs=${waitEndedAt - waitStartedAt} result=$overlayGone",
+                )
+                if (overlayGone) {
+                    trace("optional-update final cycle=$cycle result=gone-after-wait")
+                    return true
+                }
+            } else {
+                trace("optional-update wait-overlay-gone cycle=$cycle result=skipped-deadline")
             }
         }
-        return !isOverlayPresent()
+        val finalProbeStartedAt = nowMs()
+        trace("optional-update overlay-probe phase=final startMs=$finalProbeStartedAt")
+        val finalOverlayPresent = isOverlayPresent()
+        val finalProbeEndedAt = nowMs()
+        val result = !finalOverlayPresent
+        trace(
+            "optional-update overlay-probe phase=final endMs=$finalProbeEndedAt " +
+                "elapsedMs=${finalProbeEndedAt - finalProbeStartedAt} present=$finalOverlayPresent",
+        )
+        trace("optional-update final cycle=$cycle result=$result reason=deadline-exhausted")
+        return result
     }
+
+    private fun traceRuntimeOwner(message: String) {
+        Log.i(
+            "HULK_COMPAT_V2",
+            "runtime-owner $message uptimeMs=${SystemClock.uptimeMillis()} " +
+                "thread=${Thread.currentThread().name}:${Thread.currentThread().state}",
+        )
+    }
+
+    private fun runtimeOwnerExposure(): String =
+        "appExposed=${device.hasObject(By.pkg(targetContext.packageName).depth(0))} " +
+            "systemUiExposed=${device.hasObject(By.pkg("com.android.systemui"))}"
 
     private fun dismissOptionalUpdateIfPresent(timeoutMs: Long = 5_000L): Boolean {
         val titleSelector = By.text("يتوفر تحديث جديد")
@@ -162,6 +273,20 @@ class CompatibilityV2InstrumentationTest {
             click = { node -> node.click() },
             waitForOverlayGone = { waitMs -> device.wait(Until.gone(titleSelector), waitMs) },
             isStaleObject = { error -> error is StaleObjectException },
+            describeClickableOwner = { node ->
+                val focusable = try {
+                    node.isFocusable
+                } catch (_: StaleObjectException) {
+                    null
+                }
+                val bounds = try {
+                    Rect(node.visibleBounds)
+                } catch (_: StaleObjectException) {
+                    null
+                }
+                "clickable=true focusable=${focusable ?: "unknown"} visibleBounds=${bounds ?: "unknown"}"
+            },
+            trace = ::traceRuntimeOwner,
         )
     }
 
@@ -262,7 +387,9 @@ class CompatibilityV2InstrumentationTest {
             },
             parentOf = { node -> node.parent },
             isClickable = { node -> node.clickable },
-            click = { clickCount += 1 },
+            click = {
+                clickCount += 1
+            },
             waitForOverlayGone = {
                 waitCount += 1
                 false
@@ -294,7 +421,9 @@ class CompatibilityV2InstrumentationTest {
             resolveLaterAction = { laterText },
             parentOf = { node -> node.parent },
             isClickable = { node -> node.clickable },
-            click = { clickCount += 1 },
+            click = {
+                clickCount += 1
+            },
             waitForOverlayGone = { waitMs ->
                 nowMs += waitMs
                 false
@@ -311,14 +440,21 @@ class CompatibilityV2InstrumentationTest {
         resolveLogin: () -> Rect?,
         resolveSubscribe: () -> Rect?,
         semanticScroll: () -> Unit,
+        traceReachability: (String, Rect?, Rect?) -> Unit = { _, _, _ -> },
     ): Pair<Boolean, Boolean> {
-        var loginReachable = resolveLogin()?.height()?.let { it > 0 } == true
-        var subscribeReachable = resolveSubscribe()?.height()?.let { it > 0 } == true
+        val loginBoundsBeforeScroll = resolveLogin()
+        val subscribeBoundsBeforeScroll = resolveSubscribe()
+        traceReachability("pre-scroll", loginBoundsBeforeScroll, subscribeBoundsBeforeScroll)
+        var loginReachable = loginBoundsBeforeScroll?.height()?.let { it > 0 } == true
+        var subscribeReachable = subscribeBoundsBeforeScroll?.height()?.let { it > 0 } == true
         if (!subscribeReachable) {
             semanticScroll()
-            val loginReachableAfterScroll = resolveLogin()?.height()?.let { it > 0 } == true
+            val loginBoundsAfterScroll = resolveLogin()
+            val subscribeBoundsAfterScroll = resolveSubscribe()
+            traceReachability("post-scroll", loginBoundsAfterScroll, subscribeBoundsAfterScroll)
+            val loginReachableAfterScroll = loginBoundsAfterScroll?.height()?.let { it > 0 } == true
             loginReachable = loginReachable || loginReachableAfterScroll
-            subscribeReachable = resolveSubscribe()?.height()?.let { it > 0 } == true
+            subscribeReachable = subscribeBoundsAfterScroll?.height()?.let { it > 0 } == true
         }
         return loginReachable to subscribeReachable
     }
@@ -395,42 +531,222 @@ class CompatibilityV2InstrumentationTest {
         return false
     }
 
+    private fun currentTargetWindowImeBottomInset(): Int {
+        var imeBottomInset = 0
+        instrumentation.runOnMainSync {
+            val targetActivity =
+                ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(Stage.RESUMED)
+                    .firstOrNull { it.packageName == targetContext.packageName }
+            val insets = targetActivity?.window?.decorView?.let(ViewCompat::getRootWindowInsets)
+            imeBottomInset = insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+        }
+        return imeBottomInset
+    }
+
+    private fun bottomObscuredGestureMargin(
+        pageBounds: Rect,
+        displayHeight: Int,
+        imeBottomInset: Int,
+        edgeSafetyMargin: Int = 0,
+    ): Int {
+        val usablePageHeight = (pageBounds.height() - 1).coerceAtLeast(0)
+        val imeTop = displayHeight - imeBottomInset.coerceAtLeast(0)
+        val obscuredBottom = (pageBounds.bottom - imeTop).coerceIn(0, usablePageHeight)
+        return (obscuredBottom + edgeSafetyMargin.coerceAtLeast(0)).coerceIn(0, usablePageHeight)
+    }
+
+    private fun topGestureMarginForLoginScroll(direction: Direction, scaledTouchSlop: Int): Int =
+        if (direction == Direction.UP) scaledTouchSlop.coerceAtLeast(0) else 0
+
+    @Test
+    fun loginScrollKeepsGestureInsideCurrentImeViewport() {
+        val pageBounds = Rect(36, 80, 324, 536)
+
+        assertEquals(0, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 0))
+        assertEquals(179, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 283))
+        assertEquals(455, bottomObscuredGestureMargin(pageBounds, displayHeight = 640, imeBottomInset = 640))
+        assertEquals(
+            8,
+            bottomObscuredGestureMargin(
+                pageBounds,
+                displayHeight = 640,
+                imeBottomInset = 0,
+                edgeSafetyMargin = 8,
+            ),
+        )
+        assertEquals(
+            187,
+            bottomObscuredGestureMargin(
+                pageBounds,
+                displayHeight = 640,
+                imeBottomInset = 283,
+                edgeSafetyMargin = 8,
+            ),
+        )
+    }
+
+    @Test
+    fun loginScrollProtectsTopSystemEdgeOnlyForUpwardGesture() {
+        assertEquals(16, topGestureMarginForLoginScroll(Direction.UP, scaledTouchSlop = 16))
+        assertEquals(0, topGestureMarginForLoginScroll(Direction.DOWN, scaledTouchSlop = 16))
+    }
+
     private fun scrollLoginPageOnce(direction: Direction = Direction.DOWN): Boolean {
         return try {
-            val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0)) ?: return false
-            val page = appWindow.findObject(By.scrollable(true)) ?: return false
-            page.scroll(direction, 1f)
+            val appWindow = device.findObject(By.pkg(targetContext.packageName).depth(0))
+            if (appWindow == null) {
+                traceRuntimeOwner("semantic-scroll phase=resolve-app-window result=absent ${runtimeOwnerExposure()}")
+                return false
+            }
+            val page = appWindow.findObject(By.scrollable(true))
+            if (page == null) {
+                traceRuntimeOwner("semantic-scroll phase=resolve-page result=absent ${runtimeOwnerExposure()}")
+                return false
+            }
+            val pageBoundsBeforeScroll = Rect(page.visibleBounds)
+            val imeBottomInset = currentTargetWindowImeBottomInset()
+            val scaledTouchSlop = ViewConfiguration.get(targetContext).scaledTouchSlop
+            val topGestureMargin = topGestureMarginForLoginScroll(direction, scaledTouchSlop)
+            val bottomGestureMargin =
+                bottomObscuredGestureMargin(
+                    pageBounds = pageBoundsBeforeScroll,
+                    displayHeight = device.displayHeight,
+                    imeBottomInset = imeBottomInset,
+                    edgeSafetyMargin = scaledTouchSlop,
+                )
+            traceRuntimeOwner(
+                "semantic-scroll phase=before direction=$direction pageBounds=$pageBoundsBeforeScroll " +
+                    "displayHeight=${device.displayHeight} imeBottomInset=$imeBottomInset " +
+                    "scaledTouchSlop=$scaledTouchSlop topGestureMargin=$topGestureMargin " +
+                    "bottomGestureMargin=$bottomGestureMargin " +
+                    runtimeOwnerExposure(),
+            )
+            if (topGestureMargin > 0 || bottomGestureMargin > 0) {
+                page.setGestureMargins(0, topGestureMargin, 0, bottomGestureMargin)
+            }
+            val scrollStartedAt = SystemClock.uptimeMillis()
+            traceRuntimeOwner(
+                "semantic-scroll phase=page-scroll-start direction=$direction percentage=1.0 " +
+                    runtimeOwnerExposure(),
+            )
+            val scrollResult = page.scroll(direction, 1f)
+            val scrollEndedAt = SystemClock.uptimeMillis()
+            traceRuntimeOwner(
+                "semantic-scroll phase=page-scroll-end direction=$direction percentage=1.0 " +
+                    "result=$scrollResult elapsedMs=${scrollEndedAt - scrollStartedAt} " +
+                    runtimeOwnerExposure(),
+            )
+            val waitStartedAt = SystemClock.uptimeMillis()
+            traceRuntimeOwner("semantic-scroll phase=wait-for-idle-start startMs=$waitStartedAt")
             instrumentation.waitForIdleSync()
+            val waitEndedAt = SystemClock.uptimeMillis()
+            val pageBoundsAfterScroll = try {
+                Rect(page.visibleBounds)
+            } catch (_: StaleObjectException) {
+                null
+            }
+            traceRuntimeOwner(
+                "semantic-scroll phase=wait-for-idle-end endMs=$waitEndedAt " +
+                    "elapsedMs=${waitEndedAt - waitStartedAt} pageBounds=$pageBoundsAfterScroll " +
+                    runtimeOwnerExposure(),
+            )
             true
         } catch (_: StaleObjectException) {
+            traceRuntimeOwner("semantic-scroll phase=stale-node result=false ${runtimeOwnerExposure()}")
             false
         }
     }
+
+    private fun immediateVisibleBounds(selector: BySelector): Rect? =
+        try {
+            device.findObject(selector)?.let { Rect(it.visibleBounds) }
+        } catch (_: StaleObjectException) {
+            null
+        }
+
+    private fun traceSemanticSelector(selector: BySelector, phase: String, bounds: Rect?) {
+        traceRuntimeOwner(
+            "semantic-scroll-selector phase=$phase selector=$selector present=${bounds != null} " +
+                "bounds=$bounds ${runtimeOwnerExposure()}",
+        )
+    }
+
+    private fun traceLoginReachability(selector: BySelector, phase: String) {
+        Log.i(
+            "HULK_COMPAT_V2",
+            "login-reachability phase=$phase selector=$selector uptimeMs=${SystemClock.uptimeMillis()} " +
+                "thread=${Thread.currentThread().name}:${Thread.currentThread().state}",
+        )
+    }
+
+    private fun captureLoginReachabilityFailure(selector: BySelector, timeoutMs: Long): Nothing {
+        throw AssertionError(
+            buildString {
+                appendLine("Compatibility V2 login reachability exhausted")
+                appendLine("selector=$selector")
+                appendLine("timeoutMs=$timeoutMs")
+                appendLine("uptimeMs=${SystemClock.uptimeMillis()}")
+                appendLine("thread=${Thread.currentThread().name}:${Thread.currentThread().state}")
+            },
+        )
+    }
+
+    private fun credentialFieldSelector(label: String): BySelector = By.desc(label)
 
     private fun clickLoginFieldResolved(selector: BySelector, timeoutMs: Long = 6_000L): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         var didScroll = false
         while (SystemClock.uptimeMillis() < deadline) {
-            if (!dismissOptionalUpdateIfPresent()) return false
+            traceLoginReachability(selector, "before-optional-update-dismissal")
+            val optionalUpdateDismissed = dismissOptionalUpdateIfPresent()
+            traceLoginReachability(selector, "after-optional-update-dismissal:$optionalUpdateDismissed")
+            if (!optionalUpdateDismissed) {
+                captureLoginReachabilityFailure(selector, timeoutMs)
+            }
             try {
-                val node = device.findObject(selector)
-                if (node != null) {
-                    node.click()
-                    instrumentation.waitForIdleSync()
-                    if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
-                } else if (!didScroll) {
+                traceLoginReachability(selector, "before-find")
+                var node = device.findObject(selector)
+                traceLoginReachability(selector, "after-find:present=${node != null}")
+                if (node == null && !didScroll) {
                     didScroll = true
+                    traceSemanticSelector(selector, "before", null)
                     scrollLoginPageOnce()
+                    node = device.findObject(selector)
+                    traceSemanticSelector(
+                        selector,
+                        "immediately-after",
+                        node?.let { Rect(it.visibleBounds) },
+                    )
+                }
+                if (node != null) {
+                    traceLoginReachability(selector, "before-click")
+                    node.click()
+                    traceLoginReachability(selector, "after-click")
+                    traceLoginReachability(selector, "before-wait-for-idle")
+                    instrumentation.waitForIdleSync()
+                    traceLoginReachability(selector, "after-wait-for-idle")
+                    if (!device.hasObject(By.text("يتوفر تحديث جديد"))) return true
                 }
             } catch (_: StaleObjectException) {
+                traceLoginReachability(selector, "stale-accessibility-node")
                 // Resolve from the current accessibility tree on the next bounded probe.
             }
             val remaining = deadline - SystemClock.uptimeMillis()
             if (remaining > 0L) {
+                traceLoginReachability(selector, "before-selector-wait:$remaining")
                 device.wait(Until.hasObject(selector), minOf(remaining, 500L))
+                traceLoginReachability(selector, "after-selector-wait")
+                if (didScroll) {
+                    traceSemanticSelector(
+                        selector,
+                        "later-after-selector-wait",
+                        immediateVisibleBounds(selector),
+                    )
+                }
             }
         }
-        return false
+        captureLoginReachabilityFailure(selector, timeoutMs)
     }
 
     private fun resolvedVisibleBounds(selector: BySelector, timeoutMs: Long = 6_000L): Rect? {
@@ -451,23 +767,50 @@ class CompatibilityV2InstrumentationTest {
     }
 
     private fun imeWindowIsActuallyVisible(): Boolean {
-        val dump = device.executeShellCommand("dumpsys window windows")
+        val probeStartedAt = SystemClock.uptimeMillis()
+        traceRuntimeOwner("tv-ime-visibility-probe phase=start startMs=$probeStartedAt")
+        val shellStartedAt = SystemClock.uptimeMillis()
+        traceRuntimeOwner("tv-ime-shell-probe phase=start startMs=$shellStartedAt")
+        val dump = try {
+            device.executeShellCommand("dumpsys window windows")
+        } catch (error: Throwable) {
+            val shellFailedAt = SystemClock.uptimeMillis()
+            traceRuntimeOwner(
+                "tv-ime-shell-probe phase=failure endMs=$shellFailedAt " +
+                    "elapsedMs=${shellFailedAt - shellStartedAt} error=${error.javaClass.simpleName}",
+            )
+            throw error
+        }
+        val shellEndedAt = SystemClock.uptimeMillis()
+        traceRuntimeOwner(
+            "tv-ime-shell-probe phase=end endMs=$shellEndedAt " +
+                "elapsedMs=${shellEndedAt - shellStartedAt} result=completed",
+        )
         val block = StringBuilder()
         var inImeWindow = false
         for (line in dump.lineSequence()) {
             val startsWindow = line.startsWith("  Window #") && line.contains(" Window{")
-            if (!inImeWindow && startsWindow && line.contains(" InputMethod}:")) {
+            if (!inImeWindow && startsWindow && line.contains(" InputMethod}:") ) {
                 inImeWindow = true
             } else if (inImeWindow && startsWindow) {
                 break
             }
             if (inImeWindow) block.appendLine(line)
         }
-        if (block.isEmpty()) return false
-        if (!block.contains("mViewVisibility=0x0")) return false
-        return block.contains("mHasSurface=true") ||
-            block.contains("isOnScreen=true") ||
-            block.contains("isVisible=true")
+        val imeVisible =
+            block.isNotEmpty() &&
+                block.contains("mViewVisibility=0x0") &&
+                (
+                    block.contains("mHasSurface=true") ||
+                        block.contains("isOnScreen=true") ||
+                        block.contains("isVisible=true")
+                )
+        val probeEndedAt = SystemClock.uptimeMillis()
+        traceRuntimeOwner(
+            "tv-ime-visibility-probe phase=end endMs=$probeEndedAt " +
+                "elapsedMs=${probeEndedAt - probeStartedAt} imeVisible=$imeVisible",
+        )
+        return imeVisible
     }
 
     private fun waitForTelevisionImeHiddenSettled(
@@ -476,19 +819,70 @@ class CompatibilityV2InstrumentationTest {
     ): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         var hiddenSince = -1L
+        var cycle = 0
         while (SystemClock.uptimeMillis() < deadline) {
+            cycle += 1
             val remaining = deadline - SystemClock.uptimeMillis()
-            if (!dismissOptionalUpdateIfPresent(minOf(1_000L, remaining))) {
+            val optionalUpdateStartedAt = SystemClock.uptimeMillis()
+            traceRuntimeOwner(
+                "tv-ime-settle cycle=$cycle phase=optional-update-start " +
+                    "startMs=$optionalUpdateStartedAt remainingMs=$remaining",
+            )
+            val optionalUpdateDismissed = dismissOptionalUpdateIfPresent(minOf(1_000L, remaining))
+            val optionalUpdateEndedAt = SystemClock.uptimeMillis()
+            traceRuntimeOwner(
+                "tv-ime-settle cycle=$cycle phase=optional-update-end endMs=$optionalUpdateEndedAt " +
+                    "elapsedMs=${optionalUpdateEndedAt - optionalUpdateStartedAt} " +
+                    "result=$optionalUpdateDismissed",
+            )
+            if (!optionalUpdateDismissed) {
+                traceRuntimeOwner(
+                    "tv-ime-settle cycle=$cycle phase=hidden-streak-reset " +
+                        "reason=optional-update previousHiddenSince=$hiddenSince",
+                )
                 hiddenSince = -1L
                 continue
             }
             val loginExposed = device.hasObject(By.text("كود الدخول"))
+            traceRuntimeOwner("tv-ime-settle cycle=$cycle phase=login-exposure result=$loginExposed")
             val now = SystemClock.uptimeMillis()
-            if (!loginExposed || imeWindowIsActuallyVisible()) {
+            val imeVisible = if (loginExposed) {
+                val imeProbeStartedAt = SystemClock.uptimeMillis()
+                traceRuntimeOwner(
+                    "tv-ime-settle cycle=$cycle phase=ime-visibility-start startMs=$imeProbeStartedAt",
+                )
+                val visible = imeWindowIsActuallyVisible()
+                val imeProbeEndedAt = SystemClock.uptimeMillis()
+                traceRuntimeOwner(
+                    "tv-ime-settle cycle=$cycle phase=ime-visibility-end endMs=$imeProbeEndedAt " +
+                        "elapsedMs=${imeProbeEndedAt - imeProbeStartedAt} result=$visible",
+                )
+                visible
+            } else {
+                traceRuntimeOwner("tv-ime-settle cycle=$cycle phase=ime-visibility-skipped reason=login-not-exposed")
+                null
+            }
+            if (!loginExposed || imeVisible == true) {
+                traceRuntimeOwner(
+                    "tv-ime-settle cycle=$cycle phase=hidden-streak-reset " +
+                        "reason=${if (!loginExposed) "login-not-exposed" else "ime-visible"} " +
+                        "previousHiddenSince=$hiddenSince",
+                )
                 hiddenSince = -1L
             } else {
-                if (hiddenSince < 0L) hiddenSince = now
-                if (now - hiddenSince >= stableHiddenMs) return true
+                if (hiddenSince < 0L) {
+                    hiddenSince = now
+                    traceRuntimeOwner(
+                        "tv-ime-settle cycle=$cycle phase=hidden-streak-start hiddenSince=$hiddenSince",
+                    )
+                }
+                if (now - hiddenSince >= stableHiddenMs) {
+                    traceRuntimeOwner(
+                        "tv-ime-settle cycle=$cycle phase=hidden-streak-success " +
+                            "hiddenMs=${now - hiddenSince} stableHiddenMs=$stableHiddenMs",
+                    )
+                    return true
+                }
             }
             val sampleRemaining = deadline - SystemClock.uptimeMillis()
             if (sampleRemaining > 0L) {
@@ -496,6 +890,10 @@ class CompatibilityV2InstrumentationTest {
                 SystemClock.sleep(minOf(500L, sampleRemaining))
             }
         }
+        traceRuntimeOwner(
+            "tv-ime-settle phase=deadline-exhausted cycles=$cycle timeoutMs=$timeoutMs " +
+                "stableHiddenMs=$stableHiddenMs hiddenSince=$hiddenSince",
+        )
         return false
     }
 
@@ -611,6 +1009,14 @@ class CompatibilityV2InstrumentationTest {
                         if (targetContext.resources.configuration.screenWidthDp >= 600) Direction.UP else Direction.DOWN
                     scrollLoginPageOnce(direction)
                 },
+                traceReachability = { phase, loginBounds, subscribeBounds ->
+                    traceRuntimeOwner(
+                        "ime-login-actions phase=$phase loginReachable=${loginBounds?.height()?.let { it > 0 } == true} " +
+                            "loginBounds=$loginBounds " +
+                            "subscribeReachable=${subscribeBounds?.height()?.let { it > 0 } == true} " +
+                            "subscribeBounds=$subscribeBounds ${runtimeOwnerExposure()}",
+                    )
+                },
             )
             assertTrue("Login action was not reachable while the IME was active", loginReachable)
             assertTrue("Subscribe action was not reachable while the IME was active", subscribeReachable)
@@ -672,9 +1078,9 @@ class CompatibilityV2InstrumentationTest {
     @Test
     fun loginFieldsRemainReachableAcrossScrollableLayouts() {
         assertTrue("Application package did not become visible", launchMainPackage())
-        assertTrue("Access-code field was not reachable", clickLoginFieldResolved(By.text("كود الدخول")))
-        assertTrue("Username field was not reachable", clickLoginFieldResolved(By.text("اسم المستخدم")))
-        assertTrue("Password field was not reachable", clickLoginFieldResolved(By.text("كلمة المرور")))
+        assertTrue("Access-code field was not reachable", clickLoginFieldResolved(credentialFieldSelector("كود الدخول")))
+        assertTrue("Username field was not reachable", clickLoginFieldResolved(credentialFieldSelector("اسم المستخدم")))
+        assertTrue("Password field was not reachable", clickLoginFieldResolved(credentialFieldSelector("كلمة المرور")))
     }
 
     @Test
