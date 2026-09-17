@@ -18,17 +18,5 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
 }
 
 cc_require_csrf();
-$_SESSION = [];
-if (ini_get('session.use_cookies')) {
-    $parameters = session_get_cookie_params();
-    setcookie(session_name(), '', [
-        'expires' => time() - 42000,
-        'path' => $parameters['path'],
-        'domain' => $parameters['domain'],
-        'secure' => true,
-        'httponly' => true,
-        'samesite' => 'Strict',
-    ]);
-}
-session_destroy();
+cc_destroy_admin_session();
 cc_redirect(cc_base_path() . '/login.php');

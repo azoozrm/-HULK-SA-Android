@@ -28,19 +28,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
         try {
             $db = cc_db('control');
-            $statement = $db->prepare('SELECT * FROM app_admin_users WHERE username = :username LIMIT 1');
+            $db->beginTransaction();
+            $statement = $db->prepare(
+                'SELECT * FROM app_admin_users WHERE username = :username LIMIT 1 FOR UPDATE'
+            );
             $statement->execute(['username' => $username]);
             $user = $statement->fetch();
-            $dummyHash = password_hash('HULK-control-center-invalid-password', PASSWORD_DEFAULT);
-            $hash = is_array($user) ? (string) $user['password_hash'] : $dummyHash;
-            $passwordMatches = password_verify($password, $hash);
 
-            if (cc_login_record_is_valid($user, $passwordMatches, $now)) {
+            if (cc_login_record_accepts_password($user, $password, $now)) {
                 $update = $db->prepare(
                     'UPDATE app_admin_users SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW() '
                     . 'WHERE id = :id'
                 );
                 $update->execute(['id' => $user['id']]);
+                $db->commit();
                 session_regenerate_id(true);
                 $_SESSION['admin_user_id'] = (int) $user['id'];
                 $_SESSION['admin_username'] = (string) $user['username'];
@@ -73,8 +74,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     'id' => $user['id'],
                 ]);
             }
+            $db->commit();
             $error = 'بيانات الدخول غير صحيحة أو الحساب موقوف مؤقتًا.';
         } catch (Throwable $exception) {
+            if (isset($db) && $db instanceof PDO && $db->inTransaction()) {
+                $db->rollBack();
+            }
             error_log('HULK Control Center login failure.');
             $error = 'تعذر تسجيل الدخول حاليًا.';
         }

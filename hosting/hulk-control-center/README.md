@@ -69,6 +69,8 @@ Rollback is route-level: disable `/control-center/` or remove this package. Phas
 find hosting/hulk-control-center -type f -name '*.php' -print0 \
   | xargs -0 -n1 php -l
 php hosting/hulk-control-center/tests/run.php
+node --check hosting/hulk-control-center/assets/app.js
+node hosting/hulk-control-center/tests/navigation.test.js
 ```
 
 Manual rendered review should cover at least 1440×1000, 834×1112, and 390×844, including navigation, long Arabic labels, keyboard focus, table overflow, login, unavailable, empty, recoverable error, and loading/skeleton primitives.

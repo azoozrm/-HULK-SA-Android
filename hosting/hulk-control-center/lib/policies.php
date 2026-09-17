@@ -7,6 +7,21 @@ function cc_csrf_tokens_match(string $expected, string $provided): bool
     return $expected !== '' && $provided !== '' && hash_equals($expected, $provided);
 }
 
+function cc_dummy_password_hash(): string
+{
+    // Fixed bcrypt hash used only to keep unknown-user verification on the
+    // same password_verify() path. It is not a credential or an account hash.
+    return '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
+}
+
+function cc_login_record_accepts_password(mixed $record, string $password, int $now): bool
+{
+    $hash = is_array($record) ? (string) ($record['password_hash'] ?? '') : cc_dummy_password_hash();
+    $passwordMatches = $hash !== '' && password_verify($password, $hash);
+
+    return cc_login_record_is_valid($record, $passwordMatches, $now);
+}
+
 function cc_admin_record_matches_session(int $sessionId, string $sessionUsername, mixed $record): bool
 {
     if (

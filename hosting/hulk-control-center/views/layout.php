@@ -62,7 +62,7 @@ function cc_page_start(array $resolved, array $admin): void
             </div>
         </aside>
 
-        <div class="workspace">
+        <div class="workspace" data-workspace>
             <header class="topbar">
                 <div class="topbar__start">
                     <button class="icon-button nav-trigger" type="button" data-nav-open aria-controls="primary-sidebar" aria-expanded="false" aria-label="فتح قائمة التنقل">

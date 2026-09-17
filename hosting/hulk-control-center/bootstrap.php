@@ -184,6 +184,24 @@ function cc_clear_admin_identity(): void
     }
 }
 
+function cc_destroy_admin_session(): void
+{
+    cc_start_admin_session();
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $parameters = session_get_cookie_params();
+        setcookie(session_name(), '', [
+            'expires' => time() - 42000,
+            'path' => $parameters['path'],
+            'domain' => $parameters['domain'],
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
+    }
+    session_destroy();
+}
+
 function cc_admin(): ?array
 {
     cc_start_admin_session();
