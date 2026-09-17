@@ -54,6 +54,8 @@ const backdrop = new TestElement('backdrop');
 const workspace = new TestElement('workspace');
 const body = new TestElement('body');
 const lastLink = new TestElement('last-link');
+const confirmForm = new TestElement('confirm-form');
+confirmForm.getAttribute = () => 'تأكيد الاختبار';
 sidebar.focusableChildren = [closeButton, lastLink];
 
 const elements = {
@@ -68,6 +70,7 @@ const testDocument = {
     activeElement: openButton,
     body,
     querySelector: (selector) => elements[selector] ?? null,
+    querySelectorAll: (selector) => selector === 'form[data-confirm]' ? [confirmForm] : [],
     addEventListener: (name, handler) => {
         documentHandlers[name] = handler;
     },
@@ -81,11 +84,12 @@ const mediaQuery = {
 };
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'assets', 'app.js'), 'utf8');
+let confirmResult = false;
 vm.runInNewContext(source, {
     Array,
     document: testDocument,
     HTMLElement: TestElement,
-    window: {matchMedia: () => mediaQuery},
+    window: {matchMedia: () => mediaQuery, confirm: () => confirmResult},
 });
 
 assert('inert' in sidebar.attributes, 'closed mobile navigation is inert');
@@ -115,5 +119,13 @@ mediaQuery.matches = false;
 mediaQuery.handler();
 assert(!('inert' in sidebar.attributes), 'desktop navigation remains interactive after a breakpoint change');
 assert(!('aria-hidden' in sidebar.attributes), 'desktop navigation remains exposed after a breakpoint change');
+
+let prevented = false;
+confirmForm.handlers.submit({preventDefault: () => { prevented = true; }});
+assert(prevented, 'a rejected destructive-action confirmation prevents submission');
+confirmResult = true;
+prevented = false;
+confirmForm.handlers.submit({preventDefault: () => { prevented = true; }});
+assert(!prevented, 'an accepted destructive-action confirmation permits submission');
 
 process.stdout.write('PASS: Control Center mobile navigation contract.\n');

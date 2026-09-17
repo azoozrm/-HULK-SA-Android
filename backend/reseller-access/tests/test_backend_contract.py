@@ -24,6 +24,10 @@ class ResellerBackendContractTest(unittest.TestCase):
             SCHEMA,
             PUBLIC / ".hulk-reseller-app/.htaccess",
             PUBLIC / ".hulk-reseller-app/config.example.php",
+            PUBLIC / ".hulk-reseller-app/admin-domain.php",
+            PUBLIC / "hulk-reseller-admin/index.php",
+            PUBLIC / "hulk-reseller-admin/action.php",
+            ROOT / "tests/run.php",
         )
         self.assertFalse([str(path) for path in required if not path.is_file()])
 
@@ -39,6 +43,10 @@ class ResellerBackendContractTest(unittest.TestCase):
             self.assertRegex(schema, rf"\b{field}\b")
         self.assertIn("access_code_hash", schema)
         self.assertIn("password_hash", schema)
+        for table in ("admins", "resolver_rate_limits"):
+            self.assertRegex(schema, rf"CREATE TABLE IF NOT EXISTS {table}\b")
+        self.assertIn("admins_username_key_unique", schema)
+        self.assertIn("resolver_rate_limits_window_idx", schema)
 
     def test_access_codes_use_high_entropy_canonical_format(self) -> None:
         bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
@@ -80,6 +88,23 @@ class ResellerBackendContractTest(unittest.TestCase):
             self.assertIn(f"case '{action_name}'", action)
         self.assertIn("hulk_verify_csrf", action)
         self.assertIn("password_verify", action)
+
+    def test_owner_mutations_share_one_domain(self) -> None:
+        domain = (PUBLIC / ".hulk-reseller-app/admin-domain.php").read_text(encoding="utf-8")
+        owner_action = (PUBLIC / "hulk-reseller-admin/action.php").read_text(encoding="utf-8")
+        bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
+        for function in (
+            "hulk_admin_create_reseller",
+            "hulk_admin_set_status",
+            "hulk_admin_update_host",
+            "hulk_admin_set_code",
+            "hulk_admin_rotate_code",
+            "hulk_admin_reset_password",
+        ):
+            self.assertIn(f"function {function}", domain)
+            self.assertIn(f"{function}(", owner_action)
+        self.assertIn("require_once __DIR__ . '/admin-domain.php'", bootstrap)
+        self.assertIn("hulk_start_session('admin')", owner_action)
 
     def test_no_runtime_config_or_reseller_data_is_tracked(self) -> None:
         self.assertFalse((PUBLIC / ".hulk-reseller-app/config.php").exists())

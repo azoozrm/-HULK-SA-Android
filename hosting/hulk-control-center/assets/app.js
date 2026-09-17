@@ -106,4 +106,13 @@
 
     mobileQuery.addEventListener('change', () => setOpen(false, false));
     setOpen(false, false);
+
+    document.querySelectorAll('form[data-confirm]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            const message = form.getAttribute('data-confirm') || 'هل تريد تنفيذ هذا الإجراء؟';
+            if (!window.confirm(message)) {
+                event.preventDefault();
+            }
+        });
+    });
 })();
