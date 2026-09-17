@@ -184,6 +184,43 @@ function ops_growth_custom_qr_url(PDO $db, string $slot): ?string
     return ops_public_url($relativePath);
 }
 
+function ops_presence_discovery(?array $settings = null): ?array
+{
+    $presence = $settings ?? (ops_load_config()['presence'] ?? []);
+    if (!is_array($presence) || ($presence['enabled'] ?? false) !== true) {
+        return null;
+    }
+
+    $baseUrl = rtrim(trim((string) ($presence['base_url'] ?? '')), '/') . '/';
+    $parts = parse_url($baseUrl);
+    $heartbeat = (int) ($presence['heartbeat_seconds'] ?? 0);
+    $onlineTtl = (int) ($presence['online_ttl_seconds'] ?? 0);
+    if (
+        !filter_var($baseUrl, FILTER_VALIDATE_URL)
+        || !is_array($parts)
+        || ($parts['scheme'] ?? '') !== 'https'
+        || strtolower((string) ($parts['host'] ?? '')) !== 'hulksa.com'
+        || ($parts['path'] ?? '') !== '/control-center/api/app/v1/presence/'
+        || isset($parts['user'])
+        || isset($parts['pass'])
+        || isset($parts['query'])
+        || isset($parts['fragment'])
+        || $heartbeat < 15
+        || $heartbeat > 600
+        || $onlineTtl < $heartbeat * 2
+        || $onlineTtl > 3600
+    ) {
+        throw new RuntimeException('Operations Presence discovery configuration is invalid.');
+    }
+
+    return [
+        'enabled' => true,
+        'baseUrl' => $baseUrl,
+        'heartbeatSeconds' => $heartbeat,
+        'onlineTtlSeconds' => $onlineTtl,
+    ];
+}
+
 function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
 {
     $currentTime = $now ?? new DateTimeImmutable('now');
@@ -192,7 +229,7 @@ function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
         ops_active_announcements($db, $currentTime)
     );
 
-    return [
+    $payload = [
         'schemaVersion' => 1,
         'generatedAt' => $currentTime->getTimestamp(),
         'service' => ops_service_snapshot($db),
@@ -202,4 +239,9 @@ function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
         'features' => ops_feature_snapshot($db),
         'growth' => ops_growth_snapshot($db),
     ];
+    $presence = ops_presence_discovery();
+    if ($presence !== null) {
+        $payload['presence'] = $presence;
+    }
+    return $payload;
 }

@@ -23,4 +23,12 @@ return [
         // after the first administrator is created.
         'bootstrap_token' => '',
     ],
+    // Optional additive schema-v1 discovery. Keep disabled until the separate
+    // Android integration is approved and deployed; disabled means omitted.
+    'presence' => [
+        'enabled' => false,
+        'base_url' => 'https://hulksa.com/control-center/api/app/v1/presence/',
+        'heartbeat_seconds' => 60,
+        'online_ttl_seconds' => 180,
+    ],
 ];

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/lib/policies.php';
+require_once dirname(__DIR__) . '/lib/operations.php';
 
 $tests = 0;
 
@@ -196,6 +197,23 @@ ops_test(
 ops_test(
     ops_growth_qr_descriptor_errors('qr.png', 'image/png', 1024, 2048, "\x89PNG\r\n\x1a\nDATA", 600, 400) !== [],
     'non-square QR image is rejected'
+);
+
+ops_test(ops_presence_discovery([]) === null, 'Presence discovery is absent by default');
+$presenceDiscovery = ops_presence_discovery([
+    'enabled' => true,
+    'base_url' => 'https://hulksa.com/control-center/api/app/v1/presence/',
+    'heartbeat_seconds' => 60,
+    'online_ttl_seconds' => 180,
+]);
+ops_test(
+    $presenceDiscovery === [
+        'enabled' => true,
+        'baseUrl' => 'https://hulksa.com/control-center/api/app/v1/presence/',
+        'heartbeatSeconds' => 60,
+        'onlineTtlSeconds' => 180,
+    ],
+    'enabled Presence discovery is bounded and additive'
 );
 
 fwrite(STDOUT, "PASS: {$tests} HULK Operations backend policy checks.\n");
