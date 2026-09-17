@@ -124,6 +124,10 @@ $javascript = file_get_contents($root . '/assets/app.js');
 $login = file_get_contents($root . '/login.php');
 $logout = file_get_contents($root . '/logout.php');
 $htaccess = file_get_contents($root . '/.htaccess');
+$index = file_get_contents($root . '/index.php');
+$operationsAdapter = file_get_contents($root . '/lib/operations-adapter.php');
+$resellerAdapter = file_get_contents($root . '/lib/reseller-adapter.php');
+$resellerView = file_get_contents($root . '/views/resellers.php');
 cc_test(is_string($layout) && str_contains($layout, '<html lang="ar" dir="rtl">'), 'layout is Arabic and RTL');
 cc_test(is_string($css) && str_contains($css, ':focus-visible'), 'visible keyboard focus styles exist');
 cc_test(is_string($css) && str_contains($css, '@media (max-width: 860px)'), 'mobile navigation breakpoint exists');
@@ -133,6 +137,22 @@ cc_test(is_string($login) && str_contains($login, 'FOR UPDATE') && str_contains(
 cc_test(is_string($login) && str_contains($login, 'cc_login_record_accepts_password(') && !str_contains($login, 'password_hash('), 'unknown-user login does not generate a request-specific password hash');
 cc_test(is_string($logout) && str_contains($logout, "REQUEST_METHOD") && str_contains($logout, 'cc_require_csrf()') && str_contains($logout, 'cc_destroy_admin_session()'), 'logout is POST-only, CSRF-protected, and destroys the session');
 cc_test(is_string($htaccess) && str_contains($htaccess, 'config') && str_contains($htaccess, '[F,L,NC]'), 'configuration and internals are denied by web rules');
+cc_test(is_string($index) && str_contains($index, 'cc_require_csrf()'), 'all Control Center mutations pass through CSRF enforcement');
+cc_test(
+    is_string($operationsAdapter) &&
+        str_contains($operationsAdapter, "hulk-operations") &&
+        str_contains($operationsAdapter, "/admin/actions.php"),
+    'Operations mutations reuse the legacy authoritative action library'
+);
+cc_test(is_string($operationsAdapter) && str_contains($operationsAdapter, '$allowedActions'), 'Operations actions are allow-listed per module');
+cc_test(is_string($resellerAdapter) && str_contains($resellerAdapter, 'admin-domain.php') === false, 'reseller adapter obtains the shared domain through the authoritative bootstrap');
+cc_test(is_string($resellerAdapter) && str_contains($resellerAdapter, 'ops_audit('), 'successful Control Center reseller mutations use Operations audit');
+cc_test(
+    is_string($resellerAdapter) &&
+        !preg_match('/\$details\s*=\s*\[[^\]]*[\'\"](?:password|access_code)[\'\"]\s*=>/i', $resellerAdapter),
+    'reseller audit details omit passwords and access-code values'
+);
+cc_test(is_string($resellerView) && str_contains($resellerView, "credential-value") && !str_contains($resellerView, 'reveal'), 'owner access codes are displayed directly without reveal UX');
 
 $forbidden = [
     '/hulknjcx_/i' => 'production database name',
@@ -154,4 +174,4 @@ foreach ($iterator as $file) {
 
 cc_test(!is_file($root . '/config.php'), 'runtime config is not present in source');
 
-fwrite(STDOUT, "PASS: {$tests} HULK Control Center Phase 1 checks.\n");
+fwrite(STDOUT, "PASS: {$tests} HULK Control Center Phase 2 checks.\n");

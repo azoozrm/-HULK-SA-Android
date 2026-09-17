@@ -155,6 +155,28 @@ function cc_redirect(string $path): never
     exit;
 }
 
+function cc_flash(string $type, string $message): void
+{
+    cc_start_admin_session();
+    $_SESSION['cc_flash'] = [
+        'type' => in_array($type, ['success', 'warning', 'danger'], true) ? $type : 'warning',
+        'message' => $message,
+    ];
+}
+
+function cc_take_flash(): ?array
+{
+    cc_start_admin_session();
+    $flash = $_SESSION['cc_flash'] ?? null;
+    unset($_SESSION['cc_flash']);
+    return is_array($flash) ? $flash : null;
+}
+
+function cc_post_action(): string
+{
+    return trim(is_string($_POST['action'] ?? null) ? $_POST['action'] : '');
+}
+
 function cc_csrf_token(): string
 {
     cc_start_admin_session();

@@ -6,7 +6,7 @@ declare(strict_types=1);
     <div class="dashboard-intro__copy">
         <span class="eyebrow">مركز واحد. رؤية أوضح.</span>
         <h2>الأساس الجديد لإدارة HULK SA</h2>
-        <p>تم تجهيز الهيكل الإداري الموحّد. ستُربط البيانات التشغيلية الموثوقة تدريجيًا في المراحل التالية بدون تغيير الأنظمة الحالية.</p>
+        <p>تم توحيد إدارة Operations والموزعين مع إبقاء كل قاعدة بيانات مالكة لبياناتها. مؤشرات لوحة المتابعة نفسها مؤجلة للمرحلة الثالثة.</p>
     </div>
     <div class="dashboard-intro__seal" aria-hidden="true">
         <img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt="">
@@ -22,7 +22,7 @@ declare(strict_types=1);
     <?php cc_kpi_card('المستخدمون الآن', 'غير متاح بعد', 'يتطلب عقد Presence في المراحل اللاحقة.', 'users'); ?>
     <?php cc_kpi_card('الجلسات اليوم', 'غير متاح بعد', 'سيظهر بعد تفعيل سجل الجلسات.', 'clock'); ?>
     <?php cc_kpi_card('الأجهزة النشطة', 'غير متاح بعد', 'لا يوجد مصدر خادم موثوق حاليًا.', 'device'); ?>
-    <?php cc_kpi_card('الموزعون النشطون', 'غير متاح بعد', 'سيُربط بقاعدة الموزعين في Phase 2.', 'briefcase'); ?>
+    <?php cc_kpi_card('الموزعون النشطون', 'غير متاح بعد', 'سيظهر كمؤشر موثوق ضمن Dashboard V1 في Phase 3.', 'briefcase'); ?>
     <?php cc_kpi_card('صحة الهوستات', 'غير متاح بعد', 'الفحص التشغيلي ضمن Phase 7.', 'heart'); ?>
     <?php cc_kpi_card('اعتماد الإصدارات', 'غير متاح بعد', 'لن يُستنتج من تنزيلات APK.', 'chart'); ?>
 </section>
@@ -39,8 +39,8 @@ declare(strict_types=1);
     <article class="panel">
         <header class="panel__header"><div><span class="eyebrow">الجاهزية</span><h2>مصادر البيانات</h2></div></header>
         <div class="source-list">
-            <div class="source-row"><span class="source-row__icon"><?= cc_icon('pulse') ?></span><span><strong>Operations</strong><small>سلطة التحكم والتشغيل</small></span><?php cc_status_badge('Phase 2', 'neutral'); ?></div>
-            <div class="source-row"><span class="source-row__icon"><?= cc_icon('briefcase') ?></span><span><strong>Reseller</strong><small>سلطة الموزعين والوصول</small></span><?php cc_status_badge('Phase 2', 'neutral'); ?></div>
+            <div class="source-row"><span class="source-row__icon"><?= cc_icon('pulse') ?></span><span><strong>Operations</strong><small>سلطة التحكم والتشغيل</small></span><?php cc_status_badge('متصل', 'success'); ?></div>
+            <div class="source-row"><span class="source-row__icon"><?= cc_icon('briefcase') ?></span><span><strong>Reseller</strong><small>سلطة الموزعين والوصول</small></span><?php cc_status_badge('متصل', 'success'); ?></div>
             <div class="source-row"><span class="source-row__icon"><?= cc_icon('users') ?></span><span><strong>Presence</strong><small>الجلسات والحضور المباشر</small></span><?php cc_status_badge('Phase 4', 'neutral'); ?></div>
         </div>
     </article>

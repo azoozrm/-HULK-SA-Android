@@ -74,7 +74,7 @@ function hulk_security_headers(): void
     }
 }
 
-function hulk_start_session(): void
+function hulk_start_session(string $area = 'reseller'): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
@@ -87,10 +87,12 @@ function hulk_start_session(): void
     ini_set('session.gc_maxlifetime', (string) $lifetime);
     ini_set('session.cookie_httponly', '1');
     ini_set('session.cookie_samesite', 'Strict');
-    session_name('HULK_RESELLER_SESSION');
+    $isAdmin = $area === 'admin';
+    $sessionPath = $isAdmin ? '/hulk-reseller-admin/' : '/reseller/';
+    session_name($isAdmin ? 'HULK_ADMIN_SESSION' : 'HULK_RESELLER_SESSION');
     session_set_cookie_params([
         'lifetime' => $lifetime,
-        'path' => '/reseller/',
+        'path' => $sessionPath,
         'secure' => hulk_is_https(),
         'httponly' => true,
         'samesite' => 'Strict',
@@ -240,3 +242,23 @@ function hulk_current_reseller(): ?array
     }
     return $reseller;
 }
+
+function hulk_current_admin(): ?array
+{
+    $adminId = filter_var($_SESSION['admin_id'] ?? null, FILTER_VALIDATE_INT);
+    if (!$adminId) {
+        return null;
+    }
+    $statement = hulk_db()->prepare(
+        'SELECT admin_id, username, status FROM admins WHERE admin_id = :id LIMIT 1'
+    );
+    $statement->execute(['id' => $adminId]);
+    $admin = $statement->fetch();
+    if (!is_array($admin) || ($admin['status'] ?? '') !== HULK_ACTIVE_STATUS) {
+        unset($_SESSION['admin_id']);
+        return null;
+    }
+    return $admin;
+}
+
+require_once __DIR__ . '/admin-domain.php';

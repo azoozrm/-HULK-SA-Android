@@ -6,6 +6,7 @@
 - إضافة أو تعديل مضيف IPTV.
 - عرض كود الدخول وتغييره.
 - حل الكود من Android عبر `POST /api/reseller/resolve`.
+- إدارة مالك النظام عبر `/hulk-reseller-admin/` باستخدام جدول `admins` المثبت من مخطط الإنتاج.
 
 ## متطلبات الاستضافة
 
@@ -37,6 +38,7 @@ printf '%s' "$RESELLER_INITIAL_PASSWORD" | \
 
 - البوابة: `https://hulksa.com/reseller/`
 - API: `https://hulksa.com/api/reseller/resolve`
+- إدارة المالك القديمة: `https://hulksa.com/hulk-reseller-admin/`
 
 مجلد `.hulk-reseller-app` محمي من الوصول عبر الويب بواسطة `.htaccess`. يحتوي
 GitHub على السورس والمخطط فقط، ولا يحتوي على كلمات مرور أو بيانات موزعين.
@@ -63,3 +65,18 @@ Content-Type: application/json
 - `INVALID_HOST` — 422
 - `SERVICE_UNAVAILABLE` — 503
 
+## ملكية الإدارة المشتركة
+
+قواعد إنشاء الموزع وتحديث حالته وهوسته وكوده وكلمة مروره موجودة في
+`public/.hulk-reseller-app/admin-domain.php`. تستخدمها لوحة الإدارة القديمة وHULK SA
+Control Center، بينما تبقى قاعدة reseller هي المالك الوحيد لهذه الحقول.
+
+المخطط يتضمن تعريفَي `admins` و`resolver_rate_limits` كما أُخذا من قاعدة الإنتاج
+باستخدام `SHOW CREATE TABLE`. لا يتضمن المستودع بيانات الحسابات أو إعداد الاتصال.
+
+## التحقق
+
+```bash
+php backend/reseller-access/tests/run.php
+python3 -m unittest backend/reseller-access/tests/test_backend_contract.py
+```

@@ -163,7 +163,7 @@ function cc_table_shell(array $columns): void
                 </tr></thead>
                 <tbody>
                 <tr class="table-empty-row">
-                    <td colspan="<?= count($columns) ?>">لا توجد بيانات متصلة في المرحلة الأولى.</td>
+                    <td colspan="<?= count($columns) ?>">لا توجد بيانات متصلة بهذه الوحدة.</td>
                 </tr>
                 </tbody>
             </table>

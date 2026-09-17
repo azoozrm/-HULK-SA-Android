@@ -1225,6 +1225,176 @@ td {
 .notice--warning .notice__icon { color: var(--warning); background: rgba(244, 194, 92, 0.08); }
 .notice--danger .notice__icon { color: var(--danger); background: rgba(255, 124, 124, 0.08); }
 
+.module-stack {
+    display: grid;
+    gap: 16px;
+}
+
+.module-stack > .notice {
+    margin-block-end: 0;
+}
+
+.admin-form {
+    display: grid;
+    gap: 15px;
+}
+
+.admin-form--grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+}
+
+.form-field--wide,
+.check-list {
+    grid-column: 1 / -1;
+}
+
+.form-field select,
+.form-field textarea,
+.inline-form input,
+.inline-editor input {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    color: var(--text);
+    background: #0c0f12;
+}
+
+.form-field select,
+.form-field textarea {
+    min-height: 48px;
+    padding: 10px 13px;
+}
+
+.form-field textarea {
+    min-height: 112px;
+    resize: vertical;
+}
+
+.form-field input[type="file"] {
+    padding: 10px;
+}
+
+.check-list,
+.check-control,
+.row-actions,
+.stacked-actions,
+.inline-form {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.check-list,
+.row-actions,
+.stacked-actions {
+    flex-wrap: wrap;
+}
+
+.check-control {
+    min-height: 44px;
+    color: var(--text-soft);
+    font-size: 0.78rem;
+}
+
+.button--danger {
+    color: #ffd9d9;
+    border-color: rgba(255, 124, 124, 0.25);
+    background: rgba(255, 124, 124, 0.08);
+}
+
+.button--danger:hover {
+    border-color: rgba(255, 124, 124, 0.48);
+    background: rgba(255, 124, 124, 0.14);
+}
+
+.narrow-panel {
+    max-width: 920px;
+}
+
+.management-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.management-grid .panel {
+    margin: 0;
+}
+
+.muted-copy {
+    color: var(--muted);
+    font-size: 0.74rem;
+}
+
+.mono,
+.credential-value {
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+.credential-value {
+    display: inline-block;
+    padding: 7px 9px;
+    border: 1px solid rgba(247, 198, 74, 0.2);
+    border-radius: 8px;
+    color: var(--gold-soft);
+    background: rgba(247, 198, 74, 0.055);
+    user-select: all;
+}
+
+.record-count {
+    color: var(--gold);
+    font-weight: 800;
+}
+
+.management-table {
+    min-width: 860px;
+}
+
+.inline-form input,
+.inline-editor input {
+    min-width: 190px;
+    min-height: 40px;
+    padding: 7px 10px;
+}
+
+.inline-editor summary {
+    cursor: pointer;
+    color: var(--gold);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.inline-editor form {
+    display: grid;
+    gap: 8px;
+    margin-block-start: 8px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #0c0f12;
+}
+
+.break-value,
+.audit-details {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.audit-details {
+    max-width: 460px;
+}
+
+.destructive-row {
+    margin-block-start: 20px;
+    padding-block-start: 16px;
+    border-block-start: 1px solid var(--line);
+}
+
+.main-content > .notice {
+    margin-block-end: 16px;
+}
+
 
 @media (max-width: 1180px) and (min-width: 861px) {
     :root {
@@ -1506,6 +1676,21 @@ td {
     .login-card {
         padding: 24px 19px;
         border-radius: 20px;
+    }
+
+    .admin-form--grid,
+    .management-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .inline-form {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .inline-form input,
+    .inline-editor input {
+        min-width: 0;
     }
 }
 
