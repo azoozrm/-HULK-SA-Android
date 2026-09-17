@@ -88,7 +88,7 @@ $auditRows = is_array($operations['audit'] ?? null) ? $operations['audit'] : [];
         <div class="source-list">
             <div class="source-row"><span class="source-row__icon"><?= cc_icon('pulse') ?></span><span><strong>Operations</strong><small>الخدمة والإصدار والسياسات والتدقيق</small></span><?php cc_status_badge($operationsAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $operationsAvailable ? 'success' : 'danger'); ?></div>
             <div class="source-row"><span class="source-row__icon"><?= cc_icon('briefcase') ?></span><span><strong>Reseller</strong><small>الموزعون والهوست والكود الحالي</small></span><?php cc_status_badge($resellerAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $resellerAvailable ? 'success' : 'danger'); ?></div>
-            <div class="source-row"><span class="source-row__icon"><?= cc_icon('users') ?></span><span><strong>Presence</strong><small>لا توجد له سلطة خادم في هذه المرحلة</small></span><?php cc_status_badge('غير متاح بعد', 'neutral'); ?></div>
+            <div class="source-row"><span class="source-row__icon"><?= cc_icon('users') ?></span><span><strong>Presence</strong><small>لا توجد له سلطة خادم حاليًا</small></span><?php cc_status_badge('غير متاح بعد', 'neutral'); ?></div>
         </div>
     </article>
 </section>
