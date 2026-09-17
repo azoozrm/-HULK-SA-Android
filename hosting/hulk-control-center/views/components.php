@@ -65,13 +65,20 @@ function cc_alert(string $title, string $message, string $tone = 'info'): void
     <?php
 }
 
-function cc_kpi_card(string $label, string $value, string $hint, string $icon): void
+function cc_kpi_card(
+    string $label,
+    string $value,
+    string $hint,
+    string $icon,
+    string $badge = 'لاحقًا',
+    string $tone = 'neutral'
+): void
 {
     ?>
     <article class="kpi-card">
         <div class="kpi-card__head">
             <span class="kpi-card__icon"><?= cc_icon($icon) ?></span>
-            <?php cc_status_badge('لاحقًا', 'neutral'); ?>
+            <?php cc_status_badge($badge, $tone); ?>
         </div>
         <p class="kpi-card__label"><?= cc_e($label) ?></p>
         <p class="kpi-card__value"><?= cc_e($value) ?></p>

@@ -7,6 +7,7 @@ require_once __DIR__ . '/views/components.php';
 require_once __DIR__ . '/views/layout.php';
 require_once __DIR__ . '/lib/operations-adapter.php';
 require_once __DIR__ . '/lib/reseller-adapter.php';
+require_once __DIR__ . '/lib/dashboard.php';
 
 try {
     $admin = cc_require_admin();
@@ -54,7 +55,9 @@ $flash = cc_take_flash();
 $pageData = [];
 if ($resolved['valid']) {
     try {
-        if (in_array($moduleKey, cc_operations_modules(), true) || $moduleKey === 'audit') {
+        if ($moduleKey === 'dashboard') {
+            $pageData = cc_dashboard_data();
+        } elseif (in_array($moduleKey, cc_operations_modules(), true) || $moduleKey === 'audit') {
             $pageData = cc_operations_data($moduleKey);
         } elseif (in_array($moduleKey, cc_reseller_modules(), true)) {
             $pageData = cc_reseller_page();

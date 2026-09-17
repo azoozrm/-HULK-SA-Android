@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/bootstrap.php';
+require_once dirname(__DIR__) . '/lib/dashboard.php';
 
 date_default_timezone_set('UTC');
 
@@ -128,6 +129,8 @@ $index = file_get_contents($root . '/index.php');
 $operationsAdapter = file_get_contents($root . '/lib/operations-adapter.php');
 $resellerAdapter = file_get_contents($root . '/lib/reseller-adapter.php');
 $resellerView = file_get_contents($root . '/views/resellers.php');
+$dashboardSource = file_get_contents($root . '/lib/dashboard.php');
+$dashboardView = file_get_contents($root . '/views/dashboard.php');
 cc_test(is_string($layout) && str_contains($layout, '<html lang="ar" dir="rtl">'), 'layout is Arabic and RTL');
 cc_test(is_string($css) && str_contains($css, ':focus-visible'), 'visible keyboard focus styles exist');
 cc_test(is_string($css) && str_contains($css, '@media (max-width: 860px)'), 'mobile navigation breakpoint exists');
@@ -154,6 +157,79 @@ cc_test(
 );
 cc_test(is_string($resellerView) && str_contains($resellerView, "credential-value") && !str_contains($resellerView, 'reveal'), 'owner access codes are displayed directly without reveal UX');
 
+$definitions = cc_dashboard_metric_definitions();
+$expectedDashboardDefinitions = [
+    'service_status', 'current_release', 'current_version', 'minimum_version', 'update_policy',
+    'current_announcements', 'enabled_features', 'total_resellers', 'active_resellers',
+    'configured_hosts', 'resolver_ready_codes', 'recent_admin_activity',
+];
+cc_test(array_keys($definitions) === $expectedDashboardDefinitions, 'every Dashboard V1 metric has an explicit authoritative definition');
+
+$operationsPayload = ['service' => ['status' => 'OPERATIONAL']];
+$resellerPayload = ['total_resellers' => 0];
+$composed = cc_dashboard_compose(
+    static fn (): array => $operationsPayload,
+    static fn (): array => $resellerPayload
+);
+cc_test($composed['operations']['available'] === true && $composed['operations']['data'] === $operationsPayload, 'Operations zero-capable data remains available');
+cc_test($composed['reseller']['available'] === true && $composed['reseller']['data'] === $resellerPayload, 'authoritative reseller zero remains a real zero');
+
+$operationsFailure = cc_dashboard_compose(
+    static function (): array {
+        throw new RuntimeException('operations unavailable');
+    },
+    static fn (): array => $resellerPayload
+);
+cc_test($operationsFailure['operations']['available'] === false && $operationsFailure['operations']['data'] === null, 'Operations failure is unavailable and never converted to zero');
+cc_test($operationsFailure['reseller']['available'] === true && $operationsFailure['reseller']['data'] === $resellerPayload, 'Operations failure does not erase reseller data');
+
+$resellerFailure = cc_dashboard_compose(
+    static fn (): array => $operationsPayload,
+    static function (): array {
+        throw new RuntimeException('reseller unavailable');
+    }
+);
+cc_test($resellerFailure['reseller']['available'] === false && $resellerFailure['reseller']['data'] === null, 'reseller failure is unavailable and never converted to zero');
+cc_test($resellerFailure['operations']['available'] === true && $resellerFailure['operations']['data'] === $operationsPayload, 'reseller failure does not erase Operations data');
+
+cc_test(
+    is_string($dashboardSource) &&
+        str_contains($dashboardSource, 'ops_service_snapshot(') &&
+        str_contains($dashboardSource, 'ops_update_snapshot(') &&
+        str_contains($dashboardSource, 'ops_active_release(') &&
+        str_contains($dashboardSource, 'ops_feature_snapshot(') &&
+        str_contains($dashboardSource, 'ops_announcement_is_active('),
+    'Dashboard Operations reads reuse public-contract domain semantics'
+);
+cc_test(
+    is_string($dashboardSource) &&
+        str_contains($dashboardSource, "status = 'active'") &&
+        str_contains($dashboardSource, 'hulk_normalize_host(') &&
+        str_contains($dashboardSource, 'hulk_normalize_access_code(') &&
+        str_contains($dashboardSource, 'hulk_access_code_hash('),
+    'Dashboard reseller reads reuse resolver status, host, canonical-code and hash semantics'
+);
+cc_test(
+    is_string($dashboardSource) &&
+        str_contains($dashboardSource, 'SELECT a.id, a.action, a.created_at, u.username') &&
+        !preg_match('/SELECT[^;]*a\.details/is', $dashboardSource),
+    'Dashboard recent audit query excludes audit details and secret-bearing payloads'
+);
+cc_test(
+    is_string($dashboardView) &&
+        str_contains($dashboardView, 'المستخدمون الآن') &&
+        str_contains($dashboardView, 'الجلسات اليوم') &&
+        str_contains($dashboardView, 'الأجهزة النشطة') &&
+        substr_count($dashboardView, 'غير متاح بعد') >= 6,
+    'future Presence, session, device, adoption, health and analytics metrics remain explicitly unavailable'
+);
+cc_test(
+    is_string($dashboardView) &&
+        !preg_match('/(?:المستخدمون الآن|الجلسات اليوم|الأجهزة النشطة)[^\n]{0,160}>\s*[0-9]+\s*</u', $dashboardView),
+    'Dashboard does not fabricate future metric values'
+);
+cc_test(is_string($index) && str_contains($index, "\$moduleKey === 'dashboard'") && str_contains($index, 'cc_dashboard_data()'), 'Dashboard is connected through the existing allow-listed route');
+
 $forbidden = [
     '/hulknjcx_/i' => 'production database name',
     '/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/' => 'private key',
@@ -174,4 +250,4 @@ foreach ($iterator as $file) {
 
 cc_test(!is_file($root . '/config.php'), 'runtime config is not present in source');
 
-fwrite(STDOUT, "PASS: {$tests} HULK Control Center Phase 2 checks.\n");
+fwrite(STDOUT, "PASS: {$tests} HULK Control Center Phase 3 checks.\n");
