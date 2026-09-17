@@ -1,10 +1,10 @@
-# HULK SA Control Center — Phase 2
+# HULK SA Control Center — Phase 3
 
 Production foundation for the owner-facing administration application at:
 
 `https://hulksa.com/control-center/`
 
-Phase 2 keeps the Phase 1 Arabic RTL foundation and connects the existing Operations and reseller-owner authorities. It does not add Dashboard V1 metrics, Presence, Android changes, analytics, diagnostics, or host health.
+Phase 3 keeps the Phase 1 Arabic RTL foundation and Phase 2 administration workflows, then adds Dashboard V1 from the two existing authoritative databases. It does not add Presence, Android changes, analytics, diagnostics, adoption tracking, or host-health probing.
 
 ## Runtime
 
@@ -51,7 +51,25 @@ Its independent session cookie is scoped to `/control-center/`, uses `Secure`, `
 
 The allow-list is defined in `lib/routes.php`. Apache rewrites friendly module URLs such as `/control-center/live-users/` to the single authenticated shell. Unknown routes render a safe 404 state and never select files dynamically.
 
-Operations, reseller, access-code, host and audit modules are connected to their current authoritative databases. Remaining modules stay explicitly **غير متاح بعد**. The Dashboard remains a truthful shell until Phase 3 and contains no fabricated counts or demo production records.
+Operations, reseller, access-code, host and audit modules are connected to their current authoritative databases. Remaining modules stay explicitly **غير متاح بعد**. Dashboard V1 contains no fabricated counts or demo production records.
+
+## Dashboard V1 read contract
+
+Dashboard reads the two PDO authorities independently and composes them in PHP. If either authority fails, its section renders a recoverable unavailable state while valid data from the other authority remains visible. A failed read is never converted to zero.
+
+| Dashboard value | Authoritative definition |
+|---|---|
+| Service status | `ops_service_snapshot()` from `app_service_status.id=1`, identical to the public Operations contract |
+| Current version and update policy | `ops_update_snapshot()`, including the active release/settings fallback used by the public contract |
+| Active APK release | `ops_active_release()`: highest enabled, active `version_code` |
+| Current announcements | Enabled announcements inside the current start/end window and accepted by `ops_announcement_is_active()` |
+| Enabled features | `true` values from `ops_feature_snapshot()` over the exact known-feature allow-list |
+| Recent administration | Latest eight `app_admin_audit` rows; only action, administrator name, and time are displayed |
+| Total/active resellers | Counts from `resellers`; active means exactly `status='active'` |
+| Configured active hosts | Active reseller rows whose current host is accepted by `hulk_normalize_host()` |
+| Resolver-ready codes | Active reseller with a valid current host, canonical current access code, and matching SHA-256 code hash |
+
+Online users, sessions, devices, client-version adoption, host health, diagnostics, and usage analytics stay explicitly unavailable because no current server-side authority owns those measurements.
 
 ## Shared mutation paths
 
@@ -73,7 +91,7 @@ Operations, reseller, access-code, host and audit modules are connected to their
 9. Inspect desktop, tablet, and mobile layouts in Arabic RTL before enabling the route.
 10. Confirm legacy Operations, reseller administration, `/reseller/`, resolver, APK, and Android endpoints are unchanged.
 
-Rollback is route-level: disable `/control-center/` or restore its previous package. Phase 2 has no migration; completed mutations remain authoritative and visible in the legacy panels, so rollback never restores an older database over newer writes.
+Rollback is route-level: disable `/control-center/` or restore its previous package. Phase 3 has no migration; completed Phase 2 mutations remain authoritative and visible in the legacy panels, so rollback never restores an older database over newer writes.
 
 ## Validation
 
