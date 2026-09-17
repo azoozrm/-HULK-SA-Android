@@ -57,7 +57,7 @@ function cc_page_start(array $resolved, array $admin): void
             <div class="sidebar__footer">
                 <div class="phase-card">
                     <span class="phase-card__icon"><?= cc_icon('shield') ?></span>
-                    <span><strong>الإدارة الموحّدة</strong><small>المرحلة الثانية</small></span>
+                    <span><strong>الإدارة الموحّدة</strong></span>
                 </div>
             </div>
         </aside>
@@ -73,7 +73,6 @@ function cc_page_start(array $resolved, array $admin): void
                     </div>
                 </div>
                 <div class="topbar__actions">
-                    <?php cc_status_badge('Phase 2', 'info'); ?>
                     <div class="admin-menu">
                         <span class="admin-menu__avatar" aria-hidden="true"><?= cc_e(cc_initial((string) $admin['username'])) ?></span>
                         <span class="admin-menu__copy"><strong><?= cc_e((string) $admin['username']) ?></strong><small>مسؤول النظام</small></span>
