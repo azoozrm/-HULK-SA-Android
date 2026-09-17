@@ -12,7 +12,7 @@ DirectoryIndex index.php
     RewriteEngine On
 
     RewriteRule ^(?:bootstrap\.php|config(?:\.example)?\.php)$ - [F,L,NC]
-    RewriteRule ^(?:lib|tests|views)(?:/|$) - [F,L,NC]
+    RewriteRule ^(?:lib|migrations|tests|tools|views)(?:/|$) - [F,L,NC]
 
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d

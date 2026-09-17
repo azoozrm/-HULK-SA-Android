@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/bootstrap.php';
 require_once dirname(__DIR__) . '/lib/dashboard.php';
+require_once dirname(__DIR__) . '/lib/presence.php';
 
 date_default_timezone_set('UTC');
 
@@ -250,4 +251,6 @@ foreach ($iterator as $file) {
 
 cc_test(!is_file($root . '/config.php'), 'runtime config is not present in source');
 
-fwrite(STDOUT, "PASS: {$tests} HULK Control Center Phase 3 checks.\n");
+require __DIR__ . '/presence.php';
+
+fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

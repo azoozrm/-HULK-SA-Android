@@ -209,6 +209,16 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("ops_growth_custom_qr_path_is_safe", operations)
         self.assertIn("is_file($absolutePath)", operations)
 
+    def test_presence_discovery_is_optional_without_schema_bump(self) -> None:
+        operations = self.read("lib/operations.php")
+        config = self.read("config.example.php")
+        self.assertIn("'schemaVersion' => 1", operations)
+        self.assertIn("function ops_presence_discovery", operations)
+        self.assertIn("$payload['presence'] = $presence", operations)
+        self.assertIn("'enabled' => false", config)
+        self.assertIn("heartbeat_seconds", config)
+        self.assertIn("online_ttl_seconds", config)
+
     def test_growth_admin_layout_remains_mobile_adaptive(self) -> None:
         dashboard = self.read("admin/index.php")
         styles = self.read("assets/app.css")

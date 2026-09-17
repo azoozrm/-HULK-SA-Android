@@ -1,10 +1,10 @@
-# HULK SA Control Center — Phase 3
+# HULK SA Control Center
 
 Production foundation for the owner-facing administration application at:
 
 `https://hulksa.com/control-center/`
 
-Phase 3 keeps the Phase 1 Arabic RTL foundation and Phase 2 administration workflows, then adds Dashboard V1 from the two existing authoritative databases. It does not add Presence, Android changes, analytics, diagnostics, adoption tracking, or host-health probing.
+The application combines the Arabic RTL owner experience with the existing Operations and reseller authorities. Its Dashboard uses authoritative current data, and its dark Presence backend records future Android session/device telemetry without changing the current Android application or owner-facing modules.
 
 ## Runtime
 
@@ -28,6 +28,8 @@ Configure both named authorities:
 - `databases.reseller`: the existing reseller database owning reseller identity, state, password hash, host and current access code.
 
 Do not commit runtime credentials. `config.php` is ignored and denied by `.htaccess`.
+
+The `presence` configuration owns the 60-second heartbeat, 180-second Online TTL, 180-day session/device retention, cleanup batch size, and persistent API limits. Install independent random `rate_limit_secret` and `token_secret` values of at least 32 bytes outside source control. The first HMACs client network identifiers before persistence. The second combines with a per-session random nonce so valid start retries return the same opaque token while only its hash is stored. Neither is a credential-encryption key.
 
 In production the reseller shared runtime is discovered at the sibling
 `public_html/.hulk-reseller-app/bootstrap.php`. A deployment with a different layout may set
@@ -71,6 +73,47 @@ Dashboard reads the two PDO authorities independently and composes them in PHP. 
 
 Online users, sessions, devices, client-version adoption, host health, diagnostics, and usage analytics stay explicitly unavailable because no current server-side authority owns those measurements.
 
+## Presence backend
+
+The additive API is dark until the separate Android integration is deployed:
+
+```text
+POST /control-center/api/app/v1/presence/start
+POST /control-center/api/app/v1/presence/heartbeat
+POST /control-center/api/app/v1/presence/end
+```
+
+`start` accepts contract version 1, the current Android UUID `sessionId` and stable UUID `installationId`, the access-code and exact IPTV credential/host snapshot, client authentication time as metadata, device metadata, and app version metadata. It validates the current code, active reseller, and current host through the reseller authority before writing the control database. A matching retry returns the same logical session and same derived opaque token; a conflicting or ended session ID is not reused.
+
+`heartbeat` and `end` require `Authorization: Bearer <presenceToken>` plus the matching session ID. Only SHA-256 token hashes are stored. End is idempotent and accepts `LOGOUT`, `ACCOUNT_REPLACED`, or `APP_SHUTDOWN`. Heartbeat never reactivates an ended session.
+
+Online is derived only as:
+
+```text
+ended_at IS NULL AND last_seen_at >= server_now - online_ttl
+```
+
+Presence failure is intentionally independent of IPTV authentication. No endpoint mutates reseller data, Operations state, or Android authentication state, and request bodies/credentials are never logged or audited.
+
+### Credential storage decision
+
+The current deployment evidence does not prove a supported PHP sodium/OpenSSL configuration plus a secret key outside `public_html`. The approved exact access-code, IPTV username/password, and authenticated-host snapshots therefore remain direct columns in the restricted control-plane database. Transparent encryption may be added only after those runtime/key-storage facts are proven; credentials must never enter logs, audit data, diagnostics, fixtures with real values, screenshots, commit messages, or PR text.
+
+### Migration and cleanup
+
+Apply `migrations/2026-09-17-presence-v1.sql` to the Operations/control database using the deployment database account before exposing the endpoints. It adds only `cc_schema_migrations`, `cc_devices`, `cc_app_sessions`, and `cc_api_rate_limits`; it does not alter existing tables. Keep the additive tables on route rollback.
+
+Run the bounded cleanup from hosting cron (daily is sufficient):
+
+```bash
+HULK_CONTROL_CENTER_CONFIG=/absolute/private/config.php \
+  php /absolute/public_html/control-center/tools/presence_cleanup.php
+```
+
+Each invocation deletes at most the configured batch from each category: ended or stale sessions beyond retention, unreferenced inactive devices beyond retention, and expired rate-limit windows. Cleanup does not define Online state.
+
+Operations config supports an optional schema-v1 `presence` discovery object with `enabled`, `baseUrl`, `heartbeatSeconds`, and `onlineTtlSeconds`. It is omitted when disabled or absent. Leave it disabled until the separate Android round is complete.
+
 ## Shared mutation paths
 
 - Control Center loads the existing `hulk-operations/admin/actions.php` domain functions. The legacy Operations panel uses those same functions, so release, service, announcement, feature and Growth rules are not copied.
@@ -83,7 +126,7 @@ Online users, sessions, devices, client-version adoption, host health, diagnosti
 1. Confirm the deployment target maps this directory to `/control-center/`.
 2. Confirm HTTPS and `.htaccess` are active.
 3. Keep `config.php` untracked, or use `HULK_CONTROL_CENTER_CONFIG` outside the web root.
-4. Grant the control connection only the existing Operations reads and mutations used by Phase 2, including `app_admin_users` authentication/lockout and `app_admin_audit`; do not grant schema-management privileges.
+4. Apply the reviewed additive Presence migration with a deployment-only schema account, then keep the runtime control connection limited to existing Operations access plus CRUD on `cc_devices`, `cc_app_sessions`, and `cc_api_rate_limits`.
 5. Grant the reseller connection only the existing reseller-owner reads and mutations used by Phase 2.
 6. Run PHP lint and `tests/run.php` with the production PHP version.
 7. Verify unauthenticated module requests redirect to `/control-center/login.php`.
@@ -91,7 +134,7 @@ Online users, sessions, devices, client-version adoption, host health, diagnosti
 9. Inspect desktop, tablet, and mobile layouts in Arabic RTL before enabling the route.
 10. Confirm legacy Operations, reseller administration, `/reseller/`, resolver, APK, and Android endpoints are unchanged.
 
-Rollback is route-level: disable `/control-center/` or restore its previous package. Phase 3 has no migration; completed Phase 2 mutations remain authoritative and visible in the legacy panels, so rollback never restores an older database over newer writes.
+Rollback is discovery/route-level: keep Operations Presence discovery disabled or absent and disable the Presence API route. Retain additive session/device history; never roll back by dropping the new tables or restoring an older database over newer writes.
 
 ## Validation
 
@@ -99,6 +142,7 @@ Rollback is route-level: disable `/control-center/` or restore its previous pack
 find hosting/hulk-control-center -type f -name '*.php' -print0 \
   | xargs -0 -n1 php -l
 php hosting/hulk-control-center/tests/run.php
+python3 -m unittest hosting/hulk-control-center/tests/test_presence_contract.py
 node --check hosting/hulk-control-center/assets/app.js
 node hosting/hulk-control-center/tests/navigation.test.js
 ```
