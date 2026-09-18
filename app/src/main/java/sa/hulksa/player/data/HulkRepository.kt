@@ -127,6 +127,32 @@ class HulkRepository(context: Context) {
 
     fun activeAccountSession(): AccountSessionMetadata? = accountSessionStore.metadata()
 
+    internal suspend fun presenceSessionSnapshot(
+        expectedSession: AuthenticatedSession,
+        device: PresenceDeviceMetadata,
+        app: PresenceAppMetadata,
+    ): PresenceSessionSnapshot? = withContext(Dispatchers.IO) {
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            val owner = AuthenticatedSessionRegistry.currentOwner()
+                ?.takeIf { it.session === expectedSession }
+                ?: return@synchronized null
+            val metadata = accountSessionStore.metadata()
+                ?.takeIf { it.sessionId == owner.sessionId && it.accountId == owner.accountId }
+                ?: return@synchronized null
+            PresenceSessionSnapshot(
+                sessionId = metadata.sessionId,
+                installationId = metadata.installationId,
+                accessCode = expectedSession.credentials.accessCode,
+                iptvUsername = expectedSession.credentials.username,
+                iptvPassword = expectedSession.credentials.password,
+                host = expectedSession.portal.baseUrl,
+                authenticatedAtEpochMs = metadata.authenticatedAtEpochMs,
+                device = device,
+                app = app,
+            )
+        }
+    }
+
     suspend fun currentAuthenticatedSession(): AuthenticatedSession? {
         AuthenticatedSessionRegistry.current()?.let { return it }
         val restoration = withContext(Dispatchers.IO) {

@@ -101,6 +101,13 @@ data class OperationsConfig(
     val announcements: List<OperationsAnnouncement>,
     val features: OperationsFeatureFlags,
     val growth: OperationsGrowthConfig = OperationsGrowthConfig(),
+    val presence: OperationsPresenceConfig? = null,
+)
+
+data class OperationsPresenceConfig(
+    val baseUrl: String,
+    val heartbeatSeconds: Int,
+    val onlineTtlSeconds: Int,
 )
 
 data class CachedOperationsConfig(
@@ -307,6 +314,7 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
         }
     }
     val growth = parseOperationsGrowth(root.optJSONObject("growth"))
+    val presence = parseOperationsPresence(root.optJSONObject("presence"))
 
     OperationsConfig(
         schemaVersion = schemaVersion,
@@ -316,8 +324,45 @@ fun parseOperationsConfig(rawJson: String): OperationsConfig? = runCatching {
         announcements = announcements,
         features = OperationsFeatureFlags.fromRemote(remoteFeatures),
         growth = growth,
+        presence = presence,
     )
 }.getOrNull()
+
+private fun parseOperationsPresence(value: JSONObject?): OperationsPresenceConfig? = runCatching {
+    requireNotNull(value)
+    require(value.has("enabled") && value.get("enabled") is Boolean)
+    if (!value.getBoolean("enabled")) return@runCatching null
+
+    val baseUrl = value.getString("baseUrl").trim()
+    val endpoint = URI(baseUrl)
+    require(endpoint.scheme.equals("https", ignoreCase = true))
+    require(endpoint.host.equals(PRESENCE_HOST, ignoreCase = true))
+    require(endpoint.port == -1 || endpoint.port == 443)
+    require(endpoint.userInfo == null)
+    require(endpoint.query == null)
+    require(endpoint.fragment == null)
+    require(endpoint.rawPath == PRESENCE_PATH)
+
+    val heartbeatValue = value.get("heartbeatSeconds")
+    val ttlValue = value.get("onlineTtlSeconds")
+    require(heartbeatValue is Int)
+    require(ttlValue is Int)
+    val heartbeatSeconds = heartbeatValue
+    val onlineTtlSeconds = ttlValue
+    require(heartbeatSeconds in PRESENCE_HEARTBEAT_RANGE)
+    require(onlineTtlSeconds in (heartbeatSeconds * 2)..PRESENCE_MAX_TTL_SECONDS)
+
+    OperationsPresenceConfig(
+        baseUrl = endpoint.toASCIIString(),
+        heartbeatSeconds = heartbeatSeconds,
+        onlineTtlSeconds = onlineTtlSeconds,
+    )
+}.getOrNull()
+
+private const val PRESENCE_HOST = "hulksa.com"
+private const val PRESENCE_PATH = "/control-center/api/app/v1/presence/"
+private val PRESENCE_HEARTBEAT_RANGE = 15..600
+private const val PRESENCE_MAX_TTL_SECONDS = 3_600
 
 private fun parseOperationsAnnouncement(value: JSONObject?): OperationsAnnouncement? = runCatching {
     requireNotNull(value)
