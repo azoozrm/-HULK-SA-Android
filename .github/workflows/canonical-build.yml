@@ -50,6 +50,10 @@ jobs:
     name: Build, lint, unit, release and ABI
     runs-on: ubuntu-latest
     timeout-minutes: 70
+    env:
+      HULK_RUNTIME_SOURCE_SHA: fb8408e9e996599b17b20fed0507d72e1a069098
+      HULK_QUALIFICATION_VERSION_CODE: '64'
+      HULK_QUALIFICATION_VERSION_NAME: '0.9.3.23'
 
     steps:
       - uses: actions/checkout@v7
@@ -83,6 +87,8 @@ jobs:
           test ! -e qa/quality
           test ! -e qa/canonical
           test ! -e app/src/main/java/sa/hulksa/player/qa
+          test "$(git rev-parse HEAD^)" = "$HULK_RUNTIME_SOURCE_SHA"
+          git diff --quiet "$HULK_RUNTIME_SOURCE_SHA" -- app
           python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
           python3 quality/compatibility-v2/static_validate.py \
             --repo-root . --out build/compatibility-v2/canonical-static
@@ -104,6 +110,8 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
+            -PHULK_QUALIFICATION_VERSION_CODE="$HULK_QUALIFICATION_VERSION_CODE" \
+            -PHULK_QUALIFICATION_VERSION_NAME="$HULK_QUALIFICATION_VERSION_NAME" \
             clean :app:compileDebugKotlin :app:testDebugUnitTest \
             :app:lintDebug :app:assembleDebug :app:bundleDebug
 
@@ -111,6 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --console=plain \
+            -PHULK_QUALIFICATION_VERSION_CODE="$HULK_QUALIFICATION_VERSION_CODE" \
+            -PHULK_QUALIFICATION_VERSION_NAME="$HULK_QUALIFICATION_VERSION_NAME" \
             :app:assembleRelease :app:bundleRelease
 
       - name: Verify package, version and architectures
@@ -119,8 +129,8 @@ jobs:
           apk='app/build/outputs/apk/release/app-release-unsigned.apk'
           test -f "$apk"
           test "$(apkanalyzer manifest application-id "$apk")" = 'sa.hulksa.player'
-          test "$(apkanalyzer manifest version-code "$apk")" = '64'
-          test "$(apkanalyzer manifest version-name "$apk")" = '0.9.3.20'
+          test "$(apkanalyzer manifest version-code "$apk")" = "$HULK_QUALIFICATION_VERSION_CODE"
+          test "$(apkanalyzer manifest version-name "$apk")" = "$HULK_QUALIFICATION_VERSION_NAME"
 
           mkdir -p build/reports/architecture
           count=0
@@ -146,10 +156,11 @@ jobs:
             cp -a build/compatibility-v2/canonical-static build-evidence/static-validation
           fi
           {
-            echo "commit=${GITHUB_SHA}"
+            echo "commit=${HULK_RUNTIME_SOURCE_SHA}"
+            echo "workflowCommit=${GITHUB_SHA}"
             echo 'package=sa.hulksa.player'
-            echo 'versionName=0.9.3.20'
-            echo 'versionCode=64'
+            echo "versionName=${HULK_QUALIFICATION_VERSION_NAME}"
+            echo "versionCode=${HULK_QUALIFICATION_VERSION_CODE}"
           } > build-evidence/BUILD-METADATA.txt
           (
             cd build-evidence
@@ -161,7 +172,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: HULK-SA-BUILD-EVIDENCE-${{ github.run_id }}
+          name: HULK-SA-PHASE5-RUNTIME-APK-${{ github.run_id }}
           path: build-evidence/
           if-no-files-found: error
           retention-days: 14
