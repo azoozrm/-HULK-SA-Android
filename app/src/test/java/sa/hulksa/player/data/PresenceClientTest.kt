@@ -65,7 +65,7 @@ class PresenceClientTest {
                 "device",
                 "app",
             ),
-            json.keySet(),
+            json.keysSet(),
         )
         assertEquals(1, json.getInt("contractVersion"))
         assertEquals("TEST-CODE", json.getString("accessCode"))
@@ -89,7 +89,7 @@ class PresenceClientTest {
 
         val heartbeat = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         assertEquals("Bearer $TOKEN", heartbeat.getHeader("Authorization"))
-        assertEquals(setOf("sessionId"), JSONObject(heartbeat.body.readUtf8()).keySet())
+        assertEquals(setOf("sessionId"), JSONObject(heartbeat.body.readUtf8()).keysSet())
         val end = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         assertEquals("Bearer $TOKEN", end.getHeader("Authorization"))
         assertEquals("ACCOUNT_REPLACED", JSONObject(end.body.readUtf8()).getString("reason"))
@@ -206,4 +206,9 @@ class PresenceClientTest {
         const val INSTALLATION_ID = "22222222-2222-4222-8222-222222222222"
         val TOKEN = "t".repeat(43)
     }
+}
+
+private fun JSONObject.keysSet(): Set<String> = buildSet {
+    val iterator = keys()
+    while (iterator.hasNext()) add(iterator.next())
 }
