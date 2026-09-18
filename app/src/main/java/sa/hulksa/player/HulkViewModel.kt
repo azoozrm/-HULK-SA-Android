@@ -54,6 +54,10 @@ import sa.hulksa.player.data.OperationsUiState
 import sa.hulksa.player.data.OperationsUpdateDecision
 import sa.hulksa.player.data.activePersistentOperationsAnnouncement
 import sa.hulksa.player.data.PortalException
+import sa.hulksa.player.data.PresenceClient
+import sa.hulksa.player.data.PresenceLifecycleOwner
+import sa.hulksa.player.data.currentPresenceAppMetadata
+import sa.hulksa.player.data.currentPresenceDeviceMetadata
 import sa.hulksa.player.data.ProfileDownloadPauseOutcome
 import sa.hulksa.player.data.ProfileDownloadMutationOutcome
 import sa.hulksa.player.data.ProfileStore
@@ -284,6 +288,9 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val operationsClient = OperationsClient()
     private val operationsInstaller = OperationsApkInstaller(application)
     private val operationsDeviceIsTv = application.isTelevisionDevice()
+    private val presenceDeviceMetadata = application.currentPresenceDeviceMetadata(operationsDeviceIsTv)
+    private val presenceAppMetadata = currentPresenceAppMetadata()
+    private val presenceLifecycleOwner = PresenceLifecycleOwner(viewModelScope, PresenceClient())
     private val tvPlatformIntegration = TvPlatformIntegrationProvider {
         TvPlatformIntegration(application)
     }
@@ -2127,6 +2134,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         activeOperationsConfig = config
         activeOperationsFetchedAtEpochMs = fetchedAtEpochMs
+        presenceLifecycleOwner.updateDiscovery(config.presence)
         val nowEpochMs = System.currentTimeMillis()
         val activeAnnouncements = eligibleOperationsAnnouncements(
             announcements = config.announcements,
@@ -2593,6 +2601,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                             errorMessage = null,
                         )
                     }
+                    publishPresenceOwnership(refreshed)
                     onResult("تم تحديث بيانات الاشتراك من السيرفر.")
                 }
                 is AccountRefreshOutcome.Failure -> {
@@ -2771,6 +2780,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private fun beginLogout(errorMessage: String?) {
         if (logoutJob?.isActive == true) return
 
+        presenceLifecycleOwner.logout()
         authenticationAttemptGate.invalidate()
         invalidateAccountRefresh()
         val pendingLoginJob = loginJob
@@ -2946,6 +2956,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     errorMessage = null,
                 )
             }
+            publishPresenceOwnership(authenticated)
             ensureCatalog(ContentType.MOVIE)
             ensureCatalog(ContentType.SERIES)
             refreshOperations(force = false)
@@ -2959,6 +2970,23 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
             sessionRestorationComplete = true
             showFailure(error)
             resolvePendingTvDeepLink()
+        }
+    }
+
+    private suspend fun publishPresenceOwnership(authenticated: AuthenticatedSession) {
+        val snapshot = try {
+            repository.presenceSessionSnapshot(
+                expectedSession = authenticated,
+                device = presenceDeviceMetadata,
+                app = presenceAppMetadata,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        }
+        if (snapshot != null && session === authenticated) {
+            presenceLifecycleOwner.onAuthenticated(snapshot)
         }
     }
 
