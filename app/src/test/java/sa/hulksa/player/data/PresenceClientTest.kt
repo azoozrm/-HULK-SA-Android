@@ -48,7 +48,7 @@ class PresenceClientTest {
 
         assertTrue(result is PresenceStartResult.Accepted)
         val request = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
-        assertEquals("/control-center/api/app/v1/presence/start", request.path)
+        assertEquals("/control-center/api/app/v1/presence/start/", request.path)
         assertEquals("POST", request.method)
         assertFalse(request.headers.names().contains("Authorization"))
         val json = JSONObject(request.body.readUtf8())
@@ -88,9 +88,11 @@ class PresenceClientTest {
         )
 
         val heartbeat = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+        assertEquals("/control-center/api/app/v1/presence/heartbeat/", heartbeat.path)
         assertEquals("Bearer $TOKEN", heartbeat.getHeader("Authorization"))
         assertEquals(setOf("sessionId"), JSONObject(heartbeat.body.readUtf8()).keysSet())
         val end = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+        assertEquals("/control-center/api/app/v1/presence/end/", end.path)
         assertEquals("Bearer $TOKEN", end.getHeader("Authorization"))
         assertEquals("ACCOUNT_REPLACED", JSONObject(end.body.readUtf8()).getString("reason"))
     }

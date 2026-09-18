@@ -184,7 +184,7 @@ internal class PresenceClient(
         token: String? = null,
     ): Request {
         val builder = Request.Builder()
-            .url(config.baseUrl + operation)
+            .url(config.baseUrl + operation + "/")
             .post(body.toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json")
             .header("User-Agent", "HULK-SA Presence")
