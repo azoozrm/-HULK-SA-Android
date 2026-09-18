@@ -117,15 +117,20 @@ class PresenceClientTest {
 
     @Test
     fun `network and server failures are transient without automatic retry`() = runBlocking {
-        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
         server.enqueue(MockResponse().setResponseCode(503).setBody("{}"))
         val client = client(
             OkHttpClient.Builder().retryOnConnectionFailure(false).build(),
         )
+        val offlineServer = MockWebServer()
+        offlineServer.start()
+        val offlineConfig = config().copy(
+            baseUrl = offlineServer.url("/control-center/api/app/v1/presence/").toString(),
+        )
+        offlineServer.shutdown()
 
+        assertEquals(PresenceStartResult.TransientFailure, client.start(offlineConfig, snapshot()))
         assertEquals(PresenceStartResult.TransientFailure, client.start(config(), snapshot()))
-        assertEquals(PresenceStartResult.TransientFailure, client.start(config(), snapshot()))
-        assertEquals(2, server.requestCount)
+        assertEquals(1, server.requestCount)
     }
 
     @Test
