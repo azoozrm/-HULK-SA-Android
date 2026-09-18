@@ -58,7 +58,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          ref: ${{ env.HULK_RUNTIME_SOURCE_SHA }}
+          fetch-depth: 1
 
       - uses: actions/setup-java@v5
         with:
@@ -89,8 +90,7 @@ jobs:
           test ! -e qa/quality
           test ! -e qa/canonical
           test ! -e app/src/main/java/sa/hulksa/player/qa
-          test "$(git rev-parse HEAD^)" = "$HULK_RUNTIME_SOURCE_SHA"
-          git diff --quiet "$HULK_RUNTIME_SOURCE_SHA" -- app
+          test "$(git rev-parse HEAD)" = "$HULK_RUNTIME_SOURCE_SHA"
           python3 -m unittest discover -s quality/compatibility-v2/tests -p 'test_*.py' -v
           python3 quality/compatibility-v2/static_validate.py \
             --repo-root . --out build/compatibility-v2/canonical-static
