@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
-      HULK_RUNTIME_SOURCE_SHA: fb8408e9e996599b17b20fed0507d72e1a069098
+      HULK_RUNTIME_SOURCE_SHA: e12003fe8008003bf61ca19fc78c11e4c9e1ea36
       HULK_QUALIFICATION_VERSION_CODE: '67'
       HULK_QUALIFICATION_VERSION_NAME: '0.9.3.23'
 
