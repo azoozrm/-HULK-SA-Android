@@ -63,7 +63,7 @@ $versionDistribution = is_array($presence['version_distribution'] ?? null) ? $pr
 <section class="kpi-grid kpi-grid--reseller" aria-label="مؤشرات Presence الحالية">
     <?php cc_kpi_card('المستخدمون الآن', (string) ($presence['online_now'] ?? 0), 'جلسة غير منتهية بنبضة حديثة؛ لا تعني بالضرورة تشغيل وسائط.', 'users', 'Online Now', 'success'); ?>
     <?php cc_kpi_card('الجلسات اليوم', (string) ($presence['sessions_today'] ?? 0), 'بدأت منذ بداية اليوم بتوقيت لوحة التحكم.', 'clock', 'جلسات خادم', 'info'); ?>
-    <?php cc_kpi_card('الأجهزة النشطة', (string) ($presence['active_devices'] ?? 0), 'installation_id ظهر خلال آخر ' . (string) ($presence['active_device_window_hours'] ?? 24) . ' ساعة.', 'device', 'نافذة معلنة', 'success'); ?>
+    <?php cc_kpi_card('الأجهزة النشطة', (string) ($presence['active_devices'] ?? 0), 'installation_id وصلت له نبضة خلال آخر ' . (string) ($presence['active_device_window_hours'] ?? 24) . ' ساعة.', 'device', 'نافذة معلنة', 'success'); ?>
 </section>
 
 <?php if (!($presence['resellers_available'] ?? false) && $livePreview !== []): ?>

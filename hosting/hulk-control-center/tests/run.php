@@ -168,6 +168,20 @@ $expectedDashboardDefinitions = [
 ];
 cc_test(array_keys($definitions) === $expectedDashboardDefinitions, 'every Dashboard V1 metric has an explicit authoritative definition');
 
+$dashboardClocks = cc_dashboard_clock_context(
+    new DateTimeImmutable('2026-09-19 12:00:00 UTC'),
+    new DateTimeZone('Asia/Riyadh')
+);
+cc_test(
+    $dashboardClocks['operations_now']->format('Y-m-d H:i:s') === '2026-09-19 15:00:00',
+    'Dashboard Operations comparisons preserve the configured local wall clock'
+);
+cc_test(
+    $dashboardClocks['presence_now']->format('Y-m-d H:i:s.u') === '2026-09-19 12:00:00.000000'
+        && $dashboardClocks['presence_now']->getTimezone()->getName() === 'UTC',
+    'Dashboard Presence freshness continues to use the UTC server instant'
+);
+
 $operationsPayload = ['service' => ['status' => 'OPERATIONAL']];
 $resellerPayload = ['total_resellers' => 0];
 $composed = cc_dashboard_compose(

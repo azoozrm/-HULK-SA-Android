@@ -105,8 +105,8 @@ function cc_presence_session_conditions(array $filters, string $cutoff, array &$
             'username' => 's.iptv_username',
             'host' => 's.host_snapshot',
             'installation' => 'd.installation_id',
-            'manufacturer' => 'd.manufacturer',
-            'model' => 'd.model',
+            'manufacturer' => 's.device_manufacturer',
+            'model' => 's.device_model',
         ];
         $search = [];
         foreach ($searchColumns as $key => $column) {
@@ -417,13 +417,22 @@ function cc_presence_dashboard_snapshot(
     if (!is_array($aggregate)) {
         throw new RuntimeException('Presence Dashboard aggregate is unavailable.');
     }
-    $activeDevices = $controlDb->prepare('SELECT COUNT(*) FROM cc_devices WHERE last_seen_at >= :active_cutoff');
+    $activeDevices = $controlDb->prepare(
+        'SELECT COUNT(DISTINCT d.installation_id) FROM cc_app_sessions s '
+        . 'JOIN cc_devices d ON d.id = s.device_id WHERE s.last_seen_at >= :active_cutoff'
+    );
     $activeDevices->execute(['active_cutoff' => $activeCutoff]);
     $versions = $controlDb->prepare(
-        'SELECT latest_app_version_name AS app_version_name, latest_app_version_code AS app_version_code, '
-        . 'COUNT(*) AS device_count FROM cc_devices WHERE last_seen_at >= :version_cutoff '
-        . 'GROUP BY latest_app_version_name, latest_app_version_code '
-        . 'ORDER BY device_count DESC, latest_app_version_code DESC LIMIT 8'
+        'SELECT recent.app_version_name, recent.app_version_code, COUNT(*) AS device_count FROM ('
+        . 'SELECT d.installation_id, s.app_version_name, s.app_version_code '
+        . 'FROM cc_app_sessions s JOIN cc_devices d ON d.id = s.device_id '
+        . 'WHERE s.last_seen_at >= :version_cutoff AND NOT EXISTS ('
+        . 'SELECT 1 FROM cc_app_sessions newer WHERE newer.device_id = s.device_id AND ('
+        . 'newer.last_seen_at > s.last_seen_at '
+        . 'OR (newer.last_seen_at = s.last_seen_at AND newer.id > s.id)'
+        . '))'
+        . ') recent GROUP BY recent.app_version_name, recent.app_version_code '
+        . 'ORDER BY device_count DESC, recent.app_version_code DESC, recent.app_version_name DESC LIMIT 8'
     );
     $versions->execute(['version_cutoff' => $activeCutoff]);
     $preview = cc_presence_session_page(

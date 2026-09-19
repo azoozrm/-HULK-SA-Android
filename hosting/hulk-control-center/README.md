@@ -72,8 +72,8 @@ Dashboard reads Operations, reseller and Presence authorities independently and 
 | Resolver-ready codes | Active reseller with a valid current host, canonical current access code, and matching SHA-256 code hash |
 | Online Now | `ended_at IS NULL` and `last_seen_at >= server_now - configured_online_ttl` |
 | Sessions today | Sessions whose server `started_at` is inside the current Control Center day |
-| Active devices | Distinct `cc_devices` rows seen during the explicitly labeled trailing 24-hour window |
-| Presence app versions | Latest app version recorded for devices seen during the same 24-hour Presence window |
+| Active devices | Distinct `installation_id` values whose sessions heartbeated during the explicitly labeled trailing 24-hour window |
+| Presence app versions | Latest recent session-version snapshot per `installation_id` seen during the same 24-hour Presence window |
 
 `users today` remains explicitly unavailable: the merged `cc_app_sessions` schema has no stable `account_id`, and the UI does not invent one from IPTV username, reseller, device or session identifiers. Host health, diagnostics and Phase-7 analytics also remain unavailable.
 

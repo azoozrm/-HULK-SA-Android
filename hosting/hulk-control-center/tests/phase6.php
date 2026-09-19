@@ -60,8 +60,9 @@ $phaseSixControl->exec(
     "INSERT INTO cc_app_sessions "
     . "(id, session_id, device_id, reseller_id, access_code_snapshot, iptv_username, iptv_password, host_snapshot, authenticated_at_client_ms, app_version_name, app_version_code, platform_class, device_manufacturer, device_model, android_release, android_sdk_int, started_at, last_seen_at, ended_at, end_reason) VALUES "
     . "(1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 1, 7, 'HULK-TUVW-XYZA-2345-6789', 'synthetic-user-a', 'synthetic-password-a', 'https://old.invalid', 1790000000000, '0.9.3.21', 65, 'TV', 'Synthetic', 'Living Room', '15', 35, '2026-09-19 10:00:00.000000', '2026-09-19 11:59:30.000000', NULL, NULL), "
-    . "(2, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 2, 8, 'HULK-2345-6789-ABCD-EFGH', 'synthetic-user-b', 'synthetic-password-b', 'https://second.invalid', 1790000000000, '0.9.3.20', 64, 'PHONE', 'Synthetic', 'Pocket', '14', 34, '2026-09-19 09:00:00.000000', '2026-09-19 11:56:59.000000', NULL, NULL), "
-    . "(3, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 2, 7, 'hulk abcd efgh jkmn pqrs', 'synthetic-user-c', 'synthetic-password-c', 'https://current.invalid', 1790000000000, '0.9.3.20', 64, 'PHONE', 'Synthetic', 'Pocket', '14', 34, '2026-09-19 08:00:00.000000', '2026-09-19 11:59:45.000000', '2026-09-19 11:59:50.000000', 'LOGOUT')"
+    . "(2, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 2, 8, 'HULK-2345-6789-ABCD-EFGH', 'synthetic-user-b', 'synthetic-password-b', 'https://second.invalid', 1790000000000, '0.9.3.20', 64, 'PHONE', 'Synthetic', 'Pocket', '14', 34, '2026-09-19 09:00:00.000000', '2026-09-19 11:59:45.000000', '2026-09-19 11:59:46.000000', 'LOGOUT'), "
+    . "(3, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 2, 7, 'hulk abcd efgh jkmn pqrs', 'synthetic-user-c', 'synthetic-password-c', 'https://current.invalid', 1790000000000, '0.9.3.22', 66, 'PHONE', 'Synthetic', 'Pocket', '14', 34, '2026-09-19 08:00:00.000000', '2026-09-19 11:59:45.000000', '2026-09-19 11:59:50.000000', 'LOGOUT'), "
+    . "(4, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 2, 8, 'HULK-2345-6789-ABCD-EFGH', 'synthetic-user-d', 'synthetic-password-d', 'https://second.invalid', 1790000000000, '0.9.3.19', 63, 'PHONE', 'Synthetic', 'Pocket', '14', 34, '2026-09-18 20:00:00.000000', '2026-09-19 11:56:59.000000', NULL, NULL)"
 );
 
 $phaseSixConfig = $presenceConfig;
@@ -97,9 +98,12 @@ $offlinePage = cc_presence_session_page(
     $phaseSixConfig,
     $phaseSixNow
 );
-cc_test($offlinePage['total'] === 2, 'stale non-ended and explicitly ended sessions are Offline');
+cc_test($offlinePage['total'] === 3, 'stale non-ended and explicitly ended sessions are Offline');
 cc_test($offlinePage['rows'][0]['session_id'] === 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'session sorting is deterministic by selected field');
-cc_test($offlinePage['rows'][0]['online'] === false && $offlinePage['rows'][1]['online'] === false, 'Offline rows never become Online through existence alone');
+cc_test(
+    count(array_filter($offlinePage['rows'], static fn (array $row): bool => $row['online'])) === 0,
+    'Offline rows never become Online through existence alone'
+);
 
 $filteredPage = cc_presence_session_page(
     $phaseSixControl,
@@ -131,7 +135,7 @@ $partialPage = cc_presence_session_page(
     $phaseSixConfig,
     $phaseSixNow
 );
-cc_test($partialPage['total'] === 3 && $partialPage['resellers_available'] === false, 'reseller failure preserves control data as partial data');
+cc_test($partialPage['total'] === 4 && $partialPage['resellers_available'] === false, 'reseller failure preserves control data as partial data');
 cc_test($partialPage['resellers'] === [], 'reseller failure never fabricates reseller values');
 
 $devicePage = cc_presence_device_page(
@@ -144,6 +148,25 @@ cc_test($devicePage['rows'][0]['installation_id'] === '11111111-1111-4111-8111-1
 cc_test($devicePage['rows'][0]['model'] === 'Living Room' && (int) $devicePage['rows'][0]['android_sdk_int'] === 35, 'device inventory exposes authoritative metadata');
 cc_test(!array_key_exists('online', $devicePage['rows'][0]), 'device existence is not presented as Online state');
 
+$phaseSixControl->exec("UPDATE cc_devices SET manufacturer = 'Current', model = 'Changed' WHERE id = 1");
+$historicalDeviceSearch = cc_presence_session_page(
+    $phaseSixControl,
+    $resellerLoader,
+    'sessions',
+    ['q' => 'Living Room', 'status' => 'all'],
+    $phaseSixConfig,
+    $phaseSixNow
+);
+cc_test(
+    $historicalDeviceSearch['total'] === 1
+        && $historicalDeviceSearch['rows'][0]['device_model'] === 'Living Room',
+    'session search uses the immutable historical device snapshot after current device metadata changes'
+);
+
+$phaseSixControl->exec(
+    "UPDATE cc_devices SET last_seen_at = '2026-09-17 11:59:30.000000' WHERE id = 1"
+);
+
 $dashboardPresence = cc_presence_dashboard_snapshot(
     $phaseSixControl,
     $resellerLoader,
@@ -153,10 +176,16 @@ $dashboardPresence = cc_presence_dashboard_snapshot(
 );
 cc_test($dashboardPresence['online_now'] === 1, 'Dashboard Online Now uses server time and configured TTL');
 cc_test($dashboardPresence['sessions_today'] === 3, 'Dashboard sessions today counts authoritative session starts');
-cc_test($dashboardPresence['active_devices'] === 2 && $dashboardPresence['active_device_window_hours'] === 24, 'Dashboard active devices uses a labeled 24-hour window');
+cc_test(
+    $dashboardPresence['active_devices'] === 2 && $dashboardPresence['active_device_window_hours'] === 24,
+    'Dashboard active devices follows recent session heartbeats and distinct installation identity'
+);
 cc_test($dashboardPresence['users_today_available'] === false, 'users today remains unavailable without stable account identity');
 cc_test($dashboardPresence['live_preview'][0]['session_id'] === 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Dashboard Live Users preview reuses the authoritative live query');
-cc_test($dashboardPresence['version_distribution'][0]['app_version_code'] === 65, 'Dashboard version coverage is derived from recent Presence devices');
+cc_test(
+    array_column($dashboardPresence['version_distribution'], 'app_version_code') === [66, 65],
+    'Dashboard version coverage uses each installation latest recent session snapshot deterministically'
+);
 
 $resellerRows = [
     ['reseller_id' => 7, 'access_code' => 'HULK-ABCD-EFGH-JKMN-PQRS', 'host' => 'https://current.invalid'],

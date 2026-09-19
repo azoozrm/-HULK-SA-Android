@@ -19,8 +19,8 @@ function cc_dashboard_metric_definitions(): array
         'recent_admin_activity' => 'آخر 8 صفوف من app_admin_audit مع action/admin/time فقط، بدون details.',
         'online_now' => 'جلسات غير منتهية وآخر نبضة لها داخل online_ttl_seconds حسب وقت الخادم.',
         'sessions_today' => 'عدد جلسات cc_app_sessions التي بدأها الخادم منذ بداية اليوم بتوقيت لوحة التحكم.',
-        'active_devices' => 'أجهزة cc_devices التي كان last_seen_at لها خلال آخر 24 ساعة، مع إظهار النافذة صراحة.',
-        'presence_version_distribution' => 'توزيع أحدث إصدار على أجهزة Presence المرصودة خلال آخر 24 ساعة فقط.',
+        'active_devices' => 'معرّفات installation_id المميزة التي وصلت جلساتها نبضة Presence خلال آخر 24 ساعة، مع إظهار النافذة صراحة.',
+        'presence_version_distribution' => 'توزيع أحدث إصدار جلسة مرصودة لكل installation_id وصلت له نبضة Presence خلال آخر 24 ساعة.',
         'users_today' => 'غير متاح لعدم وجود account_id أو هوية حساب مستقرة في cc_app_sessions.',
     ];
 }
@@ -57,19 +57,34 @@ function cc_dashboard_compose(
 
 function cc_dashboard_data(): array
 {
-    $now = cc_presence_now();
-    $timezone = new DateTimeZone((string) (cc_load_config()['app']['timezone'] ?? 'Asia/Riyadh'));
+    $config = cc_load_config();
+    $timezone = new DateTimeZone((string) ($config['app']['timezone'] ?? 'Asia/Riyadh'));
+    $clocks = cc_dashboard_clock_context(null, $timezone);
     return cc_dashboard_compose(
-        static fn (): array => cc_dashboard_operations_snapshot(cc_db('control'), $now),
+        static fn (): array => cc_dashboard_operations_snapshot(
+            cc_db('control'),
+            $clocks['operations_now']
+        ),
         static fn (): array => cc_dashboard_reseller_snapshot(cc_db('reseller')),
         static fn (): array => cc_presence_dashboard_snapshot(
             cc_db('control'),
             static fn (array $ids): array => cc_presence_reseller_map(cc_db('reseller'), $ids),
             cc_presence_config(),
-            $now,
+            $clocks['presence_now'],
             $timezone
         )
     );
+}
+
+function cc_dashboard_clock_context(
+    ?DateTimeImmutable $now,
+    DateTimeZone $operationsTimezone
+): array {
+    $instant = $now ?? new DateTimeImmutable('now');
+    return [
+        'operations_now' => $instant->setTimezone($operationsTimezone),
+        'presence_now' => cc_presence_now($instant),
+    ];
 }
 
 function cc_dashboard_operations_snapshot(PDO $db, DateTimeImmutable $now): array
