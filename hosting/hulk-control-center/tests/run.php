@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/bootstrap.php';
 require_once dirname(__DIR__) . '/lib/presence.php';
 require_once dirname(__DIR__) . '/lib/presence-read-model.php';
+require_once dirname(__DIR__) . '/lib/phase7-read-model.php';
 require_once dirname(__DIR__) . '/lib/dashboard.php';
 
 date_default_timezone_set('UTC');
@@ -165,6 +166,7 @@ $expectedDashboardDefinitions = [
     'current_announcements', 'enabled_features', 'total_resellers', 'active_resellers',
     'configured_hosts', 'resolver_ready_codes', 'recent_admin_activity', 'online_now',
     'sessions_today', 'active_devices', 'presence_version_distribution', 'users_today',
+    'host_health_summary', 'application_failures', 'session_trend', 'version_adoption_trend',
 ];
 cc_test(array_keys($definitions) === $expectedDashboardDefinitions, 'every Dashboard V1 metric has an explicit authoritative definition');
 
@@ -191,6 +193,24 @@ $composed = cc_dashboard_compose(
 cc_test($composed['operations']['available'] === true && $composed['operations']['data'] === $operationsPayload, 'Operations zero-capable data remains available');
 cc_test($composed['reseller']['available'] === true && $composed['reseller']['data'] === $resellerPayload, 'authoritative reseller zero remains a real zero');
 cc_test($composed['presence']['available'] === false && $composed['presence']['data'] === null, 'Presence remains unavailable when no authoritative loader is supplied');
+cc_test($composed['host_health']['available'] === false && $composed['host_health']['data'] === null, 'Host Health remains unavailable when no authoritative loader is supplied');
+cc_test($composed['diagnostics']['available'] === false && $composed['diagnostics']['data'] === null, 'Diagnostics remains unavailable when no authoritative loader is supplied');
+cc_test($composed['analytics']['available'] === false && $composed['analytics']['data'] === null, 'Analytics remains unavailable when no authoritative loader is supplied');
+
+$phaseSevenPayload = ['summary' => ['HEALTHY' => 1]];
+$phaseSevenComposed = cc_dashboard_compose(
+    static fn (): array => $operationsPayload,
+    static fn (): array => $resellerPayload,
+    null,
+    static fn (): array => $phaseSevenPayload,
+    static function (): array {
+        throw new RuntimeException('diagnostics unavailable');
+    },
+    static fn (): array => ['session_trend' => []]
+);
+cc_test($phaseSevenComposed['host_health']['available'] === true, 'Dashboard accepts authoritative Host Health data');
+cc_test($phaseSevenComposed['diagnostics']['available'] === false, 'Dashboard keeps failed Diagnostics unavailable rather than zero');
+cc_test($phaseSevenComposed['analytics']['available'] === true, 'Dashboard accepts authoritative Presence analytics data');
 
 $operationsFailure = cc_dashboard_compose(
     static function (): array {
@@ -283,5 +303,6 @@ cc_test(!is_file($root . '/config.php'), 'runtime config is not present in sourc
 
 require __DIR__ . '/presence.php';
 require __DIR__ . '/phase6.php';
+require __DIR__ . '/phase7.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

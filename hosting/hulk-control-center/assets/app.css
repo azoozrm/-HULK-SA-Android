@@ -1594,6 +1594,98 @@ td {
     color: var(--muted);
 }
 
+.phase7-kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.phase7-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.phase7-module .panel {
+    overflow: hidden;
+}
+
+.phase7-table {
+    min-width: 780px;
+}
+
+.metric-definition-panel {
+    border-color: rgba(247, 198, 74, 0.2);
+}
+
+.metric-list {
+    display: grid;
+    gap: 8px;
+}
+
+.metric-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.016);
+}
+
+.metric-row > span,
+.metric-row > time {
+    min-width: 0;
+}
+
+.metric-row small {
+    display: block;
+    margin-block-start: 3px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.bar-chart {
+    display: grid;
+    gap: 10px;
+}
+
+.bar-chart__row {
+    display: grid;
+    grid-template-columns: minmax(92px, 0.7fr) minmax(120px, 2fr) auto;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.78rem;
+}
+
+.bar-chart__row > span:first-child small {
+    display: block;
+    color: var(--muted);
+}
+
+.bar-chart__progress {
+    width: 100%;
+    height: 9px;
+    overflow: hidden;
+    appearance: none;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.bar-chart__progress::-webkit-progress-bar {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.bar-chart__progress::-webkit-progress-value {
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--gold-deep), var(--gold));
+}
+
+.bar-chart__progress::-moz-progress-bar {
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--gold-deep), var(--gold));
+}
+
 
 @media (max-width: 1180px) and (min-width: 861px) {
     :root {
@@ -1650,8 +1742,13 @@ td {
     }
 
     .kpi-grid--reseller,
-    .future-metrics__grid {
+    .future-metrics__grid,
+    .phase7-kpi-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .phase7-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -1858,8 +1955,14 @@ td {
     }
 
     .kpi-grid--reseller,
-    .future-metrics__grid {
+    .future-metrics__grid,
+    .phase7-kpi-grid {
         grid-template-columns: 1fr;
+    }
+
+    .bar-chart__row {
+        grid-template-columns: minmax(86px, 0.9fr) minmax(90px, 1.4fr) auto;
+        gap: 8px;
     }
 
     .kpi-card {

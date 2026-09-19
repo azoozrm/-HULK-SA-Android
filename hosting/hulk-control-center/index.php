@@ -8,6 +8,7 @@ require_once __DIR__ . '/views/layout.php';
 require_once __DIR__ . '/lib/operations-adapter.php';
 require_once __DIR__ . '/lib/reseller-adapter.php';
 require_once __DIR__ . '/lib/presence-read-model.php';
+require_once __DIR__ . '/lib/phase7-read-model.php';
 require_once __DIR__ . '/lib/dashboard.php';
 
 try {
@@ -60,6 +61,8 @@ if ($resolved['valid']) {
             $pageData = cc_dashboard_data();
         } elseif (in_array($moduleKey, ['live-users', 'sessions', 'devices'], true)) {
             $pageData = cc_presence_page_data($moduleKey, $_GET);
+        } elseif (in_array($moduleKey, ['host-health', 'diagnostics', 'analytics'], true)) {
+            $pageData = cc_phase7_page_data($moduleKey);
         } elseif (in_array($moduleKey, cc_operations_modules(), true) || $moduleKey === 'audit') {
             $pageData = cc_operations_data($moduleKey);
         } elseif (in_array($moduleKey, cc_reseller_modules(), true)) {
@@ -87,6 +90,12 @@ if (!$resolved['valid']) {
     require __DIR__ . '/views/sessions.php';
 } elseif ($moduleKey === 'devices') {
     require __DIR__ . '/views/devices.php';
+} elseif ($moduleKey === 'host-health') {
+    require __DIR__ . '/views/host-health.php';
+} elseif ($moduleKey === 'diagnostics') {
+    require __DIR__ . '/views/diagnostics.php';
+} elseif ($moduleKey === 'analytics') {
+    require __DIR__ . '/views/analytics.php';
 } elseif (in_array($moduleKey, cc_operations_modules(), true)) {
     require __DIR__ . '/views/operations.php';
 } elseif (in_array($moduleKey, cc_reseller_modules(), true)) {
