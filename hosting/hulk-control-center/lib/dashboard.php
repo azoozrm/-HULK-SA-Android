@@ -17,6 +17,11 @@ function cc_dashboard_metric_definitions(): array
         'configured_hosts' => "موزع نشط يملك host حاليًا يقبله hulk_normalize_host().",
         'resolver_ready_codes' => 'موزع نشط بكود حالي canonical وهاش مطابق وهوست حالي صالح؛ وهي شروط قابلية resolver الحالية.',
         'recent_admin_activity' => 'آخر 8 صفوف من app_admin_audit مع action/admin/time فقط، بدون details.',
+        'online_now' => 'جلسات غير منتهية وآخر نبضة لها داخل online_ttl_seconds حسب وقت الخادم.',
+        'sessions_today' => 'عدد جلسات cc_app_sessions التي بدأها الخادم منذ بداية اليوم بتوقيت لوحة التحكم.',
+        'active_devices' => 'معرّفات installation_id المميزة التي وصلت جلساتها نبضة Presence خلال آخر 24 ساعة، مع إظهار النافذة صراحة.',
+        'presence_version_distribution' => 'توزيع أحدث إصدار جلسة مرصودة لكل installation_id وصلت له نبضة Presence خلال آخر 24 ساعة.',
+        'users_today' => 'غير متاح لعدم وجود account_id أو هوية حساب مستقرة في cc_app_sessions.',
     ];
 }
 
@@ -34,22 +39,52 @@ function cc_dashboard_isolated(callable $loader, string $authority): array
     }
 }
 
-function cc_dashboard_compose(callable $operationsLoader, callable $resellerLoader): array
+function cc_dashboard_compose(
+    callable $operationsLoader,
+    callable $resellerLoader,
+    ?callable $presenceLoader = null
+): array
 {
     return [
         'definitions' => cc_dashboard_metric_definitions(),
         'operations' => cc_dashboard_isolated($operationsLoader, 'operations'),
         'reseller' => cc_dashboard_isolated($resellerLoader, 'reseller'),
+        'presence' => $presenceLoader === null
+            ? ['available' => false, 'data' => null]
+            : cc_dashboard_isolated($presenceLoader, 'presence'),
     ];
 }
 
 function cc_dashboard_data(): array
 {
-    $now = new DateTimeImmutable('now');
+    $config = cc_load_config();
+    $timezone = new DateTimeZone((string) ($config['app']['timezone'] ?? 'Asia/Riyadh'));
+    $clocks = cc_dashboard_clock_context(null, $timezone);
     return cc_dashboard_compose(
-        static fn (): array => cc_dashboard_operations_snapshot(cc_db('control'), $now),
-        static fn (): array => cc_dashboard_reseller_snapshot(cc_db('reseller'))
+        static fn (): array => cc_dashboard_operations_snapshot(
+            cc_db('control'),
+            $clocks['operations_now']
+        ),
+        static fn (): array => cc_dashboard_reseller_snapshot(cc_db('reseller')),
+        static fn (): array => cc_presence_dashboard_snapshot(
+            cc_db('control'),
+            static fn (array $ids): array => cc_presence_reseller_map(cc_db('reseller'), $ids),
+            cc_presence_config(),
+            $clocks['presence_now'],
+            $timezone
+        )
     );
+}
+
+function cc_dashboard_clock_context(
+    ?DateTimeImmutable $now,
+    DateTimeZone $operationsTimezone
+): array {
+    $instant = $now ?? new DateTimeImmutable('now');
+    return [
+        'operations_now' => $instant->setTimezone($operationsTimezone),
+        'presence_now' => cc_presence_now($instant),
+    ];
 }
 
 function cc_dashboard_operations_snapshot(PDO $db, DateTimeImmutable $now): array
