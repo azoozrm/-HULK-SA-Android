@@ -3,8 +3,9 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/bootstrap.php';
-require_once dirname(__DIR__) . '/lib/dashboard.php';
 require_once dirname(__DIR__) . '/lib/presence.php';
+require_once dirname(__DIR__) . '/lib/presence-read-model.php';
+require_once dirname(__DIR__) . '/lib/dashboard.php';
 
 date_default_timezone_set('UTC');
 
@@ -162,7 +163,8 @@ $definitions = cc_dashboard_metric_definitions();
 $expectedDashboardDefinitions = [
     'service_status', 'current_release', 'current_version', 'minimum_version', 'update_policy',
     'current_announcements', 'enabled_features', 'total_resellers', 'active_resellers',
-    'configured_hosts', 'resolver_ready_codes', 'recent_admin_activity',
+    'configured_hosts', 'resolver_ready_codes', 'recent_admin_activity', 'online_now',
+    'sessions_today', 'active_devices', 'presence_version_distribution', 'users_today',
 ];
 cc_test(array_keys($definitions) === $expectedDashboardDefinitions, 'every Dashboard V1 metric has an explicit authoritative definition');
 
@@ -174,6 +176,7 @@ $composed = cc_dashboard_compose(
 );
 cc_test($composed['operations']['available'] === true && $composed['operations']['data'] === $operationsPayload, 'Operations zero-capable data remains available');
 cc_test($composed['reseller']['available'] === true && $composed['reseller']['data'] === $resellerPayload, 'authoritative reseller zero remains a real zero');
+cc_test($composed['presence']['available'] === false && $composed['presence']['data'] === null, 'Presence remains unavailable when no authoritative loader is supplied');
 
 $operationsFailure = cc_dashboard_compose(
     static function (): array {
@@ -192,6 +195,16 @@ $resellerFailure = cc_dashboard_compose(
 );
 cc_test($resellerFailure['reseller']['available'] === false && $resellerFailure['reseller']['data'] === null, 'reseller failure is unavailable and never converted to zero');
 cc_test($resellerFailure['operations']['available'] === true && $resellerFailure['operations']['data'] === $operationsPayload, 'reseller failure does not erase Operations data');
+
+$presenceFailure = cc_dashboard_compose(
+    static fn (): array => $operationsPayload,
+    static fn (): array => $resellerPayload,
+    static function (): array {
+        throw new RuntimeException('presence unavailable');
+    }
+);
+cc_test($presenceFailure['presence']['available'] === false && $presenceFailure['presence']['data'] === null, 'Presence failure is unavailable and never converted to zero');
+cc_test($presenceFailure['operations']['available'] === true && $presenceFailure['reseller']['available'] === true, 'Presence failure does not erase Operations or reseller data');
 
 cc_test(
     is_string($dashboardSource) &&
@@ -221,13 +234,16 @@ cc_test(
         str_contains($dashboardView, 'المستخدمون الآن') &&
         str_contains($dashboardView, 'الجلسات اليوم') &&
         str_contains($dashboardView, 'الأجهزة النشطة') &&
-        substr_count($dashboardView, 'غير متاح بعد') >= 6,
-    'future Presence, session, device, adoption, health and analytics metrics remain explicitly unavailable'
+        str_contains($dashboardView, 'online_now') &&
+        str_contains($dashboardView, 'sessions_today') &&
+        str_contains($dashboardView, 'active_devices'),
+    'authoritative Phase 6 Presence metrics replace their Dashboard placeholders'
 );
 cc_test(
     is_string($dashboardView) &&
-        !preg_match('/(?:المستخدمون الآن|الجلسات اليوم|الأجهزة النشطة)[^\n]{0,160}>\s*[0-9]+\s*</u', $dashboardView),
-    'Dashboard does not fabricate future metric values'
+        str_contains($dashboardView, 'غير متاح لعدم وجود هوية حساب ثابتة') &&
+        !str_contains($dashboardView, "users_today'] ?? 0"),
+    'Dashboard does not fabricate the unsupported users-today metric'
 );
 cc_test(is_string($index) && str_contains($index, "\$moduleKey === 'dashboard'") && str_contains($index, 'cc_dashboard_data()'), 'Dashboard is connected through the existing allow-listed route');
 
@@ -252,5 +268,6 @@ foreach ($iterator as $file) {
 cc_test(!is_file($root . '/config.php'), 'runtime config is not present in source');
 
 require __DIR__ . '/presence.php';
+require __DIR__ . '/phase6.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

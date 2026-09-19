@@ -112,8 +112,11 @@ function cc_reseller_handle_post(string $module, array $admin): string
     }
 }
 
-function cc_reseller_page(): array
+function cc_reseller_page(string $module): array
 {
+    if (!in_array($module, cc_reseller_modules(), true)) {
+        throw new InvalidArgumentException('وحدة الموزعين غير معروفة.');
+    }
     cc_reseller_require_domain();
     $search = trim(is_string($_GET['q'] ?? null) ? $_GET['q'] : '');
     $status = is_string($_GET['status'] ?? null) && in_array($_GET['status'], ['active', 'inactive'], true)
@@ -147,8 +150,26 @@ function cc_reseller_page(): array
         . 'FROM resellers' . $where . ' ORDER BY reseller_id DESC LIMIT ' . $perPage . ' OFFSET ' . $offset
     );
     $query->execute($parameters);
+    $rows = $query->fetchAll();
+    $presenceUsage = [];
+    $presenceUsageAvailable = true;
+    try {
+        $presenceConfig = cc_presence_config();
+        $presenceUsage = cc_presence_usage_for_resellers(
+            cc_db('control'),
+            $rows,
+            $module,
+            cc_presence_now(),
+            (int) $presenceConfig['online_ttl_seconds']
+        );
+    } catch (Throwable $exception) {
+        error_log('HULK Control Center reseller Presence usage unavailable.');
+        $presenceUsageAvailable = false;
+    }
     return [
-        'rows' => $query->fetchAll(), 'total' => $total, 'page' => $page, 'pages' => $pages,
+        'rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages,
         'search' => $search, 'status' => $status,
+        'presence_usage' => $presenceUsage,
+        'presence_usage_available' => $presenceUsageAvailable,
     ];
 }

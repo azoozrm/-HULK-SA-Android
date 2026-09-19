@@ -114,7 +114,8 @@ class PresenceContractTest(unittest.TestCase):
         self.assertIn("'schemaVersion' => 1", operations)
         self.assertIn('val root = JSONObject(rawJson)', parser)
         self.assertNotIn('getJSONObject("presence")', parser)
-        self.assertNotIn('"presence"', parser)
+        self.assertIn('parseOperationsPresence(root.optJSONObject("presence"))', parser)
+        self.assertIn('val presence: OperationsPresenceConfig? = null', parser)
 
     def test_retention_is_bounded_and_online_is_independent(self) -> None:
         domain = self.read(ROOT / "lib" / "presence.php")

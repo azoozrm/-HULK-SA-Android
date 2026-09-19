@@ -1439,6 +1439,161 @@ td {
     margin-block-end: 16px;
 }
 
+.presence-summary__badges,
+.presence-filter__actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.presence-filters {
+    display: grid;
+    grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(145px, 0.75fr));
+    align-items: end;
+    gap: 12px;
+}
+
+.presence-filters--devices {
+    grid-template-columns: minmax(240px, 1.6fr) repeat(3, minmax(150px, 0.8fr));
+}
+
+.presence-filter--wide {
+    grid-column: span 2;
+}
+
+.presence-filter__actions {
+    min-height: 48px;
+}
+
+.presence-table {
+    min-width: 1240px;
+}
+
+.presence-device-table {
+    min-width: 980px;
+}
+
+.presence-table td {
+    min-width: 140px;
+    vertical-align: top;
+}
+
+.presence-table td:nth-child(3) {
+    min-width: 230px;
+}
+
+.presence-table td:nth-child(4) {
+    max-width: 260px;
+}
+
+.cell-note {
+    display: block;
+    max-width: 34ch;
+    margin-block-start: 6px;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+    font-size: 0.68rem;
+}
+
+.credential-stack,
+.time-stack,
+.presence-card__facts {
+    display: grid;
+    gap: 9px;
+    margin: 0;
+}
+
+.credential-stack > div,
+.time-stack > div,
+.presence-card__facts > div {
+    min-width: 0;
+}
+
+.credential-stack dt,
+.time-stack dt,
+.presence-card__facts dt {
+    margin-block-end: 3px;
+    color: var(--muted);
+    font-size: 0.61rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.credential-stack dd,
+.time-stack dd,
+.presence-card__facts dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.credential-stack .credential-value,
+.presence-card__facts .credential-value {
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-all;
+}
+
+.presence-mobile-list {
+    display: none;
+}
+
+.presence-card {
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(8, 10, 12, 0.55);
+}
+
+.presence-card header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-block-end: 12px;
+    margin-block-end: 12px;
+    border-block-end: 1px solid var(--line);
+}
+
+.presence-card header > span:first-child {
+    min-width: 0;
+    display: grid;
+}
+
+.presence-card header small {
+    margin-block-start: 3px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.presence-pagination {
+    margin-block-start: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+
+.presence-version-list {
+    display: grid;
+    gap: 8px;
+}
+
+.presence-version-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.016);
+}
+
+.presence-version-row small {
+    display: block;
+    color: var(--muted);
+}
+
 
 @media (max-width: 1180px) and (min-width: 861px) {
     :root {
@@ -1598,6 +1753,51 @@ td {
 
     .login-card__mark {
         display: grid;
+    }
+}
+
+@media (max-width: 700px) {
+    .presence-filters,
+    .presence-filters--devices {
+        grid-template-columns: 1fr;
+    }
+
+    .presence-filter--wide {
+        grid-column: auto;
+    }
+
+    .presence-summary__badges,
+    .presence-filter__actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .presence-summary__badges .status-badge,
+    .presence-filter__actions .button {
+        justify-content: center;
+    }
+
+    .presence-desktop-table {
+        display: none;
+    }
+
+    .presence-mobile-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .presence-card__facts {
+        gap: 12px;
+    }
+
+    .presence-card__facts > div {
+        padding-block-end: 9px;
+        border-block-end: 1px solid rgba(255, 255, 255, 0.055);
+    }
+
+    .presence-card__facts > div:last-child {
+        padding-block-end: 0;
+        border-block-end: 0;
     }
 }
 

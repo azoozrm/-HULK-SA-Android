@@ -4,7 +4,7 @@ Production foundation for the owner-facing administration application at:
 
 `https://hulksa.com/control-center/`
 
-The application combines the Arabic RTL owner experience with the existing Operations and reseller authorities. Its Dashboard uses authoritative current data, and its dark Presence backend records future Android session/device telemetry without changing the current Android application or owner-facing modules.
+The application combines the Arabic RTL owner experience with the existing Operations and reseller authorities. Its Dashboard and owner modules read authoritative Presence session/device telemetry without changing the Android application or creating a competing reseller authority.
 
 ## Runtime
 
@@ -53,11 +53,11 @@ Its independent session cookie is scoped to `/control-center/`, uses `Secure`, `
 
 The allow-list is defined in `lib/routes.php`. Apache rewrites friendly module URLs such as `/control-center/live-users/` to the single authenticated shell. Unknown routes render a safe 404 state and never select files dynamically.
 
-Operations, reseller, access-code, host and audit modules are connected to their current authoritative databases. Remaining modules stay explicitly **غير متاح بعد**. Dashboard V1 contains no fabricated counts or demo production records.
+Operations, reseller, access-code, host, audit, Live Users, Sessions and Devices modules are connected to their current authoritative databases. Phase-7-only modules stay explicitly **غير متاح بعد**. No screen substitutes a failed authority with zero or demo production records.
 
 ## Dashboard V1 read contract
 
-Dashboard reads the two PDO authorities independently and composes them in PHP. If either authority fails, its section renders a recoverable unavailable state while valid data from the other authority remains visible. A failed read is never converted to zero.
+Dashboard reads Operations, reseller and Presence authorities independently and composes them in PHP. If an authority fails, its section renders a recoverable unavailable state while valid data from the other authorities remains visible. A failed read is never converted to zero.
 
 | Dashboard value | Authoritative definition |
 |---|---|
@@ -70,8 +70,23 @@ Dashboard reads the two PDO authorities independently and composes them in PHP. 
 | Total/active resellers | Counts from `resellers`; active means exactly `status='active'` |
 | Configured active hosts | Active reseller rows whose current host is accepted by `hulk_normalize_host()` |
 | Resolver-ready codes | Active reseller with a valid current host, canonical current access code, and matching SHA-256 code hash |
+| Online Now | `ended_at IS NULL` and `last_seen_at >= server_now - configured_online_ttl` |
+| Sessions today | Sessions whose server `started_at` is inside the current Control Center day |
+| Active devices | Distinct `cc_devices` rows seen during the explicitly labeled trailing 24-hour window |
+| Presence app versions | Latest app version recorded for devices seen during the same 24-hour Presence window |
 
-Online users, sessions, devices, client-version adoption, host health, diagnostics, and usage analytics stay explicitly unavailable because no current server-side authority owns those measurements.
+`users today` remains explicitly unavailable: the merged `cc_app_sessions` schema has no stable `account_id`, and the UI does not invent one from IPTV username, reseller, device or session identifiers. Host health, diagnostics and Phase-7 analytics also remain unavailable.
+
+## Phase 6 owner read models
+
+- `/live-users/` defaults to fresh non-ended sessions and can also show Offline/all states. Search, status, app-version, reseller, host and platform filters, sorting and stable pagination are server-side and retained in query parameters.
+- `/sessions/` renders immutable credential, host, device, app-version and lifecycle snapshots. A later code/host rotation never rewrites an older session.
+- `/devices/` uses `installation_id` as stable identity and displays the latest schema-owned device/app facts. Inventory existence is never treated as proof that a device is Online.
+- Each session page resolves its page of reseller IDs with one bounded reseller query. A reseller lookup failure leaves the authoritative control rows visible with an explicit partial-data warning.
+- Reseller, current access-code and current-host screens include read-only Presence usage. Current-code/current-host usage matches the current reseller value exactly, so rotated historical snapshots remain history rather than being silently reassigned.
+- ACCESS CODE, IPTV USERNAME and IPTV PASSWORD are displayed directly to the authenticated owner as required. They are not copied to logs, errors, audit JSON, analytics, screenshots or source fixtures with real values.
+
+Phase 6 adds no table, migration or index. No production query-plan measurement established a need for another index; measured production evidence remains the gate for any future schema change.
 
 ## Presence backend
 
@@ -112,7 +127,7 @@ HULK_CONTROL_CENTER_CONFIG=/absolute/private/config.php \
 
 Each invocation deletes at most the configured batch from each category: ended or stale sessions beyond retention, unreferenced inactive devices beyond retention, and expired rate-limit windows. Cleanup does not define Online state.
 
-Operations config supports an optional schema-v1 `presence` discovery object with `enabled`, `baseUrl`, `heartbeatSeconds`, and `onlineTtlSeconds`. It is omitted when disabled or absent. Leave it disabled until the separate Android round is complete.
+Operations config supports an optional schema-v1 `presence` discovery object with `enabled`, `baseUrl`, `heartbeatSeconds`, and `onlineTtlSeconds`. It is omitted when disabled or absent. The Phase 5 Android integration consumes this object independently of IPTV authentication success.
 
 ## Shared mutation paths
 
@@ -143,6 +158,7 @@ find hosting/hulk-control-center -type f -name '*.php' -print0 \
   | xargs -0 -n1 php -l
 php hosting/hulk-control-center/tests/run.php
 python3 -m unittest hosting/hulk-control-center/tests/test_presence_contract.py
+python3 -m unittest hosting/hulk-control-center/tests/test_phase6_contract.py
 node --check hosting/hulk-control-center/assets/app.js
 node hosting/hulk-control-center/tests/navigation.test.js
 ```
