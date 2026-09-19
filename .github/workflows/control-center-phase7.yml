@@ -1,0 +1,69 @@
+name: Control Center Phase 7 Verification
+
+on:
+  pull_request:
+    branches:
+      - phase-3-v0.9.3.0-adaptive-foundation
+    paths:
+      - 'hosting/hulk-control-center/**'
+      - '.github/workflows/control-center-phase7.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-center-phase7-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: PHP 8.2 and contract verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Set up production-compatible PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql, pdo_sqlite, curl, openssl
+          coverage: none
+
+      - name: Qualify PHP runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 2 ? 0 : 1);'
+          php -r 'foreach (["pdo_mysql", "pdo_sqlite", "curl", "openssl"] as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing required extension\n"); exit(1); } }'
+          php -r 'exit(function_exists("proc_open") ? 0 : 1);'
+
+      - name: Lint Control Center PHP
+        shell: bash
+        run: |
+          set -euo pipefail
+          find hosting/hulk-control-center -type f -name '*.php' -print0 \
+            | xargs -0 -n1 php -l
+
+      - name: Run Control Center behavioral tests
+        run: php hosting/hulk-control-center/tests/run.php
+
+      - name: Run Control Center contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s hosting/hulk-control-center/tests -p 'test_*.py' -v
+
+      - name: Run navigation checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check hosting/hulk-control-center/assets/app.js
+          node hosting/hulk-control-center/tests/navigation.test.js
+
+      - name: Verify patch whitespace
+        run: git diff --check HEAD^

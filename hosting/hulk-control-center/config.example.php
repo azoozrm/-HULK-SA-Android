@@ -46,4 +46,22 @@ return [
         // nonce to reproduce the same opaque token on an idempotent retry.
         'token_secret' => 'CHANGE_ME_TO_ANOTHER_RANDOM_32_BYTE_SECRET',
     ],
+    'diagnostics' => [
+        'retention_days' => 30,
+        'cleanup_batch_size' => 200,
+        'rate_limit_window_seconds' => 60,
+        'rate_limit_attempts' => 30,
+    ],
+    'host_health' => [
+        // DNS runs in a killable CLI child so this is a wall-clock bound.
+        'dns_timeout_ms' => 2000,
+        'connect_timeout_ms' => 3000,
+        'request_timeout_ms' => 5000,
+        'max_runtime_seconds' => 45,
+        'max_hosts_per_run' => 20,
+        'candidate_limit' => 500,
+        'retention_days' => 90,
+        'cleanup_batch_size' => 200,
+        'user_agent' => 'HULK-SA-Host-Health/1.0',
+    ],
 ];

@@ -5,9 +5,15 @@ declare(strict_types=1);
 $operationsAvailable = (bool) ($pageData['operations']['available'] ?? false);
 $resellerAvailable = (bool) ($pageData['reseller']['available'] ?? false);
 $presenceAvailable = (bool) ($pageData['presence']['available'] ?? false);
+$hostHealthAvailable = (bool) ($pageData['host_health']['available'] ?? false);
+$diagnosticsAvailable = (bool) ($pageData['diagnostics']['available'] ?? false);
+$analyticsAvailable = (bool) ($pageData['analytics']['available'] ?? false);
 $operations = $operationsAvailable && is_array($pageData['operations']['data'] ?? null) ? $pageData['operations']['data'] : [];
 $reseller = $resellerAvailable && is_array($pageData['reseller']['data'] ?? null) ? $pageData['reseller']['data'] : [];
 $presence = $presenceAvailable && is_array($pageData['presence']['data'] ?? null) ? $pageData['presence']['data'] : [];
+$hostHealth = $hostHealthAvailable && is_array($pageData['host_health']['data'] ?? null) ? $pageData['host_health']['data'] : [];
+$diagnostics = $diagnosticsAvailable && is_array($pageData['diagnostics']['data'] ?? null) ? $pageData['diagnostics']['data'] : [];
+$analytics = $analyticsAvailable && is_array($pageData['analytics']['data'] ?? null) ? $pageData['analytics']['data'] : [];
 $serviceLabels = [
     'OPERATIONAL' => ['تعمل بصورة طبيعية', 'success'],
     'DEGRADED' => ['أداء متأثر', 'warning'],
@@ -23,6 +29,16 @@ $auditRows = is_array($operations['audit'] ?? null) ? $operations['audit'] : [];
 $livePreview = is_array($presence['live_preview'] ?? null) ? $presence['live_preview'] : [];
 $presenceResellers = is_array($presence['resellers'] ?? null) ? $presence['resellers'] : [];
 $versionDistribution = is_array($presence['version_distribution'] ?? null) ? $presence['version_distribution'] : [];
+$healthSummary = is_array($hostHealth['summary'] ?? null) ? $hostHealth['summary'] : [];
+$healthTargets = is_array($hostHealth['targets'] ?? null) ? $hostHealth['targets'] : [];
+$hostHealthCoverageComplete = ($hostHealth['coverage_complete'] ?? false) === true;
+$sessionTrend = is_array($analytics['session_trend'] ?? null) ? $analytics['session_trend'] : [];
+$currentAdoption = is_array($analytics['current_adoption_distribution'] ?? null) ? $analytics['current_adoption_distribution'] : [];
+$currentAdoptionPartial = ($analytics['current_adoption_partial'] ?? false) === true;
+$latestSessionTrend = array_slice($sessionTrend, -7);
+$healthyHosts = (int) ($healthSummary['HEALTHY'] ?? 0);
+$hostTargetCount = count($healthTargets);
+$diagnosticEvents = (int) ($diagnostics['total_events'] ?? 0);
 ?>
 <section class="dashboard-intro dashboard-intro--connected">
     <div class="dashboard-intro__copy">
@@ -33,6 +49,8 @@ $versionDistribution = is_array($presence['version_distribution'] ?? null) ? $pr
             <?php cc_status_badge($operationsAvailable ? 'Operations متصل' : 'Operations غير متاح', $operationsAvailable ? 'success' : 'danger'); ?>
             <?php cc_status_badge($resellerAvailable ? 'Reseller متصل' : 'Reseller غير متاح', $resellerAvailable ? 'success' : 'danger'); ?>
             <?php cc_status_badge($presenceAvailable ? 'Presence متصل' : 'Presence غير متاح', $presenceAvailable ? 'success' : 'danger'); ?>
+            <?php cc_status_badge($hostHealthAvailable ? 'Host Health متصل' : 'Host Health غير متاح', $hostHealthAvailable ? 'success' : 'danger'); ?>
+            <?php cc_status_badge($diagnosticsAvailable && $analyticsAvailable ? 'Phase 7 متصل' : 'Phase 7 جزئي', $diagnosticsAvailable && $analyticsAvailable ? 'success' : 'warning'); ?>
         </div>
     </div>
     <div class="dashboard-intro__seal" aria-hidden="true"><img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""></div>
@@ -54,6 +72,58 @@ $versionDistribution = is_array($presence['version_distribution'] ?? null) ? $pr
 <?php else: ?>
     <?php cc_error_state('تعذر قراءة بيانات Operations', 'مؤشرات Operations غير متاحة حاليًا، بينما تظل بيانات الموزعين المستقلة قابلة للعرض.', cc_url('dashboard')); ?>
 <?php endif; ?>
+
+<div class="section-heading dashboard-section-heading">
+    <div><span class="eyebrow">Phase 7</span><h2>الصحة والتشخيص والاعتماد</h2></div>
+    <?php cc_status_badge(
+        $hostHealthAvailable && $diagnosticsAvailable && $analyticsAvailable ? 'كل المصادر متاحة' : 'بيانات جزئية أو غير متاحة',
+        $hostHealthAvailable && $diagnosticsAvailable && $analyticsAvailable ? 'success' : 'warning'
+    ); ?>
+</div>
+<section class="kpi-grid phase7-kpi-grid" aria-label="مؤشرات Phase 7 الحالية">
+    <?php if ($hostHealthAvailable): ?>
+        <?php cc_kpi_card('صحة الهوستات', $hostTargetCount === 0 ? 'لا توجد أهداف' : ($healthyHosts . ' / ' . $hostTargetCount), $hostTargetCount === 0 ? 'لا يوجد resellers.host حالي صالح لفحصه.' : ($hostHealthCoverageComplete ? 'هوستات resellers.host الحالية التي أحدث فحص لها سليم.' : 'ملخص جزئي لنافذة القراءة الحالية؛ راجع صفحة صحة الهوستات.'), 'heart', $hostHealthCoverageComplete ? 'ملاحظات مجدولة' : 'تغطية جزئية', $hostHealthCoverageComplete && ($hostTargetCount === 0 || $healthyHosts === $hostTargetCount) ? 'success' : 'warning'); ?>
+    <?php else: ?>
+        <?php cc_kpi_card('صحة الهوستات', 'غير متاح', 'تعذر قراءة سجل فحوص الهوست؛ لم تُعرض قيمة صفرية.', 'heart', 'مصدر غير متاح', 'danger'); ?>
+    <?php endif; ?>
+    <?php if ($diagnosticsAvailable): ?>
+        <?php cc_kpi_card('أعطال التطبيق', (string) $diagnosticEvents, 'أحداث typed مستلمة داخل مدة الاحتفاظ البالغة ' . (int) ($diagnostics['retention_days'] ?? 30) . ' يومًا.', 'diagnostic', 'ليست raw logs', $diagnosticEvents === 0 ? 'success' : 'warning'); ?>
+    <?php else: ?>
+        <?php cc_kpi_card('أعطال التطبيق', 'غير متاح', 'تعذر قراءة الأحداث التشخيصية؛ لم تُعرض قيمة صفرية.', 'diagnostic', 'مصدر غير متاح', 'danger'); ?>
+    <?php endif; ?>
+    <?php if ($analyticsAvailable): ?>
+        <?php $latestTrend = $sessionTrend === [] ? null : $sessionTrend[array_key_last($sessionTrend)]; ?>
+        <?php cc_kpi_card('أحدث يوم جلسات', $latestTrend === null ? 'لا توجد بيانات' : (string) ((int) $latestTrend['session_count']), $latestTrend === null ? 'لا توجد حقائق started_at داخل نافذة 30 يومًا.' : 'جلسات بدأت في ' . (string) $latestTrend['day'] . '.', 'clock', 'Presence started_at', 'info'); ?>
+        <?php $leadingVersion = $currentAdoption[0] ?? null; ?>
+        <?php cc_kpi_card('الاعتماد الحالي', $leadingVersion === null ? 'لا توجد بيانات' : (string) $leadingVersion['app_version_name'], $leadingVersion === null ? 'لا توجد أجهزة Presence في آخر 24 ساعة.' : (int) $leadingVersion['device_count'] . ' جهازًا على الإصدار الأكثر حضورًا' . ($currentAdoptionPartial ? ' ضمن قراءة أعلى 25 إصدارًا.' : '.'), 'package', $currentAdoptionPartial ? 'Presence · قراءة جزئية' : 'Presence خلال 24 ساعة', $currentAdoptionPartial ? 'warning' : 'info'); ?>
+    <?php else: ?>
+        <?php cc_kpi_card('اتجاه الجلسات', 'غير متاح', 'تعذر قراءة حقائق Presence التحليلية.', 'clock', 'مصدر غير متاح', 'danger'); ?>
+        <?php cc_kpi_card('اعتماد الإصدارات', 'غير متاح', 'تعذر قراءة توزيع الإصدارات من Presence.', 'package', 'مصدر غير متاح', 'danger'); ?>
+    <?php endif; ?>
+</section>
+
+<section class="dashboard-grid phase7-grid">
+    <article class="panel">
+        <header class="panel__header"><div><span class="eyebrow">آخر 7 نقاط متاحة</span><h2>اتجاه الجلسات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('analytics')) ?>">التفاصيل</a></header>
+        <?php if (!$analyticsAvailable): ?>
+            <?php cc_unavailable_state('اتجاه الجلسات غير متاح', 'تعذر الوصول إلى read model التحليلي.', 'chart'); ?>
+        <?php elseif ($latestSessionTrend === []): ?>
+            <?php cc_empty_state('لا توجد جلسات في النافذة', 'لا توجد حقائق started_at ضمن آخر 30 يومًا.'); ?>
+        <?php else: ?>
+            <div class="metric-list"><?php foreach ($latestSessionTrend as $trend): ?><div class="metric-row"><time><?= cc_e($trend['day']) ?></time><?php cc_status_badge((string) ((int) $trend['session_count']) . ' جلسة', 'info'); ?></div><?php endforeach; ?></div>
+        <?php endif; ?>
+    </article>
+    <article class="panel">
+        <header class="panel__header"><div><span class="eyebrow">Presence خلال 24 ساعة</span><h2>اعتماد الإصدارات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('analytics')) ?>">التفاصيل</a></header>
+        <?php if (!$analyticsAvailable): ?>
+            <?php cc_unavailable_state('اعتماد الإصدارات غير متاح', 'تعذر الوصول إلى read model التحليلي.', 'package'); ?>
+        <?php elseif ($currentAdoption === []): ?>
+            <?php cc_empty_state('لا توجد أجهزة حديثة', 'لا توجد أجهزة Presence ضمن نافذة 24 ساعة.'); ?>
+        <?php else: ?>
+            <div class="metric-list"><?php foreach (array_slice($currentAdoption, 0, 7) as $version): ?><div class="metric-row"><span><strong><?= cc_e($version['app_version_name']) ?></strong><small>Version code <?= (int) $version['app_version_code'] ?></small></span><?php cc_status_badge((string) ((int) $version['device_count']) . ' جهاز', 'info'); ?></div><?php endforeach; ?></div>
+        <?php endif; ?>
+    </article>
+</section>
 
 <div class="section-heading dashboard-section-heading">
     <div><span class="eyebrow">Presence</span><h2>الحضور والجلسات والأجهزة</h2></div>
@@ -133,6 +203,9 @@ $versionDistribution = is_array($presence['version_distribution'] ?? null) ? $pr
             <div class="source-row"><span class="source-row__icon"><?= cc_icon('pulse') ?></span><span><strong>Operations</strong><small>الخدمة والإصدار والسياسات والتدقيق</small></span><?php cc_status_badge($operationsAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $operationsAvailable ? 'success' : 'danger'); ?></div>
             <div class="source-row"><span class="source-row__icon"><?= cc_icon('briefcase') ?></span><span><strong>Reseller</strong><small>الموزعون والهوست والكود الحالي</small></span><?php cc_status_badge($resellerAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $resellerAvailable ? 'success' : 'danger'); ?></div>
             <div class="source-row"><span class="source-row__icon"><?= cc_icon('users') ?></span><span><strong>Presence</strong><small>الجلسات والأجهزة وإصدارات التطبيق</small></span><?php cc_status_badge($presenceAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $presenceAvailable ? 'success' : 'danger'); ?></div>
+            <div class="source-row"><span class="source-row__icon"><?= cc_icon('heart') ?></span><span><strong>Host Health</strong><small>ملاحظات fingerprint للهوست الحالي</small></span><?php cc_status_badge(!$hostHealthAvailable ? 'خطأ قابل للاستعادة' : ($hostHealthCoverageComplete ? 'متصل' : 'قراءة جزئية'), !$hostHealthAvailable ? 'danger' : ($hostHealthCoverageComplete ? 'success' : 'warning')); ?></div>
+            <div class="source-row"><span class="source-row__icon"><?= cc_icon('diagnostic') ?></span><span><strong>Diagnostics</strong><small>أحداث typed محدودة وحقائق مشتقة من الجلسة</small></span><?php cc_status_badge($diagnosticsAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $diagnosticsAvailable ? 'success' : 'danger'); ?></div>
+            <div class="source-row"><span class="source-row__icon"><?= cc_icon('chart') ?></span><span><strong>Analytics</strong><small>تجميع Presence دون تنزيلات APK</small></span><?php cc_status_badge($analyticsAvailable ? 'متصل' : 'خطأ قابل للاستعادة', $analyticsAvailable ? 'success' : 'danger'); ?></div>
         </div>
     </article>
 </section>
@@ -141,7 +214,5 @@ $versionDistribution = is_array($presence['version_distribution'] ?? null) ? $pr
     <header class="panel__header"><div><span class="eyebrow">حدود البيانات الحالية</span><h2>مؤشرات تبقى غير متاحة</h2></div><?php cc_status_badge('بدون تقديرات', 'neutral'); ?></header>
     <div class="future-metrics__grid">
         <?php cc_kpi_card('المستخدمون اليوم', 'غير متاح', 'غير متاح لعدم وجود هوية حساب ثابتة؛ لا يُستنتج من اسم IPTV أو الجهاز.', 'users'); ?>
-        <?php cc_kpi_card('صحة الهوستات', 'غير متاح بعد', 'لا يوجد فحص صحي خادمي حاليًا.', 'heart'); ?>
-        <?php cc_kpi_card('التشخيصات والتحليلات', 'غير متاح بعد', 'لا يوجد ingest أو analytics حاليًا.', 'diagnostic'); ?>
     </div>
 </section>

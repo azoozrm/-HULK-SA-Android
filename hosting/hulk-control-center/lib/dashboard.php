@@ -22,6 +22,10 @@ function cc_dashboard_metric_definitions(): array
         'active_devices' => 'معرّفات installation_id المميزة التي وصلت جلساتها نبضة Presence خلال آخر 24 ساعة، مع إظهار النافذة صراحة.',
         'presence_version_distribution' => 'توزيع أحدث إصدار جلسة مرصودة لكل installation_id وصلت له نبضة Presence خلال آخر 24 ساعة.',
         'users_today' => 'غير متاح لعدم وجود account_id أو هوية حساب مستقرة في cc_app_sessions.',
+        'host_health_summary' => cc_phase7_metric_definitions()['host_health_summary'],
+        'application_failures' => cc_phase7_metric_definitions()['application_failures'],
+        'session_trend' => cc_phase7_metric_definitions()['session_trend'],
+        'version_adoption_trend' => cc_phase7_metric_definitions()['version_adoption_trend'],
     ];
 }
 
@@ -42,7 +46,10 @@ function cc_dashboard_isolated(callable $loader, string $authority): array
 function cc_dashboard_compose(
     callable $operationsLoader,
     callable $resellerLoader,
-    ?callable $presenceLoader = null
+    ?callable $presenceLoader = null,
+    ?callable $hostHealthLoader = null,
+    ?callable $diagnosticsLoader = null,
+    ?callable $analyticsLoader = null
 ): array
 {
     return [
@@ -52,6 +59,15 @@ function cc_dashboard_compose(
         'presence' => $presenceLoader === null
             ? ['available' => false, 'data' => null]
             : cc_dashboard_isolated($presenceLoader, 'presence'),
+        'host_health' => $hostHealthLoader === null
+            ? ['available' => false, 'data' => null]
+            : cc_dashboard_isolated($hostHealthLoader, 'host-health'),
+        'diagnostics' => $diagnosticsLoader === null
+            ? ['available' => false, 'data' => null]
+            : cc_dashboard_isolated($diagnosticsLoader, 'diagnostics'),
+        'analytics' => $analyticsLoader === null
+            ? ['available' => false, 'data' => null]
+            : cc_dashboard_isolated($analyticsLoader, 'analytics'),
     ];
 }
 
@@ -72,7 +88,14 @@ function cc_dashboard_data(): array
             cc_presence_config(),
             $clocks['presence_now'],
             $timezone
-        )
+        ),
+        static fn (): array => cc_phase7_host_health_page(cc_db('control'), cc_db('reseller')),
+        static fn (): array => cc_phase7_diagnostics_page(
+            cc_db('control'),
+            $clocks['presence_now'],
+            (int) cc_diagnostics_config()['retention_days']
+        ),
+        static fn (): array => cc_phase7_analytics_page(cc_db('control'), $clocks['presence_now'])
     );
 }
 
