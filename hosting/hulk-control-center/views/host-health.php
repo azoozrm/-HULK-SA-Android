@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 if (!empty($pageData['load_error'])) {
-    cc_error_state('تعذر تحميل صحة الهوستات', 'لم تُعرض حالة بديلة. تحقق من migration وتشغيل الفحص المجدول.', cc_url('host-health'));
+    cc_error_state('تعذر تحميل صحة الهوستات', 'لم تُعرض حالة بديلة. تحقق من جاهزية مصدر البيانات وتشغيل الفحص المجدول.', cc_url('host-health'));
     return;
 }
 
@@ -51,7 +51,7 @@ $fingerprint = static fn (string $value): string => substr($value, 0, 12) . '…
     <section class="panel">
         <header class="panel__header"><div><span class="eyebrow">Append-only snapshots</span><h2>سجل الفحوص</h2><p class="muted-copy">آخر <?= CC_PHASE7_HISTORY_LIMIT ?> ملاحظة. تغيير الهوست لا يغيّر fingerprint التاريخي.</p></div></header>
         <?php if ($history === []): ?>
-            <?php cc_empty_state('لم يصل أول فحص بعد', 'بعد نشر migration وجدولة أداة CLI ستظهر الملاحظات هنا.'); ?>
+            <?php cc_empty_state('لم يصل أول فحص بعد', 'ستظهر هنا النتائج بعد أول تشغيل للفحص المجدول.'); ?>
         <?php else: ?>
             <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="سجل فحوص الهوستات"><table class="phase7-table" data-mobile-cards><thead><tr><th>الوقت</th><th>الموزع</th><th>Fingerprint</th><th>النتيجة</th><th>DNS</th><th>TCP</th><th>HTTP</th><th>الزمن</th></tr></thead><tbody>
             <?php foreach ($history as $check): ?>

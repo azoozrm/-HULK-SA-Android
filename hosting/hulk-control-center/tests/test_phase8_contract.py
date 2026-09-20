@@ -56,6 +56,50 @@ class PhaseEightContractTests(unittest.TestCase):
         for field in ("date_from", "date_to", "admin", "action", "reseller_id"):
             self.assertIn(f'name="{field}"', view)
 
+    def test_owner_audit_is_arabic_structured_and_technically_secondary(self) -> None:
+        domain = self.read(ROOT / "lib" / "phase8.php")
+        view = self.read(ROOT / "views" / "audit.php")
+        dashboard = self.read(ROOT / "views" / "dashboard.php")
+        self.assertIn("function cc_phase8_audit_action_presentation", domain)
+        self.assertIn("GROWTH_CONFIG_PUBLISHED", domain)
+        self.assertIn("تم تحديث إعدادات التجديد والدعم", domain)
+        self.assertIn("LEGACY_CUSTOM_ACTION", self.read(ROOT / "tests" / "phase8.php"))
+        self.assertIn("technical_id", domain)
+        self.assertIn("'rows'", domain)
+        self.assertIn("'direction' => 'ltr'", domain)
+        self.assertIn("تفاصيل تقنية", view)
+        self.assertIn("audit-event__title", view)
+        self.assertIn("cc_phase8_audit_action_presentation", dashboard)
+        self.assertNotRegex(view, re.compile(r"<code[^>]*>\s*<\?=\s*cc_e\(\$row\['action'\]\)", re.IGNORECASE))
+
+    def test_navigation_and_settings_use_owner_oriented_arabic(self) -> None:
+        routes = self.read(ROOT / "lib" / "routes.php")
+        layout = self.read(ROOT / "views" / "layout.php")
+        settings = self.read(ROOT / "views" / "settings.php")
+        css = self.read(ROOT / "assets" / "app.css")
+        for label in ("النشاط المباشر", "الموزعون والوصول", "إدارة التطبيق", "المتابعة والتحليل", "إدارة المركز"):
+            self.assertIn(label, routes)
+        self.assertIn("navigation__group-title", layout)
+        for forbidden_heading in ("Presence", "Diagnostics", "Host Health", "Single-owner boundaries"):
+            self.assertNotIn(f'>{forbidden_heading}<', settings)
+        self.assertIn("إعدادات مركز التحكم", settings)
+        self.assertIn("الجهات المسؤولة عن التعديل", settings)
+        self.assertIn("technical-disclosure", settings)
+        self.assertIn("--surface-1", css)
+        self.assertIn("dashboard-command", css)
+        self.assertIn("intdiv", settings)
+        self.assertIn("الرئيسية", layout)
+
+    def test_dashboard_distinguishes_partial_evidence_and_keeps_every_warning_visible(self) -> None:
+        dashboard = self.read(ROOT / "views" / "dashboard.php")
+        audit = self.read(ROOT / "views" / "audit.php")
+        self.assertIn("!$hostHealthAvailable || !$diagnosticsAvailable || !$analyticsAvailable", dashboard)
+        self.assertIn("!$hostHealthCoverageComplete", dashboard)
+        self.assertIn("آخر فحص لم يشمل كل الهوستات المستهدفة", dashboard)
+        self.assertNotIn("array_slice($attentionItems, 0, 5)", dashboard)
+        self.assertIn("technical_id", dashboard)
+        self.assertIn("غير مصنف", audit)
+
     def test_saved_filters_are_local_bounded_and_exclude_sensitive_fields(self) -> None:
         source = self.read(ROOT / "assets" / "app.js")
         sessions = self.read(ROOT / "views" / "sessions.php")
@@ -88,7 +132,7 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("summary:focus-visible", css)
         self.assertIn("min-height: 44px", css)
         self.assertIn("@media (max-width: 700px)", css)
-        self.assertIn("app.css?v=3.0.0", login)
+        self.assertIn("app.css?v=4.0.0", login)
 
     def test_cross_module_links_use_non_secret_context_only(self) -> None:
         bootstrap = self.read(ROOT / "bootstrap.php")

@@ -15,7 +15,7 @@ $csrf = cc_csrf_token();
 <section class="module-stack">
     <?php if ($moduleKey === 'resellers'): ?>
     <section class="panel">
-        <div class="panel__header"><div><span class="eyebrow">Reseller DB</span><h2>إنشاء موزع</h2></div><?php cc_status_badge('مالك البيانات', 'success'); ?></div>
+        <div class="panel__header"><div><span class="eyebrow">إدارة الموزعين</span><h2>إنشاء موزع</h2></div><?php cc_status_badge('المصدر المعتمد', 'success'); ?></div>
         <form class="admin-form admin-form--grid" method="post">
             <input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="create_reseller">
             <label class="form-field"><span>اسم دخول الموزع</span><input name="reseller_name" maxlength="100" autocomplete="off" required></label>
@@ -30,7 +30,7 @@ $csrf = cc_csrf_token();
     <section class="panel">
         <div class="panel__header"><div><h2><?= $moduleKey === 'access-codes' ? 'أكواد الدخول الحالية' : ($moduleKey === 'hosts' ? 'هوستات الموزعين' : 'حسابات الموزعين') ?></h2><p class="muted-copy">البيانات المعروضة مباشرة من قاعدة reseller الموثوقة.</p></div><span class="record-count"><?= (int) ($pageData['total'] ?? 0) ?> سجل</span></div>
         <?php if (!$presenceUsageAvailable): ?>
-            <?php cc_alert('استخدام Presence غير متاح', 'بيانات الموزعين الحالية متاحة، لكن تعذر قراءة إحصاءات الجلسات. لم تُعرض أصفار بديلة.', 'warning'); ?>
+            <?php cc_alert('نشاط الجلسات غير متاح', 'بيانات الموزعين الحالية متاحة، لكن تعذر قراءة إحصاءات الجلسات. لم تُعرض أصفار بديلة.', 'warning'); ?>
         <?php endif; ?>
         <form class="data-toolbar data-toolbar--saved" method="get" data-saved-filters="<?= cc_e($moduleKey) ?>" data-saved-filter-fields="status,reseller">
             <label class="search-control"><span class="sr-only">بحث</span><?= cc_icon('search') ?><input name="q" type="search" value="<?= cc_e($pageData['search'] ?? '') ?>" placeholder="بحث بالاسم أو الهوست أو الكود"></label>
@@ -41,7 +41,7 @@ $csrf = cc_csrf_token();
         </form>
 
         <?php if ($rows === []): cc_empty_state('لا توجد نتائج', 'غيّر البحث أو أنشئ موزعًا جديدًا.'); else: ?>
-        <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="بيانات الموزعين"><table class="management-table" data-mobile-cards><thead><tr><th>الموزع</th><th>الحالة</th><th><?= $moduleKey === 'access-codes' ? 'كود الدخول' : ($moduleKey === 'hosts' ? 'الهوست' : 'آخر تحديث') ?></th><th>استخدام Presence</th><th>الإدارة</th></tr></thead><tbody>
+        <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="بيانات الموزعين"><table class="management-table" data-mobile-cards><thead><tr><th>الموزع</th><th>الحالة</th><th><?= $moduleKey === 'access-codes' ? 'كود الدخول' : ($moduleKey === 'hosts' ? 'الهوست' : 'آخر تحديث') ?></th><th>نشاط الجلسات</th><th>الإدارة</th></tr></thead><tbody>
         <?php foreach ($rows as $row): $id = (int) $row['reseller_id']; $usage = $presenceUsage[$id] ?? null; ?>
             <tr>
                 <td><strong><?= cc_e($row['reseller_name']) ?></strong><br><span class="mono muted-copy">#<?= $id ?></span></td>

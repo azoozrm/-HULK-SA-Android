@@ -87,14 +87,129 @@ function cc_phase8_like_pattern(string $value, bool $prefixOnly = false): string
     return ($prefixOnly ? '' : '%') . $escaped . '%';
 }
 
-function cc_phase8_safe_audit_details(mixed $raw): string
+function cc_phase8_audit_action_presentation(string $action): array
+{
+    $catalog = [
+        'ADMIN_CREATED' => ['title' => 'تم إنشاء حساب إداري', 'tone' => 'info', 'icon' => 'users'],
+        'APK_UPLOADED' => ['title' => 'تم رفع إصدار جديد', 'tone' => 'info', 'icon' => 'package'],
+        'RELEASE_ACTIVATED' => ['title' => 'تم تفعيل إصدار', 'tone' => 'success', 'icon' => 'package'],
+        'RELEASE_DISABLED' => ['title' => 'تم تعطيل إصدار', 'tone' => 'warning', 'icon' => 'package'],
+        'RELEASE_DELETED' => ['title' => 'تم حذف إصدار', 'tone' => 'danger', 'icon' => 'package'],
+        'MINIMUM_VERSION_CHANGED' => ['title' => 'تم تحديث سياسة الإصدار', 'tone' => 'info', 'icon' => 'shield'],
+        'ANNOUNCEMENT_CREATED' => ['title' => 'تم إنشاء إعلان', 'tone' => 'success', 'icon' => 'bell'],
+        'ANNOUNCEMENT_DISABLED' => ['title' => 'تم تعطيل إعلان', 'tone' => 'warning', 'icon' => 'bell'],
+        'MAINTENANCE_ENABLED' => ['title' => 'تم تغيير حالة الخدمة إلى الصيانة', 'tone' => 'warning', 'icon' => 'pulse'],
+        'MAINTENANCE_DISABLED' => ['title' => 'تم تحديث حالة الخدمة', 'tone' => 'success', 'icon' => 'pulse'],
+        'FEATURE_FLAG_CHANGED' => ['title' => 'تم تغيير حالة ميزة', 'tone' => 'info', 'icon' => 'toggle'],
+        'GROWTH_CONFIG_PUBLISHED' => ['title' => 'تم تحديث إعدادات التجديد والدعم', 'tone' => 'info', 'icon' => 'trend'],
+        'GROWTH_QR_REPLACED' => ['title' => 'تم تحديث رمز QR', 'tone' => 'info', 'icon' => 'trend'],
+        'GROWTH_QR_DELETED' => ['title' => 'تم حذف رمز QR مخصص', 'tone' => 'warning', 'icon' => 'trend'],
+        'CONTROL_CENTER_RESELLER_CREATED' => ['title' => 'تم إنشاء موزع', 'tone' => 'success', 'icon' => 'briefcase'],
+        'CONTROL_CENTER_RESELLER_STATUS_CHANGED' => ['title' => 'تم تغيير حالة موزع', 'tone' => 'info', 'icon' => 'briefcase'],
+        'CONTROL_CENTER_RESELLER_HOST_CHANGED' => ['title' => 'تم تحديث هوست موزع', 'tone' => 'info', 'icon' => 'server'],
+        'CONTROL_CENTER_RESELLER_CODE_CHANGED' => ['title' => 'تم تحديث كود دخول موزع', 'tone' => 'warning', 'icon' => 'key'],
+        'CONTROL_CENTER_RESELLER_PASSWORD_RESET' => ['title' => 'تمت إعادة تعيين كلمة مرور موزع', 'tone' => 'warning', 'icon' => 'shield'],
+    ];
+    $presentation = $catalog[$action] ?? ['title' => 'عملية إدارية', 'tone' => 'neutral', 'icon' => 'audit'];
+    $presentation['technical_id'] = $action;
+    $presentation['known'] = array_key_exists($action, $catalog);
+    return $presentation;
+}
+
+function cc_phase8_audit_detail_definition(string $key): ?array
+{
+    $definitions = [
+        'reseller_id' => ['label' => 'رقم الموزع', 'direction' => 'ltr'],
+        'status' => ['label' => 'الحالة', 'direction' => 'auto'],
+        'mode' => ['label' => 'طريقة التغيير', 'direction' => 'auto'],
+        'enabled' => ['label' => 'الحالة الجديدة', 'direction' => 'auto'],
+        'host_configured' => ['label' => 'إعداد الهوست', 'direction' => 'auto'],
+        'release_id' => ['label' => 'رقم الإصدار الداخلي', 'direction' => 'ltr'],
+        'version_name' => ['label' => 'اسم الإصدار', 'direction' => 'ltr'],
+        'version_code' => ['label' => 'رمز الإصدار', 'direction' => 'ltr'],
+        'minimum_version_code' => ['label' => 'الحد الأدنى المدعوم', 'direction' => 'ltr'],
+        'required' => ['label' => 'سياسة التحديث', 'direction' => 'auto'],
+        'message_key' => ['label' => 'معرّف الإعلان', 'direction' => 'ltr'],
+        'severity' => ['label' => 'مستوى الإعلان', 'direction' => 'auto'],
+        'target' => ['label' => 'الجمهور المستهدف', 'direction' => 'auto'],
+        'estimated_end_at' => ['label' => 'الانتهاء المتوقع', 'direction' => 'ltr'],
+        'flag_key' => ['label' => 'الميزة', 'direction' => 'ltr'],
+        'slot' => ['label' => 'القسم', 'direction' => 'auto'],
+        'qr_mode' => ['label' => 'طريقة رمز QR', 'direction' => 'auto'],
+        'changed_fields' => ['label' => 'الإعدادات المتغيرة', 'direction' => 'auto'],
+        'growth_enabled' => ['label' => 'واجهة التجديد والدعم', 'direction' => 'auto'],
+        'renewal_enabled' => ['label' => 'التجديد', 'direction' => 'auto'],
+        'support_enabled' => ['label' => 'الدعم', 'direction' => 'auto'],
+        'renewal_qr_mode' => ['label' => 'رمز التجديد', 'direction' => 'auto'],
+        'support_qr_mode' => ['label' => 'رمز الدعم', 'direction' => 'auto'],
+        'days_before_expiry' => ['label' => 'التنبيه قبل الانتهاء', 'direction' => 'auto'],
+        'extension' => ['label' => 'نوع الملف', 'direction' => 'ltr'],
+        'size_bytes' => ['label' => 'حجم الملف', 'direction' => 'ltr'],
+        'sha256' => ['label' => 'بصمة الملف', 'direction' => 'ltr'],
+        'was_active' => ['label' => 'كان الإصدار نشطًا', 'direction' => 'auto'],
+        'username' => ['label' => 'اسم المسؤول', 'direction' => 'ltr'],
+    ];
+    return $definitions[$key] ?? null;
+}
+
+function cc_phase8_audit_changed_fields(string $value): string
+{
+    $labels = [
+        'growth_enabled' => 'واجهة التجديد والدعم',
+        'growth_renewal_enabled' => 'التجديد',
+        'growth_renewal_title' => 'عنوان التجديد',
+        'growth_renewal_url' => 'رابط التجديد',
+        'growth_renewal_display_text' => 'نص التجديد',
+        'growth_renewal_qr_mode' => 'رمز التجديد',
+        'growth_renewal_custom_qr_path' => 'صورة رمز التجديد',
+        'growth_support_enabled' => 'الدعم',
+        'growth_support_title' => 'عنوان الدعم',
+        'growth_support_url' => 'رابط الدعم',
+        'growth_support_display_text' => 'نص الدعم',
+        'growth_support_qr_mode' => 'رمز الدعم',
+        'growth_support_custom_qr_path' => 'صورة رمز الدعم',
+        'growth_renewal_banner_enabled' => 'تنبيه التجديد',
+        'growth_renewal_banner_days' => 'مدة تنبيه التجديد',
+    ];
+    $fields = array_values(array_filter(array_map('trim', explode(',', $value)), static fn (string $field): bool => $field !== ''));
+    return $fields === [] ? 'لا توجد تغييرات' : implode('، ', array_map(static fn (string $field): string => $labels[$field] ?? $field, $fields));
+}
+
+function cc_phase8_audit_detail_value(string $key, mixed $value): string
+{
+    if ($value === null || $value === '') {
+        return 'غير محدد';
+    }
+    if (is_bool($value)) {
+        if ($key === 'required') {
+            return $value ? 'إلزامي' : 'اختياري';
+        }
+        return $value ? 'مفعّل' : 'معطّل';
+    }
+    $string = (string) $value;
+    if ($key === 'changed_fields') {
+        return cc_phase8_audit_changed_fields($string);
+    }
+    $labels = [
+        'active' => 'نشط', 'inactive' => 'متوقف',
+        'custom' => 'مخصص', 'generated' => 'تلقائي',
+        'AUTO' => 'تلقائي', 'CUSTOM' => 'مخصص',
+        'renewal' => 'التجديد', 'support' => 'الدعم',
+        'INFO' => 'معلومات', 'WARNING' => 'تنبيه', 'IMPORTANT' => 'مهم',
+        'ALL' => 'جميع المستخدمين', 'MOBILE' => 'الجوال والأجهزة اللوحية', 'TV' => 'التلفاز',
+        'OPERATIONAL' => 'تعمل بصورة طبيعية', 'DEGRADED' => 'أداء متأثر', 'MAINTENANCE' => 'صيانة جارية',
+    ];
+    return $labels[$string] ?? $string;
+}
+
+function cc_phase8_safe_audit_details(mixed $raw): array
 {
     if (!is_string($raw) || trim($raw) === '') {
-        return '—';
+        return ['rows' => [], 'technical_json' => null, 'state' => 'empty'];
     }
     $decoded = json_decode($raw, true);
     if (!is_array($decoded)) {
-        return 'تفاصيل قديمة محجوبة';
+        return ['rows' => [], 'technical_json' => null, 'state' => 'legacy'];
     }
     $allowedKeys = [
         'reseller_id', 'status', 'mode', 'enabled', 'host_configured',
@@ -112,10 +227,27 @@ function cc_phase8_safe_audit_details(mixed $raw): string
         }
     }
     if ($safe === []) {
-        return 'تفاصيل غير حساسة محجوبة';
+        return ['rows' => [], 'technical_json' => null, 'state' => 'hidden'];
+    }
+    $rows = [];
+    foreach ($safe as $key => $value) {
+        $definition = cc_phase8_audit_detail_definition($key);
+        if ($definition === null) {
+            continue;
+        }
+        $rows[] = [
+            'label' => $definition['label'],
+            'value' => cc_phase8_audit_detail_value($key, $value),
+            'direction' => $definition['direction'],
+            'technical' => in_array($key, ['release_id', 'message_key', 'flag_key', 'extension', 'size_bytes', 'sha256'], true),
+        ];
     }
     $encoded = json_encode($safe, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    return is_string($encoded) ? $encoded : 'تفاصيل غير حساسة محجوبة';
+    return [
+        'rows' => $rows,
+        'technical_json' => is_string($encoded) ? $encoded : null,
+        'state' => $rows === [] ? 'hidden' : 'available',
+    ];
 }
 
 function cc_phase8_audit_page(
@@ -167,6 +299,7 @@ function cc_phase8_audit_page(
         && $filters['page'] < CC_PHASE8_AUDIT_MAX_PAGES;
     $rows = array_slice($rows, 0, CC_PHASE8_AUDIT_PAGE_SIZE);
     foreach ($rows as &$row) {
+        $row['action_presentation'] = cc_phase8_audit_action_presentation((string) ($row['action'] ?? ''));
         $row['details_safe'] = cc_phase8_safe_audit_details($row['details'] ?? null);
         unset($row['details']);
     }

@@ -19,7 +19,7 @@ function cc_page_start(array $resolved, array $admin): void
         <meta name="theme-color" content="#07090b">
         <title><?= cc_e((string) $module['title']) ?> — HULK SA Control Center</title>
         <link rel="icon" href="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" type="image/svg+xml">
-        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=3.0.0')) ?>">
+        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=4.0.0')) ?>">
     </head>
     <body>
     <a class="skip-link" href="#main-content">انتقل إلى المحتوى</a>
@@ -27,7 +27,7 @@ function cc_page_start(array $resolved, array $admin): void
         <div class="nav-backdrop" data-nav-backdrop hidden></div>
         <aside class="sidebar" id="primary-sidebar" aria-label="التنقل الرئيسي" data-sidebar>
             <div class="sidebar__top">
-                <a class="brand" href="<?= cc_e(cc_url()) ?>" aria-label="HULK SA Control Center — نظرة عامة">
+                <a class="brand" href="<?= cc_e(cc_url()) ?>" aria-label="HULK SA Control Center — الرئيسية">
                     <span class="brand__mark"><img src="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" alt=""></span>
                     <span class="brand__copy"><strong>HULK SA</strong><small>CONTROL CENTER</small></span>
                 </a>
@@ -38,7 +38,8 @@ function cc_page_start(array $resolved, array $admin): void
 
             <nav class="navigation">
                 <?php foreach ($groups as $groupKey => $groupLabel): ?>
-                    <?php if ($groupLabel !== ''): ?><p class="navigation__label"><?= cc_e($groupLabel) ?></p><?php endif; ?>
+                    <section class="navigation__section" aria-labelledby="nav-group-<?= cc_e($groupKey) ?>">
+                    <h2 class="navigation__group-title" id="nav-group-<?= cc_e($groupKey) ?>"><?= cc_e($groupLabel) ?></h2>
                     <div class="navigation__group">
                         <?php foreach ($modules as $key => $item): ?>
                             <?php if ($item['group'] !== $groupKey) { continue; } ?>
@@ -51,6 +52,7 @@ function cc_page_start(array $resolved, array $admin): void
                             </a>
                         <?php endforeach; ?>
                     </div>
+                    </section>
                 <?php endforeach; ?>
             </nav>
 
@@ -69,7 +71,7 @@ function cc_page_start(array $resolved, array $admin): void
                         <?= cc_icon('menu') ?>
                     </button>
                     <div class="breadcrumb" aria-label="مسار الصفحة">
-                        <span>مركز التحكم</span><?= cc_icon('chevron') ?><strong><?= cc_e((string) $module['label']) ?></strong>
+                        <span>HULK SA</span><?= cc_icon('chevron') ?><strong><?= cc_e((string) $module['label']) ?></strong>
                     </div>
                 </div>
                 <div class="topbar__actions">
@@ -90,11 +92,9 @@ function cc_page_start(array $resolved, array $admin): void
             <main class="main-content" id="main-content" tabindex="-1">
                 <header class="page-header">
                     <div>
-                        <span class="eyebrow">HULK SA CONTROL CENTER</span>
                         <h1><?= cc_e((string) $module['title']) ?></h1>
                         <p><?= cc_e((string) $module['description']) ?></p>
                     </div>
-                    <div class="page-header__status"><?php cc_status_badge('بيانات موثوقة', 'success'); ?></div>
                 </header>
     <?php
 }
@@ -106,7 +106,7 @@ function cc_page_end(): void
             <footer class="app-footer"><span>HULK SA Control Center</span><span>واجهة إدارية عربية موحّدة</span></footer>
         </div>
     </div>
-    <script src="<?= cc_e(cc_asset_url('app.js?v=3.0.0')) ?>" defer></script>
+    <script src="<?= cc_e(cc_asset_url('app.js?v=4.0.0')) ?>" defer></script>
     </body>
     </html>
     <?php
