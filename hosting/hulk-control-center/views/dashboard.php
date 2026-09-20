@@ -146,7 +146,7 @@ $diagnosticEvents = (int) ($diagnostics['total_events'] ?? 0);
         <?php if ($livePreview === []): ?>
             <?php cc_empty_state('لا توجد جلسات Online الآن', 'ستظهر الجلسة بعد وصول نبضة حديثة ضمن TTL المضبوط.'); ?>
         <?php else: ?>
-            <div class="table-shell"><div class="table-scroll" tabindex="0" aria-label="معاينة المستخدمين الآن"><table><thead><tr><th>الموزع</th><th>الكود</th><th>IPTV USERNAME</th><th>الهوست</th><th>الجهاز</th><th>الإصدار</th><th>آخر اتصال</th></tr></thead><tbody><?php foreach ($livePreview as $session): $resellerId = (int) $session['reseller_id']; $currentReseller = $presenceResellers[$resellerId] ?? null; ?><tr><td><?= cc_e(is_array($currentReseller) ? ($currentReseller['reseller_name'] ?? ('#' . $resellerId)) : '#' . $resellerId) ?></td><td><code class="credential-value" dir="ltr"><?= cc_e($session['access_code_snapshot']) ?></code></td><td><code class="credential-value" dir="ltr"><?= cc_e($session['iptv_username']) ?></code></td><td><span class="mono break-value" dir="ltr"><?= cc_e($session['host_snapshot']) ?></span></td><td><?= cc_e($session['device_manufacturer'] . ' ' . $session['device_model']) ?></td><td><?= cc_e($session['app_version_name']) ?> (<?= (int) $session['app_version_code'] ?>)</td><td><?= cc_e(cc_presence_display_time($session['last_seen_at'])) ?></td></tr><?php endforeach; ?></tbody></table></div></div>
+            <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="معاينة المستخدمين الآن"><table data-mobile-cards><thead><tr><th>الموزع</th><th>الكود</th><th>IPTV USERNAME</th><th>الهوست</th><th>الجهاز</th><th>الإصدار</th><th>آخر اتصال</th></tr></thead><tbody><?php foreach ($livePreview as $session): $resellerId = (int) $session['reseller_id']; $currentReseller = $presenceResellers[$resellerId] ?? null; ?><tr><td><?= cc_e(is_array($currentReseller) ? ($currentReseller['reseller_name'] ?? ('#' . $resellerId)) : '#' . $resellerId) ?></td><td><code class="credential-value" dir="ltr"><?= cc_e($session['access_code_snapshot']) ?></code></td><td><code class="credential-value" dir="ltr"><?= cc_e($session['iptv_username']) ?></code></td><td><span class="mono break-value" dir="ltr"><?= cc_e($session['host_snapshot']) ?></span></td><td><?= cc_e($session['device_manufacturer'] . ' ' . $session['device_model']) ?></td><td><?= cc_e($session['app_version_name']) ?> (<?= (int) $session['app_version_code'] ?>)</td><td><?= cc_e(cc_presence_display_time($session['last_seen_at'])) ?></td></tr><?php endforeach; ?></tbody></table></div></div>
         <?php endif; ?>
     </article>
     <article class="panel">
@@ -187,7 +187,7 @@ $diagnosticEvents = (int) ($diagnostics['total_events'] ?? 0);
             <?php cc_empty_state('لا توجد عمليات إدارية مسجلة', 'ستظهر هنا العمليات المسجلة في سلطة التدقيق الحالية.'); ?>
         <?php else: ?>
             <div class="table-shell dashboard-audit-table"><div class="table-scroll" tabindex="0" aria-label="آخر النشاطات الإدارية">
-                <table><thead><tr><th scope="col">العملية</th><th scope="col">المسؤول</th><th scope="col">التاريخ</th></tr></thead><tbody>
+                <table data-mobile-cards><thead><tr><th scope="col">العملية</th><th scope="col">المسؤول</th><th scope="col">التاريخ</th></tr></thead><tbody>
                 <?php foreach ($auditRows as $audit): ?><tr>
                     <td><strong><?= cc_e((string) ($audit['action'] ?? '—')) ?></strong></td>
                     <td><?= cc_e((string) (($audit['username'] ?? null) ?: 'مسؤول محذوف')) ?></td>

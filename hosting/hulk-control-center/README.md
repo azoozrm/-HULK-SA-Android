@@ -53,7 +53,18 @@ Its independent session cookie is scoped to `/control-center/`, uses `Secure`, `
 
 The allow-list is defined in `lib/routes.php`. Apache rewrites friendly module URLs such as `/control-center/live-users/` to the single authenticated shell. Unknown routes render a safe 404 state and never select files dynamically.
 
-Operations, reseller, access-code, host, audit, Live Users, Sessions, Devices, Host Health, Diagnostics and Analytics modules are connected to their authoritative databases. No screen substitutes a failed authority with zero or demo production records.
+Operations, reseller, access-code, host, audit, Live Users, Sessions, Devices, Host Health, Diagnostics and Analytics modules are connected to their authoritative databases. Settings reads only allow-listed values from the installed private configuration. No screen substitutes a failed authority with zero or demo production records.
+
+## Phase 8 administration completeness
+
+- Settings is a safe read-only operational boundary: it shows only allow-listed runtime limits and routes mutable concerns to their existing authoritative modules. It never exposes database configuration, secrets, cookie names or private targets.
+- Audit search is server-side and parameterized across a bounded date window, administrator, action prefix and reseller ID. Pagination is frozen to the first-page maximum ID, fetches 50 rows plus one continuation row and is capped at 200 pages.
+- Repeated safe filters can be saved locally in the owner's browser, up to ten views per module. Free search, host, session, code and credential values are intentionally excluded from saved filters.
+- Wide owner tables progressively become labelled cards on narrow screens while retaining the semantic table fallback when JavaScript is unavailable.
+- Host Health links only by non-secret reseller ID to the current host and session contexts.
+- Admin-account management is not implemented: the current product has no authoritative roles/account-lifecycle contract. Existing `app_admin_users` authentication and CLI recovery remain the owner.
+
+See `PHASE-8-QUALIFICATION.md` for parity classification, query budgets, accessibility/RTL acceptance, recovery, maintenance, backup/restore rehearsal and Phase 9 prerequisites.
 
 ## Dashboard V1 read contract
 

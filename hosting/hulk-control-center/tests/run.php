@@ -304,5 +304,6 @@ cc_test(!is_file($root . '/config.php'), 'runtime config is not present in sourc
 require __DIR__ . '/presence.php';
 require __DIR__ . '/phase6.php';
 require __DIR__ . '/phase7.php';
+require __DIR__ . '/phase8.php';
 
 fwrite(STDOUT, "PASS: {$tests} HULK Control Center checks.\n");

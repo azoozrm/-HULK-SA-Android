@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/phase8.php';
+
 $operationsRoot = dirname(__DIR__, 2) . '/hulk-operations';
 require_once $operationsRoot . '/bootstrap.php';
 if (!defined('HULK_OPERATIONS_ADMIN')) {
@@ -69,7 +71,7 @@ function cc_operations_handle_post(string $module, array $admin): string
     };
 }
 
-function cc_operations_data(string $module): array
+function cc_operations_data(string $module, array $query = []): array
 {
     $db = cc_db('control');
     return match ($module) {
@@ -86,23 +88,7 @@ function cc_operations_data(string $module): array
         ],
         'features' => ['features' => ops_feature_snapshot($db)],
         'growth' => ['growth' => ops_growth_snapshot($db)],
-        'audit' => cc_operations_audit_page($db),
+        'audit' => cc_phase8_audit_page($db, $query),
         default => [],
     };
-}
-
-function cc_operations_audit_page(PDO $db): array
-{
-    $page = max(1, (int) ($_GET['page'] ?? 1));
-    $perPage = 50;
-    $total = (int) $db->query('SELECT COUNT(*) FROM app_admin_audit')->fetchColumn();
-    $pages = max(1, (int) ceil($total / $perPage));
-    $page = min($page, $pages);
-    $offset = ($page - 1) * $perPage;
-    $rows = $db->query(
-        'SELECT a.id, a.action, a.details, a.created_at, u.username '
-        . 'FROM app_admin_audit a LEFT JOIN app_admin_users u ON u.id = a.admin_user_id '
-        . 'ORDER BY a.id DESC LIMIT ' . $perPage . ' OFFSET ' . $offset
-    )->fetchAll();
-    return ['audit' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages];
 }

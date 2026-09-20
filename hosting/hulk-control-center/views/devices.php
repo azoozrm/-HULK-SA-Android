@@ -18,13 +18,14 @@ $paginationUrl = static function (int $page) use ($filters): string {
 <section class="module-stack presence-module">
     <section class="panel presence-summary">
         <div class="panel__header"><div><span class="eyebrow">cc_devices</span><h2>مخزون الأجهزة الموثوق</h2><p class="muted-copy">installation_id هو هوية الجهاز الثابتة. وجود الجهاز في المخزون لا يعني أنه Online.</p></div><div class="presence-summary__badges"><?php cc_status_badge((string) ((int) ($pageData['total'] ?? 0)) . ' جهاز', 'info'); ?><?php cc_status_badge('آخر ظهور من Presence', 'neutral'); ?></div></div>
-        <form class="presence-filters presence-filters--devices" method="get" aria-label="بحث وتصفية الأجهزة">
+    <form class="presence-filters presence-filters--devices" method="get" aria-label="بحث وتصفية الأجهزة" data-saved-filters="devices" data-saved-filter-fields="platform,sort,direction">
             <label class="form-field presence-filter--wide"><span>بحث</span><input name="q" type="search" maxlength="100" value="<?= cc_e($filters['q'] ?? '') ?>" placeholder="installation ID، الشركة، الموديل أو Android"></label>
             <label class="form-field"><span>إصدار التطبيق</span><input name="app_version" maxlength="32" dir="ltr" value="<?= cc_e($filters['app_version'] ?? '') ?>" placeholder="0.9.3.21"></label>
             <label class="form-field"><span>المنصة</span><select name="platform"><option value="">كل المنصات</option><?php foreach ($platformLabels as $value => $label): ?><option value="<?= cc_e($value) ?>" <?= ($filters['platform'] ?? '') === $value ? 'selected' : '' ?>><?= cc_e($label) ?></option><?php endforeach; ?></select></label>
             <label class="form-field"><span>الترتيب</span><select name="sort"><option value="last_seen" <?= ($filters['sort'] ?? '') === 'last_seen' ? 'selected' : '' ?>>آخر ظهور</option><option value="first_seen" <?= ($filters['sort'] ?? '') === 'first_seen' ? 'selected' : '' ?>>أول ظهور</option><option value="app_version" <?= ($filters['sort'] ?? '') === 'app_version' ? 'selected' : '' ?>>إصدار التطبيق</option><option value="device" <?= ($filters['sort'] ?? '') === 'device' ? 'selected' : '' ?>>هوية الجهاز</option></select></label>
             <label class="form-field"><span>الاتجاه</span><select name="direction"><option value="desc" <?= ($filters['direction'] ?? '') === 'desc' ? 'selected' : '' ?>>الأحدث أولًا</option><option value="asc" <?= ($filters['direction'] ?? '') === 'asc' ? 'selected' : '' ?>>الأقدم أولًا</option></select></label>
             <div class="presence-filter__actions"><button class="button button--primary" type="submit">تطبيق</button><a class="button button--quiet" href="<?= cc_e(cc_url('devices')) ?>">مسح الفلاتر</a></div>
+        <?php cc_saved_filter_controls('devices', ['platform', 'sort', 'direction']); ?>
         </form>
     </section>
     <section class="panel">

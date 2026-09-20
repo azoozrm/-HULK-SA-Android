@@ -78,6 +78,8 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
 [tabindex]:focus-visible {
     outline: none;
     box-shadow: var(--focus);
@@ -228,7 +230,7 @@ svg {
 }
 
 .navigation__link {
-    min-height: 43px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     gap: 11px;
@@ -496,7 +498,7 @@ svg {
 .button,
 .icon-button,
 .page-button {
-    min-height: 42px;
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -548,7 +550,7 @@ svg {
 
 .icon-button,
 .page-button {
-    width: 42px;
+    width: 44px;
     padding: 0;
     color: var(--text-soft);
     border-color: var(--line);
@@ -992,8 +994,8 @@ td {
 
 .pagination .icon-button,
 .pagination .page-button {
-    width: 36px;
-    min-height: 36px;
+    width: 44px;
+    min-height: 44px;
 }
 
 .icon-button--flip .icon {
@@ -1429,6 +1431,140 @@ td {
     max-width: 460px;
 }
 
+.audit-filters {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(135px, 1fr));
+    align-items: end;
+    gap: 12px;
+}
+
+.saved-filters {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) auto minmax(180px, 1fr) auto auto;
+    align-items: end;
+    gap: 9px;
+    margin-block-start: 4px;
+    padding-block-start: 13px;
+    border-block-start: 1px solid var(--line);
+}
+
+.data-toolbar--saved {
+    flex-wrap: wrap;
+}
+
+.data-toolbar--saved .saved-filters {
+    width: 100%;
+}
+
+.saved-filters__status {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.7rem;
+}
+
+.reseller-id-filter {
+    width: 150px;
+}
+
+.context-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.context-links a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    color: var(--gold-soft);
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.settings-card {
+    margin: 0;
+}
+
+.settings-list {
+    display: grid;
+    gap: 0;
+    margin: 0;
+}
+
+.settings-list > div {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+    gap: 12px;
+    padding-block: 11px;
+    border-block-end: 1px solid var(--line);
+}
+
+.settings-list > div:last-child {
+    border-block-end: 0;
+}
+
+.settings-list dt {
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+
+.settings-list dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--text-soft);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.settings-card__note {
+    margin: 13px 0 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+
+.ownership-links {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.ownership-links a {
+    min-height: 76px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.016);
+}
+
+.ownership-links a:hover {
+    border-color: rgba(247, 198, 74, 0.28);
+    background: rgba(247, 198, 74, 0.05);
+}
+
+.ownership-links strong {
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-size: 0.78rem;
+}
+
+.ownership-links span {
+    color: var(--muted);
+    font-size: 0.68rem;
+}
+
 .destructive-row {
     margin-block-start: 20px;
     padding-block-start: 16px;
@@ -1750,6 +1886,15 @@ td {
     .phase7-grid {
         grid-template-columns: 1fr;
     }
+
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ownership-links,
+    .audit-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 860px) {
@@ -1795,8 +1940,8 @@ td {
     }
 
     .logout-button {
-        width: 36px;
-        min-height: 36px;
+        width: 44px;
+        min-height: 44px;
         padding: 0;
     }
 
@@ -1895,6 +2040,78 @@ td {
     .presence-card__facts > div:last-child {
         padding-block-end: 0;
         border-block-end: 0;
+    }
+
+    .saved-filters,
+    .audit-filters {
+        grid-template-columns: 1fr;
+    }
+
+    .saved-filters .button,
+    .saved-filters .form-field,
+    .audit-filters .button,
+    .audit-filters .form-field,
+    .reseller-id-filter {
+        width: 100%;
+    }
+
+    .table-scroll.is-mobile-card-ready {
+        overflow: visible;
+        background: none;
+    }
+
+    table.is-mobile-card-ready {
+        min-width: 0;
+        display: block;
+    }
+
+    table.is-mobile-card-ready thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    table.is-mobile-card-ready tbody {
+        display: grid;
+        gap: 10px;
+    }
+
+    table.is-mobile-card-ready tr {
+        display: block;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(8, 10, 12, 0.55);
+    }
+
+    table.is-mobile-card-ready td {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(95px, 0.7fr) minmax(0, 1.3fr);
+        align-items: start;
+        gap: 11px;
+        padding: 11px 12px;
+        overflow-wrap: anywhere;
+    }
+
+    table.is-mobile-card-ready td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 0.68rem;
+        font-weight: 800;
+    }
+
+    table.is-mobile-card-ready td:last-child {
+        border-block-end: 0;
+    }
+
+    table.is-mobile-card-ready td form,
+    table.is-mobile-card-ready td details,
+    table.is-mobile-card-ready td .context-links {
+        min-width: 0;
     }
 }
 
@@ -2048,6 +2265,15 @@ td {
     .inline-form input,
     .inline-editor input {
         min-width: 0;
+    }
+
+    .ownership-links {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-list > div {
+        grid-template-columns: 1fr;
+        gap: 4px;
     }
 }
 

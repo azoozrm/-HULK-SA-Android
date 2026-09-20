@@ -44,7 +44,7 @@ $paginationUrl = static function (int $page) use ($moduleKey, $filters): string 
         <?php if (!$resellersAvailable && $rows !== []): ?>
             <?php cc_alert('بيانات جزئية', 'بيانات الجلسات متاحة، لكن تعذر ربط أسماء الموزعين الحالية. لم تُفبرك أي قيمة بديلة.', 'warning'); ?>
         <?php endif; ?>
-        <form class="presence-filters" method="get" aria-label="بحث وتصفية الجلسات">
+        <form class="presence-filters" method="get" aria-label="بحث وتصفية الجلسات" data-saved-filters="<?= cc_e($moduleKey) ?>" data-saved-filter-fields="status,reseller,platform,sort,direction">
             <label class="form-field presence-filter--wide"><span>بحث</span><input name="q" type="search" maxlength="100" value="<?= cc_e($filters['q'] ?? '') ?>" placeholder="الجلسة، الكود، اسم IPTV، الهوست أو الجهاز"></label>
             <label class="form-field"><span>الحالة</span><select name="status"><option value="all" <?= ($filters['status'] ?? '') === 'all' ? 'selected' : '' ?>>الكل</option><option value="online" <?= ($filters['status'] ?? '') === 'online' ? 'selected' : '' ?>>Online</option><option value="offline" <?= ($filters['status'] ?? '') === 'offline' ? 'selected' : '' ?>>Offline</option></select></label>
             <label class="form-field"><span>إصدار التطبيق</span><input name="app_version" maxlength="32" dir="ltr" value="<?= cc_e($filters['app_version'] ?? '') ?>" placeholder="0.9.3.21"></label>
@@ -54,6 +54,7 @@ $paginationUrl = static function (int $page) use ($moduleKey, $filters): string 
             <label class="form-field"><span>الترتيب</span><select name="sort"><option value="last_seen" <?= ($filters['sort'] ?? '') === 'last_seen' ? 'selected' : '' ?>>آخر اتصال</option><option value="started" <?= ($filters['sort'] ?? '') === 'started' ? 'selected' : '' ?>>بداية الجلسة</option><option value="app_version" <?= ($filters['sort'] ?? '') === 'app_version' ? 'selected' : '' ?>>إصدار التطبيق</option><option value="reseller" <?= ($filters['sort'] ?? '') === 'reseller' ? 'selected' : '' ?>>الموزع</option><option value="device" <?= ($filters['sort'] ?? '') === 'device' ? 'selected' : '' ?>>الجهاز</option></select></label>
             <label class="form-field"><span>الاتجاه</span><select name="direction"><option value="desc" <?= ($filters['direction'] ?? '') === 'desc' ? 'selected' : '' ?>>الأحدث أولًا</option><option value="asc" <?= ($filters['direction'] ?? '') === 'asc' ? 'selected' : '' ?>>الأقدم أولًا</option></select></label>
             <div class="presence-filter__actions"><button class="button button--primary" type="submit">تطبيق</button><a class="button button--quiet" href="<?= cc_e(cc_url($moduleKey)) ?>">مسح الفلاتر</a></div>
+            <?php cc_saved_filter_controls($moduleKey, ['status', 'reseller', 'platform', 'sort', 'direction']); ?>
         </form>
     </section>
 

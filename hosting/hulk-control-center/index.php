@@ -9,6 +9,7 @@ require_once __DIR__ . '/lib/operations-adapter.php';
 require_once __DIR__ . '/lib/reseller-adapter.php';
 require_once __DIR__ . '/lib/presence-read-model.php';
 require_once __DIR__ . '/lib/phase7-read-model.php';
+require_once __DIR__ . '/lib/phase8.php';
 require_once __DIR__ . '/lib/dashboard.php';
 
 try {
@@ -64,9 +65,11 @@ if ($resolved['valid']) {
         } elseif (in_array($moduleKey, ['host-health', 'diagnostics', 'analytics'], true)) {
             $pageData = cc_phase7_page_data($moduleKey);
         } elseif (in_array($moduleKey, cc_operations_modules(), true) || $moduleKey === 'audit') {
-            $pageData = cc_operations_data($moduleKey);
+            $pageData = cc_operations_data($moduleKey, $_GET);
         } elseif (in_array($moduleKey, cc_reseller_modules(), true)) {
             $pageData = cc_reseller_page($moduleKey);
+        } elseif ($moduleKey === 'settings') {
+            $pageData = cc_phase8_settings_data($admin);
         }
     } catch (Throwable $exception) {
         error_log('HULK Control Center module read failed.');
@@ -102,6 +105,8 @@ if (!$resolved['valid']) {
     require __DIR__ . '/views/resellers.php';
 } elseif ($moduleKey === 'audit') {
     require __DIR__ . '/views/audit.php';
+} elseif ($moduleKey === 'settings') {
+    require __DIR__ . '/views/settings.php';
 } else {
     require __DIR__ . '/views/module.php';
 }

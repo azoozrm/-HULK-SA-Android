@@ -32,14 +32,16 @@ $csrf = cc_csrf_token();
         <?php if (!$presenceUsageAvailable): ?>
             <?php cc_alert('استخدام Presence غير متاح', 'بيانات الموزعين الحالية متاحة، لكن تعذر قراءة إحصاءات الجلسات. لم تُعرض أصفار بديلة.', 'warning'); ?>
         <?php endif; ?>
-        <form class="data-toolbar" method="get">
+        <form class="data-toolbar data-toolbar--saved" method="get" data-saved-filters="<?= cc_e($moduleKey) ?>" data-saved-filter-fields="status,reseller">
             <label class="search-control"><span class="sr-only">بحث</span><?= cc_icon('search') ?><input name="q" type="search" value="<?= cc_e($pageData['search'] ?? '') ?>" placeholder="بحث بالاسم أو الهوست أو الكود"></label>
             <label class="filter-control"><span class="sr-only">الحالة</span><?= cc_icon('filter') ?><select name="status"><option value="">كل الحالات</option><option value="active" <?= ($pageData['status'] ?? '') === 'active' ? 'selected' : '' ?>>نشط</option><option value="inactive" <?= ($pageData['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>متوقف</option></select></label>
+            <label class="form-field reseller-id-filter"><span>رقم الموزع</span><input name="reseller" type="number" min="1" value="<?= cc_e($pageData['reseller'] ?? '') ?>" placeholder="مثال: 7"></label>
             <button class="button button--secondary" type="submit">تطبيق</button>
+            <?php cc_saved_filter_controls($moduleKey, ['status', 'reseller']); ?>
         </form>
 
         <?php if ($rows === []): cc_empty_state('لا توجد نتائج', 'غيّر البحث أو أنشئ موزعًا جديدًا.'); else: ?>
-        <div class="table-shell"><div class="table-scroll" tabindex="0"><table class="management-table"><thead><tr><th>الموزع</th><th>الحالة</th><th><?= $moduleKey === 'access-codes' ? 'كود الدخول' : ($moduleKey === 'hosts' ? 'الهوست' : 'آخر تحديث') ?></th><th>استخدام Presence</th><th>الإدارة</th></tr></thead><tbody>
+        <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="بيانات الموزعين"><table class="management-table" data-mobile-cards><thead><tr><th>الموزع</th><th>الحالة</th><th><?= $moduleKey === 'access-codes' ? 'كود الدخول' : ($moduleKey === 'hosts' ? 'الهوست' : 'آخر تحديث') ?></th><th>استخدام Presence</th><th>الإدارة</th></tr></thead><tbody>
         <?php foreach ($rows as $row): $id = (int) $row['reseller_id']; $usage = $presenceUsage[$id] ?? null; ?>
             <tr>
                 <td><strong><?= cc_e($row['reseller_name']) ?></strong><br><span class="mono muted-copy">#<?= $id ?></span></td>
@@ -56,7 +58,7 @@ $csrf = cc_csrf_token();
             </tr>
         <?php endforeach; ?>
         </tbody></table></div>
-        <?php $page = (int) $pageData['page']; $pages = (int) $pageData['pages']; $query = ['q' => $pageData['search'], 'status' => $pageData['status']]; ?>
+        <?php $page = (int) $pageData['page']; $pages = (int) $pageData['pages']; $query = ['q' => $pageData['search'], 'status' => $pageData['status'], 'reseller' => $pageData['reseller']]; ?>
         <nav class="pagination" aria-label="ترقيم الصفحات"><p>الصفحة <?= $page ?> من <?= $pages ?></p><div><?php if ($page > 1): ?><a class="page-button" href="?<?= cc_e(http_build_query($query + ['page' => $page - 1])) ?>" aria-label="الصفحة السابقة"><?= cc_icon('chevron') ?></a><?php endif; ?><span class="page-button" aria-current="page"><?= $page ?></span><?php if ($page < $pages): ?><a class="page-button icon-button--flip" href="?<?= cc_e(http_build_query($query + ['page' => $page + 1])) ?>" aria-label="الصفحة التالية"><?= cc_icon('chevron') ?></a><?php endif; ?></div></nav>
         </div>
         <?php endif; ?>

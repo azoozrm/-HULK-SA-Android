@@ -137,6 +137,27 @@ function cc_skeleton(int $rows = 3): void
     <?php
 }
 
+function cc_saved_filter_controls(string $module, array $allowedFields): void
+{
+    $safeModule = preg_match('/^[a-z0-9-]{1,40}$/', $module) ? $module : '';
+    $safeFields = array_values(array_filter($allowedFields, static fn (mixed $field): bool =>
+        is_string($field) && preg_match('/^[a-z_]{1,32}$/', $field) === 1
+    ));
+    if ($safeModule === '' || $safeFields === []) {
+        return;
+    }
+    ?>
+    <div class="saved-filters" data-saved-filter-controls>
+        <label class="form-field saved-filters__name"><span>اسم العرض المحفوظ</span><input type="text" maxlength="40" data-saved-filter-name autocomplete="off" placeholder="مثال: أجهزة التلفاز"></label>
+        <button class="button button--secondary" type="button" data-saved-filter-save>حفظ الفلاتر الآمنة</button>
+        <label class="form-field saved-filters__select"><span>العروض المحفوظة</span><select data-saved-filter-select><option value="">اختر عرضًا محفوظًا</option></select></label>
+        <button class="button button--quiet" type="button" data-saved-filter-apply>تطبيق العرض</button>
+        <button class="button button--quiet" type="button" data-saved-filter-delete>حذف العرض</button>
+        <p class="saved-filters__status" data-saved-filter-status role="status" aria-live="polite">لا تُحفظ حقول البحث الحر أو بيانات الدخول أو الهوست.</p>
+    </div>
+    <?php
+}
+
 function cc_toolbar(string $searchLabel, array $filters = []): void
 {
     ?>
