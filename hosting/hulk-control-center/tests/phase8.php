@@ -74,7 +74,11 @@ $settings = cc_phase8_settings_snapshot([
     ],
 ]);
 $encodedSettings = json_encode($settings, JSON_THROW_ON_ERROR);
-cc_test(str_contains($encodedSettings, 'Asia/Riyadh') && str_contains($encodedSettings, 'online_ttl_seconds'), 'Phase 8 settings exposes useful safe runtime boundaries');
+cc_test(
+    ($settings['application']['timezone'] ?? '') === 'Asia/Riyadh'
+        && ($settings['presence']['online_ttl_seconds'] ?? 0) === 180,
+    'Phase 8 settings exposes useful safe runtime boundaries'
+);
 cc_test(($settings['authentication']['login_max_attempts'] ?? 0) === 5 && ($settings['authentication']['login_lock_seconds'] ?? 0) === 900, 'Phase 8 settings exposes the effective non-secret lockout policy');
 foreach (['private-cookie-name', 'mysql:', 'private-user-agent', str_repeat('s', 32), str_repeat('t', 32)] as $forbidden) {
     cc_test(!str_contains($encodedSettings, $forbidden), 'Phase 8 settings never exposes private runtime configuration');
