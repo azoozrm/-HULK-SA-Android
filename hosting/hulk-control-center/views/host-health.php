@@ -40,9 +40,9 @@ $fingerprint = static fn (string $value): string => substr($value, 0, 12) . '…
         <?php if ($targets === []): ?>
             <?php cc_empty_state('لا توجد هوستات حالية صالحة', 'لا يوجد موزع نشط يملك host يقبله مسار التطبيع الحالي.'); ?>
         <?php else: ?>
-            <div class="table-shell"><div class="table-scroll" tabindex="0" aria-label="الحالة الحالية للهوستات"><table class="phase7-table"><thead><tr><th>الموزع</th><th>Fingerprint</th><th>الحالة</th><th>آخر فحص</th><th>HTTP</th><th>الزمن</th></tr></thead><tbody>
+            <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="الحالة الحالية للهوستات"><table class="phase7-table" data-mobile-cards><thead><tr><th>الموزع</th><th>Fingerprint</th><th>الحالة</th><th>آخر فحص</th><th>HTTP</th><th>الزمن</th><th>السياق</th></tr></thead><tbody>
             <?php foreach ($targets as $target): $state = (string) $target['health_state']; $latest = is_array($target['latest_check'] ?? null) ? $target['latest_check'] : null; ?>
-                <tr><td><strong><?= cc_e($target['reseller_name']) ?></strong><small class="cell-note">#<?= (int) $target['reseller_id'] ?></small></td><td><code dir="ltr"><?= cc_e($fingerprint((string) $target['host_fingerprint'])) ?></code></td><td><?php cc_status_badge($labels[$state][0] ?? $state, $labels[$state][1] ?? 'neutral'); ?></td><td><?= cc_e($latest['checked_at'] ?? 'غير متاح') ?></td><td><?= $latest === null || $latest['http_status'] === null ? 'غير متاح' : (int) $latest['http_status'] ?></td><td><?= $latest === null ? 'غير متاح' : ((int) $latest['latency_ms'] . ' ms') ?></td></tr>
+                <tr><td><strong><?= cc_e($target['reseller_name']) ?></strong><small class="cell-note">#<?= (int) $target['reseller_id'] ?></small></td><td><code dir="ltr"><?= cc_e($fingerprint((string) $target['host_fingerprint'])) ?></code></td><td><?php cc_status_badge($labels[$state][0] ?? $state, $labels[$state][1] ?? 'neutral'); ?></td><td><?= cc_e($latest['checked_at'] ?? 'غير متاح') ?></td><td><?= $latest === null || $latest['http_status'] === null ? 'غير متاح' : (int) $latest['http_status'] ?></td><td><?= $latest === null ? 'غير متاح' : ((int) $latest['latency_ms'] . ' ms') ?></td><td><div class="context-links"><a href="<?= cc_e(cc_context_url('hosts', ['reseller' => (int) $target['reseller_id']])) ?>">الهوست الحالي</a><a href="<?= cc_e(cc_context_url('sessions', ['reseller' => (int) $target['reseller_id']])) ?>">الجلسات</a></div></td></tr>
             <?php endforeach; ?>
             </tbody></table></div></div>
         <?php endif; ?>
@@ -53,7 +53,7 @@ $fingerprint = static fn (string $value): string => substr($value, 0, 12) . '…
         <?php if ($history === []): ?>
             <?php cc_empty_state('لم يصل أول فحص بعد', 'بعد نشر migration وجدولة أداة CLI ستظهر الملاحظات هنا.'); ?>
         <?php else: ?>
-            <div class="table-shell"><div class="table-scroll" tabindex="0" aria-label="سجل فحوص الهوستات"><table class="phase7-table"><thead><tr><th>الوقت</th><th>الموزع</th><th>Fingerprint</th><th>النتيجة</th><th>DNS</th><th>TCP</th><th>HTTP</th><th>الزمن</th></tr></thead><tbody>
+            <div class="table-shell table-shell--responsive"><div class="table-scroll" tabindex="0" aria-label="سجل فحوص الهوستات"><table class="phase7-table" data-mobile-cards><thead><tr><th>الوقت</th><th>الموزع</th><th>Fingerprint</th><th>النتيجة</th><th>DNS</th><th>TCP</th><th>HTTP</th><th>الزمن</th></tr></thead><tbody>
             <?php foreach ($history as $check): ?>
                 <tr><td><?= cc_e($check['checked_at']) ?></td><td>#<?= (int) $check['reseller_id'] ?></td><td><code dir="ltr"><?= cc_e($fingerprint((string) $check['host_fingerprint'])) ?></code></td><td><?= cc_e($check['probe_result']) ?></td><td><?= $check['dns_ok'] ? 'PASS' : 'FAIL' ?></td><td><?= $check['tcp_ok'] ? 'PASS' : 'FAIL' ?></td><td><?= $check['http_status'] === null ? '—' : (int) $check['http_status'] ?></td><td><?= (int) $check['latency_ms'] ?> ms</td></tr>
             <?php endforeach; ?>

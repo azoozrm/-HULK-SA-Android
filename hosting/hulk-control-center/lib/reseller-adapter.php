@@ -122,6 +122,8 @@ function cc_reseller_page(string $module): array
     $status = is_string($_GET['status'] ?? null) && in_array($_GET['status'], ['active', 'inactive'], true)
         ? $_GET['status']
         : '';
+    $resellerFilter = filter_var($_GET['reseller'] ?? null, FILTER_VALIDATE_INT);
+    $resellerFilter = $resellerFilter === false || $resellerFilter < 1 ? null : (int) $resellerFilter;
     $page = max(1, (int) ($_GET['page'] ?? 1));
     $perPage = 25;
     $conditions = [];
@@ -136,6 +138,10 @@ function cc_reseller_page(string $module): array
     if ($status !== '') {
         $conditions[] = 'status = :status';
         $parameters['status'] = $status;
+    }
+    if ($resellerFilter !== null) {
+        $conditions[] = 'reseller_id = :reseller_id';
+        $parameters['reseller_id'] = $resellerFilter;
     }
     $where = $conditions === [] ? '' : ' WHERE ' . implode(' AND ', $conditions);
     $db = cc_db('reseller');
@@ -168,7 +174,7 @@ function cc_reseller_page(string $module): array
     }
     return [
         'rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages,
-        'search' => $search, 'status' => $status,
+        'search' => $search, 'status' => $status, 'reseller' => $resellerFilter,
         'presence_usage' => $presenceUsage,
         'presence_usage_available' => $presenceUsageAvailable,
     ];

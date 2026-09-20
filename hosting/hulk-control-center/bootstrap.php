@@ -144,6 +144,39 @@ function cc_url(string $module = 'dashboard'): string
     return $module === 'dashboard' ? $base . '/' : $base . '/' . rawurlencode($module) . '/';
 }
 
+function cc_context_url(string $module, array $query): string
+{
+    $allowed = [
+        'hosts' => ['reseller'],
+        'resellers' => ['reseller'],
+        'access-codes' => ['reseller'],
+        'sessions' => ['reseller', 'app_version', 'platform', 'status'],
+        'live-users' => ['reseller', 'app_version', 'platform', 'status'],
+    ];
+    if (!isset($allowed[$module])) {
+        throw new InvalidArgumentException('Context link module is not allow-listed.');
+    }
+    $safe = [];
+    foreach ($allowed[$module] as $key) {
+        $value = $query[$key] ?? null;
+        if ($key === 'reseller') {
+            $parsed = filter_var($value, FILTER_VALIDATE_INT);
+            if ($parsed !== false && $parsed > 0) {
+                $safe[$key] = (int) $parsed;
+            }
+            continue;
+        }
+        if ($key === 'platform' && is_string($value) && in_array($value, ['PHONE', 'TABLET', 'TV', 'OTHER'], true)) {
+            $safe[$key] = $value;
+        } elseif ($key === 'status' && is_string($value) && in_array($value, ['all', 'online', 'offline'], true)) {
+            $safe[$key] = $value;
+        } elseif ($key === 'app_version' && is_string($value) && preg_match('/^[0-9A-Za-z._-]{1,32}$/', $value) === 1) {
+            $safe[$key] = $value;
+        }
+    }
+    return cc_url($module) . ($safe === [] ? '' : '?' . http_build_query($safe));
+}
+
 function cc_asset_url(string $path): string
 {
     return cc_base_path() . '/assets/' . ltrim($path, '/');
