@@ -132,7 +132,7 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("summary:focus-visible", css)
         self.assertIn("min-height: 44px", css)
         self.assertIn("@media (max-width: 700px)", css)
-        self.assertIn("app.css?v=5.0.1", login)
+        self.assertIn("app.css?v=5.0.2", login)
 
     def test_closed_rtl_mobile_drawer_is_fully_outside_the_viewport(self) -> None:
         css = self.read(ROOT / "assets" / "app.css")
@@ -182,6 +182,58 @@ class PhaseEightContractTests(unittest.TestCase):
             visible_width,
             0.0,
             "the closed RTL mobile drawer must not cover or block any page content",
+        )
+
+    def test_login_layout_fits_a_390px_viewport(self) -> None:
+        css = self.read(ROOT / "assets" / "app.css")
+        base_css, mobile_and_smaller = css.split("@media (max-width: 860px)", 1)
+        mobile_css = mobile_and_smaller.split("@media (max-width: 700px)", 1)[0]
+
+        base_match = re.search(r"\.login-layout\s*\{([^}]*)\}", base_css)
+        self.assertIsNotNone(base_match)
+        template_match = re.search(
+            r"grid-template-columns\s*:\s*([^;]+);", base_match.group(1)
+        )
+        self.assertIsNotNone(template_match)
+        effective_template = template_match.group(1)
+
+        mobile_match = re.search(r"\.login-layout\s*\{([^}]*)\}", mobile_css)
+        if mobile_match is not None:
+            mobile_template_match = re.search(
+                r"grid-template-columns\s*:\s*([^;]+);", mobile_match.group(1)
+            )
+            if mobile_template_match is not None:
+                effective_template = mobile_template_match.group(1)
+
+        minimum_track_widths = [
+            float(value)
+            for value in re.findall(
+                r"minmax\(\s*([\d.]+)px\s*,", effective_template
+            )
+        ]
+        required_width = sum(minimum_track_widths)
+
+        self.assertLessEqual(
+            required_width,
+            390.0,
+            "the login grid must not require a desktop-width viewport on iPhone",
+        )
+
+    def test_mobile_login_form_precedes_the_decorative_story(self) -> None:
+        css = self.read(ROOT / "assets" / "app.css")
+        mobile_css = css.split("@media (max-width: 860px)", 1)[1].split(
+            "@media (max-width: 700px)", 1
+        )[0]
+        story_match = re.search(r"\.login-story\s*\{([^}]*)\}", mobile_css)
+        self.assertIsNotNone(story_match)
+        display_match = re.search(
+            r"display\s*:\s*([^;]+);", story_match.group(1)
+        )
+        self.assertIsNotNone(display_match)
+        self.assertEqual(
+            display_match.group(1).strip(),
+            "none",
+            "the decorative desktop story must not push the login form below the mobile fold",
         )
 
     def test_every_shared_view_has_a_purpose_specific_page_composition(self) -> None:

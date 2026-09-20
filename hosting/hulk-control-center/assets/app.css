@@ -475,6 +475,10 @@ tbody tr:last-child td { border-block-end: 0; }
 
 @media (max-width: 860px) {
     .app-shell { display: block; }
+    .login-layout { grid-template-columns: minmax(0,1fr); }
+    .login-story { display: none; }
+    .login-panel { min-height: 100dvh; padding: 24px; }
+    .login-card__mark { display: grid; margin-block-end: 8px; }
     .sidebar { position: fixed; z-index: 60; inset-block: 0; right: 0; left: auto; width: min(82vw,310px); height: 100dvh; visibility: hidden; pointer-events: none; box-shadow: -24px 0 70px rgba(0,0,0,.48); transform: translate3d(100%,0,0); transition: transform 180ms ease, visibility 0s linear 180ms; }
     .sidebar.is-open { visibility: visible; pointer-events: auto; transform: translate3d(0,0,0); transition-delay: 0s; }
     .sidebar__top { min-height: 64px; padding: 10px 12px; }
@@ -576,6 +580,8 @@ tbody tr:last-child td { border-block-end: 0; }
 }
 
 @media (max-width: 440px) {
+    .login-panel { padding: 14px; }
+    .login-card { padding: 22px; }
     .topbar { padding-inline: 12px; }
     .page-summary__main p { padding-inline-end: 0; }
     .page-summary__facts { grid-template-columns: 1fr; }
