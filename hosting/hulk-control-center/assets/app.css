@@ -461,7 +461,7 @@ tbody tr:last-child td { border-block-end: 0; }
 .skeleton__row { height: 42px; border-radius: 10px; background: linear-gradient(90deg,var(--surface-2),var(--surface-3),var(--surface-2)); background-size: 200% 100%; animation: skeleton 1.2s linear infinite; }
 @keyframes skeleton { to { background-position: -200% 0; } }
 
-@media (max-width: 1160px) {
+@media (max-width: 1180px) {
     :root { --sidebar: 244px; }
     .presence-filters, .audit-filters, .admin-form--grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
     .data-toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
