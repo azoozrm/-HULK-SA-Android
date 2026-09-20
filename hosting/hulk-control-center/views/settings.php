@@ -3,23 +3,105 @@
 declare(strict_types=1);
 
 if (!empty($pageData['load_error'])) {
-    cc_error_state('تعذر قراءة حدود التشغيل', 'لم تُعرض قيم افتراضية. تحقق من ملف الإعداد الخاص ثم أعد المحاولة.', cc_url('settings'));
+    cc_error_state('تعذر قراءة إعدادات المركز', 'لم تُعرض قيم افتراضية. تحقق من ملف الإعداد الخاص ثم أعد المحاولة.', cc_url('settings'));
     return;
 }
+
 $settings = is_array($pageData['settings'] ?? null) ? $pageData['settings'] : [];
 $application = $settings['application'] ?? [];
 $authentication = $settings['authentication'] ?? [];
 $presence = $settings['presence'] ?? [];
 $diagnostics = $settings['diagnostics'] ?? [];
 $health = $settings['host_health'] ?? [];
+$durationLabel = static function (int $seconds): string {
+    $seconds = max(0, $seconds);
+    if ($seconds < 60) {
+        return $seconds . ' ثانية';
+    }
+    $minutes = intdiv($seconds, 60);
+    $remainder = $seconds % 60;
+    return $remainder === 0 ? $minutes . ' دقيقة' : $minutes . ' دقيقة و' . $remainder . ' ثانية';
+};
+$lockDuration = $durationLabel((int) ($authentication['login_lock_seconds'] ?? 0));
+$onlineDuration = $durationLabel((int) ($presence['online_ttl_seconds'] ?? 0));
 ?>
-<section class="module-stack settings-module">
-    <?php cc_alert('حدود إعداد آمنة للقراءة فقط', 'القيم القابلة للتعديل تبقى لدى Operations أو سلطة الموزعين أو ملف النشر الخاص. لا تعرض هذه الصفحة أسرارًا ولا تنشئ مالكًا ثانيًا.', 'info'); ?>
-    <section class="settings-grid">
-        <article class="panel settings-card"><header class="panel__header"><div><span class="eyebrow">Control Center</span><h2>التطبيق والمصادقة</h2></div><?php cc_status_badge('قراءة فقط', 'info'); ?></header><dl class="settings-list"><div><dt>المسار</dt><dd dir="ltr"><?= cc_e($application['route_path'] ?? '—') ?></dd></div><div><dt>المنطقة الزمنية</dt><dd dir="ltr"><?= cc_e($application['timezone'] ?? '—') ?></dd></div><div><dt>سلطة الحساب</dt><dd><code><?= cc_e($authentication['authority'] ?? '—') ?></code></dd></div><div><dt>قفل المحاولات</dt><dd>بعد <?= (int) ($authentication['login_max_attempts'] ?? 0) ?> محاولات · <?= (int) ($authentication['login_lock_seconds'] ?? 0) ?> ثانية</dd></div><div><dt>الجلسة</dt><dd>Secure · HttpOnly · SameSite=<?= cc_e($authentication['same_site'] ?? '—') ?></dd></div></dl><p class="settings-card__note">استعادة حساب المالك عملية تشغيلية موثقة وليست إدارة RBAC داخل الواجهة.</p></article>
-        <article class="panel settings-card"><header class="panel__header"><div><span class="eyebrow">Presence</span><h2>الحضور والاحتفاظ</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('sessions')) ?>">عرض الجلسات</a></header><dl class="settings-list"><div><dt>نبضة التطبيق</dt><dd><?= (int) ($presence['heartbeat_seconds'] ?? 0) ?> ثانية</dd></div><div><dt>Online TTL</dt><dd><?= (int) ($presence['online_ttl_seconds'] ?? 0) ?> ثانية</dd></div><div><dt>احتفاظ الجلسات</dt><dd><?= (int) ($presence['session_retention_days'] ?? 0) ?> يومًا</dd></div><div><dt>احتفاظ الأجهزة</dt><dd><?= (int) ($presence['device_retention_days'] ?? 0) ?> يومًا</dd></div><div><dt>دفعة التنظيف</dt><dd><?= (int) ($presence['cleanup_batch_size'] ?? 0) ?> صف</dd></div></dl></article>
-        <article class="panel settings-card"><header class="panel__header"><div><span class="eyebrow">Diagnostics</span><h2>التشخيصات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('diagnostics')) ?>">عرض التشخيصات</a></header><dl class="settings-list"><div><dt>مدة الاحتفاظ</dt><dd><?= (int) ($diagnostics['retention_days'] ?? 0) ?> يومًا</dd></div><div><dt>دفعة التنظيف</dt><dd><?= (int) ($diagnostics['cleanup_batch_size'] ?? 0) ?> صف</dd></div></dl><p class="settings-card__note">العقد typed فقط ولا يقبل رسائل حرة أو raw logs أو بيانات اعتماد.</p></article>
-        <article class="panel settings-card"><header class="panel__header"><div><span class="eyebrow">Host Health</span><h2>ميزانية الفحص</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('host-health')) ?>">عرض الصحة</a></header><dl class="settings-list"><div><dt>DNS / الاتصال / الطلب</dt><dd><?= (int) ($health['dns_timeout_ms'] ?? 0) ?> / <?= (int) ($health['connect_timeout_ms'] ?? 0) ?> / <?= (int) ($health['request_timeout_ms'] ?? 0) ?> ms</dd></div><div><dt>حد التشغيل</dt><dd><?= (int) ($health['max_runtime_seconds'] ?? 0) ?> ثانية</dd></div><div><dt>العمل لكل تشغيل</dt><dd><?= (int) ($health['max_hosts_per_run'] ?? 0) ?> من نافذة <?= (int) ($health['candidate_limit'] ?? 0) ?></dd></div><div><dt>مدة الاحتفاظ</dt><dd><?= (int) ($health['retention_days'] ?? 0) ?> يومًا</dd></div><div><dt>دفعة التنظيف</dt><dd><?= (int) ($health['cleanup_batch_size'] ?? 0) ?> صف</dd></div></dl></article>
+<section class="module-stack settings-module settings-overview-page">
+    <?php cc_page_summary(
+        'إعدادات مركز التحكم',
+        'ملخص حدود التشغيل',
+        'صفحة قراءة فقط لفهم الحماية والاحتفاظ والفحص. يتم كل تعديل من الوحدة المالكة له.',
+        'settings',
+        ['label' => 'قراءة فقط', 'tone' => 'info'],
+        [
+            ['label' => 'الاتصال الحالي', 'value' => 'خلال ' . $onlineDuration],
+            ['label' => 'حفظ الجلسات', 'value' => (string) ((int) ($presence['session_retention_days'] ?? 0)) . ' يومًا'],
+            ['label' => 'حفظ الأعطال', 'value' => (string) ((int) ($diagnostics['retention_days'] ?? 0)) . ' يومًا'],
+        ]
+    ); ?>
+
+    <section class="panel policy-overview">
+        <header class="panel__header"><div><span class="eyebrow">ما يهم في الاستخدام اليومي</span><h2>سياسات المركز</h2><p class="muted-copy">ملخص مباشر للقيم التشغيلية، من دون خلطها بعناصر تحكم غير موجودة.</p></div></header>
+        <div class="policy-list">
+            <article class="policy-row">
+                <span class="policy-row__icon"><?= cc_icon('shield') ?></span>
+                <div><h3>تسجيل الدخول والحماية</h3><p>يُقفل تسجيل الدخول بعد <?= (int) ($authentication['login_max_attempts'] ?? 0) ?> محاولات لمدة <?= cc_e($lockDuration) ?>.</p></div>
+                <?php cc_status_badge('محمي', 'success'); ?>
+            </article>
+            <article class="policy-row">
+                <span class="policy-row__icon"><?= cc_icon('users') ?></span>
+                <div><h3>نشاط المستخدمين والجلسات</h3><p>يُعد المستخدم نشطًا عند وصول نشاط خلال آخر <?= cc_e($onlineDuration) ?>، وتُحفظ الجلسات <?= (int) ($presence['session_retention_days'] ?? 0) ?> يومًا.</p></div>
+                <a class="button button--quiet" href="<?= cc_e(cc_url('sessions')) ?>">عرض الجلسات</a>
+            </article>
+            <article class="policy-row">
+                <span class="policy-row__icon"><?= cc_icon('clock') ?></span>
+                <div><h3>الاحتفاظ والتنظيف</h3><p>تُحفظ الأجهزة <?= (int) ($presence['device_retention_days'] ?? 0) ?> يومًا، وأحداث الأعطال <?= (int) ($diagnostics['retention_days'] ?? 0) ?> يومًا.</p></div>
+                <?php cc_status_badge('تنظيف محدود', 'info'); ?>
+            </article>
+            <article class="policy-row">
+                <span class="policy-row__icon"><?= cc_icon('heart') ?></span>
+                <div><h3>صحة الهوستات</h3><p>يفحص التشغيل الواحد حتى <?= (int) ($health['max_hosts_per_run'] ?? 0) ?> هوست، وتُحفظ النتائج <?= (int) ($health['retention_days'] ?? 0) ?> يومًا.</p></div>
+                <a class="button button--quiet" href="<?= cc_e(cc_url('host-health')) ?>">عرض الصحة</a>
+            </article>
+            <article class="policy-row">
+                <span class="policy-row__icon"><?= cc_icon('diagnostic') ?></span>
+                <div><h3>أعطال التطبيق</h3><p>تُحفظ رموز أعطال مصنفة وآمنة فقط، من دون رسائل خام أو بيانات دخول.</p></div>
+                <a class="button button--quiet" href="<?= cc_e(cc_url('diagnostics')) ?>">عرض الأعطال</a>
+            </article>
+        </div>
     </section>
-    <section class="panel ownership-panel"><header class="panel__header"><div><span class="eyebrow">Single-owner boundaries</span><h2>أماكن التعديل الموثوقة</h2></div></header><div class="ownership-links"><a href="<?= cc_e(cc_url('releases')) ?>"><strong>الإصدارات والتحديثات</strong><span>Operations</span></a><a href="<?= cc_e(cc_url('service')) ?>"><strong>حالة الخدمة</strong><span>Operations</span></a><a href="<?= cc_e(cc_url('growth')) ?>"><strong>التجديد والدعم</strong><span>Operations</span></a><a href="<?= cc_e(cc_url('resellers')) ?>"><strong>الموزعون</strong><span>Reseller authority</span></a><a href="<?= cc_e(cc_url('audit')) ?>"><strong>سجل الإدارة</strong><span>Audit authority</span></a></div></section>
+
+    <section class="panel ownership-panel">
+        <header class="panel__header"><div><span class="eyebrow">الجهات المسؤولة عن التعديل</span><h2>انتقل إلى مكان الإجراء</h2><p class="muted-copy">تبقى هذه الصفحة للقراءة؛ كل وحدة تعرض إجراءاتها المصرح بها فقط.</p></div></header>
+        <div class="ownership-links">
+            <a href="<?= cc_e(cc_url('releases')) ?>"><span class="ownership-links__icon"><?= cc_icon('package') ?></span><strong>الإصدارات والتحديثات</strong><small>رفع وتفعيل وسياسة التحديث</small></a>
+            <a href="<?= cc_e(cc_url('service')) ?>"><span class="ownership-links__icon"><?= cc_icon('pulse') ?></span><strong>حالة الخدمة</strong><small>الحالة والرسالة المنشورة</small></a>
+            <a href="<?= cc_e(cc_url('growth')) ?>"><span class="ownership-links__icon"><?= cc_icon('trend') ?></span><strong>التجديد والدعم</strong><small>المحتوى والروابط ورمز QR</small></a>
+            <a href="<?= cc_e(cc_url('resellers')) ?>"><span class="ownership-links__icon"><?= cc_icon('briefcase') ?></span><strong>الموزعون والوصول</strong><small>الحسابات والأكواد والهوستات</small></a>
+            <a href="<?= cc_e(cc_url('audit')) ?>"><span class="ownership-links__icon"><?= cc_icon('audit') ?></span><strong>النشاط الإداري</strong><small>مراجعة سجل التغييرات</small></a>
+        </div>
+    </section>
+
+    <?php cc_technical_disclosure('القيم التشغيلية التقنية'); ?>
+        <div class="settings-technical-grid">
+            <section><h2>المركز وتسجيل الدخول</h2><?php cc_fact_list([
+                ['label' => 'المسار', 'value' => (string) ($application['route_path'] ?? '—'), 'ltr' => true],
+                ['label' => 'المنطقة الزمنية', 'value' => (string) ($application['timezone'] ?? '—'), 'ltr' => true],
+                ['label' => 'مصدر الحساب', 'value' => (string) ($authentication['authority'] ?? '—'), 'ltr' => true],
+                ['label' => 'سياسة الارتباط', 'value' => 'Secure · HttpOnly · SameSite=' . (string) ($authentication['same_site'] ?? '—'), 'ltr' => true],
+            ]); ?></section>
+            <section><h2>الجلسات والتنظيف</h2><?php cc_fact_list([
+                ['label' => 'فاصل النشاط', 'value' => (string) ((int) ($presence['heartbeat_seconds'] ?? 0)) . ' ثانية'],
+                ['label' => 'مهلة الاتصال', 'value' => (string) ((int) ($presence['online_ttl_seconds'] ?? 0)) . ' ثانية'],
+                ['label' => 'دفعة تنظيف الجلسات', 'value' => (string) ((int) ($presence['cleanup_batch_size'] ?? 0)) . ' سجل'],
+                ['label' => 'دفعة تنظيف الأعطال', 'value' => (string) ((int) ($diagnostics['cleanup_batch_size'] ?? 0)) . ' سجل'],
+            ]); ?></section>
+            <section><h2>فحص الهوستات</h2><?php cc_fact_list([
+                ['label' => 'مهلة اسم النطاق', 'value' => (string) ((int) ($health['dns_timeout_ms'] ?? 0)) . ' مللي ثانية'],
+                ['label' => 'مهلة الاتصال', 'value' => (string) ((int) ($health['connect_timeout_ms'] ?? 0)) . ' مللي ثانية'],
+                ['label' => 'مهلة الطلب', 'value' => (string) ((int) ($health['request_timeout_ms'] ?? 0)) . ' مللي ثانية'],
+                ['label' => 'حد التشغيل', 'value' => (string) ((int) ($health['max_runtime_seconds'] ?? 0)) . ' ثانية / ' . (string) ((int) ($health['candidate_limit'] ?? 0)) . ' مرشح'],
+                ['label' => 'دفعة التنظيف', 'value' => (string) ((int) ($health['cleanup_batch_size'] ?? 0)) . ' سجل'],
+            ]); ?></section>
+        </div>
+    <?php cc_disclosure_end(); ?>
 </section>

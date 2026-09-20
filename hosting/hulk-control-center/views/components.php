@@ -87,6 +87,83 @@ function cc_kpi_card(
     <?php
 }
 
+function cc_page_summary(
+    string $eyebrow,
+    string $title,
+    string $description,
+    string $icon,
+    ?array $status = null,
+    array $facts = []
+): void {
+    ?>
+    <section class="page-summary">
+        <div class="page-summary__main">
+            <span class="page-summary__icon"><?= cc_icon($icon) ?></span>
+            <div>
+                <span class="eyebrow"><?= cc_e($eyebrow) ?></span>
+                <h2><?= cc_e($title) ?></h2>
+                <p><?= cc_e($description) ?></p>
+            </div>
+        </div>
+        <?php if ($status !== null): ?>
+            <div class="page-summary__status"><?php cc_status_badge((string) ($status['label'] ?? ''), (string) ($status['tone'] ?? 'neutral')); ?></div>
+        <?php endif; ?>
+        <?php if ($facts !== []): ?>
+            <dl class="page-summary__facts">
+                <?php foreach ($facts as $fact): ?>
+                    <div>
+                        <dt><?= cc_e((string) ($fact['label'] ?? '')) ?></dt>
+                        <dd<?= !empty($fact['ltr']) ? ' dir="ltr"' : '' ?>><?= cc_e((string) ($fact['value'] ?? '—')) ?></dd>
+                        <?php if (($fact['hint'] ?? '') !== ''): ?><small><?= cc_e((string) $fact['hint']) ?></small><?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </dl>
+        <?php endif; ?>
+    </section>
+    <?php
+}
+
+function cc_fact_list(array $facts, string $class = ''): void
+{
+    ?>
+    <dl class="fact-list <?= cc_e($class) ?>">
+        <?php foreach ($facts as $fact): ?>
+            <div>
+                <dt><?= cc_e((string) ($fact['label'] ?? '')) ?></dt>
+                <dd<?= !empty($fact['ltr']) ? ' dir="ltr"' : '' ?>><?= cc_e((string) ($fact['value'] ?? '—')) ?></dd>
+                <?php if (($fact['hint'] ?? '') !== ''): ?><small><?= cc_e((string) $fact['hint']) ?></small><?php endif; ?>
+            </div>
+        <?php endforeach; ?>
+    </dl>
+    <?php
+}
+
+function cc_filter_disclosure(string $title, string $description, bool $open = false): void
+{
+    ?>
+    <details class="filter-disclosure"<?= $open ? ' open' : '' ?>>
+        <summary><span><?= cc_icon('filter') ?></span><span><strong><?= cc_e($title) ?></strong><small><?= cc_e($description) ?></small></span></summary>
+        <div class="filter-disclosure__body">
+    <?php
+}
+
+function cc_technical_disclosure(string $title = 'تفاصيل تقنية', bool $open = false): void
+{
+    ?>
+    <details class="technical-disclosure"<?= $open ? ' open' : '' ?>>
+        <summary><?= cc_e($title) ?></summary>
+        <div class="technical-disclosure__body">
+    <?php
+}
+
+function cc_disclosure_end(): void
+{
+    ?>
+        </div>
+    </details>
+    <?php
+}
+
 function cc_unavailable_state(string $title, string $description, string $icon = 'shield'): void
 {
     ?>

@@ -56,6 +56,50 @@ class PhaseEightContractTests(unittest.TestCase):
         for field in ("date_from", "date_to", "admin", "action", "reseller_id"):
             self.assertIn(f'name="{field}"', view)
 
+    def test_owner_audit_is_arabic_structured_and_technically_secondary(self) -> None:
+        domain = self.read(ROOT / "lib" / "phase8.php")
+        view = self.read(ROOT / "views" / "audit.php")
+        dashboard = self.read(ROOT / "views" / "dashboard.php")
+        self.assertIn("function cc_phase8_audit_action_presentation", domain)
+        self.assertIn("GROWTH_CONFIG_PUBLISHED", domain)
+        self.assertIn("تم تحديث إعدادات التجديد والدعم", domain)
+        self.assertIn("LEGACY_CUSTOM_ACTION", self.read(ROOT / "tests" / "phase8.php"))
+        self.assertIn("technical_id", domain)
+        self.assertIn("'rows'", domain)
+        self.assertIn("'direction' => 'ltr'", domain)
+        self.assertIn("تفاصيل تقنية", view)
+        self.assertIn("audit-event__title", view)
+        self.assertIn("cc_phase8_audit_action_presentation", dashboard)
+        self.assertNotRegex(view, re.compile(r"<code[^>]*>\s*<\?=\s*cc_e\(\$row\['action'\]\)", re.IGNORECASE))
+
+    def test_navigation_and_settings_use_owner_oriented_arabic(self) -> None:
+        routes = self.read(ROOT / "lib" / "routes.php")
+        layout = self.read(ROOT / "views" / "layout.php")
+        settings = self.read(ROOT / "views" / "settings.php")
+        css = self.read(ROOT / "assets" / "app.css")
+        for label in ("النشاط المباشر", "الموزعون والوصول", "إدارة التطبيق", "المتابعة والتحليل", "إدارة المركز"):
+            self.assertIn(label, routes)
+        self.assertIn("navigation__group-title", layout)
+        for forbidden_heading in ("Presence", "Diagnostics", "Host Health", "Single-owner boundaries"):
+            self.assertNotIn(f'>{forbidden_heading}<', settings)
+        self.assertIn("إعدادات مركز التحكم", settings)
+        self.assertIn("الجهات المسؤولة عن التعديل", settings)
+        self.assertIn("cc_technical_disclosure", settings)
+        self.assertIn("--surface-1", css)
+        self.assertIn("dashboard-command", css)
+        self.assertIn("intdiv", settings)
+        self.assertIn("الرئيسية", layout)
+
+    def test_dashboard_distinguishes_partial_evidence_and_keeps_every_warning_visible(self) -> None:
+        dashboard = self.read(ROOT / "views" / "dashboard.php")
+        audit = self.read(ROOT / "views" / "audit.php")
+        self.assertIn("!$hostHealthAvailable || !$diagnosticsAvailable || !$analyticsAvailable", dashboard)
+        self.assertIn("!$hostHealthCoverageComplete", dashboard)
+        self.assertIn("آخر فحص لم يشمل كل الهوستات المستهدفة", dashboard)
+        self.assertNotIn("array_slice($attentionItems, 0, 5)", dashboard)
+        self.assertIn("technical_id", dashboard)
+        self.assertIn("غير مصنف", audit)
+
     def test_saved_filters_are_local_bounded_and_exclude_sensitive_fields(self) -> None:
         source = self.read(ROOT / "assets" / "app.js")
         sessions = self.read(ROOT / "views" / "sessions.php")
@@ -88,7 +132,171 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("summary:focus-visible", css)
         self.assertIn("min-height: 44px", css)
         self.assertIn("@media (max-width: 700px)", css)
-        self.assertIn("app.css?v=3.0.0", login)
+        self.assertIn("app.css?v=5.0.2", login)
+
+    def test_closed_rtl_mobile_drawer_is_fully_outside_the_viewport(self) -> None:
+        css = self.read(ROOT / "assets" / "app.css")
+        mobile_css = css.split("@media (max-width: 860px)", 1)[1].split(
+            "@media (max-width: 700px)", 1
+        )[0]
+        sidebar_match = re.search(r"\.sidebar\s*\{([^}]*)\}", mobile_css)
+        self.assertIsNotNone(sidebar_match)
+        declarations = {
+            name.strip(): value.strip()
+            for name, value in re.findall(
+                r"([\w-]+)\s*:\s*([^;]+);", sidebar_match.group(1)
+            )
+        }
+
+        viewport_width = 390.0
+        width_match = re.fullmatch(
+            r"min\(([\d.]+)vw,\s*([\d.]+)px\)", declarations.get("width", "")
+        )
+        self.assertIsNotNone(width_match)
+        drawer_width = min(
+            viewport_width * float(width_match.group(1)) / 100.0,
+            float(width_match.group(2)),
+        )
+
+        if "right" in declarations:
+            closed_left = viewport_width - drawer_width - float(
+                declarations["right"].removesuffix("px")
+            )
+        elif declarations.get("inset-inline-end") == "0":
+            # In an RTL document, inline-end resolves to the physical left edge.
+            closed_left = 0.0
+        else:
+            self.fail("mobile drawer has no supported physical anchor")
+
+        translation_match = re.search(
+            r"translate(?:X|3d)\(\s*([\d.]+)%", declarations.get("transform", "")
+        )
+        self.assertIsNotNone(translation_match)
+        closed_left += drawer_width * float(translation_match.group(1)) / 100.0
+        visible_width = max(
+            0.0,
+            min(viewport_width, closed_left + drawer_width) - max(0.0, closed_left),
+        )
+
+        self.assertEqual(
+            visible_width,
+            0.0,
+            "the closed RTL mobile drawer must not cover or block any page content",
+        )
+
+    def test_login_layout_fits_a_390px_viewport(self) -> None:
+        css = self.read(ROOT / "assets" / "app.css")
+        base_css, mobile_and_smaller = css.split("@media (max-width: 860px)", 1)
+        mobile_css = mobile_and_smaller.split("@media (max-width: 700px)", 1)[0]
+
+        base_match = re.search(r"\.login-layout\s*\{([^}]*)\}", base_css)
+        self.assertIsNotNone(base_match)
+        template_match = re.search(
+            r"grid-template-columns\s*:\s*([^;]+);", base_match.group(1)
+        )
+        self.assertIsNotNone(template_match)
+        effective_template = template_match.group(1)
+
+        mobile_match = re.search(r"\.login-layout\s*\{([^}]*)\}", mobile_css)
+        if mobile_match is not None:
+            mobile_template_match = re.search(
+                r"grid-template-columns\s*:\s*([^;]+);", mobile_match.group(1)
+            )
+            if mobile_template_match is not None:
+                effective_template = mobile_template_match.group(1)
+
+        minimum_track_widths = [
+            float(value)
+            for value in re.findall(
+                r"minmax\(\s*([\d.]+)px\s*,", effective_template
+            )
+        ]
+        required_width = sum(minimum_track_widths)
+
+        self.assertLessEqual(
+            required_width,
+            390.0,
+            "the login grid must not require a desktop-width viewport on iPhone",
+        )
+
+    def test_mobile_login_form_precedes_the_decorative_story(self) -> None:
+        css = self.read(ROOT / "assets" / "app.css")
+        mobile_css = css.split("@media (max-width: 860px)", 1)[1].split(
+            "@media (max-width: 700px)", 1
+        )[0]
+        story_match = re.search(r"\.login-story\s*\{([^}]*)\}", mobile_css)
+        self.assertIsNotNone(story_match)
+        display_match = re.search(
+            r"display\s*:\s*([^;]+);", story_match.group(1)
+        )
+        self.assertIsNotNone(display_match)
+        self.assertEqual(
+            display_match.group(1).strip(),
+            "none",
+            "the decorative desktop story must not push the login form below the mobile fold",
+        )
+
+    def test_every_shared_view_has_a_purpose_specific_page_composition(self) -> None:
+        components = self.read(ROOT / "views" / "components.php")
+        sessions = self.read(ROOT / "views" / "sessions.php")
+        devices = self.read(ROOT / "views" / "devices.php")
+        resellers = self.read(ROOT / "views" / "resellers.php")
+        operations = self.read(ROOT / "views" / "operations.php")
+        health = self.read(ROOT / "views" / "host-health.php")
+        diagnostics = self.read(ROOT / "views" / "diagnostics.php")
+        analytics = self.read(ROOT / "views" / "analytics.php")
+
+        for primitive in (
+            "function cc_page_summary",
+            "function cc_filter_disclosure",
+            "function cc_fact_list",
+            "function cc_technical_disclosure",
+        ):
+            self.assertIn(primitive, components)
+
+        for marker in ("live-users-page", "session-history-page", "credential-disclosure"):
+            self.assertIn(marker, sessions)
+        self.assertIn("device-inventory-page", devices)
+
+        for marker in (
+            "reseller-accounts-page",
+            "access-code-management-page",
+            "host-management-page",
+        ):
+            self.assertIn(marker, resellers)
+
+        for marker in (
+            "release-management-page",
+            "service-control-page",
+            "announcement-management-page",
+            "feature-control-page",
+            "growth-management-page",
+        ):
+            self.assertIn(marker, operations)
+
+        self.assertIn("host-decision-page", health)
+        self.assertIn("failure-insights-page", diagnostics)
+        self.assertIn("analytics-workspace", analytics)
+
+    def test_owner_flows_demote_forms_filters_and_technical_metadata(self) -> None:
+        operations = self.read(ROOT / "views" / "operations.php")
+        resellers = self.read(ROOT / "views" / "resellers.php")
+        sessions = self.read(ROOT / "views" / "sessions.php")
+        audit = self.read(ROOT / "views" / "audit.php")
+        health = self.read(ROOT / "views" / "host-health.php")
+        analytics = self.read(ROOT / "views" / "analytics.php")
+
+        self.assertIn('class="form-section"', operations)
+        self.assertIn("release-current", operations)
+        self.assertIn("service-message-preview", operations)
+        self.assertIn("feature-state-group", operations)
+        self.assertIn("growth-channel", operations)
+        self.assertIn("management-summary", resellers)
+        self.assertIn("record-actions", resellers)
+        self.assertIn("cc_filter_disclosure", sessions)
+        self.assertIn("cc_filter_disclosure", audit)
+        self.assertIn("health-attention-list", health)
+        self.assertIn("methodology-disclosure", analytics)
 
     def test_cross_module_links_use_non_secret_context_only(self) -> None:
         bootstrap = self.read(ROOT / "bootstrap.php")

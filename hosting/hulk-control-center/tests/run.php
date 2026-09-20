@@ -265,9 +265,9 @@ cc_test(
 );
 cc_test(
     is_string($dashboardView) &&
-        str_contains($dashboardView, 'المستخدمون الآن') &&
-        str_contains($dashboardView, 'الجلسات اليوم') &&
-        str_contains($dashboardView, 'الأجهزة النشطة') &&
+        str_contains($dashboardView, 'النشطون الآن') &&
+        str_contains($dashboardView, 'جلسات اليوم') &&
+        str_contains($dashboardView, 'أجهزة نشطة') &&
         str_contains($dashboardView, 'online_now') &&
         str_contains($dashboardView, 'sessions_today') &&
         str_contains($dashboardView, 'active_devices'),

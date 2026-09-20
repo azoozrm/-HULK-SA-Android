@@ -30,14 +30,34 @@ $fallback = cc_phase8_audit_filters([
 cc_test($fallback['page'] === CC_PHASE8_AUDIT_MAX_PAGES, 'Phase 8 audit page count is bounded');
 cc_test($fallback['notice'] !== '', 'Phase 8 audit reports a normalized over-wide date window');
 
+$knownAction = cc_phase8_audit_action_presentation('GROWTH_CONFIG_PUBLISHED');
+cc_test(
+    $knownAction['title'] === 'تم تحديث إعدادات التجديد والدعم'
+        && $knownAction['technical_id'] === 'GROWTH_CONFIG_PUBLISHED',
+    'Phase 8 owner UI gives known audit actions a clear Arabic meaning'
+);
+$unknownAction = cc_phase8_audit_action_presentation('LEGACY_CUSTOM_ACTION');
+cc_test(
+    $unknownAction['title'] === 'عملية إدارية'
+        && $unknownAction['technical_id'] === 'LEGACY_CUSTOM_ACTION',
+    'Phase 8 owner UI keeps an honest Arabic fallback and secondary unknown identifier'
+);
+
 $safeDetails = cc_phase8_safe_audit_details(json_encode([
     'reseller_id' => 7,
     'status' => 'active',
+    'enabled' => true,
     'password' => 'synthetic-secret',
     'token' => 'synthetic-token',
 ], JSON_THROW_ON_ERROR));
-cc_test(str_contains($safeDetails, 'reseller_id') && str_contains($safeDetails, 'status'), 'Phase 8 audit retains allow-listed operational details');
-cc_test(!str_contains($safeDetails, 'password') && !str_contains($safeDetails, 'token') && !str_contains($safeDetails, 'synthetic'), 'Phase 8 audit suppresses secret-bearing detail keys and values');
+$encodedSafeDetails = json_encode($safeDetails, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+cc_test(
+    ($safeDetails['rows'][0]['label'] ?? '') === 'رقم الموزع'
+        && ($safeDetails['rows'][0]['direction'] ?? '') === 'ltr',
+    'Phase 8 audit projects allow-listed details into Arabic label/value rows with bidi metadata'
+);
+cc_test(str_contains($encodedSafeDetails, 'نشط') && str_contains($encodedSafeDetails, 'مفعّل'), 'Phase 8 audit presents common operational values in Arabic');
+cc_test(!str_contains($encodedSafeDetails, 'password') && !str_contains($encodedSafeDetails, 'token') && !str_contains($encodedSafeDetails, 'synthetic'), 'Phase 8 audit suppresses secret-bearing detail keys and values');
 
 $settings = cc_phase8_settings_snapshot([
     'app' => [
@@ -118,7 +138,8 @@ cc_test($page['snapshot'] === 55, 'Phase 8 audit captures an immutable paginatio
 foreach ($page['audit'] as $row) {
     cc_test($row['username'] === 'owner', 'Phase 8 audit administrator filter is applied by SQL');
     cc_test(str_starts_with($row['action'], 'CONTROL_CENTER_'), 'Phase 8 audit action prefix filter is applied by SQL');
-    cc_test(str_contains($row['details_safe'], '"reseller_id":7'), 'Phase 8 audit reseller detail filter uses an exact numeric JSON boundary');
-    cc_test(str_contains($row['details_safe'], 'reseller_id') && !str_contains($row['details_safe'], 'password'), 'Phase 8 audit emits only safe detail output');
+    $projected = json_encode($row['details_safe'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    cc_test(str_contains($projected, 'رقم الموزع') && str_contains($projected, '>') === false, 'Phase 8 audit reseller detail filter returns structured safe rows');
+    cc_test(!str_contains($projected, 'password'), 'Phase 8 audit emits only safe detail output');
     cc_test(!array_key_exists('details', $row), 'Phase 8 audit removes raw details before the view boundary');
 }
