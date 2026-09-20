@@ -112,7 +112,7 @@ $hasFilters = trim((string) ($pageData['search'] ?? '')) !== ''
                         <?php if ($moduleKey === 'access-codes'): ?>
                             <div class="credential-block">
                                 <span>الكود الحالي</span>
-                                <code dir="ltr"><?= cc_e($row['access_code'] !== '' ? $row['access_code'] : 'غير محدد') ?></code>
+                        <code class="credential-value" dir="ltr"><?= cc_e($row['access_code'] !== '' ? $row['access_code'] : 'غير محدد') ?></code>
                             </div>
                             <dl class="record-card__highlights record-card__highlights--three">
                                 <div><dt>الجاهزية</dt><dd><?= $active && $row['access_code'] !== '' ? 'الكود مرتبط بحساب نشط' : 'يحتاج إلى مراجعة' ?></dd></div>
