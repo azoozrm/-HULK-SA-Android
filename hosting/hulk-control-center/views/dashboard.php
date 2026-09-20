@@ -106,7 +106,7 @@ if ($diagnosticsAvailable && $diagnosticEvents > 0) {
     </div>
 </section>
 
-<section class="dashboard-grid dashboard-grid--priority">
+<section class="dashboard-priority">
     <article class="panel attention-panel">
         <header class="panel__header"><div><span class="eyebrow">الأولوية الآن</span><h2>ما يحتاج إلى انتباهك</h2></div><span class="record-count"><?= count($attentionItems) ?></span></header>
         <?php if ($attentionItems === []): ?>
@@ -115,27 +115,20 @@ if ($diagnosticsAvailable && $diagnosticEvents > 0) {
             <div class="attention-list"><?php foreach ($attentionItems as $item): ?><a class="attention-item attention-item--<?= cc_e($item['tone']) ?>" href="<?= cc_e($item['url']) ?>"><span class="attention-item__icon"><?= cc_icon($item['icon']) ?></span><span><strong><?= cc_e($item['title']) ?></strong><small><?= cc_e($item['message']) ?></small></span><?= cc_icon('chevron', 'attention-item__arrow') ?></a><?php endforeach; ?></div>
         <?php endif; ?>
     </article>
-    <article class="panel quick-actions">
-        <header class="panel__header"><div><span class="eyebrow">وصول سريع</span><h2>أين تريد أن تعمل؟</h2></div></header>
-        <div class="quick-actions__grid">
-            <a href="<?= cc_e(cc_url('releases')) ?>"><?= cc_icon('package') ?><span><strong>إدارة إصدار</strong><small>رفع أو تفعيل أو ضبط تحديث</small></span></a>
-            <a href="<?= cc_e(cc_url('resellers')) ?>"><?= cc_icon('briefcase') ?><span><strong>إدارة موزع</strong><small>الحالة والكود والهوست</small></span></a>
-            <a href="<?= cc_e(cc_url('announcements')) ?>"><?= cc_icon('bell') ?><span><strong>نشر إعلان</strong><small>رسالة موجهة للمستخدمين</small></span></a>
-            <a href="<?= cc_e(cc_url('audit')) ?>"><?= cc_icon('audit') ?><span><strong>مراجعة النشاط</strong><small>آخر التغييرات الإدارية</small></span></a>
-        </div>
-    </article>
 </section>
 
-<section class="dashboard-section">
-    <header class="section-heading"><div><span class="eyebrow">النشاط والوصول</span><h2>صورة اليوم</h2></div></header>
-    <div class="dashboard-metrics" aria-label="مؤشرات النشاط والوصول">
-        <a class="metric-tile" href="<?= cc_e(cc_url('live-users')) ?>"><span class="metric-tile__icon"><?= cc_icon('users') ?></span><span class="metric-tile__label">النشطون الآن</span><strong><?= $presenceAvailable ? (int) ($presence['online_now'] ?? 0) : '—' ?></strong><small><?= $presenceAvailable ? 'جلسة بنشاط حديث' : 'البيانات غير متاحة' ?></small></a>
-        <a class="metric-tile" href="<?= cc_e(cc_url('sessions')) ?>"><span class="metric-tile__icon"><?= cc_icon('clock') ?></span><span class="metric-tile__label">جلسات اليوم</span><strong><?= $presenceAvailable ? (int) ($presence['sessions_today'] ?? 0) : '—' ?></strong><small><?= $presenceAvailable ? 'حسب وقت الخادم' : 'البيانات غير متاحة' ?></small></a>
-        <a class="metric-tile" href="<?= cc_e(cc_url('devices')) ?>"><span class="metric-tile__icon"><?= cc_icon('device') ?></span><span class="metric-tile__label">أجهزة نشطة</span><strong><?= $presenceAvailable ? (int) ($presence['active_devices'] ?? 0) : '—' ?></strong><small><?= $presenceAvailable ? 'خلال آخر ' . (int) ($presence['active_device_window_hours'] ?? 24) . ' ساعة' : 'البيانات غير متاحة' ?></small></a>
-        <a class="metric-tile" href="<?= cc_e(cc_url('resellers')) ?>"><span class="metric-tile__icon"><?= cc_icon('briefcase') ?></span><span class="metric-tile__label">موزعون نشطون</span><strong><?= $resellerAvailable ? (int) ($reseller['active_resellers'] ?? 0) : '—' ?></strong><small><?= $resellerAvailable ? 'من ' . (int) ($reseller['total_resellers'] ?? 0) . ' موزعين' : 'البيانات غير متاحة' ?></small></a>
-        <a class="metric-tile" href="<?= cc_e(cc_url('access-codes')) ?>"><span class="metric-tile__icon"><?= cc_icon('key') ?></span><span class="metric-tile__label">أكواد جاهزة</span><strong><?= $resellerAvailable ? (int) ($reseller['resolver_ready_codes'] ?? 0) : '—' ?></strong><small><?= $resellerAvailable ? 'جاهزة لحل الهوست' : 'البيانات غير متاحة' ?></small></a>
-        <a class="metric-tile" href="<?= cc_e(cc_url('diagnostics')) ?>"><span class="metric-tile__icon"><?= cc_icon('diagnostic') ?></span><span class="metric-tile__label">أحداث أعطال</span><strong><?= $diagnosticsAvailable ? $diagnosticEvents : '—' ?></strong><small><?= $diagnosticsAvailable ? 'ضمن مدة الاحتفاظ' : 'البيانات غير متاحة' ?></small></a>
-    </div>
+<nav class="dashboard-shortcuts" aria-label="إجراءات سريعة">
+    <a href="<?= cc_e(cc_url('releases')) ?>"><?= cc_icon('package') ?><span>إدارة إصدار</span></a>
+    <a href="<?= cc_e(cc_url('resellers')) ?>"><?= cc_icon('briefcase') ?><span>إدارة موزع</span></a>
+    <a href="<?= cc_e(cc_url('announcements')) ?>"><?= cc_icon('bell') ?><span>نشر إعلان</span></a>
+    <a href="<?= cc_e(cc_url('audit')) ?>"><?= cc_icon('audit') ?><span>مراجعة النشاط</span></a>
+</nav>
+
+<section class="operations-strip" aria-label="ملخص النشاط والوصول">
+    <a href="<?= cc_e(cc_url('live-users')) ?>"><span>النشطون الآن</span><strong><?= $presenceAvailable ? (int) ($presence['online_now'] ?? 0) : '—' ?></strong><small><?= $presenceAvailable ? 'جلسة حديثة' : 'غير متاح' ?></small></a>
+    <a href="<?= cc_e(cc_url('sessions')) ?>"><span>جلسات اليوم</span><strong><?= $presenceAvailable ? (int) ($presence['sessions_today'] ?? 0) : '—' ?></strong><small><?= $presenceAvailable ? 'حسب وقت الخادم' : 'غير متاح' ?></small></a>
+    <a href="<?= cc_e(cc_url('devices')) ?>"><span>أجهزة نشطة</span><strong><?= $presenceAvailable ? (int) ($presence['active_devices'] ?? 0) : '—' ?></strong><small><?= $presenceAvailable ? 'آخر ' . (int) ($presence['active_device_window_hours'] ?? 24) . ' ساعة' : 'غير متاح' ?></small></a>
+    <a href="<?= cc_e(cc_url('diagnostics')) ?>"><span>أعطال مسجلة</span><strong><?= $diagnosticsAvailable ? $diagnosticEvents : '—' ?></strong><small><?= $diagnosticsAvailable ? 'ضمن مدة الاحتفاظ' : 'غير متاح' ?></small></a>
 </section>
 
 <section class="dashboard-grid dashboard-grid--activity">
@@ -150,30 +143,6 @@ if ($diagnosticsAvailable && $diagnosticEvents > 0) {
         <?php endif; ?>
     </article>
     <article class="panel">
-        <header class="panel__header"><div><span class="eyebrow">آخر 24 ساعة</span><h2>استخدام الإصدارات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('analytics')) ?>">التحليلات</a></header>
-        <?php if (!$analyticsAvailable): ?>
-            <?php cc_unavailable_state('استخدام الإصدارات غير متاح', 'تعذر قراءة بيانات الأجهزة الحديثة.', 'package'); ?>
-        <?php elseif ($currentAdoption === []): ?>
-            <?php cc_empty_state('لا توجد أجهزة حديثة', 'لا توجد أجهزة مرصودة ضمن النافذة الحالية.'); ?>
-        <?php else: ?>
-            <div class="version-ranking"><?php foreach (array_slice($currentAdoption, 0, 6) as $index => $version): ?><div class="version-ranking__row"><span class="version-ranking__rank"><?= $index + 1 ?></span><span><strong dir="ltr"><?= cc_e($version['app_version_name']) ?></strong><small>رمز <?= (int) $version['app_version_code'] ?></small></span><b><?= (int) $version['device_count'] ?> جهاز</b></div><?php endforeach; ?></div>
-            <?php if ($currentAdoptionPartial): ?><p class="muted-copy">تعرض القائمة أعلى الإصدارات ضمن نافذة القراءة الحالية.</p><?php endif; ?>
-        <?php endif; ?>
-    </article>
-</section>
-
-<section class="dashboard-grid dashboard-grid--activity">
-    <article class="panel">
-        <header class="panel__header"><div><span class="eyebrow">آخر 7 أيام متاحة</span><h2>اتجاه الجلسات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('analytics')) ?>">التفاصيل</a></header>
-        <?php if (!$analyticsAvailable): ?>
-            <?php cc_unavailable_state('اتجاه الجلسات غير متاح', 'تعذر قراءة بيانات التحليل.', 'chart'); ?>
-        <?php elseif ($latestSessionTrend === []): ?>
-            <?php cc_empty_state('لا توجد جلسات في النافذة', 'لا توجد جلسات مسجلة ضمن آخر 30 يومًا.'); ?>
-        <?php else: ?>
-            <div class="metric-list"><?php foreach ($latestSessionTrend as $trend): ?><div class="metric-row"><time><?= cc_e($trend['day']) ?></time><strong><?= (int) $trend['session_count'] ?> جلسة</strong></div><?php endforeach; ?></div>
-        <?php endif; ?>
-    </article>
-    <article class="panel">
         <header class="panel__header"><div><span class="eyebrow">آخر التغييرات</span><h2>النشاط الإداري</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('audit')) ?>">عرض السجل</a></header>
         <?php if (!$operationsAvailable): ?>
             <?php cc_unavailable_state('النشاط الإداري غير متاح', 'تعذر الوصول إلى سجل التغييرات.', 'audit'); ?>
@@ -184,6 +153,33 @@ if ($diagnosticsAvailable && $diagnosticEvents > 0) {
         <?php endif; ?>
     </article>
 </section>
+
+<details class="panel dashboard-secondary">
+    <summary><span><strong>اتجاهات إضافية</strong><small>استخدام الإصدارات وحركة الجلسات</small></span><?= cc_icon('chart') ?></summary>
+    <div class="dashboard-secondary__grid">
+        <section>
+            <header class="panel__header"><div><span class="eyebrow">آخر 24 ساعة</span><h2>استخدام الإصدارات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('analytics')) ?>">التحليلات</a></header>
+            <?php if (!$analyticsAvailable): ?>
+                <?php cc_unavailable_state('استخدام الإصدارات غير متاح', 'تعذر قراءة بيانات الأجهزة الحديثة.', 'package'); ?>
+            <?php elseif ($currentAdoption === []): ?>
+                <?php cc_empty_state('لا توجد أجهزة حديثة', 'لا توجد أجهزة مرصودة ضمن النافذة الحالية.'); ?>
+            <?php else: ?>
+                <div class="version-ranking"><?php foreach (array_slice($currentAdoption, 0, 6) as $index => $version): ?><div class="version-ranking__row"><span class="version-ranking__rank"><?= $index + 1 ?></span><span><strong dir="ltr"><?= cc_e($version['app_version_name']) ?></strong><small>رمز <?= (int) $version['app_version_code'] ?></small></span><b><?= (int) $version['device_count'] ?> جهاز</b></div><?php endforeach; ?></div>
+                <?php if ($currentAdoptionPartial): ?><p class="muted-copy">تعرض القائمة أعلى الإصدارات ضمن نافذة القراءة الحالية.</p><?php endif; ?>
+            <?php endif; ?>
+        </section>
+        <section>
+            <header class="panel__header"><div><span class="eyebrow">آخر 7 أيام متاحة</span><h2>اتجاه الجلسات</h2></div><a class="button button--quiet" href="<?= cc_e(cc_url('analytics')) ?>">التفاصيل</a></header>
+            <?php if (!$analyticsAvailable): ?>
+                <?php cc_unavailable_state('اتجاه الجلسات غير متاح', 'تعذر قراءة بيانات التحليل.', 'chart'); ?>
+            <?php elseif ($latestSessionTrend === []): ?>
+                <?php cc_empty_state('لا توجد جلسات في النافذة', 'لا توجد جلسات مسجلة ضمن آخر 30 يومًا.'); ?>
+            <?php else: ?>
+                <div class="metric-list"><?php foreach ($latestSessionTrend as $trend): ?><div class="metric-row"><time><?= cc_e($trend['day']) ?></time><strong><?= (int) $trend['session_count'] ?> جلسة</strong></div><?php endforeach; ?></div>
+            <?php endif; ?>
+        </section>
+    </div>
+</details>
 
 <details class="panel dashboard-sources">
     <summary><span><strong>حالة مصادر البيانات</strong><small><?= $availableSources ?> من 6 مصادر متاحة</small></span><?php cc_status_badge($availableSources === 6 ? 'كاملة' : 'جزئية', $availableSources === 6 ? 'success' : 'warning'); ?></summary>

@@ -84,7 +84,7 @@ class PhaseEightContractTests(unittest.TestCase):
             self.assertNotIn(f'>{forbidden_heading}<', settings)
         self.assertIn("إعدادات مركز التحكم", settings)
         self.assertIn("الجهات المسؤولة عن التعديل", settings)
-        self.assertIn("technical-disclosure", settings)
+        self.assertIn("cc_technical_disclosure", settings)
         self.assertIn("--surface-1", css)
         self.assertIn("dashboard-command", css)
         self.assertIn("intdiv", settings)
@@ -132,7 +132,69 @@ class PhaseEightContractTests(unittest.TestCase):
         self.assertIn("summary:focus-visible", css)
         self.assertIn("min-height: 44px", css)
         self.assertIn("@media (max-width: 700px)", css)
-        self.assertIn("app.css?v=4.0.0", login)
+        self.assertIn("app.css?v=5.0.0", login)
+
+    def test_every_shared_view_has_a_purpose_specific_page_composition(self) -> None:
+        components = self.read(ROOT / "views" / "components.php")
+        sessions = self.read(ROOT / "views" / "sessions.php")
+        devices = self.read(ROOT / "views" / "devices.php")
+        resellers = self.read(ROOT / "views" / "resellers.php")
+        operations = self.read(ROOT / "views" / "operations.php")
+        health = self.read(ROOT / "views" / "host-health.php")
+        diagnostics = self.read(ROOT / "views" / "diagnostics.php")
+        analytics = self.read(ROOT / "views" / "analytics.php")
+
+        for primitive in (
+            "function cc_page_summary",
+            "function cc_filter_disclosure",
+            "function cc_fact_list",
+            "function cc_technical_disclosure",
+        ):
+            self.assertIn(primitive, components)
+
+        for marker in ("live-users-page", "session-history-page", "credential-disclosure"):
+            self.assertIn(marker, sessions)
+        self.assertIn("device-inventory-page", devices)
+
+        for marker in (
+            "reseller-accounts-page",
+            "access-code-management-page",
+            "host-management-page",
+        ):
+            self.assertIn(marker, resellers)
+
+        for marker in (
+            "release-management-page",
+            "service-control-page",
+            "announcement-management-page",
+            "feature-control-page",
+            "growth-management-page",
+        ):
+            self.assertIn(marker, operations)
+
+        self.assertIn("host-decision-page", health)
+        self.assertIn("failure-insights-page", diagnostics)
+        self.assertIn("analytics-workspace", analytics)
+
+    def test_owner_flows_demote_forms_filters_and_technical_metadata(self) -> None:
+        operations = self.read(ROOT / "views" / "operations.php")
+        resellers = self.read(ROOT / "views" / "resellers.php")
+        sessions = self.read(ROOT / "views" / "sessions.php")
+        audit = self.read(ROOT / "views" / "audit.php")
+        health = self.read(ROOT / "views" / "host-health.php")
+        analytics = self.read(ROOT / "views" / "analytics.php")
+
+        self.assertIn('class="form-section"', operations)
+        self.assertIn("release-current", operations)
+        self.assertIn("service-message-preview", operations)
+        self.assertIn("feature-state-group", operations)
+        self.assertIn("growth-channel", operations)
+        self.assertIn("management-summary", resellers)
+        self.assertIn("record-actions", resellers)
+        self.assertIn("cc_filter_disclosure", sessions)
+        self.assertIn("cc_filter_disclosure", audit)
+        self.assertIn("health-attention-list", health)
+        self.assertIn("methodology-disclosure", analytics)
 
     def test_cross_module_links_use_non_secret_context_only(self) -> None:
         bootstrap = self.read(ROOT / "bootstrap.php")

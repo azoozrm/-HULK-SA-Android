@@ -19,7 +19,7 @@ function cc_page_start(array $resolved, array $admin): void
         <meta name="theme-color" content="#07090b">
         <title><?= cc_e((string) $module['title']) ?> — HULK SA Control Center</title>
         <link rel="icon" href="<?= cc_e(cc_asset_url('hulk-sa-mark.svg')) ?>" type="image/svg+xml">
-        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=4.0.0')) ?>">
+        <link rel="stylesheet" href="<?= cc_e(cc_asset_url('app.css?v=5.0.0')) ?>">
     </head>
     <body>
     <a class="skip-link" href="#main-content">انتقل إلى المحتوى</a>
@@ -106,7 +106,7 @@ function cc_page_end(): void
             <footer class="app-footer"><span>HULK SA Control Center</span><span>واجهة إدارية عربية موحّدة</span></footer>
         </div>
     </div>
-    <script src="<?= cc_e(cc_asset_url('app.js?v=4.0.0')) ?>" defer></script>
+    <script src="<?= cc_e(cc_asset_url('app.js?v=5.0.0')) ?>" defer></script>
     </body>
     </html>
     <?php
