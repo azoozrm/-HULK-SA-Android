@@ -48,7 +48,6 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.roundToInt
 
 private const val ANDROID_KEYCODE_LAST_CHANNEL = 229
-private const val LIVE_TV_PRO_CONTROLS_HINT_TIMEOUT_MS = 5_200L
 private const val LIVE_TV_PRO_ZAP_COMMIT_DELAY_MS = 220L
 private const val LIVE_TV_PRO_ZAP_INDICATOR_TIMEOUT_MS = 2_400L
 
@@ -190,23 +189,12 @@ fun PlayerProScreen(
     var recentChannelIds by remember(liveCatalog, liveProfileScope) {
         mutableStateOf(context.liveTvProRecentChannelIds())
     }
-    var liveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
-    var liveControlsLikelyVisible by remember(request.historyKey) { mutableStateOf(false) }
-    var liveControlsInteractionTick by remember(request.historyKey) { mutableIntStateOf(0) }
     var pendingLiveChannelId by remember(request.streamId, liveCatalog) { mutableStateOf<Int?>(null) }
     var liveZapInteractionTick by remember(request.streamId) { mutableIntStateOf(0) }
     var liveZapIndicatorChannelId by remember(liveCatalog) { mutableStateOf<Int?>(null) }
     var liveZapIndicatorTick by remember(liveCatalog) { mutableIntStateOf(0) }
-    var childControlSelectionPending by remember(request.historyKey) { mutableStateOf(false) }
     var childErrorModalInputActive by remember(request.historyKey) { mutableStateOf(false) }
-
-    LaunchedEffect(liveControlsLikelyVisible, liveControlsInteractionTick) {
-        if (liveControlsLikelyVisible) {
-            delay(LIVE_TV_PRO_CONTROLS_HINT_TIMEOUT_MS)
-            liveControlsLikelyVisible = false
-            childControlSelectionPending = false
-        }
-    }
+    var childLiveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
 
     LaunchedEffect(request.isLive, request.streamId, liveCatalog, liveProfileScope) {
         if (request.isLive && liveChannels.any { it.id == request.streamId }) {
@@ -289,13 +277,6 @@ fun PlayerProScreen(
         liveZapInteractionTick += 1
     }
 
-    fun markLiveControlsInteraction() {
-        cancelPendingLiveZap()
-        dismissLiveZapIndicator()
-        liveControlsLikelyVisible = true
-        liveControlsInteractionTick += 1
-    }
-
     fun liveNavigationSequence(): List<ContentItem> = playerProLiveNavigationSequence(
         channels = liveChannels,
         currentStreamId = request.streamId,
@@ -313,9 +294,6 @@ fun PlayerProScreen(
             delta = delta,
         ) ?: return false
         if (channel.id == request.streamId && pendingLiveChannelId == null) return false
-        childControlSelectionPending = false
-        liveBrowserVisible = false
-        liveControlsLikelyVisible = false
         pendingLiveChannelId = channel.id
         liveZapInteractionTick += 1
         showLiveZapIndicator(channel)
@@ -350,11 +328,8 @@ fun PlayerProScreen(
         if (relativeDelta != null) {
             queueLiveRelative(relativeDelta)
         } else {
-            childControlSelectionPending = false
             cancelPendingLiveZap()
             dismissLiveZapIndicator()
-            liveBrowserVisible = false
-            liveControlsLikelyVisible = false
             onSelectLiveChannel(channel)
         }
     }
@@ -372,89 +347,53 @@ fun PlayerProScreen(
                             isLive = request.isLive,
                             liveTvProEnabled = liveTvProEnabled,
                             errorModalInputActive = childErrorModalInputActive,
+                            browserVisible = childLiveBrowserVisible,
                         )
                     ) {
                         return@onPreviewKeyEvent false
                     }
-                    if (liveBrowserVisible) return@onPreviewKeyEvent false
 
                     when (keyCode) {
                         AndroidKeyEvent.KEYCODE_CHANNEL_UP,
                         AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
                         -> {
-                            childControlSelectionPending = false
-                            liveControlsLikelyVisible = false
                             return@onPreviewKeyEvent queueLiveRelative(1)
                         }
 
                         AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
                         AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
                         -> {
-                            childControlSelectionPending = false
-                            liveControlsLikelyVisible = false
                             return@onPreviewKeyEvent queueLiveRelative(-1)
                         }
 
                         ANDROID_KEYCODE_LAST_CHANNEL -> {
                             val channel = lastChannel ?: return@onPreviewKeyEvent false
-                            childControlSelectionPending = false
                             cancelPendingLiveZap()
                             showLiveZapIndicator(channel)
-                            liveControlsLikelyVisible = false
                             onSelectLiveChannel(channel)
                             return@onPreviewKeyEvent true
-                        }
-
-                        AndroidKeyEvent.KEYCODE_DPAD_CENTER,
-                        AndroidKeyEvent.KEYCODE_ENTER,
-                        AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
-                        -> {
-                            if (childControlSelectionPending) {
-                                childControlSelectionPending = false
-                                markLiveControlsInteraction()
-                                return@onPreviewKeyEvent false
-                            }
-                            if (!liveControlsLikelyVisible) {
-                                cancelPendingLiveZap()
-                                dismissLiveZapIndicator()
-                                liveBrowserVisible = true
-                                return@onPreviewKeyEvent true
-                            }
-                            childControlSelectionPending = true
-                            markLiveControlsInteraction()
-                            return@onPreviewKeyEvent false
                         }
 
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT,
                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
                         AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                         -> {
-                            childControlSelectionPending = false
-                            markLiveControlsInteraction()
+                            cancelPendingLiveZap()
+                            dismissLiveZapIndicator()
                             return@onPreviewKeyEvent false
                         }
 
                         AndroidKeyEvent.KEYCODE_DPAD_UP,
                         AndroidKeyEvent.KEYCODE_DPAD_DOWN,
-                        -> {
-                            if (childControlSelectionPending) {
-                                liveControlsLikelyVisible = true
-                                liveControlsInteractionTick += 1
-                                return@onPreviewKeyEvent false
-                            }
-                            liveControlsLikelyVisible = false
-                            return@onPreviewKeyEvent queueLiveRelative(
-                                if (keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP) 1 else -1,
-                            )
-                        }
+                        -> return@onPreviewKeyEvent queueLiveRelative(
+                            if (keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP) 1 else -1,
+                        )
 
                         AndroidKeyEvent.KEYCODE_BACK,
                         AndroidKeyEvent.KEYCODE_ESCAPE,
                         -> {
-                            childControlSelectionPending = false
                             cancelPendingLiveZap()
                             dismissLiveZapIndicator()
-                            liveControlsLikelyVisible = false
                             return@onPreviewKeyEvent false
                         }
                     }
@@ -499,9 +438,10 @@ fun PlayerProScreen(
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
             onPlayNextEpisode = onPlayNextEpisode,
             onErrorModalActiveChanged = { childErrorModalInputActive = it },
+            onBrowserVisibilityChanged = { childLiveBrowserVisible = it },
         )
 
-        if (liveTvProEnabled && request.isLive && liveZapIndicatorChannel != null && !liveBrowserVisible) {
+        if (liveTvProEnabled && request.isLive && liveZapIndicatorChannel != null && !childLiveBrowserVisible) {
             LiveZapIndicator(
                 channel = liveZapIndicatorChannel,
                 modifier = Modifier
@@ -517,30 +457,6 @@ fun PlayerProScreen(
                         end = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeHorizontalPaddingDp.dp else 16.dp,
                         bottom = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeBottomPaddingDp.dp else 94.dp,
                     ),
-            )
-        }
-
-        if (liveTvProEnabled && request.isLive && liveBrowserVisible) {
-            LiveTvProChannelBrowser(
-                catalog = liveCatalog,
-                currentStreamId = request.streamId,
-                isFavorite = isFavorite,
-                onToggleFavorite = onToggleFavorite,
-                onSelectChannel = { channel ->
-                    childControlSelectionPending = false
-                    cancelPendingLiveZap()
-                    dismissLiveZapIndicator()
-                    liveBrowserVisible = false
-                    liveControlsLikelyVisible = false
-                    onSelectLiveChannel(channel)
-                },
-                onClose = {
-                    childControlSelectionPending = false
-                    cancelPendingLiveZap()
-                    dismissLiveZapIndicator()
-                    liveBrowserVisible = false
-                },
-                modifier = Modifier.align(Alignment.CenterEnd),
             )
         }
     }

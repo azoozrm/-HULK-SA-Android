@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PLAYER_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
 PLAYER_PRO = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerProEpisodeNavigation.kt"
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
-LIVE_TV_BROWSER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LiveTvProChannelBrowser.kt"
+LIVE_TV_BROWSER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LiveChannelBrowser.kt"
 
 
 class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
@@ -26,22 +26,26 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
             text,
         )
 
-    def test_parent_ok_cycle_cannot_open_channel_browser_over_child_panel(self) -> None:
+    def test_parent_ok_defers_to_the_single_child_owned_channel_browser(self) -> None:
         text = self.read(PLAYER_PRO)
-        select_contract = re.compile(
-            r"KEYCODE_DPAD_CENTER,\s*"
-            r"AndroidKeyEvent\.KEYCODE_ENTER,\s*"
-            r"AndroidKeyEvent\.KEYCODE_NUMPAD_ENTER,\s*"
-            r"->\s*\{\s*"
-            r"if \(childControlSelectionPending\) \{.*?"
-            r"return@onPreviewKeyEvent false\s*"
-            r"\}\s*"
-            r"if \(!liveControlsLikelyVisible\) \{.*?"
-            r"liveBrowserVisible = true",
-            re.DOTALL,
-        )
-        self.assertRegex(text, select_contract)
-        self.assertIn("childControlSelectionPending = true", text)
+        # The duplicate outer browser must be gone: the parent no longer renders or opens a
+        # channel browser, and it yields Live keys while the child owns the canonical browser.
+        self.assertNotIn("LiveTvProChannelBrowser(", text)
+        self.assertNotIn("liveBrowserVisible", text)
+        self.assertNotIn("childControlSelectionPending", text)
+        self.assertIn("browserVisible = childLiveBrowserVisible", text)
+        self.assertIn("onBrowserVisibilityChanged = { childLiveBrowserVisible = it }", text)
+
+    def test_single_canonical_browser_serves_both_entry_points(self) -> None:
+        text = self.read(PLAYER_SCREEN)
+        # Exactly one canonical browser render site, driven by one explicit launch origin.
+        self.assertEqual(1, text.count("LiveChannelBrowser("))
+        self.assertIn("browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE", text)
+        self.assertIn("browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY", text)
+        self.assertIn("origin = browserOrigin", text)
+        # Error-origin close returns to the suspended error, normal close to the player surface.
+        self.assertIn("fun closeBrowserAndRestoreError()", text)
+        self.assertIn("restoreSuspendedFinalError()", text)
 
     def test_hardware_channel_keys_keep_live_zapping_contract(self) -> None:
         text = self.read(PLAYER_PRO)
@@ -63,7 +67,7 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         player_text = self.read(PLAYER_SCREEN)
         pro_text = self.read(PLAYER_PRO)
         self.assertIn("browserVisible || activePanel != null", player_text)
-        self.assertIn("if (liveBrowserVisible) return@onPreviewKeyEvent false", pro_text)
+        self.assertIn("browserVisible = childLiveBrowserVisible", pro_text)
         self.assertIn("cancelPendingLiveZap()", pro_text)
         self.assertIn("dismissLiveZapIndicator()", pro_text)
 

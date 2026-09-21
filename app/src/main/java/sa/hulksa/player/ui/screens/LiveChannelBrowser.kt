@@ -40,7 +40,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -91,15 +90,48 @@ internal fun liveTvProCategoryReturnNeedsReveal(
 ): Boolean = targetIndex !in visibleIndices
 
 /**
- * v1.6 Live TV Pro browser shown over playback.
+ * Launch origin of the canonical Live channel browser.
  *
- * Keeps the launch context, explicit channel-to-category focus return and a safe responsive shell
- * for both TV/remote and touch layouts.
+ * The browser itself must understand why it was opened so its copy and the surrounding
+ * close/selection contract stay deterministic for both entry points. The origin is explicit and
+ * never inferred from timing.
+ */
+internal enum class LiveChannelBrowserOrigin {
+    NORMAL_LIVE,
+    ERROR_RECOVERY,
+}
+
+internal data class LiveChannelBrowserCopy(
+    val title: String,
+    val description: String,
+)
+
+internal fun liveChannelBrowserCopy(origin: LiveChannelBrowserOrigin): LiveChannelBrowserCopy =
+    when (origin) {
+        LiveChannelBrowserOrigin.NORMAL_LIVE -> LiveChannelBrowserCopy(
+            title = "القنوات المباشرة",
+            description = "اختر قناة أو تنقل بين الفئات",
+        )
+        LiveChannelBrowserOrigin.ERROR_RECOVERY -> LiveChannelBrowserCopy(
+            title = "القنوات المباشرة",
+            description = "تعذر تشغيل القناة الحالية، اختر قناة أخرى للمتابعة",
+        )
+    }
+
+/**
+ * Canonical Live channel browser shown over playback.
+ *
+ * This is the single implementation used by both Live entry points: normal Live OK and the
+ * final-error "اختيار قناة" action. It keeps the launch context, explicit channel-to-category
+ * focus return and a safe responsive shell for TV/remote and touch layouts. The owning surface
+ * (PlayerScreen) owns the single visibility/launch-origin state; this composable is stateless in
+ * that regard and only reports row/category interactions.
  */
 @Composable
-fun LiveTvProChannelBrowser(
+internal fun LiveChannelBrowser(
     catalog: Catalog?,
     currentStreamId: Int,
+    origin: LiveChannelBrowserOrigin,
     isFavorite: (ContentItem) -> Boolean,
     onToggleFavorite: (ContentItem) -> Unit,
     onSelectChannel: (ContentItem) -> Unit,
@@ -109,6 +141,7 @@ fun LiveTvProChannelBrowser(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val context = LocalContext.current
+    val copy = remember(origin) { liveChannelBrowserCopy(origin) }
     val tvLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
     val stackedMobile = !tvLayout && adaptiveUi.screenWidthDp < 600
     val safeInsets = tvPageSafeInsets(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
@@ -375,15 +408,26 @@ fun LiveTvProChannelBrowser(
         var focused by remember(channel.id) { mutableStateOf(false) }
         var remoteLongPressHandled by remember(channel.id) { mutableStateOf(false) }
         val showFocused = focused && adaptiveUi.showFocusHighlights
-        val active = showFocused || selected
+        val currentPlaying = selected
+        val active = showFocused || currentPlaying
         val shape = RoundedCornerShape(11.dp)
         Row(
             modifier = rowModifier
                 .fillMaxWidth()
                 .height(64.dp)
                 .clip(shape)
-                .background(if (active) colors.gold.copy(alpha = .14f) else Color.Transparent)
-                .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+                .background(
+                    when {
+                        showFocused -> colors.gold.copy(alpha = .20f)
+                        currentPlaying -> colors.gold.copy(alpha = .10f)
+                        else -> Color.Transparent
+                    },
+                )
+                .border(
+                    if (showFocused) 2.dp else 0.dp,
+                    if (showFocused) colors.goldBright else Color.Transparent,
+                    shape,
+                )
                 .onFocusChanged { focused = it.isFocused }
                 .onPreviewKeyEvent { event ->
                     val code = event.nativeKeyEvent.keyCode
@@ -437,7 +481,19 @@ fun LiveTvProChannelBrowser(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text("● بث مباشر", color = if (active) colors.goldBright else colors.textMuted, fontSize = 10.sp)
+                Text(
+                    text = if (currentPlaying) "● تشاهد الآن" else "● بث مباشر",
+                    color = if (active) colors.goldBright else colors.textMuted,
+                    fontSize = 10.sp,
+                )
+            }
+            if (currentPlaying) {
+                Text(
+                    "الآن",
+                    color = colors.goldBright,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
             if (favorite) {
                 Text("★", color = colors.goldBright, fontSize = 16.sp)
@@ -664,25 +720,50 @@ fun LiveTvProChannelBrowser(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        selectedCategoryTitle,
+                        copy.title,
                         color = colors.text,
-                        fontSize = if (tvLayout) 20.sp else 17.sp,
+                        fontSize = if (tvLayout) 21.sp else 18.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        buildString {
-                            append("${visible.size} قناة")
-                            current?.let { append("  •  تشاهد الان : ${it.name}") }
-                        },
-                        color = if (current != null) colors.goldBright else colors.textMuted,
+                        copy.description,
+                        color = colors.textMuted,
                         fontSize = if (tvLayout) 10.sp else 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 FocusButton("اغلاق", onClose, primary = false, compact = true)
+            }
+
+            Spacer(Modifier.height(7.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color.White.copy(alpha = .055f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    selectedCategoryTitle,
+                    color = colors.text,
+                    fontSize = if (tvLayout) 15.sp else 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    buildString {
+                        append("${visible.size} قناة")
+                        current?.let { append("  •  تشاهد الان : ${it.name}") }
+                    },
+                    color = if (current != null) colors.goldBright else colors.textMuted,
+                    fontSize = if (tvLayout) 10.sp else 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             Spacer(Modifier.height(7.dp))
@@ -800,8 +881,8 @@ fun LiveTvProChannelBrowser(
             } else {
                 Row(
                     modifier = Modifier
-                        .align(Alignment.Center)
-                        .fillMaxHeight(.90f)
+                        .align(if (tvLayout) Alignment.CenterEnd else Alignment.Center)
+                        .fillMaxHeight(if (tvLayout) 1f else .90f)
                         .fillMaxWidth(if (tvLayout) .82f else .94f)
                         .clip(shellShape)
                         .background(Brush.horizontalGradient(listOf(Color(0xFA080907), Color(0xF814150F))))
