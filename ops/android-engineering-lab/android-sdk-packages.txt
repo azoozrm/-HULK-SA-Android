@@ -1,0 +1,7 @@
+# Mode B build/tooling packages qualified on the permanent lab.
+platform-tools
+platforms;android-36
+build-tools;35.0.0
+build-tools;36.0.0
+
+# No Android emulator system image is part of the permanent Mode B baseline.

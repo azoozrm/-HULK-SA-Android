@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO=/srv/hulk-android/repos/HULK-SA-Android
+OFFICIAL=phase-3-v0.9.3.0-adaptive-foundation
+WORKROOT=/srv/hulk-android/worktrees
+
+[[ $# -eq 1 ]] || {
+  echo 'Usage: hulk-task-close <task-id>'
+  exit 2
+}
+
+P="$WORKROOT/$1"
+[[ -d "$P" ]] || {
+  echo 'STOP: task worktree missing'
+  exit 10
+}
+
+git -C "$REPO" worktree list --porcelain | grep -Fx "worktree $P" >/dev/null || {
+  echo 'STOP: not a registered worktree'
+  exit 11
+}
+[[ -z "$(git -C "$P" status --porcelain)" ]] || {
+  echo 'STOP: worktree dirty'
+  exit 12
+}
+
+BRANCH=$(git -C "$P" branch --show-current)
+HEAD=$(git -C "$P" rev-parse HEAD)
+[[ -n "$BRANCH" && "$BRANCH" != "$OFFICIAL" ]] || {
+  echo 'STOP: unsafe branch identity'
+  exit 13
+}
+
+git -C "$REPO" worktree remove "$P"
+
+LIVE=$(git -C "$REPO" ls-remote origin "refs/heads/$OFFICIAL" | awk '{print $1}')
+REMOTE_TASK=$(git -C "$REPO" ls-remote --heads origin "refs/heads/$BRANCH")
+
+if [[ "$HEAD" == "$LIVE" && -z "$REMOTE_TASK" ]]; then
+  git -C "$REPO" branch -d "$BRANCH" >/dev/null
+fi
+
+echo HULK_TASK_CLOSED

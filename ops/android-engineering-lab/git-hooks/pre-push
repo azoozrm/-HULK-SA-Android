@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+OFFICIAL='refs/heads/phase-3-v0.9.3.0-adaptive-foundation'
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [[ "$remote_ref" == "$OFFICIAL" ]]; then
+    echo 'BLOCKED: direct push to official branch is forbidden.' >&2
+    exit 1
+  fi
+done
