@@ -39,8 +39,10 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("'samesite' => 'Strict'", bootstrap)
         self.assertIn("session.use_strict_mode", bootstrap)
         self.assertIn("ops_require_csrf", actions)
-        self.assertIn("password_verify", login)
-        self.assertIn("locked_until", login)
+        # The retired legacy owner login no longer authenticates or verifies
+        # passwords; it redirects to the Control Center login route.
+        self.assertNotIn("password_verify", login)
+        self.assertIn("ops_legacy_redirect(", login)
         self.assertIn("PDO::ATTR_EMULATE_PREPARES", bootstrap)
         self.assertGreaterEqual(actions.count("->prepare("), 12)
 
@@ -71,10 +73,14 @@ class OperationsBackendContractTest(unittest.TestCase):
     def test_release_deletion_has_one_authoritative_owner(self) -> None:
         actions = self.read("admin/actions.php")
         legacy = self.read("admin/delete_release.php")
+        redirect = self.read("admin/redirect.php")
         self.assertEqual(actions.count("function ops_delete_release("), 1)
         self.assertIn("RELEASE_DELETED", actions)
         self.assertIn("ops_reset_release_settings($db)", actions)
-        self.assertIn("ops_delete_release($db, $admin)", legacy)
+        # The retired legacy route can no longer call the authoritative owner.
+        self.assertNotIn("ops_delete_release", legacy)
+        self.assertIn("ops_legacy_redirect(", legacy)
+        self.assertIn("/control-center/releases/", redirect)
         self.assertNotIn("DELETE FROM app_releases", legacy)
         self.assertNotIn("FOR UPDATE", legacy)
 
@@ -98,26 +104,17 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("'starts_now' => $formattedNow", operations)
         self.assertIn("'ends_now' => $formattedNow", operations)
 
-    def test_admin_dashboard_is_arabic_and_mobile_adaptive(self) -> None:
+    def test_legacy_operations_dashboard_route_is_retired(self) -> None:
         dashboard = self.read("admin/index.php")
-        layout = self.read("admin/_layout.php")
-        login = self.read("admin/login.php")
-        styles = self.read("assets/app.css")
-        for label in (
-            "مركز عمليات HULK SA",
-            "الإصدار المنشور حاليًا",
-            "الحد الأدنى للإصدار المدعوم",
-            "حالة التحديث",
-            "حالة الخدمة",
-            "وضع الصيانة",
-            "الرسالة النشطة",
-            "المميزات المفعّلة",
-        ):
-            self.assertIn(label, dashboard)
-        self.assertNotIn("Operations Center", dashboard + layout + login)
-        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", styles)
-        self.assertIn(".stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }", styles)
-        self.assertIn(".logout-user { display: none; }", styles)
+        redirect = self.read("admin/redirect.php")
+        # Section navigation still resolves, but only through the redirect gate.
+        self.assertIn("$_GET['section']", dashboard)
+        self.assertIn("ops_legacy_redirect(", dashboard)
+        self.assertNotIn("ops_require_admin", dashboard)
+        self.assertNotIn("ops_admin_handle_post", dashboard)
+        # The retired admin UI copy no longer renders from the legacy route.
+        self.assertNotIn("مركز عمليات HULK SA", dashboard)
+        self.assertIn("/control-center/", redirect)
 
     def test_service_and_feature_mutations_use_closed_allowlists(self) -> None:
         actions = self.read("admin/actions.php")
@@ -133,10 +130,13 @@ class OperationsBackendContractTest(unittest.TestCase):
             self.assertIn(f"'{flag}'", policies)
         self.assertIn("in_array($flagKey, ops_known_feature_flags(), true)", actions)
 
-    def test_package_root_routes_to_protected_admin(self) -> None:
+    def test_package_root_redirects_to_control_center(self) -> None:
         root_index = self.read("index.php")
-        self.assertIn("Location: admin/", root_index)
-        self.assertIn("Cache-Control: no-store", root_index)
+        redirect = self.read("admin/redirect.php")
+        self.assertIn("ops_legacy_redirect(", root_index)
+        self.assertIn("'dashboard'", root_index)
+        self.assertIn("Cache-Control: no-store", redirect)
+        self.assertIn("true, ops_legacy_redirect_status()", redirect)
 
     def test_audit_filter_excludes_secrets(self) -> None:
         bootstrap = self.read("bootstrap.php")
@@ -163,14 +163,12 @@ class OperationsBackendContractTest(unittest.TestCase):
 
     def test_growth_admin_is_integrated_and_csrf_protected(self) -> None:
         dashboard = self.read("admin/index.php")
-        layout = self.read("admin/_layout.php")
         actions = self.read("admin/actions.php")
-        self.assertIn("'growth' => 'TV Growth'", layout)
-        self.assertIn("HULK TV Growth", dashboard)
-        self.assertIn('name="action" value="save_growth"', dashboard)
-        self.assertIn('name="csrf_token"', dashboard)
         self.assertIn("case 'save_growth':", actions)
         self.assertIn("ops_require_csrf", actions)
+        # The retired legacy dashboard no longer renders or submits Growth.
+        self.assertNotIn('name="action" value="save_growth"', dashboard)
+        self.assertNotIn('name="csrf_token"', dashboard)
 
     def test_growth_url_and_day_validation_are_closed(self) -> None:
         policies = self.read("lib/policies.php")
@@ -229,12 +227,8 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("heartbeat_seconds", config)
         self.assertIn("online_ttl_seconds", config)
 
-    def test_growth_admin_layout_remains_mobile_adaptive(self) -> None:
-        dashboard = self.read("admin/index.php")
+    def test_growth_styles_remain_available_for_reference(self) -> None:
         styles = self.read("assets/app.css")
-        self.assertIn("growth-form", dashboard)
-        self.assertIn("growth-grid", dashboard)
-        self.assertIn("growth-banner-card", dashboard)
         self.assertIn("@media (max-width: 650px)", styles)
         self.assertIn(".growth-card-head", styles)
         self.assertIn(".growth-publish .button { width: 100%; }", styles)
@@ -269,39 +263,43 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("function ops_public_config_json(", operations)
 
 
-    def test_phase_9a_legacy_owner_panel_is_read_only(self) -> None:
+    def test_phase_9b_legacy_owner_panel_redirects(self) -> None:
         index = self.read("admin/index.php")
         delete = self.read("admin/delete_release.php")
         setup = self.read("admin/setup.php")
         login = self.read("admin/login.php")
         logout = self.read("admin/logout.php")
+        root = self.read("index.php")
+        redirect = self.read("admin/redirect.php")
         actions = self.read("admin/actions.php")
-        read_only = self.read("admin/read-only.php")
 
-        # Legacy business mutations are routed away before the authoritative
-        # function can run.
-        self.assertLess(
-            index.index("ops_legacy_block_owner_mutation($section)"),
-            index.index("ops_admin_handle_post("),
-        )
-        self.assertLess(
-            delete.index("ops_legacy_block_owner_mutation('releases')"),
-            delete.index("ops_delete_release($db, $admin)"),
-        )
-        self.assertIn("/control-center/", read_only)
+        # Every retired legacy route redirects through the Phase 9B gate.
+        for route in (root, index, delete, setup, login, logout):
+            self.assertIn("ops_legacy_redirect(", route)
 
-        # The rendered legacy panel is read-only and points to Control Center.
-        self.assertIn("legacy-read-only", index)
-        self.assertIn("HULK SA Control Center", index)
-        self.assertIn("HULK SA Control Center", login)
+        # The gate maps only allow-listed sections to the exact module and
+        # treats any untrusted value as the safe Control Center root.
+        self.assertIn("'/control-center/'", redirect)
+        self.assertIn("'/control-center/releases/'", redirect)
+        self.assertIn("in_array($section, ops_legacy_control_center_modules(), true)", redirect)
+        self.assertIn("? 303 : 302", redirect)
 
-        # Login and logout remain usable session actions.
-        self.assertIn("password_verify", login)
-        self.assertIn("session_destroy()", logout)
+        # No legacy authentication, database, CSRF or mutation runs.
+        for route in (root, index, delete, setup, login, logout):
+            for marker in (
+                "ops_require_admin",
+                "ops_require_csrf",
+                "ops_db(",
+                "ops_admin_handle_post",
+                "ops_delete_release",
+                "password_verify",
+                "session_start",
+            ):
+                self.assertNotIn(marker, route)
 
-        # The hidden web first-admin setup path no longer creates an admin.
-        self.assertNotIn("INSERT INTO app_admin_users", setup)
-        self.assertIn("create_admin.php", setup)
+        # The retired web first-admin setup path no longer creates an admin.
+        self.assertNotIn("INSERT", setup)
+        self.assertNotIn("app_admin_users", setup)
 
         # The authoritative Operations mutation library is unchanged and still
         # owns every action used by Control Center.

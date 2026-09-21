@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parents[1]
 PUBLIC = ROOT / "public"
 BOOTSTRAP = PUBLIC / ".hulk-reseller-app/bootstrap.php"
 API = PUBLIC / "api/reseller/resolve/index.php"
@@ -92,6 +93,9 @@ class ResellerBackendContractTest(unittest.TestCase):
     def test_owner_mutations_share_one_domain(self) -> None:
         domain = (PUBLIC / ".hulk-reseller-app/admin-domain.php").read_text(encoding="utf-8")
         owner_action = (PUBLIC / "hulk-reseller-admin/action.php").read_text(encoding="utf-8")
+        adapter = (
+            REPO / "hosting/hulk-control-center/lib/reseller-adapter.php"
+        ).read_text(encoding="utf-8")
         bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
         for function in (
             "hulk_admin_create_reseller",
@@ -102,9 +106,12 @@ class ResellerBackendContractTest(unittest.TestCase):
             "hulk_admin_reset_password",
         ):
             self.assertIn(f"function {function}", domain)
-            self.assertIn(f"{function}(", owner_action)
+            # Control Center is now the sole owner-facing consumer.
+            self.assertIn(f"{function}(", adapter)
+            # The retired legacy owner endpoint no longer calls the authority.
+            self.assertNotIn(f"{function}(", owner_action)
         self.assertIn("require_once __DIR__ . '/admin-domain.php'", bootstrap)
-        self.assertIn("hulk_start_session('admin')", owner_action)
+        self.assertNotIn("hulk_start_session('admin')", owner_action)
 
     def test_no_runtime_config_or_reseller_data_is_tracked(self) -> None:
         self.assertFalse((PUBLIC / ".hulk-reseller-app/config.php").exists())
@@ -117,20 +124,33 @@ class ResellerBackendContractTest(unittest.TestCase):
         self.assertNotRegex(combined, r"mysql:host=[^;]+;dbname=(?!REPLACE_ME)")
 
 
-    def test_phase_9a_legacy_owner_panel_is_read_only(self) -> None:
+    def test_phase_9b_legacy_owner_panel_redirects(self) -> None:
         owner_index = (PUBLIC / "hulk-reseller-admin/index.php").read_text(encoding="utf-8")
         owner_action = (PUBLIC / "hulk-reseller-admin/action.php").read_text(encoding="utf-8")
-        read_only = (PUBLIC / "hulk-reseller-admin/read-only.php").read_text(encoding="utf-8")
+        redirect = (PUBLIC / "hulk-reseller-admin/redirect.php").read_text(encoding="utf-8")
         domain = (PUBLIC / ".hulk-reseller-app/admin-domain.php").read_text(encoding="utf-8")
 
-        # The legacy owner routes business mutations away before the shared
-        # authority can run.
-        self.assertLess(
-            owner_action.index("hulk_legacy_owner_allows_session_action($action)"),
-            owner_action.index("hulk_admin_create_reseller("),
-        )
-        self.assertIn("$action === 'login'", owner_action)
-        self.assertIn("'logout'", owner_action)
+        # The retired legacy owner routes redirect before any session, CSRF,
+        # database or hulk_admin_* work.
+        for route in (owner_index, owner_action):
+            self.assertIn("hulk_legacy_owner_redirect(", route)
+            for marker in (
+                "hulk_start_session",
+                "hulk_verify_csrf",
+                "hulk_db(",
+                "hulk_admin_create_reseller",
+                "hulk_admin_set_status",
+                "hulk_admin_update_host",
+                "hulk_admin_set_code",
+                "hulk_admin_rotate_code",
+                "hulk_admin_reset_password",
+                "$_SESSION",
+            ):
+                self.assertNotIn(marker, route)
+
+        self.assertIn("/control-center/resellers/", redirect)
+        self.assertIn("/control-center/login.php", redirect)
+        self.assertIn("'login'", owner_action)
 
         # The shared reseller authority is unchanged.
         for function in (
@@ -142,20 +162,6 @@ class ResellerBackendContractTest(unittest.TestCase):
             "hulk_admin_reset_password",
         ):
             self.assertIn(f"function {function}", domain)
-
-        # The rendered legacy owner list is read-only and links to Control Center.
-        self.assertIn("hulk_legacy_owner_read_only_notice()", owner_index)
-        self.assertIn("/control-center/resellers/", read_only)
-        self.assertIn('value="logout"', owner_index)
-        for action in (
-            "create_reseller",
-            "set_status",
-            "update_host",
-            "set_code",
-            "rotate_code",
-            "reset_password",
-        ):
-            self.assertNotIn(f'value="{action}"', owner_index)
 
         # Reseller self-service remains untouched.
         portal_action = (PUBLIC / "reseller/action.php").read_text(encoding="utf-8")

@@ -38,7 +38,8 @@ printf '%s' "$RESELLER_INITIAL_PASSWORD" | \
 
 - البوابة: `https://hulksa.com/reseller/`
 - API: `https://hulksa.com/api/reseller/resolve`
-- إدارة المالك القديمة: `https://hulksa.com/hulk-reseller-admin/`
+- إدارة المالك القديمة: `https://hulksa.com/hulk-reseller-admin/` — تعيد التوجيه الآن إلى
+  HULK SA Control Center (`/control-center/resellers/`).
 
 مجلد `.hulk-reseller-app` محمي من الوصول عبر الويب بواسطة `.htaccess`. يحتوي
 GitHub على السورس والمخطط فقط، ولا يحتوي على كلمات مرور أو بيانات موزعين.
