@@ -10,7 +10,7 @@ HULK_APP = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
 ADAPTIVE_UI = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/adaptive/AdaptiveUi.kt"
 PLAYER_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
 PLAYER_PRO = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerProEpisodeNavigation.kt"
-LIVE_BROWSER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LiveTvProChannelBrowser.kt"
+LIVE_BROWSER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LiveChannelBrowser.kt"
 BOTTOM_NAV = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/StableMobileBottomNavigation.kt"
 
 

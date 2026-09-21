@@ -110,6 +110,7 @@ class PlayerModalPolicyTest {
                 isLive = true,
                 liveTvProEnabled = true,
                 errorModalInputActive = true,
+                browserVisible = false,
             ),
         )
         assertEquals(
@@ -125,6 +126,7 @@ class PlayerModalPolicyTest {
                 isLive = true,
                 liveTvProEnabled = true,
                 errorModalInputActive = true,
+                browserVisible = false,
             ),
         )
         listOf(PlayerErrorModalInput.UP, PlayerErrorModalInput.DOWN).forEach { input ->
@@ -142,6 +144,7 @@ class PlayerModalPolicyTest {
                 isLive = true,
                 liveTvProEnabled = true,
                 errorModalInputActive = true,
+                browserVisible = false,
             ),
         )
         listOf(PlayerErrorModalInput.CHANNEL_UP, PlayerErrorModalInput.CHANNEL_DOWN).forEach { input ->
@@ -159,6 +162,7 @@ class PlayerModalPolicyTest {
                 isLive = true,
                 liveTvProEnabled = true,
                 errorModalInputActive = true,
+                browserVisible = false,
             ),
         )
         assertEquals(
@@ -174,6 +178,39 @@ class PlayerModalPolicyTest {
                 isLive = true,
                 liveTvProEnabled = true,
                 errorModalInputActive = false,
+                browserVisible = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `child live browser visible prevents outer live key ownership`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+                browserVisible = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `child browser visible never grants ownership outside live pro playback`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = false,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+                browserVisible = true,
+            ),
+        )
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = false,
+                errorModalInputActive = false,
+                browserVisible = true,
             ),
         )
     }
@@ -185,6 +222,7 @@ class PlayerModalPolicyTest {
                 isLive = false,
                 liveTvProEnabled = true,
                 errorModalInputActive = false,
+                browserVisible = false,
             ),
         )
         assertFalse(
@@ -192,6 +230,7 @@ class PlayerModalPolicyTest {
                 isLive = true,
                 liveTvProEnabled = false,
                 errorModalInputActive = false,
+                browserVisible = false,
             ),
         )
     }

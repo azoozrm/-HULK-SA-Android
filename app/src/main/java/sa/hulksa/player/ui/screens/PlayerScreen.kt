@@ -19,7 +19,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.rememberScrollState
@@ -79,7 +78,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -125,20 +123,13 @@ import sa.hulksa.player.playback.shouldReprepareAfterAudioTrackOverride
 import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandBadge
-import sa.hulksa.player.ui.components.ChannelLogo
-import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
-import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
 private const val CONTROLS_TIMEOUT_MS = 5_000L
-private const val PLAYER_FAVORITES_CATEGORY = "__player_favorites__"
-private const val PLAYER_CONTINUE_CATEGORY = "__player_continue__"
-private const val LIVE_CATEGORY_ORDER_PREFS = "live_category_order"
-private const val PREF_IDS = "ids"
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 
@@ -254,6 +245,7 @@ fun PlayerScreen(
     nextEpisodeTitle: String? = null,
     onPlayNextEpisode: (() -> Unit)? = null,
     onErrorModalActiveChanged: (Boolean) -> Unit = {},
+    onBrowserVisibilityChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -307,6 +299,7 @@ fun PlayerScreen(
     var buffering by remember(request) { mutableStateOf(true) }
     var controlsVisible by remember(request) { mutableStateOf(!request.isLive) }
     var browserVisible by remember(request) { mutableStateOf(false) }
+    var browserOrigin by remember(request) { mutableStateOf(LiveChannelBrowserOrigin.NORMAL_LIVE) }
     var activePanel by remember(request) { mutableStateOf<PlayerPanel?>(null) }
     var isPlaying by remember(request) { mutableStateOf(false) }
     var isMuted by remember(request) { mutableStateOf(false) }
@@ -1085,6 +1078,12 @@ fun PlayerScreen(
         onDispose { latestOnErrorModalActiveChanged(false) }
     }
 
+    val latestOnBrowserVisibilityChanged by rememberUpdatedState(onBrowserVisibilityChanged)
+    DisposableEffect(browserVisible) {
+        latestOnBrowserVisibilityChanged(browserVisible)
+        onDispose { latestOnBrowserVisibilityChanged(false) }
+    }
+
     val interactionModifier = Modifier
         .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
@@ -1168,6 +1167,7 @@ fun PlayerScreen(
                             -> {
                                 controlsVisible = false
                                 activePanel = null
+                                browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
                                 browserVisible = true
                                 return@onPreviewKeyEvent true
                             }
@@ -1420,6 +1420,7 @@ fun PlayerScreen(
                 onChooseChannel = {
                     suspendFinalErrorForModal()
                     controlsVisible = false
+                    browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY
                     browserVisible = true
                 },
                 onChooseServer = {
@@ -1436,6 +1437,7 @@ fun PlayerScreen(
             LiveChannelBrowser(
                 catalog = liveCatalog,
                 currentStreamId = request.streamId,
+                origin = browserOrigin,
                 isFavorite = isFavorite,
                 onToggleFavorite = { channel ->
                     val wasFavorite = isFavorite(channel)
@@ -2265,525 +2267,6 @@ private fun PlayerSidePanel(
                 .verticalScroll(rememberScrollState()),
             content = content,
         )
-    }
-}
-
-@Composable
-private fun LiveChannelBrowser(
-    catalog: Catalog?,
-    currentStreamId: Int,
-    isFavorite: (ContentItem) -> Boolean,
-    onToggleFavorite: (ContentItem) -> Unit,
-    onSelectChannel: (ContentItem) -> Unit,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val context = LocalContext.current
-    val tvLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
-    val current = remember(catalog, currentStreamId) {
-        catalog?.items?.firstOrNull { it.id == currentStreamId }
-    }
-
-    val categoryOrderPrefs = remember(context) {
-        context.getSharedPreferences(LIVE_CATEGORY_ORDER_PREFS, Context.MODE_PRIVATE)
-    }
-    var orderedCategoryIds by remember(catalog) {
-        mutableStateOf(
-            categoryOrderPrefs.getString(PREF_IDS, "")
-                .orEmpty()
-                .split(',')
-                .filter(String::isNotBlank),
-        )
-    }
-    var movingCategoryId by remember { mutableStateOf<String?>(null) }
-    val orderedCategories = remember(catalog?.categories, orderedCategoryIds) {
-        val categories = catalog?.categories.orEmpty()
-        val byId = categories.associateBy { it.id }
-        (orderedCategoryIds.mapNotNull(byId::get) + categories.filterNot { it.id in orderedCategoryIds })
-            .distinctBy { it.id }
-    }
-
-    fun moveCategory(id: String, delta: Int) {
-        val values = orderedCategories.map { it.id }.toMutableList()
-        val from = values.indexOf(id)
-        if (from < 0) return
-        val to = (from + delta).coerceIn(0, values.lastIndex)
-        if (from == to) return
-        values.add(to, values.removeAt(from))
-        orderedCategoryIds = values
-        categoryOrderPrefs.edit().putString(PREF_IDS, values.joinToString(",")).apply()
-    }
-
-    val liveProfileScope = context.liveTvProStateScope()
-    var recentChannelIds by remember(catalog, liveProfileScope) {
-        mutableStateOf(context.liveTvProRecentChannelIds())
-    }
-    LaunchedEffect(currentStreamId, catalog, liveProfileScope) {
-        if (catalog?.items?.any { it.id == currentStreamId } == true) {
-            val updated = (listOf(currentStreamId) + recentChannelIds.filterNot { it == currentStreamId })
-                .take(60)
-            if (updated != recentChannelIds) {
-                recentChannelIds = updated
-                context.saveLiveTvProRecentChannelIds(updated)
-            }
-        }
-    }
-    val recentChannels = remember(catalog, recentChannelIds) {
-        val byId = catalog?.items.orEmpty().associateBy(ContentItem::id)
-        recentChannelIds.mapNotNull(byId::get)
-    }
-
-    var selectedCategory by remember(catalog, currentStreamId) {
-        mutableStateOf(current?.categoryId ?: catalog?.categories?.firstOrNull()?.id)
-    }
-    var searchQuery by remember { mutableStateOf("") }
-    var favoriteIds by remember(catalog) {
-        mutableStateOf(catalog?.items.orEmpty().filter(isFavorite).map(ContentItem::id).toSet())
-    }
-    val categoryArtwork = remember(catalog) {
-        catalog?.items.orEmpty()
-            .filter { !it.posterUrl.isNullOrBlank() }
-            .groupBy(ContentItem::categoryId)
-            .mapValues { (_, channels) -> channels.first() }
-    }
-
-    val categoryChannels = when (selectedCategory) {
-        PLAYER_CONTINUE_CATEGORY -> recentChannels
-        PLAYER_FAVORITES_CATEGORY -> catalog?.items.orEmpty().filter { it.id in favoriteIds }
-        null -> catalog?.items.orEmpty()
-        else -> catalog?.items.orEmpty().filter { it.categoryId == selectedCategory }
-    }
-    val normalizedQuery = searchQuery.trim()
-    val visible = if (normalizedQuery.isBlank()) {
-        categoryChannels
-    } else {
-        catalog?.items.orEmpty().filter { channel ->
-            channel.name.contains(normalizedQuery, ignoreCase = true) ||
-                channel.id.toString().contains(normalizedQuery)
-        }
-    }
-    val selectedCategoryTitle = when {
-        normalizedQuery.isNotBlank() -> "نتائج البحث"
-        selectedCategory == PLAYER_CONTINUE_CATEGORY -> "استكمال المشاهدة"
-        selectedCategory == PLAYER_FAVORITES_CATEGORY -> "القنوات المفضلة"
-        selectedCategory == null -> "كل القنوات"
-        else -> orderedCategories.firstOrNull { it.id == selectedCategory }?.name ?: "كل القنوات"
-    }
-
-    val listState = rememberLazyListState()
-    val channelFocus = remember { FocusRequester() }
-    val searchFocus = remember { FocusRequester() }
-    val focusIndex = visible.indexOfFirst { it.id == currentStreamId }.takeIf { it >= 0 } ?: 0
-
-    LaunchedEffect(visible, selectedCategory, normalizedQuery) {
-        if (visible.isNotEmpty() && normalizedQuery.isBlank()) {
-            listState.scrollToItem(focusIndex)
-            withFrameNanos { }
-            runCatching { channelFocus.requestFocus() }
-        }
-    }
-
-    fun selectCategory(id: String?) {
-        movingCategoryId = null
-        selectedCategory = id
-        searchQuery = ""
-    }
-
-    val closeOnBackModifier = Modifier.onPreviewKeyEvent { event ->
-        val keyCode = event.nativeKeyEvent.keyCode
-        val isBack = keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE
-        if (isBack) {
-            if (event.type == KeyEventType.KeyDown) onClose()
-            true
-        } else {
-            false
-        }
-    }
-
-    @Composable
-    fun ReorderableCategoryRow(category: sa.hulksa.player.model.Category) {
-        var focused by remember(category.id) { mutableStateOf(false) }
-        var selectPressed by remember(category.id) { mutableStateOf(false) }
-        var longPressHandled by remember(category.id) { mutableStateOf(false) }
-        val moving = movingCategoryId == category.id
-        val shape = RoundedCornerShape(10.dp)
-
-        LaunchedEffect(selectPressed, moving) {
-            if (selectPressed && !moving) {
-                delay(650L)
-                if (selectPressed && !longPressHandled) {
-                    longPressHandled = true
-                    movingCategoryId = category.id
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(
-                    when {
-                        focused -> colors.goldBright
-                        selectedCategory == category.id && searchQuery.isBlank() -> colors.gold
-                        moving -> colors.gold.copy(alpha = .30f)
-                        else -> Color.White.copy(alpha = .055f)
-                    },
-                )
-                .border(
-                    if (focused || moving) 2.dp else 1.dp,
-                    if (focused || moving) colors.goldBright else Color.White.copy(alpha = .10f),
-                    shape,
-                )
-                .onFocusChanged { focused = it.isFocused }
-                .onPreviewKeyEvent { event ->
-                    val keyCode = event.nativeKeyEvent.keyCode
-                    val selectKey =
-                        keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
-                            keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
-                            keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
-
-                    when {
-                        selectKey && event.type == KeyEventType.KeyDown -> {
-                            selectPressed = true
-                            true
-                        }
-                        selectKey && event.type == KeyEventType.KeyUp -> {
-                            selectPressed = false
-                            if (!longPressHandled) {
-                                if (moving) movingCategoryId = null else selectCategory(category.id)
-                            }
-                            longPressHandled = false
-                            true
-                        }
-                        moving && event.type == KeyEventType.KeyDown &&
-                            (keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP ||
-                                keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN) -> true
-                        moving && event.type == KeyEventType.KeyUp &&
-                            keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP -> {
-                            moveCategory(category.id, -1)
-                            true
-                        }
-                        moving && event.type == KeyEventType.KeyUp &&
-                            keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN -> {
-                            moveCategory(category.id, 1)
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                .clickable(
-                    role = Role.Button,
-                    onClick = {
-                        if (moving) movingCategoryId = null else selectCategory(category.id)
-                    },
-                )
-                .focusable()
-                .padding(horizontal = 8.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            categoryArtwork[category.id]?.let { channel ->
-                ChannelLogo(channel, Modifier.size(28.dp))
-            }
-            Text(
-                text = if (moving) "↕ ${category.name}" else category.name,
-                modifier = Modifier.weight(1f),
-                color = if (focused || (selectedCategory == category.id && searchQuery.isBlank())) Color.Black else colors.text,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-
-    @Composable
-    fun CategoryPane(paneModifier: Modifier) {
-        val paneShape = RoundedCornerShape(if (tvLayout) 12.dp else 18.dp)
-        Column(
-            modifier = paneModifier
-                .clip(paneShape)
-                .background(
-                    if (tvLayout) Color.Black.copy(alpha = .58f)
-                    else Color.White.copy(alpha = .045f),
-                )
-                .border(
-                    1.dp,
-                    Color.White.copy(alpha = if (tvLayout) .14f else .08f),
-                    paneShape,
-                )
-                .padding(if (tvLayout) 9.dp else 10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "الفئات",
-                        color = colors.goldBright,
-                        fontSize = if (tvLayout) 16.sp else 15.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    if (movingCategoryId != null) {
-                        Text(
-                            "حرك ↑ ↓ ثم OK للحفظ",
-                            color = colors.goldBright,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-                Text(
-                    "${orderedCategories.size}",
-                    color = colors.textMuted,
-                    fontSize = 10.sp,
-                )
-            }
-            Spacer(Modifier.height(if (tvLayout) 7.dp else 8.dp))
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(if (tvLayout) 4.dp else 6.dp),
-                contentPadding = PaddingValues(bottom = 12.dp),
-            ) {
-                item("all") {
-                    FocusButton(
-                        text = "الكل",
-                        onClick = { selectCategory(null) },
-                        modifier = Modifier.fillMaxWidth(),
-                        primary = selectedCategory == null && searchQuery.isBlank(),
-                        compact = true,
-                    )
-                }
-                item("continue") {
-                    FocusButton(
-                        text = "▶ استكمال المشاهدة (${recentChannels.size})",
-                        onClick = { selectCategory(PLAYER_CONTINUE_CATEGORY) },
-                        modifier = Modifier.fillMaxWidth(),
-                        primary = selectedCategory == PLAYER_CONTINUE_CATEGORY && searchQuery.isBlank(),
-                        compact = true,
-                        enabled = recentChannels.isNotEmpty(),
-                    )
-                }
-                item("favorites") {
-                    FocusButton(
-                        text = "★ المفضلة (${favoriteIds.size})",
-                        onClick = { selectCategory(PLAYER_FAVORITES_CATEGORY) },
-                        modifier = Modifier.fillMaxWidth(),
-                        primary = selectedCategory == PLAYER_FAVORITES_CATEGORY && searchQuery.isBlank(),
-                        compact = true,
-                    )
-                }
-                items(orderedCategories, key = { it.id }) { category ->
-                    if (tvLayout) {
-                        ReorderableCategoryRow(category)
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            categoryArtwork[category.id]?.let { channel ->
-                                ChannelLogo(channel, Modifier.size(32.dp))
-                            }
-                            FocusButton(
-                                text = category.name,
-                                onClick = { selectCategory(category.id) },
-                                modifier = Modifier.weight(1f),
-                                primary = selectedCategory == category.id && searchQuery.isBlank(),
-                                compact = true,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @Composable
-    fun ChannelPane(
-        paneModifier: Modifier,
-        showSearch: Boolean,
-        showClose: Boolean,
-    ) {
-        val paneShape = RoundedCornerShape(if (tvLayout) 12.dp else 18.dp)
-        Column(
-            modifier = paneModifier
-                .clip(paneShape)
-                .background(
-                    if (tvLayout) Color.Black.copy(alpha = .38f)
-                    else Color.Black.copy(alpha = .18f),
-                )
-                .border(
-                    1.dp,
-                    Color.White.copy(alpha = if (tvLayout) .13f else .08f),
-                    paneShape,
-                )
-                .padding(if (tvLayout) 11.dp else 12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        selectedCategoryTitle,
-                        color = colors.text,
-                        fontSize = if (tvLayout) 19.sp else 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        buildString {
-                            append("${visible.size} قناة")
-                            current?.let { append("  •  تشاهد الان: ${it.name}") }
-                        },
-                        color = if (current != null) colors.goldBright else colors.textMuted,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (showClose) {
-                    FocusButton("اغلاق", onClose, primary = false, compact = true)
-                }
-            }
-
-            if (showSearch) {
-                Spacer(Modifier.height(8.dp))
-                HulkTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    label = "بحث سريع عن قناة",
-                    modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
-                )
-            }
-            Spacer(Modifier.height(if (tvLayout) 7.dp else 8.dp))
-
-            when {
-                catalog == null -> LoadingRing(
-                    label = "جاري تجهيز القنوات…",
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp),
-                )
-                visible.isEmpty() -> Text(
-                    when {
-                        normalizedQuery.isNotBlank() -> "لا توجد قناة مطابقة للبحث"
-                        selectedCategory == PLAYER_CONTINUE_CATEGORY -> "لا توجد قنوات في استكمال المشاهدة"
-                        selectedCategory == PLAYER_FAVORITES_CATEGORY -> "لا توجد قنوات مفضلة"
-                        else -> "لا توجد قنوات في هذه الفئة"
-                    },
-                    color = colors.textMuted,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp),
-                )
-                else -> LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(if (tvLayout) 4.dp else 6.dp),
-                    contentPadding = PaddingValues(bottom = 14.dp),
-                ) {
-                    items(visible, key = ContentItem::id) { channel ->
-                        val index = visible.indexOf(channel)
-                        val favorite = channel.id in favoriteIds
-                        ChannelListItem(
-                            item = channel,
-                            selected = channel.id == currentStreamId,
-                            onFocused = {},
-                            onClick = { onSelectChannel(channel) },
-                            isFavorite = favorite,
-                            onLongClick = {
-                                favoriteIds = if (favorite) favoriteIds - channel.id else favoriteIds + channel.id
-                                onToggleFavorite(channel)
-                            },
-                            modifier = if (index == focusIndex && normalizedQuery.isBlank()) {
-                                Modifier.focusRequester(channelFocus)
-                            } else {
-                                Modifier
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    if (tvLayout) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = .10f))
-                .then(closeOnBackModifier),
-        )
-        Row(
-            modifier = modifier
-                .fillMaxHeight()
-                .fillMaxWidth(.72f)
-                .then(closeOnBackModifier)
-                .background(
-                    Brush.horizontalGradient(
-                        listOf(
-                            Color.Black.copy(alpha = .76f),
-                            Color.Black.copy(alpha = .56f),
-                            Color.Black.copy(alpha = .22f),
-                        ),
-                    ),
-                )
-                .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            ChannelPane(
-                paneModifier = Modifier.weight(1f).fillMaxHeight(),
-                showSearch = true,
-                showClose = true,
-            )
-            CategoryPane(Modifier.width(250.dp).fillMaxHeight())
-        }
-    } else {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = .72f))
-                .then(closeOnBackModifier),
-        )
-        Column(
-            modifier = modifier
-                .fillMaxHeight(.80f)
-                .fillMaxWidth(.76f)
-                .widthIn(max = 920.dp)
-                .then(closeOnBackModifier)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Brush.verticalGradient(listOf(Color(0xFF15170F), Color(0xFF080906))))
-                .border(1.dp, colors.gold.copy(alpha = .46f), RoundedCornerShape(24.dp))
-                .padding(18.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                BrandBadge(Modifier.size(50.dp))
-                Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("القنوات المباشرة", color = colors.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${visible.size} قناة  •  اضغط مطولا OK لاضافة او ازالة المفضلة",
-                        color = colors.textMuted,
-                        fontSize = 11.sp,
-                    )
-                }
-                FocusButton("اغلاق", onClose, primary = false, compact = true)
-            }
-
-            Spacer(Modifier.height(11.dp))
-            HulkTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                label = "بحث سريع عن قناة",
-                modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
-            )
-            Spacer(Modifier.height(11.dp))
-
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CategoryPane(Modifier.width(220.dp).fillMaxHeight())
-                ChannelPane(
-                    paneModifier = Modifier.weight(1f).fillMaxHeight(),
-                    showSearch = false,
-                    showClose = false,
-                )
-            }
-        }
     }
 }
 
