@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO=/srv/hulk-android/repos/HULK-SA-Android
+OFFICIAL=phase-3-v0.9.3.0-adaptive-foundation
+WORKROOT=/srv/hulk-android/worktrees
+
+echo '=== HULK TASK STATUS ==='
+printf 'CANONICAL_HEAD='
+git -C "$REPO" rev-parse HEAD
+printf 'REMOTE_HEAD='
+git -C "$REPO" ls-remote origin "refs/heads/$OFFICIAL" | awk '{print $1}'
+[[ -z "$(git -C "$REPO" status --porcelain)" ]] && echo CANONICAL_CLEAN=yes || echo CANONICAL_CLEAN=no
+
+git -C "$REPO" worktree list
+
+if [[ $# -eq 1 ]]; then
+  P="$WORKROOT/$1"
+  [[ -d "$P" ]] || {
+    echo "TASK_NOT_FOUND=$1"
+    exit 3
+  }
+  printf 'TASK_BRANCH='
+  git -C "$P" branch --show-current
+  printf 'TASK_HEAD='
+  git -C "$P" rev-parse HEAD
+  [[ -z "$(git -C "$P" status --porcelain)" ]] && echo TASK_CLEAN=yes || echo TASK_CLEAN=no
+fi

@@ -169,6 +169,7 @@ In particular:
 
 - Compatibility Lab V2: `quality/compatibility-v2/README.md`
 - HULK Operations, when in scope: `hosting/hulk-operations/README.md`
+- Android Engineering Lab, for lab/runtime/maintenance work: `docs/android-engineering-lab/README.md`
 
 Do not copy old contract text from chat or Project Sources over the current repository version.
 

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO=/srv/hulk-android/repos/HULK-SA-Android
+OFFICIAL=phase-3-v0.9.3.0-adaptive-foundation
+WORKROOT=/srv/hulk-android/worktrees
+REPORTROOT=/srv/hulk-android/reports
+
+[[ $# -eq 3 ]] || {
+  echo 'Usage: hulk-task-new <task-id> <branch> <expected-head>'
+  exit 2
+}
+
+TASK_ID=$1
+BRANCH=$2
+EXPECTED=$3
+
+[[ "$TASK_ID" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || {
+  echo 'STOP: invalid task id'
+  exit 10
+}
+git check-ref-format --branch "$BRANCH" >/dev/null || {
+  echo 'STOP: invalid branch'
+  exit 11
+}
+[[ "$BRANCH" != "$OFFICIAL" ]] || {
+  echo 'STOP: task branch cannot be official branch'
+  exit 12
+}
+[[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'STOP: invalid expected HEAD'
+  exit 13
+}
+
+if command -v hulk-disk-gate >/dev/null 2>&1; then
+  hulk-disk-gate
+fi
+
+[[ -z "$(git -C "$REPO" status --porcelain)" ]] || {
+  echo 'STOP: canonical clone dirty'
+  exit 20
+}
+
+git -C "$REPO" fetch --prune origin
+LIVE=$(git -C "$REPO" ls-remote origin "refs/heads/$OFFICIAL" | awk '{print $1}')
+[[ "$LIVE" == "$EXPECTED" ]] || {
+  echo 'STOP: expected/live HEAD mismatch'
+  echo "EXPECTED=$EXPECTED"
+  echo "LIVE=$LIVE"
+  exit 21
+}
+
+WORKTREE="$WORKROOT/$TASK_ID"
+REPORT="$REPORTROOT/$(date -u +%Y)/$TASK_ID"
+
+[[ ! -e "$WORKTREE" ]] || {
+  echo 'STOP: worktree path exists'
+  exit 22
+}
+! git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH" || {
+  echo 'STOP: local branch exists'
+  exit 23
+}
+[[ -z "$(git -C "$REPO" ls-remote --heads origin "refs/heads/$BRANCH")" ]] || {
+  echo 'STOP: remote branch exists'
+  exit 24
+}
+
+mkdir -p "$WORKROOT" "$REPORT"
+git -C "$REPO" worktree add -b "$BRANCH" "$WORKTREE" "$EXPECTED"
+
+cat >"$REPORT/TASK.env" <<EOF
+TASK_ID=$TASK_ID
+REPOSITORY=azoozrm/-HULK-SA-Android
+OFFICIAL_BRANCH=$OFFICIAL
+EXPECTED_OFFICIAL_HEAD=$EXPECTED
+VERIFIED_REMOTE_HEAD=$LIVE
+WORKTREE=$WORKTREE
+TASK_BRANCH=$BRANCH
+CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LAB_MODE=B
+EOF
+chmod 0640 "$REPORT/TASK.env"
+
+echo "TASK_ID=$TASK_ID"
+echo "BRANCH=$BRANCH"
+echo "HEAD=$(git -C "$WORKTREE" rev-parse HEAD)"
+echo "WORKTREE=$WORKTREE"
+echo "REPORT=$REPORT"
+echo HULK_TASK_READY
