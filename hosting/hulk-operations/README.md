@@ -17,12 +17,14 @@
 4. ارفع محتويات هذا المجلد إلى:
    `public_html/hulk-operations/`
 5. لإنشاء أول مسؤول:
-   - بدءًا من المرحلة 9A، صفحة `admin/setup.php` للعرض فقط ولا تنشئ مسؤولًا. استخدم أداة سطر الأوامر:
+   - بدءًا من المرحلة 9B، صفحة `admin/setup.php` تعيد التوجيه إلى HULK SA Control Center ولا تنشئ
+     مسؤولًا. استخدم أداة سطر الأوامر:
      `php public_html/hulk-operations/tools/create_admin.php admin`
    - راجع `hosting/hulk-control-center/PHASE-9-READ-ONLY-CUTOVER.md` قبل الاستخدام.
-6. افتح لوحة الإدارة وسجل الدخول من:
-   `https://hulksa.com/hulk-operations/`
-   (أو مباشرة: `https://hulksa.com/hulk-operations/admin/login.php`)
+6. الإدارة الآن من HULK SA Control Center:
+   `https://hulksa.com/control-center/`
+   (لوحة العمليات القديمة `https://hulksa.com/hulk-operations/` تعيد التوجيه إليه، ولم تعد تعرض
+   واجهة إدارة قابلة للاستخدام.)
 7. اختبر API:
    `https://hulksa.com/hulk-operations/api/app/v1/config/`
 8. ارفع APK من قسم **التحديثات**، راجع SHA-256، ثم فعّل الإصدار. الرفع وحده لا ينشره.

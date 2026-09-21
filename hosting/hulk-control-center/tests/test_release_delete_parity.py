@@ -59,13 +59,14 @@ class ReleaseDeleteParityTests(unittest.TestCase):
         self.assertNotIn("apk_path", view)
         self.assertNotIn("apk_sha256", view)
 
-    def test_legacy_operations_route_still_owns_and_delegates_the_destructive_logic(self) -> None:
+    def test_legacy_operations_route_is_retired_and_control_center_owns_deletion(self) -> None:
         actions = self.read(REPOSITORY / "hosting" / "hulk-operations" / "admin" / "actions.php")
         legacy = self.read(REPOSITORY / "hosting" / "hulk-operations" / "admin" / "delete_release.php")
         self.assertEqual(actions.count("function ops_delete_release("), 1)
         self.assertIn("RELEASE_DELETED", actions)
         self.assertIn("ops_reset_release_settings($db)", actions)
-        self.assertIn("ops_delete_release(", legacy)
+        self.assertIn("ops_legacy_redirect(", legacy)
+        self.assertNotIn("ops_delete_release", legacy)
         self.assertNotIn("DELETE FROM app_releases", legacy)
         self.assertNotIn("FOR UPDATE", legacy)
 

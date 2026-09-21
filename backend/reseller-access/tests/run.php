@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/public/.hulk-reseller-app/bootstrap.php';
-require_once dirname(__DIR__) . '/public/hulk-reseller-admin/read-only.php';
+require_once dirname(__DIR__) . '/public/hulk-reseller-admin/redirect.php';
 
 $tests = 0;
 function reseller_test(bool $condition, string $message): void
@@ -72,46 +72,55 @@ foreach ([
     }
 }
 
-// Phase 9A: the legacy reseller-owner panel is read-only.
+// Phase 9B: the retired legacy reseller-owner entry points redirect.
 reseller_test(
     hulk_legacy_owner_control_center_url() === '/control-center/resellers/',
-    'legacy owner routes to the exact Control Center resellers module'
+    'legacy owner navigation routes to the exact Control Center resellers module'
 );
 reseller_test(
-    hulk_legacy_owner_session_actions() === ['login', 'logout'],
-    'only login and logout remain legacy owner session actions'
+    hulk_legacy_owner_login_url() === '/control-center/login.php',
+    'a direct historical owner login routes to the Control Center login route'
 );
-reseller_test(hulk_legacy_owner_allows_session_action('login'), 'legacy owner login remains available');
-reseller_test(hulk_legacy_owner_allows_session_action('logout'), 'legacy owner logout remains available');
-foreach (['create_reseller', 'set_status', 'update_host', 'set_code', 'rotate_code', 'reset_password'] as $blockedAction) {
-    reseller_test(
-        !hulk_legacy_owner_allows_session_action($blockedAction),
-        'legacy owner business action ' . $blockedAction . ' is blocked'
-    );
-}
 
-$ownerActionSource = (string) file_get_contents(dirname(__DIR__) . '/public/hulk-reseller-admin/action.php');
-reseller_test(
-    strpos($ownerActionSource, 'hulk_legacy_owner_allows_session_action($action)') !== false
-        && strpos($ownerActionSource, 'hulk_legacy_owner_allows_session_action($action)')
-            < strpos($ownerActionSource, 'hulk_admin_create_reseller('),
-    'legacy owner action.php routes business mutations away before any hulk_admin_* call'
-);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+reseller_test(hulk_legacy_owner_redirect_status() === 302, 'legacy owner GET navigation uses HTTP 302');
+$_SERVER['REQUEST_METHOD'] = 'POST';
+reseller_test(hulk_legacy_owner_redirect_status() === 303, 'legacy owner POST uses HTTP 303');
+unset($_SERVER['REQUEST_METHOD']);
+reseller_test(hulk_legacy_owner_redirect_status() === 302, 'a missing method is treated as navigation');
 
 $ownerIndexSource = (string) file_get_contents(dirname(__DIR__) . '/public/hulk-reseller-admin/index.php');
-reseller_test(
-    strpos($ownerIndexSource, 'hulk_legacy_owner_read_only_notice()') !== false,
-    'legacy owner list announces read-only mode'
-);
-reseller_test(
-    strpos($ownerIndexSource, 'value="logout"') !== false,
-    'legacy owner logout form remains rendered'
-);
-foreach (['create_reseller', 'set_status', 'update_host', 'set_code', 'rotate_code', 'reset_password'] as $removedAction) {
+$ownerActionSource = (string) file_get_contents(dirname(__DIR__) . '/public/hulk-reseller-admin/action.php');
+$forbiddenLegacyWork = [
+    'hulk_start_session',
+    'hulk_verify_csrf',
+    'hulk_db(',
+    'hulk_current_admin',
+    'hulk_normalize_reseller_name',
+    'password_verify',
+    '$_SESSION',
+    'hulk_admin_create_reseller',
+    'hulk_admin_set_status',
+    'hulk_admin_update_host',
+    'hulk_admin_set_code',
+    'hulk_admin_rotate_code',
+    'hulk_admin_reset_password',
+];
+foreach (['index.php' => $ownerIndexSource, 'action.php' => $ownerActionSource] as $route => $source) {
     reseller_test(
-        strpos($ownerIndexSource, 'value="' . $removedAction . '"') === false,
-        'legacy owner UI no longer offers ' . $removedAction
+        strpos($source, 'hulk_legacy_owner_redirect(') !== false,
+        'legacy owner ' . $route . ' delegates to the Phase 9B redirect gate'
     );
+    foreach ($forbiddenLegacyWork as $marker) {
+        reseller_test(
+            strpos($source, $marker) === false,
+            'legacy owner ' . $route . ' no longer contains ' . $marker
+        );
+    }
 }
+reseller_test(
+    strpos($ownerActionSource, "'login'") !== false,
+    'the retired owner action endpoint still distinguishes the historical login action'
+);
 
 fwrite(STDOUT, "PASS: {$tests} reseller administration domain checks.\n");

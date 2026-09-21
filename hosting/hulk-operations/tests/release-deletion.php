@@ -16,10 +16,10 @@ ops_test(
     'exactly one authoritative release deletion implementation exists'
 );
 ops_test(
-    str_contains($legacyDeleteSource, 'ops_delete_release(')
+    str_contains($legacyDeleteSource, 'ops_legacy_redirect(')
         && !str_contains($legacyDeleteSource, 'DELETE FROM app_releases')
         && !str_contains($legacyDeleteSource, 'FOR UPDATE'),
-    'the legacy Operations route delegates to the authoritative deletion implementation'
+    'the retired legacy Operations route redirects to the Control Center releases module'
 );
 ops_test(
     str_contains($releaseActionsSource, 'function ops_upload_release(')
