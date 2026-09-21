@@ -7,6 +7,7 @@ if (!defined('HULK_OPERATIONS_ADMIN')) {
     define('HULK_OPERATIONS_ADMIN', true);
 }
 require_once __DIR__ . '/actions.php';
+require_once __DIR__ . '/read-only.php';
 
 try {
     $admin = ops_require_admin();
@@ -15,6 +16,10 @@ try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
         throw new InvalidArgumentException('طريقة الطلب غير مسموحة.');
     }
+
+    // Phase 9A: legacy release deletion is disabled. The request is routed to
+    // the Control Center releases module before ops_delete_release executes.
+    ops_legacy_block_owner_mutation('releases');
 
     $db = ops_db();
     $message = ops_delete_release($db, $admin);

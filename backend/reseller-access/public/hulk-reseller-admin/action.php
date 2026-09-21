@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/.hulk-reseller-app/bootstrap.php';
+require __DIR__ . '/read-only.php';
 
 if (!hulk_is_https()) {
     hulk_redirect('https://hulksa.com/hulk-reseller-admin/?error=request');
@@ -16,6 +17,13 @@ if (!hulk_verify_csrf(is_string($_POST['csrf_token'] ?? null) ? $_POST['csrf_tok
 }
 
 $action = is_string($_POST['action'] ?? null) ? $_POST['action'] : '';
+
+// Phase 9A: legacy reseller-owner business mutations are disabled. Login and
+// logout remain session actions; every other action is routed to Control
+// Center before any hulk_admin_* domain mutation runs.
+if (!hulk_legacy_owner_allows_session_action($action)) {
+    hulk_redirect(hulk_legacy_owner_control_center_url() . '?legacy=readonly');
+}
 try {
     if ($action === 'login') {
         $username = hulk_normalize_reseller_name(is_string($_POST['username'] ?? null) ? $_POST['username'] : '');

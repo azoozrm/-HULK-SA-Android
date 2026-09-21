@@ -269,5 +269,57 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("function ops_public_config_json(", operations)
 
 
+    def test_phase_9a_legacy_owner_panel_is_read_only(self) -> None:
+        index = self.read("admin/index.php")
+        delete = self.read("admin/delete_release.php")
+        setup = self.read("admin/setup.php")
+        login = self.read("admin/login.php")
+        logout = self.read("admin/logout.php")
+        actions = self.read("admin/actions.php")
+        read_only = self.read("admin/read-only.php")
+
+        # Legacy business mutations are routed away before the authoritative
+        # function can run.
+        self.assertLess(
+            index.index("ops_legacy_block_owner_mutation($section)"),
+            index.index("ops_admin_handle_post("),
+        )
+        self.assertLess(
+            delete.index("ops_legacy_block_owner_mutation('releases')"),
+            delete.index("ops_delete_release($db, $admin)"),
+        )
+        self.assertIn("/control-center/", read_only)
+
+        # The rendered legacy panel is read-only and points to Control Center.
+        self.assertIn("legacy-read-only", index)
+        self.assertIn("HULK SA Control Center", index)
+        self.assertIn("HULK SA Control Center", login)
+
+        # Login and logout remain usable session actions.
+        self.assertIn("password_verify", login)
+        self.assertIn("session_destroy()", logout)
+
+        # The hidden web first-admin setup path no longer creates an admin.
+        self.assertNotIn("INSERT INTO app_admin_users", setup)
+        self.assertIn("create_admin.php", setup)
+
+        # The authoritative Operations mutation library is unchanged and still
+        # owns every action used by Control Center.
+        self.assertEqual(actions.count("function ops_admin_handle_post("), 1)
+        self.assertIn("function ops_delete_release(", actions)
+        for action in (
+            "upload_release",
+            "activate_release",
+            "disable_release",
+            "update_release_policy",
+            "create_announcement",
+            "disable_announcement",
+            "update_service_status",
+            "toggle_feature_flag",
+            "save_growth",
+        ):
+            self.assertIn(f"case '{action}':", actions)
+
+
 if __name__ == "__main__":
     unittest.main()

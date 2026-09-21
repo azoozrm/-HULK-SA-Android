@@ -217,6 +217,7 @@ ops_test(
 );
 
 require __DIR__ . '/release-deletion.php';
+require __DIR__ . '/phase9a-read-only.php';
 
 $publicConfigFixture = [
     'schemaVersion' => 1,

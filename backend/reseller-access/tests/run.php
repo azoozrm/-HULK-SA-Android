@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/public/.hulk-reseller-app/bootstrap.php';
+require_once dirname(__DIR__) . '/public/hulk-reseller-admin/read-only.php';
 
 $tests = 0;
 function reseller_test(bool $condition, string $message): void
@@ -69,6 +70,48 @@ foreach ([
     } catch (InvalidArgumentException) {
         reseller_test(true, 'invalid mutation is rejected');
     }
+}
+
+// Phase 9A: the legacy reseller-owner panel is read-only.
+reseller_test(
+    hulk_legacy_owner_control_center_url() === '/control-center/resellers/',
+    'legacy owner routes to the exact Control Center resellers module'
+);
+reseller_test(
+    hulk_legacy_owner_session_actions() === ['login', 'logout'],
+    'only login and logout remain legacy owner session actions'
+);
+reseller_test(hulk_legacy_owner_allows_session_action('login'), 'legacy owner login remains available');
+reseller_test(hulk_legacy_owner_allows_session_action('logout'), 'legacy owner logout remains available');
+foreach (['create_reseller', 'set_status', 'update_host', 'set_code', 'rotate_code', 'reset_password'] as $blockedAction) {
+    reseller_test(
+        !hulk_legacy_owner_allows_session_action($blockedAction),
+        'legacy owner business action ' . $blockedAction . ' is blocked'
+    );
+}
+
+$ownerActionSource = (string) file_get_contents(dirname(__DIR__) . '/public/hulk-reseller-admin/action.php');
+reseller_test(
+    strpos($ownerActionSource, 'hulk_legacy_owner_allows_session_action($action)') !== false
+        && strpos($ownerActionSource, 'hulk_legacy_owner_allows_session_action($action)')
+            < strpos($ownerActionSource, 'hulk_admin_create_reseller('),
+    'legacy owner action.php routes business mutations away before any hulk_admin_* call'
+);
+
+$ownerIndexSource = (string) file_get_contents(dirname(__DIR__) . '/public/hulk-reseller-admin/index.php');
+reseller_test(
+    strpos($ownerIndexSource, 'hulk_legacy_owner_read_only_notice()') !== false,
+    'legacy owner list announces read-only mode'
+);
+reseller_test(
+    strpos($ownerIndexSource, 'value="logout"') !== false,
+    'legacy owner logout form remains rendered'
+);
+foreach (['create_reseller', 'set_status', 'update_host', 'set_code', 'rotate_code', 'reset_password'] as $removedAction) {
+    reseller_test(
+        strpos($ownerIndexSource, 'value="' . $removedAction . '"') === false,
+        'legacy owner UI no longer offers ' . $removedAction
+    );
 }
 
 fwrite(STDOUT, "PASS: {$tests} reseller administration domain checks.\n");

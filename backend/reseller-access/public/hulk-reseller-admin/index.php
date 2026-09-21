@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/.hulk-reseller-app/bootstrap.php';
+require __DIR__ . '/read-only.php';
 
 if (!hulk_is_https()) {
     hulk_redirect('https://hulksa.com/hulk-reseller-admin/');
@@ -25,13 +26,6 @@ try {
     $serviceError = 'الخدمة غير متاحة مؤقتًا.';
 }
 
-$messages = [
-    'created' => 'تم إنشاء الموزع.',
-    'status' => 'تم تحديث الحالة.',
-    'host' => 'تم تحديث الهوست.',
-    'code' => 'تم تحديث كود الدخول.',
-    'password' => 'تم تحديث كلمة المرور.',
-];
 $errors = [
     'invalid' => 'اسم المستخدم أو كلمة المرور غير صحيحة.',
     'inactive' => 'حساب الإدارة متوقف.',
@@ -41,8 +35,6 @@ $errors = [
     'exists' => 'الاسم أو كود الدخول مستخدم مسبقًا.',
     'service' => 'الخدمة غير متاحة مؤقتًا.',
 ];
-$resultKey = is_string($_GET['result'] ?? null) ? $_GET['result'] : '';
-$result = $messages[$resultKey] ?? null;
 $errorKey = is_string($_GET['error'] ?? null) ? $_GET['error'] : '';
 $error = $serviceError ?? ($errors[$errorKey] ?? null);
 ?>
@@ -80,74 +72,22 @@ $error = $serviceError ?? ($errors[$errorKey] ?? null);
                 <button type="submit">تسجيل الخروج</button>
             </form>
         </header>
-        <?php if ($result !== null): ?><p role="status"><?= hulk_escape($result) ?></p><?php endif; ?>
         <?php if ($error !== null): ?><p role="alert"><?= hulk_escape($error) ?></p><?php endif; ?>
-
-        <section aria-labelledby="create-title">
-            <h2 id="create-title">إضافة موزع</h2>
-            <form class="form-stack" action="/hulk-reseller-admin/action.php" method="post">
-                <input type="hidden" name="action" value="create_reseller">
-                <input type="hidden" name="csrf_token" value="<?= hulk_escape(hulk_csrf_token()) ?>">
-                <input name="reseller_name" maxlength="100" placeholder="اسم الموزع" required>
-                <input name="password" type="password" minlength="10" maxlength="256" placeholder="كلمة المرور" required>
-                <input name="host" type="url" maxlength="2048" placeholder="الهوست">
-                <input name="access_code" maxlength="64" placeholder="HULK-XXXX-XXXX-XXXX-XXXX">
-                <button type="submit">إنشاء</button>
-            </form>
-        </section>
+        <p role="status"><?= hulk_escape(hulk_legacy_owner_read_only_notice()) ?>
+            <a href="<?= hulk_escape(hulk_legacy_owner_control_center_url()) ?>">فتح HULK SA Control Center</a></p>
 
         <section aria-labelledby="accounts-title">
             <h2 id="accounts-title">الحسابات</h2>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>الموزع</th><th>الحالة</th><th>الهوست</th><th>كود الدخول</th><th>الإدارة</th></tr></thead>
+                    <thead><tr><th>الموزع</th><th>الحالة</th><th>الهوست</th><th>كود الدخول</th></tr></thead>
                     <tbody>
-                    <?php foreach ($resellers as $row): $id = (int) $row['reseller_id']; ?>
+                    <?php foreach ($resellers as $row): ?>
                         <tr>
-                            <td><?= hulk_escape($row['reseller_name']) ?></td>
-                            <td><?= hulk_escape($row['status']) ?></td>
-                            <td>
-                                <form action="/hulk-reseller-admin/action.php" method="post">
-                                    <input type="hidden" name="csrf_token" value="<?= hulk_escape(hulk_csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="update_host">
-                                    <input type="hidden" name="reseller_id" value="<?= $id ?>">
-                                    <input name="host" type="url" maxlength="2048" value="<?= hulk_escape($row['host']) ?>" placeholder="فارغ للمسح">
-                                    <button type="submit">حفظ</button>
-                                </form>
-                            </td>
-                            <td dir="ltr">
-                                <strong><?= hulk_escape($row['access_code']) ?></strong>
-                                <form action="/hulk-reseller-admin/action.php" method="post">
-                                    <input type="hidden" name="csrf_token" value="<?= hulk_escape(hulk_csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="set_code">
-                                    <input type="hidden" name="reseller_id" value="<?= $id ?>">
-                                    <input name="access_code" maxlength="64" value="<?= hulk_escape($row['access_code']) ?>" required>
-                                    <button type="submit">حفظ الكود</button>
-                                </form>
-                                <form action="/hulk-reseller-admin/action.php" method="post">
-                                    <input type="hidden" name="csrf_token" value="<?= hulk_escape(hulk_csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="rotate_code">
-                                    <input type="hidden" name="reseller_id" value="<?= $id ?>">
-                                    <button type="submit">تدوير</button>
-                                </form>
-                            </td>
-                            <td>
-                                <form action="/hulk-reseller-admin/action.php" method="post">
-                                    <input type="hidden" name="csrf_token" value="<?= hulk_escape(hulk_csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="set_status">
-                                    <input type="hidden" name="reseller_id" value="<?= $id ?>">
-                                    <input type="hidden" name="status" value="<?= $row['status'] === 'active' ? 'inactive' : 'active' ?>">
-                                    <button type="submit"><?= $row['status'] === 'active' ? 'إيقاف' : 'تفعيل' ?></button>
-                                </form>
-                                <form action="/hulk-reseller-admin/action.php" method="post">
-                                    <input type="hidden" name="csrf_token" value="<?= hulk_escape(hulk_csrf_token()) ?>">
-                                    <input type="hidden" name="action" value="reset_password">
-                                    <input type="hidden" name="reseller_id" value="<?= $id ?>">
-                                    <input name="password" type="password" minlength="10" maxlength="256" placeholder="كلمة جديدة" required>
-                                    <input name="confirm_password" type="password" minlength="10" maxlength="256" placeholder="التأكيد" required>
-                                    <button type="submit">تعيين</button>
-                                </form>
-                            </td>
+                            <td><?= hulk_escape((string) $row['reseller_name']) ?></td>
+                            <td><?= hulk_escape((string) $row['status']) ?></td>
+                            <td dir="ltr"><?= hulk_escape((string) $row['host']) ?></td>
+                            <td dir="ltr"><strong><?= hulk_escape((string) $row['access_code']) ?></strong></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>

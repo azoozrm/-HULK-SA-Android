@@ -117,5 +117,51 @@ class ResellerBackendContractTest(unittest.TestCase):
         self.assertNotRegex(combined, r"mysql:host=[^;]+;dbname=(?!REPLACE_ME)")
 
 
+    def test_phase_9a_legacy_owner_panel_is_read_only(self) -> None:
+        owner_index = (PUBLIC / "hulk-reseller-admin/index.php").read_text(encoding="utf-8")
+        owner_action = (PUBLIC / "hulk-reseller-admin/action.php").read_text(encoding="utf-8")
+        read_only = (PUBLIC / "hulk-reseller-admin/read-only.php").read_text(encoding="utf-8")
+        domain = (PUBLIC / ".hulk-reseller-app/admin-domain.php").read_text(encoding="utf-8")
+
+        # The legacy owner routes business mutations away before the shared
+        # authority can run.
+        self.assertLess(
+            owner_action.index("hulk_legacy_owner_allows_session_action($action)"),
+            owner_action.index("hulk_admin_create_reseller("),
+        )
+        self.assertIn("$action === 'login'", owner_action)
+        self.assertIn("'logout'", owner_action)
+
+        # The shared reseller authority is unchanged.
+        for function in (
+            "hulk_admin_create_reseller",
+            "hulk_admin_set_status",
+            "hulk_admin_update_host",
+            "hulk_admin_set_code",
+            "hulk_admin_rotate_code",
+            "hulk_admin_reset_password",
+        ):
+            self.assertIn(f"function {function}", domain)
+
+        # The rendered legacy owner list is read-only and links to Control Center.
+        self.assertIn("hulk_legacy_owner_read_only_notice()", owner_index)
+        self.assertIn("/control-center/resellers/", read_only)
+        self.assertIn('value="logout"', owner_index)
+        for action in (
+            "create_reseller",
+            "set_status",
+            "update_host",
+            "set_code",
+            "rotate_code",
+            "reset_password",
+        ):
+            self.assertNotIn(f'value="{action}"', owner_index)
+
+        # Reseller self-service remains untouched.
+        portal_action = (PUBLIC / "reseller/action.php").read_text(encoding="utf-8")
+        for action in ("update_host", "rotate_code"):
+            self.assertIn(f"case '{action}':", portal_action)
+
+
 if __name__ == "__main__":
     unittest.main()
