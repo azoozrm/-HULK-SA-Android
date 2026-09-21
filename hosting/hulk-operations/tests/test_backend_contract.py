@@ -68,6 +68,16 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertIn("enabled = 0, is_active = 0", actions)
         self.assertNotIn("$_POST['apk_sha256']", actions)
 
+    def test_release_deletion_has_one_authoritative_owner(self) -> None:
+        actions = self.read("admin/actions.php")
+        legacy = self.read("admin/delete_release.php")
+        self.assertEqual(actions.count("function ops_delete_release("), 1)
+        self.assertIn("RELEASE_DELETED", actions)
+        self.assertIn("ops_reset_release_settings($db)", actions)
+        self.assertIn("ops_delete_release($db, $admin)", legacy)
+        self.assertNotIn("DELETE FROM app_releases", legacy)
+        self.assertNotIn("FOR UPDATE", legacy)
+
     def test_public_api_is_read_only_and_versioned(self) -> None:
         endpoint = self.read("api/app/v1/config/index.php")
         operations = self.read("lib/operations.php")

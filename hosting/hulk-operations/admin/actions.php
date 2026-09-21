@@ -551,6 +551,60 @@ function ops_update_release_policy(PDO $db, array $admin): void
     }
 }
 
+function ops_delete_release(PDO $db, array $admin): string
+{
+    $releaseId = filter_var($_POST['release_id'] ?? null, FILTER_VALIDATE_INT);
+    if ($releaseId === false || $releaseId < 1) {
+        throw new InvalidArgumentException('الإصدار غير صالح.');
+    }
+
+    $relativePath = '';
+    $db->beginTransaction();
+
+    try {
+        $statement = $db->prepare('SELECT * FROM app_releases WHERE id = :id FOR UPDATE');
+        $statement->execute(['id' => (int) $releaseId]);
+        $release = $statement->fetch();
+        if (!is_array($release)) {
+            throw new InvalidArgumentException('الإصدار غير موجود أو تم حذفه مسبقًا.');
+        }
+
+        $relativePath = ltrim(str_replace('\\', '/', (string) $release['apk_path']), '/');
+        if (!preg_match('#^releases/[A-Za-z0-9._-]+\.apk$#D', $relativePath)) {
+            throw new RuntimeException('مسار ملف APK غير صالح للحذف الآمن.');
+        }
+
+        if ((bool) $release['is_active']) {
+            ops_reset_release_settings($db);
+        }
+
+        $delete = $db->prepare('DELETE FROM app_releases WHERE id = :id');
+        $delete->execute(['id' => (int) $releaseId]);
+
+        ops_audit($db, (int) $admin['id'], 'RELEASE_DELETED', [
+            'release_id' => (int) $releaseId,
+            'version_name' => (string) $release['version_name'],
+            'version_code' => (int) $release['version_code'],
+            'sha256' => (string) $release['apk_sha256'],
+            'was_active' => (bool) $release['is_active'],
+        ]);
+
+        $db->commit();
+    } catch (Throwable $exception) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $exception;
+    }
+
+    $absolutePath = dirname(__DIR__) . '/' . $relativePath;
+    if (is_file($absolutePath) && !@unlink($absolutePath)) {
+        error_log('HULK Operations release row deleted but APK file could not be removed: ' . $absolutePath);
+    }
+
+    return 'تم حذف الإصدار وملف APK. يمكنك الآن رفع نفس رمز الإصدار من جديد.';
+}
+
 function ops_create_announcement(PDO $db, array $admin): void
 {
     $messageKeyInput = trim((string) ($_POST['message_key'] ?? ''));
