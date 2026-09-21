@@ -9,9 +9,9 @@ owner entry-point routing only.
 | Stage | State | Notes |
 |---|---|---|
 | Phase 9A — legacy owner panels read-only | **MERGED + DEPLOYED + read-only** | PR #296 merged (`4bd33265`); deployed to production and byte-verified; production smoke passed. |
-| Phase 9B — legacy owner `302`/`303` redirects | **SOURCE CANDIDATE / PR** | Implemented in this round as one source branch and one PR. **Not merged, not deployed.** Production still runs the Phase 9A read-only behavior. |
+| Phase 9B — legacy owner `302`/`303` redirects | **MERGED + DEPLOYED + VERIFIED** | PR #297 merged at `5767d537`; production deployment completed at 2026-09-21T14:15:05Z; deployed bytes matched merged source and production redirect smoke passed 32/32. |
 | Soak | **SOAK: OWNER_WAIVED** | The owner explicitly waived the Phase 9A → Phase 9B soak for this entry gate. This is an owner override; no soak was run or observed, and no soak PASS is claimed. |
-| Production Phase 9B | **NOT DEPLOYED** | Phase 9 is not fully production-cut-over until Stage B is reviewed, merged and separately authorized for deployment. |
+| Production Phase 9B | **COMPLETE** | Legacy owner administration routes now redirect to HULK SA Control Center; Control Center is the sole owner-facing administration entry. |
 
 ## Phase 9A — read-only (merged, deployed)
 
@@ -23,9 +23,9 @@ The legacy owner panels remained available for authenticated observation:
 
 Both panels were read-only: every owner business mutation was rejected server-side before the
 authoritative mutation function ran. Phase 9A is preserved as historical fact; it was not
-reconstructed or falsified by this round.
+reconstructed or falsified by Phase 9B.
 
-## Phase 9B — legacy redirect (source candidate)
+## Phase 9B — legacy redirect (merged, deployed, verified)
 
 Stage B retires the remaining legacy owner-facing administration entry points. They no longer
 authenticate a legacy owner, read the database, process CSRF or run any legacy business action; each
@@ -75,6 +75,30 @@ The retired action endpoint no longer performs login, logout, CSRF verification,
 database access or any `hulk_admin_*` mutation. No authentication bridge is created between the
 legacy reseller admin and Control Center.
 
+### Production deployment verification
+
+The production cutover was completed from merged official HEAD
+`5767d53775727d2c0292e4a05e223dd9bd5c216b` after post-merge CI run `35609362863` succeeded.
+
+Deployment verification established:
+
+- pre-deploy production routing files matched the Phase 9A baseline with no unexplained drift;
+- a new private pre-deploy rollback backup was created at
+  `/home/hulknjcx/private/backups/phase9b-predeploy-20260921T141505Z/`;
+- the existing Phase 9A backup remained untouched;
+- all 10 deployed runtime files matched the merged Phase 9B source by SHA-256;
+- both retired `read-only.php` files were removed and both Phase 9B `redirect.php` files were present;
+- production PHP 8.2.33 syntax checks passed for all deployed runtime files;
+- automated production redirect validation passed 32/32 with exact `302`/`303` destinations and
+  zero-byte redirect bodies;
+- `/control-center/`, `/reseller/`, resolver invalid-code behavior, Operations
+  `schemaVersion = 1`, weak ETag / `If-None-Match` `304` zero-body behavior and the active APK path
+  remained intact;
+- no database/schema/migration/config/cron/APK/source/GitHub mutation was part of the production
+  routing deployment.
+
+No rollback was required.
+
 ### Preserved and authoritative
 
 - HULK SA Control Center is the sole owner-facing administration entry and keeps its current owner
@@ -91,14 +115,16 @@ legacy reseller admin and Control Center.
 ### Rollback
 
 Phase 9B rollback is source routing only. Restore the Phase 9A read-only legacy owner routes for
-`hosting/hulk-operations/**` and `backend/reseller-access/public/hulk-reseller-admin/**` by reverting
-the Phase 9B routing commit. Do not restore an older database over newer writes, do not run a schema
-migration or rollback, and do not delete data or additive Control Center tables. The protected
-production Phase 9A deployment backup remains a deployment rollback asset and is not touched by this
-source round.
+`hosting/hulk-operations/**` and `backend/reseller-access/public/hulk-reseller-admin/**` using the
+preserved Phase 9B pre-deploy routing backup or by reverting the Phase 9B routing commit. Do not
+restore an older database over newer writes, do not run a schema migration or rollback, and do not
+delete data or additive Control Center tables. The protected Phase 9A deployment backup remains a
+separate historical rollback asset.
 
 ## Current production state
 
-Production runs the Phase 9A read-only behavior. Phase 9B is a source candidate only and is **not
-deployed**; this runbook does not claim a full Phase 9 production cutover until Stage B is reviewed,
-merged and separately authorized for deployment.
+**Phase 9 production cutover is complete.** Phase 9A read-only and Phase 9B redirect are both merged,
+deployed and verified. Legacy owner administration entry points now redirect to HULK SA Control
+Center, which is the sole owner-facing administration entry.
+
+Soak remains **SOAK: OWNER_WAIVED** as an owner override. No soak PASS is claimed.
