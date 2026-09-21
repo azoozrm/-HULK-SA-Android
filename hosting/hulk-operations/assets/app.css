@@ -175,3 +175,8 @@ td { font-size: .9rem; }
     .nav { grid-row: 3; }
     .logout .button { width: 100%; }
 }
+
+fieldset.legacy-read-only { border: 0; margin: 0; min-width: 0; padding: 0; }
+.legacy-read-only-notice { margin-bottom: 14px; }
+.legacy-read-only-notice h2 { margin-bottom: 8px; }
+.legacy-read-only-notice .button { display: inline-flex; align-items: center; text-decoration: none; }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/bootstrap.php';
+require_once __DIR__ . '/read-only.php';
 
 try {
     ops_start_admin_session();
@@ -85,6 +86,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
     }
 }
+
+$controlCenterUrl = ops_legacy_control_center_url('dashboard');
 ?>
 <!doctype html>
 <html lang="ar" dir="rtl">
@@ -103,6 +106,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             <div><strong>HULK SA</strong><small>مركز العمليات</small></div>
         </div>
         <h1>تسجيل دخول المسؤول</h1>
+        <p class="muted">هذه اللوحة أصبحت للعرض فقط. تتم إدارة التطبيق الآن من HULK SA Control Center.</p>
         <?php if ($error !== null): ?><div class="flash error"><?= ops_e($error) ?></div><?php endif; ?>
         <form method="post" autocomplete="on">
             <input type="hidden" name="csrf_token" value="<?= ops_e(ops_csrf_token()) ?>">
@@ -116,6 +120,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             </div>
             <button class="button" type="submit">دخول</button>
         </form>
+        <p><a href="<?= ops_e($controlCenterUrl) ?>">فتح HULK SA Control Center</a></p>
     </section>
 </main>
 </body>

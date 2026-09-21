@@ -6,6 +6,7 @@ require_once dirname(__DIR__) . '/bootstrap.php';
 require_once __DIR__ . '/_layout.php';
 define('HULK_OPERATIONS_ADMIN', true);
 require_once __DIR__ . '/actions.php';
+require_once __DIR__ . '/read-only.php';
 
 try {
     $admin = ops_require_admin();
@@ -23,6 +24,10 @@ if (!in_array($section, $allowedSections, true)) {
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    // Phase 9A: legacy Operations owner mutations are disabled. The request is
+    // routed to the equivalent Control Center module before any authoritative
+    // mutation function runs.
+    ops_legacy_block_owner_mutation($section);
     ops_admin_handle_post($db, $admin, $section);
 }
 
@@ -86,7 +91,14 @@ $titles = [
 
 ops_admin_page_start($titles[$section], $section, $admin);
 ops_admin_flash($flash);
+$controlCenterUrl = ops_legacy_control_center_url($section);
 ?>
+<section class="card legacy-read-only-notice" role="status">
+    <h2>هذه اللوحة أصبحت للعرض فقط</h2>
+    <p>تتم جميع تعديلات الإدارة الآن من <strong>HULK SA Control Center</strong>، وتبقى هذه الصفحة متاحة لعرض البيانات التشغيلية فقط.</p>
+    <p><a class="button secondary" href="<?= ops_e($controlCenterUrl) ?>">فتح وحدة مركز التحكم المقابلة</a></p>
+</section>
+<fieldset class="legacy-read-only" disabled>
 
 <?php if ($section === 'dashboard'): ?>
     <?php
@@ -370,5 +382,6 @@ ops_admin_flash($flash);
         </tbody></table></div><?php endif; ?>
     </section>
 <?php endif; ?>
+</fieldset>
 
 <?php ops_admin_page_end(); ?>
