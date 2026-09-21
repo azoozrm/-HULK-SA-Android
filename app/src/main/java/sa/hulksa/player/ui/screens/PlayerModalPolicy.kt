@@ -76,3 +76,19 @@ internal fun playerErrorModalActions(
     if (canChooseSource) add(PlayerErrorModalAction.CHOOSE_SOURCE)
     add(PlayerErrorModalAction.BACK)
 }
+
+/**
+ * Ordered, bounded focus-acquisition candidates for the final error modal.
+ *
+ * The order is preserved from [playerErrorModalActions], so RETRY (the recommended action) is
+ * preferred whenever it is placed and has not been attempted yet. Only actions that have signalled
+ * layout placement are eligible and each action is offered at most once, so the caller can request
+ * focus deterministically without delay, polling or unbounded retries.
+ */
+internal fun playerErrorFocusCandidates(
+    actions: List<PlayerErrorModalAction>,
+    placedActions: Set<PlayerErrorModalAction>,
+    attemptedActions: Set<PlayerErrorModalAction>,
+): List<PlayerErrorModalAction> = actions
+    .filter { it in placedActions && it !in attemptedActions }
+    .distinct()

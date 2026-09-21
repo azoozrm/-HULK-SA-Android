@@ -76,6 +76,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -1064,13 +1065,6 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(finalError, request.historyKey) {
-        if (finalError != null) {
-            withFrameNanos { }
-            runCatching { errorRetryFocus.requestFocus() }
-        }
-    }
-
     val errorModalInputActive = finalError != null || suspendedFinalError != null
     val latestOnErrorModalActiveChanged by rememberUpdatedState(onErrorModalActiveChanged)
     DisposableEffect(errorModalInputActive) {
@@ -2013,7 +2007,9 @@ private fun PlayerErrorPanel(
     val channelFocusRequester = remember { FocusRequester() }
     val serverFocusRequester = remember { FocusRequester() }
     val backFocusRequester = remember { FocusRequester() }
-    val actions = playerErrorModalActions(canChooseChannel, canChooseServer)
+    val actions = remember(canChooseChannel, canChooseServer) {
+        playerErrorModalActions(canChooseChannel, canChooseServer)
+    }
     val requesters = actions.map { action ->
         when (action) {
             PlayerErrorModalAction.RETRY -> retryFocusRequester
@@ -2022,8 +2018,36 @@ private fun PlayerErrorPanel(
             PlayerErrorModalAction.BACK -> backFocusRequester
         }
     }
+    var focusedAction by remember { mutableStateOf<PlayerErrorModalAction?>(null) }
+    var placedActions by remember { mutableStateOf(emptySet<PlayerErrorModalAction>()) }
+    var focusAcquired by remember { mutableStateOf(false) }
+    val attemptedActions = remember { mutableSetOf<PlayerErrorModalAction>() }
 
-    fun actionModifier(index: Int, requester: FocusRequester): Modifier {
+    // Deterministic initial focus: an action only becomes eligible after it signals layout
+    // placement, so the request never depends on a single frame guess. The preferred RETRY action
+    // wins when it is placed and focusable, and each action is attempted at most once, which makes
+    // the fallback bounded and terminates as soon as one request reports success.
+    LaunchedEffect(actions, placedActions, focusAcquired) {
+        if (focusAcquired) return@LaunchedEffect
+        val candidates = playerErrorFocusCandidates(
+            actions = actions,
+            placedActions = placedActions,
+            attemptedActions = attemptedActions,
+        )
+        for (candidate in candidates) {
+            attemptedActions += candidate
+            val acquired = runCatching {
+                requesters[actions.indexOf(candidate)].requestFocus()
+            }.getOrDefault(false)
+            if (acquired) {
+                focusAcquired = true
+                return@LaunchedEffect
+            }
+        }
+    }
+
+    fun actionModifier(action: PlayerErrorModalAction, requester: FocusRequester): Modifier {
+        val index = actions.indexOf(action)
         val leftIndex = if (layoutDirection == LayoutDirection.Rtl) index + 1 else index - 1
         val rightIndex = if (layoutDirection == LayoutDirection.Rtl) index - 1 else index + 1
         return Modifier
@@ -2033,6 +2057,14 @@ private fun PlayerErrorPanel(
                 right = requesters.getOrNull(rightIndex) ?: FocusRequester.Cancel
                 up = FocusRequester.Cancel
                 down = FocusRequester.Cancel
+            }
+            .onGloballyPositioned { placedActions = placedActions + action }
+            .onFocusChanged { state ->
+                if (state.isFocused) {
+                    focusedAction = action
+                } else if (focusedAction == action) {
+                    focusedAction = null
+                }
             }
     }
 
@@ -2080,28 +2112,30 @@ private fun PlayerErrorPanel(
                         PlayerErrorModalAction.RETRY -> FocusButton(
                             "اعادة المحاولة",
                             onRetry,
-                            modifier = actionModifier(index, retryFocusRequester),
+                            modifier = actionModifier(PlayerErrorModalAction.RETRY, retryFocusRequester),
+                            primary = focusedAction == PlayerErrorModalAction.RETRY,
+                            accent = focusedAction != PlayerErrorModalAction.RETRY,
                             compact = true,
                         )
                         PlayerErrorModalAction.CHOOSE_CHANNEL -> FocusButton(
                             "اختيار قناة",
                             onChooseChannel,
-                            modifier = actionModifier(index, channelFocusRequester),
-                            primary = false,
+                            modifier = actionModifier(PlayerErrorModalAction.CHOOSE_CHANNEL, channelFocusRequester),
+                            primary = focusedAction == PlayerErrorModalAction.CHOOSE_CHANNEL,
                             compact = true,
                         )
                         PlayerErrorModalAction.CHOOSE_SOURCE -> FocusButton(
                             "اختيار مصدر",
                             onChooseServer,
-                            modifier = actionModifier(index, serverFocusRequester),
-                            primary = false,
+                            modifier = actionModifier(PlayerErrorModalAction.CHOOSE_SOURCE, serverFocusRequester),
+                            primary = focusedAction == PlayerErrorModalAction.CHOOSE_SOURCE,
                             compact = true,
                         )
                         PlayerErrorModalAction.BACK -> FocusButton(
                             "رجوع",
                             onBack,
-                            modifier = actionModifier(index, backFocusRequester),
-                            primary = false,
+                            modifier = actionModifier(PlayerErrorModalAction.BACK, backFocusRequester),
+                            primary = focusedAction == PlayerErrorModalAction.BACK,
                             compact = true,
                         )
                     }
