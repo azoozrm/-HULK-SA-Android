@@ -245,3 +245,60 @@ function ops_build_public_config(PDO $db, ?DateTimeImmutable $now = null): array
     }
     return $payload;
 }
+
+function ops_public_config_json(array $payload): string
+{
+    return json_encode(
+        $payload,
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+    );
+}
+
+/**
+ * Weak cache validator for the public config.
+ *
+ * The successful 200 body carries the advisory `generatedAt` timestamp and
+ * therefore differs on every request even when the observable configuration is
+ * unchanged. A strong validator over the exact body would rotate every second.
+ * This derives a weak validator from the same payload with ONLY `generatedAt`
+ * removed, so it stays stable while the configuration is unchanged and changes
+ * whenever any returned semantic field changes (service, update, announcement/s,
+ * features, growth, optional presence, schemaVersion).
+ */
+function ops_public_config_validator(array $payload): string
+{
+    $semantic = $payload;
+    unset($semantic['generatedAt']);
+
+    return 'W/"' . hash('sha256', ops_public_config_json($semantic)) . '"';
+}
+
+/**
+ * Weak comparison of an If-None-Match condition against this endpoint's
+ * validator. RFC 9110 requires weak comparison for If-None-Match, so the
+ * emitted weak validator and its strong-equivalent opaque tag match alike.
+ * Lists and the `*` wildcard are handled; entity-tags cannot contain commas.
+ */
+function ops_public_config_validator_matches(string $condition, string $validator): bool
+{
+    $condition = trim($condition);
+    if ($condition === '') {
+        return false;
+    }
+    if ($condition === '*') {
+        return true;
+    }
+
+    $target = str_starts_with($validator, 'W/') ? substr($validator, 2) : $validator;
+    foreach (explode(',', $condition) as $candidate) {
+        $candidate = trim($candidate);
+        if (str_starts_with($candidate, 'W/')) {
+            $candidate = substr($candidate, 2);
+        }
+        if ($candidate !== '' && hash_equals($target, $candidate)) {
+            return true;
+        }
+    }
+
+    return false;
+}

@@ -218,4 +218,79 @@ ops_test(
 
 require __DIR__ . '/release-deletion.php';
 
+$publicConfigFixture = [
+    'schemaVersion' => 1,
+    'generatedAt' => 1770000000,
+    'service' => ['status' => 'OPERATIONAL', 'message' => '', 'startsAt' => null, 'estimatedEndAt' => null],
+    'update' => [
+        'latestVersionCode' => 67,
+        'latestVersionName' => '0.9.3.23',
+        'minimumSupportedVersionCode' => 64,
+        'updateType' => 'OPTIONAL',
+        'required' => false,
+        'apkUrl' => 'https://hulksa.com/hulk-operations/releases/hulk-sa.apk',
+        'apkSha256' => str_repeat('a', 64),
+        'releaseNotes' => '',
+    ],
+    'announcement' => null,
+    'announcements' => [],
+    'features' => ['downloads_enabled' => true],
+    'growth' => ['enabled' => true],
+];
+$publicConfigValidator = ops_public_config_validator($publicConfigFixture);
+ops_test(
+    preg_match('/^W\/"[0-9a-f]{64}"$/D', $publicConfigValidator) === 1,
+    'the public config validator is a weak SHA-256 entity-tag'
+);
+$publicConfigLater = $publicConfigFixture;
+$publicConfigLater['generatedAt'] = 1770003600;
+ops_test(
+    ops_public_config_validator($publicConfigLater) === $publicConfigValidator,
+    'a changed generatedAt keeps the same weak validator'
+);
+$publicConfigJsonLater = ops_public_config_json($publicConfigLater);
+ops_test(
+    str_contains($publicConfigJsonLater, '"generatedAt":1770003600'),
+    'the 200 response body still carries generatedAt'
+);
+$publicConfigService = $publicConfigFixture;
+$publicConfigService['service']['status'] = 'MAINTENANCE';
+ops_test(
+    ops_public_config_validator($publicConfigService) !== $publicConfigValidator,
+    'a service change changes the validator'
+);
+$publicConfigFeature = $publicConfigFixture;
+$publicConfigFeature['features']['downloads_enabled'] = false;
+ops_test(
+    ops_public_config_validator($publicConfigFeature) !== $publicConfigValidator,
+    'a feature change changes the validator'
+);
+$publicConfigAnnouncement = $publicConfigFixture;
+$publicConfigAnnouncement['announcements'] = [['id' => 'MSG-X', 'enabled' => true]];
+$publicConfigAnnouncement['announcement'] = $publicConfigAnnouncement['announcements'][0];
+ops_test(
+    ops_public_config_validator($publicConfigAnnouncement) !== $publicConfigValidator,
+    'an announcement activation change changes the validator'
+);
+ops_test(
+    ops_public_config_validator_matches($publicConfigValidator, $publicConfigValidator),
+    'the exact emitted validator matches If-None-Match'
+);
+ops_test(
+    ops_public_config_validator_matches(substr($publicConfigValidator, 2), $publicConfigValidator),
+    'the strong-equivalent opaque tag matches If-None-Match by weak comparison'
+);
+ops_test(
+    ops_public_config_validator_matches('*', $publicConfigValidator),
+    'the wildcard If-None-Match condition matches'
+);
+ops_test(
+    !ops_public_config_validator_matches('W/"' . str_repeat('0', 64) . '"', $publicConfigValidator),
+    'a different validator does not match If-None-Match'
+);
+ops_test(
+    !ops_public_config_validator_matches('', $publicConfigValidator),
+    'an absent If-None-Match condition does not match'
+);
+
 fwrite(STDOUT, "PASS: {$tests} HULK Operations backend policy checks.\n");
