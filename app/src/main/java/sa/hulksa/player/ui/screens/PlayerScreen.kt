@@ -253,6 +253,7 @@ fun PlayerScreen(
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
     nextEpisodeTitle: String? = null,
     onPlayNextEpisode: (() -> Unit)? = null,
+    onErrorModalActiveChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1075,6 +1076,13 @@ fun PlayerScreen(
             withFrameNanos { }
             runCatching { errorRetryFocus.requestFocus() }
         }
+    }
+
+    val errorModalInputActive = finalError != null || suspendedFinalError != null
+    val latestOnErrorModalActiveChanged by rememberUpdatedState(onErrorModalActiveChanged)
+    DisposableEffect(errorModalInputActive) {
+        latestOnErrorModalActiveChanged(errorModalInputActive)
+        onDispose { latestOnErrorModalActiveChanged(false) }
     }
 
     val interactionModifier = Modifier

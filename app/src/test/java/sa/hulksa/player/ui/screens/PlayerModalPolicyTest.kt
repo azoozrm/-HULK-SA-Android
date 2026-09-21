@@ -102,4 +102,97 @@ class PlayerModalPolicyTest {
             playerErrorModalInputDisposition(PlayerErrorModalInput.BACK),
         )
     }
+
+    @Test
+    fun `error modal active prevents outer live OK ownership`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = true,
+            ),
+        )
+        assertEquals(
+            PlayerErrorModalInputDisposition.PASS_TO_MODAL_ACTION,
+            playerErrorModalInputDisposition(PlayerErrorModalInput.SELECT),
+        )
+    }
+
+    @Test
+    fun `error modal active prevents outer live up down zapping`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = true,
+            ),
+        )
+        listOf(PlayerErrorModalInput.UP, PlayerErrorModalInput.DOWN).forEach { input ->
+            assertEquals(
+                PlayerErrorModalInputDisposition.CONSUME,
+                playerErrorModalInputDisposition(input),
+            )
+        }
+    }
+
+    @Test
+    fun `error modal active prevents outer channel keys from zapping`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = true,
+            ),
+        )
+        listOf(PlayerErrorModalInput.CHANNEL_UP, PlayerErrorModalInput.CHANNEL_DOWN).forEach { input ->
+            assertEquals(
+                PlayerErrorModalInputDisposition.CONSUME,
+                playerErrorModalInputDisposition(input),
+            )
+        }
+    }
+
+    @Test
+    fun `error modal active prevents outer media next previous from zapping`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = true,
+            ),
+        )
+        assertEquals(
+            PlayerErrorModalInputDisposition.CONSUME,
+            playerErrorModalInputDisposition(PlayerErrorModalInput.PLAYER_COMMAND),
+        )
+    }
+
+    @Test
+    fun `outer live layer owns input again once the error modal is gone`() {
+        assertTrue(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `outer live layer never owns input outside live pro playback`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = false,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+            ),
+        )
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = false,
+                errorModalInputActive = false,
+            ),
+        )
+    }
 }
