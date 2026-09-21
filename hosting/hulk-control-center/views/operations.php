@@ -85,6 +85,12 @@ $csrf = cc_csrf_token();
                                 <details class="inline-editor"><summary>تعديل السياسة</summary><form method="post"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="update_release_policy"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><label class="form-field"><span>الحد الأدنى</span><input name="minimum_supported_version_code" type="number" min="1" value="<?= (int) $release['minimum_supported_version_code'] ?>" required></label><label class="check-control"><input name="required" type="checkbox" value="1" <?= !empty($release['required']) ? 'checked' : '' ?>> تحديث إلزامي</label><button class="button button--secondary" type="submit">حفظ السياسة</button></form></details>
                                 <?php if (!empty($release['enabled']) || !empty($release['is_active'])): ?><form method="post" data-confirm="تعطيل هذا الإصدار؟"><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="disable_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--danger" type="submit">تعطيل</button></form><?php endif; ?>
                             </div>
+                            <section class="destructive-zone">
+                                <div><strong>حذف الإصدار نهائيًا</strong><small>يحذف سجل الإصدار وملف APK المرتبط به من الاستضافة. لا يمكن التراجع عن هذا الإجراء.</small></div>
+                                <div class="record-actions">
+                                    <form method="post" data-confirm="حذف هذا الإصدار نهائيًا؟ سيُحذف سجل الإصدار وملف APK، وإذا كان الإصدار منشورًا فستعود سياسة التحديث إلى الوضع الآمن."><input type="hidden" name="csrf_token" value="<?= cc_e($csrf) ?>"><input type="hidden" name="action" value="delete_release"><input type="hidden" name="release_id" value="<?= (int) $release['id'] ?>"><button class="button button--danger" type="submit">حذف الإصدار</button></form>
+                                </div>
+                            </section>
                         </article>
                     <?php endforeach; ?>
                 </div>

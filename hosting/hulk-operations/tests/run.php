@@ -216,4 +216,6 @@ ops_test(
     'enabled Presence discovery is bounded and additive'
 );
 
+require __DIR__ . '/release-deletion.php';
+
 fwrite(STDOUT, "PASS: {$tests} HULK Operations backend policy checks.\n");

@@ -23,7 +23,7 @@ function cc_operations_handle_post(string $module, array $admin): string
     }
     $action = cc_post_action();
     $allowedActions = [
-        'releases' => ['upload_release', 'activate_release', 'disable_release', 'update_release_policy'],
+        'releases' => ['upload_release', 'activate_release', 'disable_release', 'update_release_policy', 'delete_release'],
         'service' => ['update_service_status'],
         'announcements' => ['create_announcement', 'disable_announcement'],
         'features' => ['toggle_feature_flag'],
@@ -50,6 +50,7 @@ function cc_operations_handle_post(string $module, array $admin): string
             ops_update_release_policy($db, $admin);
             return 'تم تحديث سياسة الإصدار.';
         })(),
+        'delete_release' => ops_delete_release($db, $admin),
         'update_service_status' => (function () use ($db, $admin): string {
             ops_update_service_status($db, $admin);
             return 'تم تحديث حالة الخدمة.';
