@@ -11,18 +11,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
 try {
     require_once dirname(__DIR__, 4) . '/bootstrap.php';
     $payload = ops_build_public_config(ops_db());
-    $json = json_encode(
-        $payload,
-        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
-    );
-    $etag = '"' . hash('sha256', $json) . '"';
+    $json = ops_public_config_json($payload);
+    $etag = ops_public_config_validator($payload);
 
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: public, max-age=' . (int) (ops_load_config()['app']['api_cache_seconds'] ?? 60));
     header('ETag: ' . $etag);
     header('X-Content-Type-Options: nosniff');
 
-    if (trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
+    if (ops_public_config_validator_matches((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''), $etag)) {
         http_response_code(304);
         exit;
     }

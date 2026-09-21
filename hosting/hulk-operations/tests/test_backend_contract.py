@@ -253,6 +253,21 @@ class OperationsBackendContractTest(unittest.TestCase):
         self.assertNotIn("firebase", growth_sources)
         self.assertNotIn("analytics", growth_sources)
 
+    def test_public_api_uses_stable_weak_validator(self) -> None:
+        endpoint = self.read("api/app/v1/config/index.php")
+        operations = self.read("lib/operations.php")
+        # The endpoint derives the validator from the semantic payload and never
+        # hashes the volatile full body (which embeds generatedAt).
+        self.assertIn("ops_public_config_validator($payload)", endpoint)
+        self.assertIn("ops_public_config_validator_matches(", endpoint)
+        self.assertNotIn("hash('sha256', $json)", endpoint)
+        # The validator is weak and strips only generatedAt.
+        self.assertIn('W/"', operations)
+        self.assertIn("unset($semantic['generatedAt'])", operations)
+        # generatedAt remains part of the normal public payload.
+        self.assertIn("'generatedAt' => $currentTime->getTimestamp()", operations)
+        self.assertIn("function ops_public_config_json(", operations)
+
 
 if __name__ == "__main__":
     unittest.main()
