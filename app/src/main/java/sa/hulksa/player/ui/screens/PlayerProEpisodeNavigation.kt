@@ -198,6 +198,7 @@ fun PlayerProScreen(
     var liveZapIndicatorChannelId by remember(liveCatalog) { mutableStateOf<Int?>(null) }
     var liveZapIndicatorTick by remember(liveCatalog) { mutableIntStateOf(0) }
     var childControlSelectionPending by remember(request.historyKey) { mutableStateOf(false) }
+    var childErrorModalInputActive by remember(request.historyKey) { mutableStateOf(false) }
 
     LaunchedEffect(liveControlsLikelyVisible, liveControlsInteractionTick) {
         if (liveControlsLikelyVisible) {
@@ -366,6 +367,15 @@ fun PlayerProScreen(
 
                 val keyCode = event.nativeKeyEvent.keyCode
                 if (request.isLive && liveTvProEnabled) {
+                    if (
+                        !playerLiveProLayerOwnsInput(
+                            isLive = request.isLive,
+                            liveTvProEnabled = liveTvProEnabled,
+                            errorModalInputActive = childErrorModalInputActive,
+                        )
+                    ) {
+                        return@onPreviewKeyEvent false
+                    }
                     if (liveBrowserVisible) return@onPreviewKeyEvent false
 
                     when (keyCode) {
@@ -488,6 +498,7 @@ fun PlayerProScreen(
             onProgress = onProgress,
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
             onPlayNextEpisode = onPlayNextEpisode,
+            onErrorModalActiveChanged = { childErrorModalInputActive = it },
         )
 
         if (liveTvProEnabled && request.isLive && liveZapIndicatorChannel != null && !liveBrowserVisible) {

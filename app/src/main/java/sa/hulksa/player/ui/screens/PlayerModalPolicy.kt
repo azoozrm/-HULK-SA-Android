@@ -46,6 +46,20 @@ internal fun playerErrorModalInputDisposition(
     PlayerErrorModalInput.OTHER -> PlayerErrorModalInputDisposition.PASS_TO_SYSTEM
 }
 
+/**
+ * Input ownership across the PlayerProScreen / PlayerScreen boundary.
+ *
+ * The child player error modal (and the channel/server pickers it opens) is the single input
+ * owner while it is active. The outer Live TV Pro layer must not convert modal-owned keys into
+ * Live navigation or browser actions during that time. When no error modal is active the outer
+ * layer keeps its existing Live behavior.
+ */
+internal fun playerLiveProLayerOwnsInput(
+    isLive: Boolean,
+    liveTvProEnabled: Boolean,
+    errorModalInputActive: Boolean,
+): Boolean = isLive && liveTvProEnabled && !errorModalInputActive
+
 internal fun canOfferPlayerErrorSourcePicker(
     failureClass: RecoveryFailureClass?,
     candidateCount: Int,
