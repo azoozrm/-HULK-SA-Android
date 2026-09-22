@@ -1,6 +1,7 @@
 import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URI
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -74,6 +75,33 @@ val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfi
                 "The HULK Operations config endpoint must be the reviewed public HTTPS URL.",
             )
         }
+    }
+}
+
+tasks.register("verifyBenchmarkBaselineProfilePackaging") {
+    group = "verification"
+    description = "Asserts the non-debuggable benchmark APK packages a merged baseline profile for Gate 3."
+
+    dependsOn("assembleBenchmark")
+
+    doLast {
+        val apk = layout.buildDirectory
+            .file("outputs/apk/benchmark/app-benchmark.apk")
+            .get()
+            .asFile
+        if (!apk.isFile) {
+            throw GradleException("Benchmark APK not found: ${apk.absolutePath}")
+        }
+        val packaged = ZipFile(apk).use { zip ->
+            listOf("assets/dexopt/baseline.prof", "assets/dexopt/baseline.profm")
+                .all { entry -> zip.getEntry(entry) != null }
+        }
+        if (!packaged) {
+            throw GradleException(
+                "Benchmark APK is missing the packaged baseline profile (assets/dexopt/baseline.prof).",
+            )
+        }
+        logger.lifecycle("Baseline profile packaging verified in ${apk.name}")
     }
 }
 
@@ -168,6 +196,20 @@ android {
             }
             isMinifyEnabled = true
             isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+        create("benchmark") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".benchmark"
+            versionNameSuffix = ".benchmark"
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isProfileable = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
