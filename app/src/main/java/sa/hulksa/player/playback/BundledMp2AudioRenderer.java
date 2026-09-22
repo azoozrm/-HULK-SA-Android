@@ -113,6 +113,12 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
 
   static final class Mp2Decoder
       extends SimpleDecoder<DecoderInputBuffer, SimpleDecoderOutputBuffer, Mp2DecoderException> {
+    // JLayer's Layer-II decode path indexes its frame bit buffer without bounds checking, so a
+    // single corrupt/desynchronized frame can raise an ArrayIndexOutOfBoundsException. One such
+    // frame-local failure is recoverable; a second consecutive failure without an intervening
+    // successful frame proves persistent corruption and must surface as a normal fatal error.
+    private static final int MAX_CONSECUTIVE_FRAME_RECOVERIES = 1;
+
     private final Format inputFormat;
     private QueuedInputStream encodedInput;
     @Nullable private Bitstream bitstream;
@@ -122,6 +128,8 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
     @Nullable private OutputBuffer pcmBuffer;
     private int channelCount;
     private int sampleRate;
+    private boolean decoderConfigured;
+    private int consecutiveFrameRecoveries;
 
     Mp2Decoder(
         Format format, int inputBufferCount, int outputBufferCount, int initialInputBufferSize)
@@ -194,6 +202,11 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
         int channels = header.mode() == Header.SINGLE_CHANNEL ? 1 : 2;
         int frameSampleRate = header.frequency();
         if (decoder == null) {
+          // After a recovered frame failure the output configuration must not silently change;
+          // keep applying the mid-stream guard once a decoder has been established.
+          if (decoderConfigured && (channelCount != channels || sampleRate != frameSampleRate)) {
+            return new Mp2DecoderException("MP2 output configuration changed mid-stream.");
+          }
           pcmBuffer = new OutputBuffer(channels, /* isBigEndian= */ false);
           leftFilter = new SynthesisFilter(0, 32700.0f, null);
           rightFilter = channels == 2 ? new SynthesisFilter(1, 32700.0f, null) : null;
@@ -207,11 +220,14 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
               OutputChannels.BOTH_CHANNELS);
           channelCount = channels;
           sampleRate = frameSampleRate;
+          decoderConfigured = true;
         } else if (channelCount != channels || sampleRate != frameSampleRate) {
           return new Mp2DecoderException("MP2 output configuration changed mid-stream.");
         }
 
         decoder.decodeFrame();
+        // The frame decoded without triggering a JLayer indexing failure, so restore the budget.
+        consecutiveFrameRecoveries = 0;
         int outputSize = pcmBuffer.reset();
         if (outputSize <= 0) {
           outputBuffer.shouldBeSkipped = true;
@@ -227,6 +243,8 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
         outputData.position(0);
         outputData.limit(outputSize);
         return null;
+      } catch (ArrayIndexOutOfBoundsException frameFailure) {
+        return recoverFrameFailure(outputBuffer, frameFailure);
       } catch (BitstreamException | javazoom.jl.decoder.DecoderException error) {
         return new Mp2DecoderException("Bundled MP2 decoder rejected the frame.", error);
       } catch (RuntimeException error) {
@@ -252,6 +270,28 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
       return sampleRate;
     }
 
+    private Mp2DecoderException recoverFrameFailure(
+        SimpleDecoderOutputBuffer outputBuffer, ArrayIndexOutOfBoundsException error) {
+      if (consecutiveFrameRecoveries >= MAX_CONSECUTIVE_FRAME_RECOVERIES) {
+        return new Mp2DecoderException("Bundled MP2 decoder failed.", error);
+      }
+      consecutiveFrameRecoveries++;
+      resetFrameDecodeState();
+      outputBuffer.shouldBeSkipped = true;
+      return null;
+    }
+
+    private void resetFrameDecodeState() {
+      // readFrame() already consumed the failed frame, so the Bitstream parser position and the
+      // queued encoded input are preserved and JLayer can resynchronize on the next frame. Only the
+      // partially-updated decoder/synthesis/output state is discarded; the established output
+      // configuration is retained.
+      decoder = null;
+      leftFilter = null;
+      rightFilter = null;
+      pcmBuffer = null;
+    }
+
     private void resetDecoderState() {
       closeBitstream();
       encodedInput = new QueuedInputStream();
@@ -262,6 +302,8 @@ final class BundledMp2AudioRenderer extends DecoderAudioRenderer<BundledMp2Audio
       pcmBuffer = null;
       channelCount = inputFormat.channelCount;
       sampleRate = inputFormat.sampleRate;
+      decoderConfigured = false;
+      consecutiveFrameRecoveries = 0;
     }
 
     private void closeBitstream() {
