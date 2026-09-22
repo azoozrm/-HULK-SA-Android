@@ -123,6 +123,7 @@ import sa.hulksa.player.playback.playerReplacementPolicy
 import sa.hulksa.player.playback.shouldReprepareAfterAudioTrackOverride
 import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.BrandBadge
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
@@ -1638,6 +1639,60 @@ private fun ModernVodControls(
     }
 }
 
+internal data class LiveControlsLayoutMetrics(
+    val outerHorizontalPaddingDp: Float,
+    val outerTopPaddingDp: Float,
+    val outerBottomPaddingDp: Float,
+    val rowHorizontalContentPaddingDp: Float,
+    val rowVerticalContentPaddingDp: Float,
+)
+
+/**
+ * Adaptive layout policy for the Live controls overlay.
+ *
+ * On television/remote layouts the overlay adopts the same premium safe-window metrics as the
+ * other Player TV overlays and reserves focus-edge room so the scaled, bordered FocusButton is not
+ * clipped by the LazyRow viewport at its first or last item. Touch layouts keep the existing
+ * compact phone geometry.
+ */
+internal fun liveControlsLayoutMetrics(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+    remoteLayout: Boolean,
+): LiveControlsLayoutMetrics {
+    if (!remoteLayout) {
+        return LiveControlsLayoutMetrics(
+            outerHorizontalPaddingDp = 18f,
+            outerTopPaddingDp = 13f,
+            outerBottomPaddingDp = 18f,
+            rowHorizontalContentPaddingDp = 0f,
+            rowVerticalContentPaddingDp = 2f,
+        )
+    }
+
+    val width = screenWidthDp.coerceAtLeast(1)
+    val height = screenHeightDp.coerceAtLeast(1)
+    val overlay = playerTvPremiumOverlayMetrics(width, height)
+    val premium = tvPremiumWindowPolicy(width, height)
+    val focusGrowth = (premium.focusScale - 1f) / 2f
+    val horizontalFocusRoom =
+        premium.focusBorderWidthDp + focusGrowth * LIVE_CONTROL_FOCUS_REFERENCE_WIDTH_DP
+    val verticalFocusRoom =
+        premium.focusBorderWidthDp + focusGrowth * LIVE_CONTROL_FOCUS_REFERENCE_HEIGHT_DP
+
+    return LiveControlsLayoutMetrics(
+        outerHorizontalPaddingDp = overlay.safeHorizontalPaddingDp.toFloat(),
+        outerTopPaddingDp = 18f,
+        outerBottomPaddingDp = overlay.safeBottomPaddingDp.toFloat(),
+        rowHorizontalContentPaddingDp = horizontalFocusRoom,
+        rowVerticalContentPaddingDp = maxOf(verticalFocusRoom, 2f),
+    )
+}
+
+// Compact Live control footprint used only to size focus-edge room for the row's scaled focus ring.
+private const val LIVE_CONTROL_FOCUS_REFERENCE_WIDTH_DP = 150f
+private const val LIVE_CONTROL_FOCUS_REFERENCE_HEIGHT_DP = 40f
+
 @Composable
 private fun ModernLiveControls(
     isPlaying: Boolean,
@@ -1656,6 +1711,13 @@ private fun ModernLiveControls(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val remoteLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+    val layoutMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, remoteLayout) {
+        liveControlsLayoutMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            remoteLayout = remoteLayout,
+        )
+    }
 
     Column(
         modifier = modifier
@@ -1671,10 +1733,10 @@ private fun ModernLiveControls(
             )
             .navigationBarsPadding()
             .padding(
-                start = if (remoteLayout) 34.dp else 18.dp,
-                end = if (remoteLayout) 34.dp else 18.dp,
-                top = if (remoteLayout) 18.dp else 13.dp,
-                bottom = if (remoteLayout) 30.dp else 18.dp,
+                start = layoutMetrics.outerHorizontalPaddingDp.dp,
+                end = layoutMetrics.outerHorizontalPaddingDp.dp,
+                top = layoutMetrics.outerTopPaddingDp.dp,
+                bottom = layoutMetrics.outerBottomPaddingDp.dp,
             ),
     ) {
         Row(
@@ -1726,7 +1788,10 @@ private fun ModernLiveControls(
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(if (remoteLayout) 8.dp else 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(vertical = 2.dp),
+            contentPadding = PaddingValues(
+                horizontal = layoutMetrics.rowHorizontalContentPaddingDp.dp,
+                vertical = layoutMetrics.rowVerticalContentPaddingDp.dp,
+            ),
         ) {
             item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
             item {
