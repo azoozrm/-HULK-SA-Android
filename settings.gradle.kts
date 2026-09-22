@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "HULK-SA"
 include(":app")
+include(":macrobenchmark")
