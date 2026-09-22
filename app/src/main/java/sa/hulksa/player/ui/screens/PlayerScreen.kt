@@ -248,6 +248,7 @@ fun PlayerScreen(
     onPlayNextEpisode: (() -> Unit)? = null,
     onErrorModalActiveChanged: (Boolean) -> Unit = {},
     onBrowserVisibilityChanged: (Boolean) -> Unit = {},
+    onPanelActiveChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1079,6 +1080,13 @@ fun PlayerScreen(
         onDispose { latestOnBrowserVisibilityChanged(false) }
     }
 
+    val panelInputActive = activePanel != null
+    val latestOnPanelActiveChanged by rememberUpdatedState(onPanelActiveChanged)
+    DisposableEffect(panelInputActive) {
+        latestOnPanelActiveChanged(panelInputActive)
+        onDispose { latestOnPanelActiveChanged(false) }
+    }
+
     val interactionModifier = Modifier
         .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
@@ -1289,15 +1297,17 @@ fun PlayerScreen(
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
                     resizeLabel = resizeLabel(resizeModeIndex),
+                    hasMultipleSources = canOfferPlayerLiveSourcePicker(request.candidates.size),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                    onReload = { retryManually() },
+                    onReload = { retryManually(candidateIndex) },
                     onMute = {
                         val muted = !isMuted
                         isMuted = muted
                         player.volume = if (muted) 0f else 1f
                     },
+                    onServers = { activePanel = PlayerPanel.SERVERS },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     primaryFocus = primaryFocus,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -1699,11 +1709,13 @@ private fun ModernLiveControls(
     isMuted: Boolean,
     quality: String,
     resizeLabel: String,
+    hasMultipleSources: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onPlayPause: () -> Unit,
     onReload: () -> Unit,
     onMute: () -> Unit,
+    onServers: () -> Unit,
     onResize: () -> Unit,
     primaryFocus: FocusRequester,
     modifier: Modifier = Modifier,
@@ -1805,6 +1817,9 @@ private fun ModernLiveControls(
             item { FocusButton("القناة التالية", onNext, primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
+            if (hasMultipleSources) {
+                item { FocusButton("اختيار المصدر", onServers, primary = false, compact = true) }
+            }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
         }
     }

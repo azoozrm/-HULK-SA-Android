@@ -236,6 +236,61 @@ class PlayerModalPolicyTest {
     }
 
     @Test
+    fun `active child player panel prevents outer live key ownership`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+                browserVisible = false,
+                panelInputActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `outer live layer owns input when no child surface owns input`() {
+        assertTrue(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+                browserVisible = false,
+                panelInputActive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `child panel never grants ownership outside live pro playback`() {
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = false,
+                liveTvProEnabled = true,
+                errorModalInputActive = false,
+                browserVisible = false,
+                panelInputActive = true,
+            ),
+        )
+        assertFalse(
+            playerLiveProLayerOwnsInput(
+                isLive = true,
+                liveTvProEnabled = false,
+                errorModalInputActive = false,
+                browserVisible = false,
+                panelInputActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `live source picker is offered only when more than one candidate exists`() {
+        assertFalse(canOfferPlayerLiveSourcePicker(candidateCount = 1))
+        assertTrue(canOfferPlayerLiveSourcePicker(candidateCount = 2))
+        assertTrue(canOfferPlayerLiveSourcePicker(candidateCount = 4))
+    }
+
+    @Test
     fun `error focus prefers retry once it is placed`() {
         val actions = playerErrorModalActions(canChooseChannel = true, canChooseSource = true)
 
