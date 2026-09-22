@@ -234,4 +234,79 @@ class PlayerModalPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `error focus prefers retry once it is placed`() {
+        val actions = playerErrorModalActions(canChooseChannel = true, canChooseSource = true)
+
+        val candidates = playerErrorFocusCandidates(
+            actions = actions,
+            placedActions = actions.toSet(),
+            attemptedActions = emptySet(),
+        )
+
+        assertEquals(PlayerErrorModalAction.RETRY, candidates.first())
+    }
+
+    @Test
+    fun `error focus falls back in deterministic action order when preferred is not placed`() {
+        val actions = playerErrorModalActions(canChooseChannel = true, canChooseSource = true)
+        val placed = setOf(
+            PlayerErrorModalAction.CHOOSE_CHANNEL,
+            PlayerErrorModalAction.BACK,
+        )
+
+        val candidates = playerErrorFocusCandidates(
+            actions = actions,
+            placedActions = placed,
+            attemptedActions = emptySet(),
+        )
+
+        assertEquals(
+            listOf(PlayerErrorModalAction.CHOOSE_CHANNEL, PlayerErrorModalAction.BACK),
+            candidates,
+        )
+    }
+
+    @Test
+    fun `error focus never retries an already attempted action`() {
+        val actions = playerErrorModalActions(canChooseChannel = true, canChooseSource = true)
+
+        val candidates = playerErrorFocusCandidates(
+            actions = actions,
+            placedActions = actions.toSet(),
+            attemptedActions = setOf(PlayerErrorModalAction.RETRY),
+        )
+
+        assertFalse(PlayerErrorModalAction.RETRY in candidates)
+        assertEquals(PlayerErrorModalAction.CHOOSE_CHANNEL, candidates.first())
+    }
+
+    @Test
+    fun `error focus is bounded to placed modal actions`() {
+        val actions = playerErrorModalActions(canChooseChannel = true, canChooseSource = true)
+
+        val candidates = playerErrorFocusCandidates(
+            actions = actions,
+            placedActions = actions.toSet(),
+            attemptedActions = emptySet(),
+        )
+
+        assertEquals(actions.size, candidates.size)
+        assertEquals(actions.toSet(), candidates.toSet())
+        assertEquals(candidates.distinct(), candidates)
+    }
+
+    @Test
+    fun `error focus returns nothing until an action is placed`() {
+        val actions = playerErrorModalActions(canChooseChannel = true, canChooseSource = true)
+
+        assertTrue(
+            playerErrorFocusCandidates(
+                actions = actions,
+                placedActions = emptySet(),
+                attemptedActions = emptySet(),
+            ).isEmpty(),
+        )
+    }
 }
