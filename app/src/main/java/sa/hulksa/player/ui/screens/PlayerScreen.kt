@@ -2350,6 +2350,16 @@ private fun PlayerSidePanel(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val panelShape = RoundedCornerShape(24.dp)
+    val closeOnBackModifier = Modifier.onPreviewKeyEvent { event ->
+        val code = event.nativeKeyEvent.keyCode
+        val isBack = code == AndroidKeyEvent.KEYCODE_BACK || code == AndroidKeyEvent.KEYCODE_ESCAPE
+        if (isBack) {
+            if (event.type == KeyEventType.KeyDown) onClose()
+            true
+        } else {
+            false
+        }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .62f)))
     Column(
         modifier = modifier
@@ -2359,7 +2369,8 @@ private fun PlayerSidePanel(
             .clip(panelShape)
             .background(Brush.horizontalGradient(listOf(Color(0xFF080906), Color(0xFA15170F))))
             .border(1.dp, colors.gold.copy(alpha = .42f), panelShape)
-            .padding(horizontal = if (adaptiveUi.isTelevision) 26.dp else 18.dp, vertical = if (adaptiveUi.isTelevision) 22.dp else 16.dp),
+            .padding(horizontal = if (adaptiveUi.isTelevision) 26.dp else 18.dp, vertical = if (adaptiveUi.isTelevision) 22.dp else 16.dp)
+            .then(closeOnBackModifier),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(

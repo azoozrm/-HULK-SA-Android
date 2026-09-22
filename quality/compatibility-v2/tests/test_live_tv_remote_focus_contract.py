@@ -26,6 +26,27 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
             text,
         )
 
+    def test_player_side_panel_locally_owns_remote_back_and_escape(self) -> None:
+        text = self.read(PLAYER_SCREEN)
+        start = text.index("private fun PlayerSidePanel(")
+        end = text.index("private fun Int?.orZero()", start)
+        block = text[start:end]
+        # The focused panel locally owns Back/Escape instead of falling through to the surface.
+        self.assertIn(".then(closeOnBackModifier)", block)
+        ownership = re.compile(
+            r"val closeOnBackModifier = Modifier\.onPreviewKeyEvent \{ event ->\s*"
+            r"val code = event\.nativeKeyEvent\.keyCode\s*"
+            r"val isBack = code == AndroidKeyEvent\.KEYCODE_BACK \|\| code == AndroidKeyEvent\.KEYCODE_ESCAPE\s*"
+            r"if \(isBack\) \{\s*"
+            r"if \(event\.type == KeyEventType\.KeyDown\) onClose\(\)\s*"
+            r"true\s*"
+            r"\}\s*else \{\s*"
+            r"false\s*"
+            r"\}",
+            re.DOTALL,
+        )
+        self.assertRegex(block, ownership)
+
     def test_parent_ok_defers_to_the_single_child_owned_channel_browser(self) -> None:
         text = self.read(PLAYER_PRO)
         # The duplicate outer browser must be gone: the parent no longer renders or opens a
