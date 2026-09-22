@@ -50,22 +50,26 @@ internal fun playerErrorModalInputDisposition(
  * Input ownership across the PlayerProScreen / PlayerScreen boundary.
  *
  * The child player error modal (and the channel/server pickers it opens) is the single input
- * owner while it is active, and the child also owns the single canonical Live channel browser
- * visibility state. The outer Live TV Pro layer must not convert child-owned keys into Live
- * navigation or browser actions during that time. When the child owns neither the error modal nor
- * the channel browser the outer layer keeps its existing Live behavior.
+ * owner while it is active, the child owns the single canonical Live channel browser visibility
+ * state, and any active child Player panel (resize, source, audio, subtitles, speed, quality) owns
+ * its own navigation keys. The outer Live TV Pro layer must not convert child-owned keys into Live
+ * navigation or browser actions during that time. When the child owns none of those surfaces the
+ * outer layer keeps its existing Live behavior.
  */
 internal fun playerLiveProLayerOwnsInput(
     isLive: Boolean,
     liveTvProEnabled: Boolean,
     errorModalInputActive: Boolean,
     browserVisible: Boolean,
-): Boolean = isLive && liveTvProEnabled && !errorModalInputActive && !browserVisible
+    panelInputActive: Boolean = false,
+): Boolean = isLive && liveTvProEnabled && !errorModalInputActive && !browserVisible && !panelInputActive
 
 internal fun canOfferPlayerErrorSourcePicker(
     failureClass: RecoveryFailureClass?,
     candidateCount: Int,
 ): Boolean = failureClass == RecoveryFailureClass.SOURCE && candidateCount > 1
+
+internal fun canOfferPlayerLiveSourcePicker(candidateCount: Int): Boolean = candidateCount > 1
 
 internal fun playerErrorModalActions(
     canChooseChannel: Boolean,

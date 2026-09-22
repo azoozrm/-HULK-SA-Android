@@ -123,6 +123,7 @@ import sa.hulksa.player.playback.playerReplacementPolicy
 import sa.hulksa.player.playback.shouldReprepareAfterAudioTrackOverride
 import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.BrandBadge
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
@@ -247,6 +248,7 @@ fun PlayerScreen(
     onPlayNextEpisode: (() -> Unit)? = null,
     onErrorModalActiveChanged: (Boolean) -> Unit = {},
     onBrowserVisibilityChanged: (Boolean) -> Unit = {},
+    onPanelActiveChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1078,6 +1080,13 @@ fun PlayerScreen(
         onDispose { latestOnBrowserVisibilityChanged(false) }
     }
 
+    val panelInputActive = activePanel != null
+    val latestOnPanelActiveChanged by rememberUpdatedState(onPanelActiveChanged)
+    DisposableEffect(panelInputActive) {
+        latestOnPanelActiveChanged(panelInputActive)
+        onDispose { latestOnPanelActiveChanged(false) }
+    }
+
     val interactionModifier = Modifier
         .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
@@ -1288,15 +1297,17 @@ fun PlayerScreen(
                     isMuted = isMuted,
                     quality = qualityLabel(videoHeight),
                     resizeLabel = resizeLabel(resizeModeIndex),
+                    hasMultipleSources = canOfferPlayerLiveSourcePicker(request.candidates.size),
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                    onReload = { retryManually() },
+                    onReload = { retryManually(candidateIndex) },
                     onMute = {
                         val muted = !isMuted
                         isMuted = muted
                         player.volume = if (muted) 0f else 1f
                     },
+                    onServers = { activePanel = PlayerPanel.SERVERS },
                     onResize = { activePanel = PlayerPanel.RESIZE },
                     primaryFocus = primaryFocus,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -1638,17 +1649,73 @@ private fun ModernVodControls(
     }
 }
 
+internal data class LiveControlsLayoutMetrics(
+    val outerHorizontalPaddingDp: Float,
+    val outerTopPaddingDp: Float,
+    val outerBottomPaddingDp: Float,
+    val rowHorizontalContentPaddingDp: Float,
+    val rowVerticalContentPaddingDp: Float,
+)
+
+/**
+ * Adaptive layout policy for the Live controls overlay.
+ *
+ * On television/remote layouts the overlay adopts the same premium safe-window metrics as the
+ * other Player TV overlays and reserves focus-edge room so the scaled, bordered FocusButton is not
+ * clipped by the LazyRow viewport at its first or last item. Touch layouts keep the existing
+ * compact phone geometry.
+ */
+internal fun liveControlsLayoutMetrics(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+    remoteLayout: Boolean,
+): LiveControlsLayoutMetrics {
+    if (!remoteLayout) {
+        return LiveControlsLayoutMetrics(
+            outerHorizontalPaddingDp = 18f,
+            outerTopPaddingDp = 13f,
+            outerBottomPaddingDp = 18f,
+            rowHorizontalContentPaddingDp = 0f,
+            rowVerticalContentPaddingDp = 2f,
+        )
+    }
+
+    val width = screenWidthDp.coerceAtLeast(1)
+    val height = screenHeightDp.coerceAtLeast(1)
+    val overlay = playerTvPremiumOverlayMetrics(width, height)
+    val premium = tvPremiumWindowPolicy(width, height)
+    val focusGrowth = (premium.focusScale - 1f) / 2f
+    val horizontalFocusRoom =
+        premium.focusBorderWidthDp + focusGrowth * LIVE_CONTROL_FOCUS_REFERENCE_WIDTH_DP
+    val verticalFocusRoom =
+        premium.focusBorderWidthDp + focusGrowth * LIVE_CONTROL_FOCUS_REFERENCE_HEIGHT_DP
+
+    return LiveControlsLayoutMetrics(
+        outerHorizontalPaddingDp = overlay.safeHorizontalPaddingDp.toFloat(),
+        outerTopPaddingDp = 18f,
+        outerBottomPaddingDp = overlay.safeBottomPaddingDp.toFloat(),
+        rowHorizontalContentPaddingDp = horizontalFocusRoom,
+        rowVerticalContentPaddingDp = maxOf(verticalFocusRoom, 2f),
+    )
+}
+
+// Compact Live control footprint used only to size focus-edge room for the row's scaled focus ring.
+private const val LIVE_CONTROL_FOCUS_REFERENCE_WIDTH_DP = 150f
+private const val LIVE_CONTROL_FOCUS_REFERENCE_HEIGHT_DP = 40f
+
 @Composable
 private fun ModernLiveControls(
     isPlaying: Boolean,
     isMuted: Boolean,
     quality: String,
     resizeLabel: String,
+    hasMultipleSources: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onPlayPause: () -> Unit,
     onReload: () -> Unit,
     onMute: () -> Unit,
+    onServers: () -> Unit,
     onResize: () -> Unit,
     primaryFocus: FocusRequester,
     modifier: Modifier = Modifier,
@@ -1656,6 +1723,13 @@ private fun ModernLiveControls(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val remoteLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+    val layoutMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, remoteLayout) {
+        liveControlsLayoutMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            remoteLayout = remoteLayout,
+        )
+    }
 
     Column(
         modifier = modifier
@@ -1671,10 +1745,10 @@ private fun ModernLiveControls(
             )
             .navigationBarsPadding()
             .padding(
-                start = if (remoteLayout) 34.dp else 18.dp,
-                end = if (remoteLayout) 34.dp else 18.dp,
-                top = if (remoteLayout) 18.dp else 13.dp,
-                bottom = if (remoteLayout) 30.dp else 18.dp,
+                start = layoutMetrics.outerHorizontalPaddingDp.dp,
+                end = layoutMetrics.outerHorizontalPaddingDp.dp,
+                top = layoutMetrics.outerTopPaddingDp.dp,
+                bottom = layoutMetrics.outerBottomPaddingDp.dp,
             ),
     ) {
         Row(
@@ -1726,7 +1800,10 @@ private fun ModernLiveControls(
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(if (remoteLayout) 8.dp else 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(vertical = 2.dp),
+            contentPadding = PaddingValues(
+                horizontal = layoutMetrics.rowHorizontalContentPaddingDp.dp,
+                vertical = layoutMetrics.rowVerticalContentPaddingDp.dp,
+            ),
         ) {
             item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
             item {
@@ -1740,6 +1817,9 @@ private fun ModernLiveControls(
             item { FocusButton("القناة التالية", onNext, primary = false, compact = true) }
             item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
             item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
+            if (hasMultipleSources) {
+                item { FocusButton("اختيار المصدر", onServers, primary = false, compact = true) }
+            }
             item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
         }
     }

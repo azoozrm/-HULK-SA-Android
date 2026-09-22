@@ -195,6 +195,7 @@ fun PlayerProScreen(
     var liveZapIndicatorTick by remember(liveCatalog) { mutableIntStateOf(0) }
     var childErrorModalInputActive by remember(request.historyKey) { mutableStateOf(false) }
     var childLiveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
+    var childPanelInputActive by remember(request.historyKey) { mutableStateOf(false) }
 
     LaunchedEffect(request.isLive, request.streamId, liveCatalog, liveProfileScope) {
         if (request.isLive && liveChannels.any { it.id == request.streamId }) {
@@ -348,6 +349,7 @@ fun PlayerProScreen(
                             liveTvProEnabled = liveTvProEnabled,
                             errorModalInputActive = childErrorModalInputActive,
                             browserVisible = childLiveBrowserVisible,
+                            panelInputActive = childPanelInputActive,
                         )
                     ) {
                         return@onPreviewKeyEvent false
@@ -439,6 +441,7 @@ fun PlayerProScreen(
             onPlayNextEpisode = onPlayNextEpisode,
             onErrorModalActiveChanged = { childErrorModalInputActive = it },
             onBrowserVisibilityChanged = { childLiveBrowserVisible = it },
+            onPanelActiveChanged = { childPanelInputActive = it },
         )
 
         if (liveTvProEnabled && request.isLive && liveZapIndicatorChannel != null && !childLiveBrowserVisible) {
