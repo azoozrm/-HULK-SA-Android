@@ -28,6 +28,11 @@ jobs:
       HULK_E2E_ACCESS_CODE: ${{ secrets.HULK_E2E_ACCESS_CODE }}
       HULK_E2E_USERNAME: ${{ secrets.HULK_E2E_USERNAME }}
       HULK_E2E_PASSWORD: ${{ secrets.HULK_E2E_PASSWORD }}
+      HULK_GATE3B_EGRESS_SSH_KEY: ${{ secrets.HULK_GATE3B_EGRESS_SSH_KEY }}
+      HULK_GATE3B_EGRESS_HOST: ${{ secrets.HULK_GATE3B_EGRESS_HOST }}
+      HULK_GATE3B_EGRESS_USER: ${{ secrets.HULK_GATE3B_EGRESS_USER }}
+      HULK_GATE3B_EGRESS_PORT: ${{ secrets.HULK_GATE3B_EGRESS_PORT }}
+      HULK_GATE3B_EGRESS_HOST_KEY: ${{ secrets.HULK_GATE3B_EGRESS_HOST_KEY }}
 
     steps:
       - uses: actions/checkout@v7
@@ -49,13 +54,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in HULK_E2E_ACCESS_CODE HULK_E2E_USERNAME HULK_E2E_PASSWORD; do
+          for name in HULK_E2E_ACCESS_CODE HULK_E2E_USERNAME HULK_E2E_PASSWORD \
+            HULK_GATE3B_EGRESS_SSH_KEY HULK_GATE3B_EGRESS_HOST HULK_GATE3B_EGRESS_USER; do
             if [[ -z "${!name:-}" ]]; then
               echo "Missing protected secret: $name" >&2
               exit 2
             fi
           done
-          echo "PASS: protected Gate 3B credentials are available"
+          echo "PASS: protected Gate 3B credentials and egress inputs are available"
 
       - name: Install Android SDK
         run: |
@@ -91,6 +97,10 @@ jobs:
           test -e /dev/kvm
           sudo chmod a+rw /dev/kvm
 
+      - name: Start approved Contabo egress tunnel
+        shell: bash
+        run: bash .github/gate3b-egress.sh
+
       - name: Generate and qualify baseline profile
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -102,7 +112,7 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin 1920x1080
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin 1920x1080 -http-proxy 10.0.2.2:8118
           script: bash .github/gate3b-generate.sh
 
       - name: Write sanitized evidence summary
@@ -143,3 +153,8 @@ jobs:
           path: build/gate3b/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Tear down approved egress tunnel
+        if: always()
+        shell: bash
+        run: bash .github/gate3b-egress-cleanup.sh

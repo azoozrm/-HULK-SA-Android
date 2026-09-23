@@ -118,6 +118,7 @@ secrets = [
     os.environ.get("HULK_E2E_ACCESS_CODE", ""),
     os.environ.get("HULK_E2E_USERNAME", ""),
     os.environ.get("HULK_E2E_PASSWORD", ""),
+    os.environ.get("HULK_GATE3B_EGRESS_SSH_KEY", ""),
 ]
 secrets = [s for s in secrets if s]
 for dirpath, _, files in os.walk(root):
