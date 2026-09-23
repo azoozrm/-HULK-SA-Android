@@ -1,0 +1,113 @@
+name: Gate 3B Emulator Probe (temporary)
+
+# Temporary, non-deliverable probe used to qualify the GitHub-hosted Android TV
+# AOSP emulator path for Gate 3B Baseline Profile generation. Proves: Android TV
+# API 36 x86_64 boot, /dev/kvm acceleration, adb root, D-pad input, HULK
+# benchmark target install, and BaselineProfileRule generation on the emulator.
+# This workflow makes no application/runtime change and is removed after
+# qualification.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Android TV API 36 x86_64 root + baseline probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Build benchmark target APKs
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain --max-workers=2 \
+            :app:assembleBenchmark :macrobenchmark:assembleBenchmark
+
+      - name: Probe TV emulator capabilities and baseline generation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: android-tv
+          arch: x86_64
+          profile: tv_1080p
+          disable-animations: true
+          disk-size: 4096M
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin 1920x1080
+          script: |
+            set -euxo pipefail
+            out=build/gate3b-probe
+            mkdir -p "$out"
+
+            adb wait-for-device
+            adb root || echo "ADB_ROOT_FAILED" | tee -a "$out/device.txt"
+            sleep 5
+            adb wait-for-device
+
+            {
+              echo "host_kvm_present=$( [[ -e /dev/kvm ]] && echo yes || echo no )"
+              echo "sdk=$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+              echo "release=$(adb shell getprop ro.build.version.release | tr -d '\r')"
+              echo "build_type=$(adb shell getprop ro.build.type | tr -d '\r')"
+              echo "debuggable=$(adb shell getprop ro.debuggable | tr -d '\r')"
+              echo "product=$(adb shell getprop ro.product.name | tr -d '\r')"
+              echo "device=$(adb shell getprop ro.product.device | tr -d '\r')"
+              echo "abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
+              echo "fingerprint=$(adb shell getprop ro.build.fingerprint | tr -d '\r')"
+              echo "shell_id=$(adb shell id | tr -d '\r')"
+              echo "dumpsys_accel=$(adb shell 'ls /dev/kvm' 2>&1 | tr -d '\r' || true)"
+            } | tee "$out/device.txt"
+
+            adb shell input keyevent 20 && echo "dpad_down_ok" | tee "$out/dpad.txt" || echo "dpad_down_fail" | tee "$out/dpad.txt"
+            adb shell input keyevent 22 && echo "dpad_right_ok" | tee -a "$out/dpad.txt" || echo "dpad_right_fail" | tee -a "$out/dpad.txt"
+
+            adb install -r app/build/outputs/apk/benchmark/app-benchmark.apk | tee "$out/install-app.txt"
+            adb install -r macrobenchmark/build/outputs/apk/benchmark/macrobenchmark-benchmark.apk | tee "$out/install-macrobenchmark.txt"
+
+            set +e
+            ./gradlew --no-daemon --console=plain --max-workers=2 \
+              :macrobenchmark:connectedBenchmarkAndroidTest \
+              "-Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.macrobenchmark.BaselineProfileGenerator" \
+              2>&1 | tee "$out/generation.log"
+            generation_status=${PIPESTATUS[0]}
+            echo "generation_status=$generation_status" | tee "$out/generation-status.txt"
+            set -e
+
+            find macrobenchmark/build -type f \( -name 'baseline-prof.txt' -o -name '*.prof' -o -name '*.profm' \) -print 2>/dev/null | tee "$out/profile-files.txt" || true
+            mkdir -p "$out/profiles"
+            while IFS= read -r f; do
+              cp "$f" "$out/profiles/$(echo "$f" | tr '/' '_')" 2>/dev/null || true
+            done < "$out/profile-files.txt"
+
+            adb logcat -d -t 400 > "$out/logcat-tail.txt" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: HULK-SA-GATE3B-EMULATOR-PROBE-${{ github.run_id }}
+          path: build/gate3b-probe/
+          if-no-files-found: error
+          retention-days: 14
