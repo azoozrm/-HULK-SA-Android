@@ -236,6 +236,7 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
+                "proguard-benchmark-test-api.pro",
             )
             // Gate 3B: keep the instrumentation APK buildable on the minified benchmark variant.
             testProguardFiles("proguard-test-rules.pro")
