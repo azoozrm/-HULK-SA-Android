@@ -48,6 +48,19 @@ done
 lab_guard_test_package "$PKG"
 SERIAL=$(lab_require_adb_device)
 mkdir -p "$OUT"
+REMOTE_UI=/sdcard/hulk_lab_ui.xml
+
+# Interruption-safe cleanup for the on-device raw UI dump (only registered when --capture-ui
+# is used). Removes only the temporary remote file; never deletes produced evidence files.
+cleanup_remote_ui() {
+  if [[ -n "${SERIAL:-}" ]]; then
+    timeout 10 adb -s "$SERIAL" shell rm -f "$REMOTE_UI" >/dev/null 2>&1 || true
+  fi
+}
+if [[ "$CAPTURE_UI" == true ]]; then
+  trap 'cleanup_remote_ui' EXIT
+  trap 'cleanup_remote_ui; exit 130' INT TERM HUP
+fi
 
 cap() { timeout 25 adb -s "$SERIAL" shell "$@" 2>&1 || true; }
 
@@ -105,7 +118,6 @@ else
 fi
 
 if [[ "$CAPTURE_UI" == true ]]; then
-  REMOTE_UI=/sdcard/hulk_lab_ui.xml
   if cap uiautomator dump "$REMOTE_UI" | grep -qi 'dumped'; then
     timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$OUT/ui-hierarchy.xml" >/dev/null 2>&1 || true
     timeout 20 adb -s "$SERIAL" shell rm -f "$REMOTE_UI" || true

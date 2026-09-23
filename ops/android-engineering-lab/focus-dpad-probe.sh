@@ -41,6 +41,20 @@ lab_guard_test_package "$PKG"
 SERIAL=$(lab_require_adb_device)
 mkdir -p "$OUT"
 REMOTE_UI=/sdcard/hulk_lab_focus.xml
+LAB_TMP_FILE=""
+
+# Interruption-safe cleanup: remove any local temporary raw-UI file and the on-device raw-UI
+# dump even on EXIT/INT/TERM/HUP. Best-effort; never removes intentionally produced evidence.
+cleanup_evidence() {
+  if [[ -n "${LAB_TMP_FILE:-}" && -f "${LAB_TMP_FILE:-}" ]]; then
+    rm -f "$LAB_TMP_FILE" || true
+  fi
+  if [[ -n "${SERIAL:-}" ]]; then
+    timeout 10 adb -s "$SERIAL" shell rm -f "$REMOTE_UI" >/dev/null 2>&1 || true
+  fi
+}
+trap 'cleanup_evidence' EXIT
+trap 'cleanup_evidence; exit 130' INT TERM HUP
 
 adb_shell() { timeout 25 adb -s "$SERIAL" shell "$@" 2>&1 || true; }
 
@@ -61,23 +75,24 @@ keycode_for() {
 # node" from "standalone uiautomator unavailable" without retaining raw UI.
 dump_focus() {
   local label=$1
-  local tmp
-  tmp=$(mktemp)
+  LAB_TMP_FILE=$(mktemp)
   local pulled=false
   adb_shell rm -f "$REMOTE_UI" >/dev/null
   if adb_shell uiautomator dump "$REMOTE_UI" | grep -qi 'dumped'; then
-    if timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$tmp" >/dev/null 2>&1 && [[ -s "$tmp" ]]; then
+    if timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$LAB_TMP_FILE" >/dev/null 2>&1 && [[ -s "$LAB_TMP_FILE" ]]; then
       pulled=true
     fi
     adb_shell rm -f "$REMOTE_UI" >/dev/null
   fi
   if [[ "$pulled" == true ]]; then
-    python3 "$FOCUS_HELPER" "$tmp" >"$OUT/focus-$label.json" 2>/dev/null || echo '[]' >"$OUT/focus-$label.json"
+    python3 "$FOCUS_HELPER" "$LAB_TMP_FILE" >"$OUT/focus-$label.json" 2>/dev/null || echo '[]' >"$OUT/focus-$label.json"
     : >"$OUT/focus-$label.ok"
-    rm -f "$tmp"
+    rm -f "$LAB_TMP_FILE"
+    LAB_TMP_FILE=""
     return 0
   fi
-  rm -f "$tmp"
+  rm -f "$LAB_TMP_FILE"
+  LAB_TMP_FILE=""
   echo '[]' >"$OUT/focus-$label.json"
   return 1
 }

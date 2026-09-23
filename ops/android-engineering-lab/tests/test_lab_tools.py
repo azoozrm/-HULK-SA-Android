@@ -135,6 +135,28 @@ class ToolGuardTest(unittest.TestCase):
         self.assertIn("CAPTURE_UI=false", script)
         self.assertIn("credential-safe default", script)
 
+    def test_focus_probe_registers_interruption_safe_cleanup(self) -> None:
+        script = (TOOLS_DIR / "focus-dpad-probe.sh").read_text(encoding="utf-8")
+        self.assertIn("cleanup_evidence()", script)
+        self.assertIn("trap 'cleanup_evidence' EXIT", script)
+        self.assertIn("trap 'cleanup_evidence; exit 130' INT TERM HUP", script)
+        cleanup = script[script.index("cleanup_evidence()"):script.index("trap 'cleanup_evidence'")]
+        self.assertIn('rm -f "$LAB_TMP_FILE"', cleanup)
+        self.assertIn('shell rm -f "$REMOTE_UI"', cleanup)
+        self.assertNotIn("$OUT", cleanup)
+
+    def test_runtime_capture_registers_remote_cleanup_when_capture_ui(self) -> None:
+        script = (TOOLS_DIR / "runtime-capture.sh").read_text(encoding="utf-8")
+        self.assertIn("cleanup_remote_ui()", script)
+        self.assertIn('if [[ "$CAPTURE_UI" == true ]]', script)
+        self.assertIn("trap 'cleanup_remote_ui' EXIT", script)
+        self.assertIn("trap 'cleanup_remote_ui; exit 130' INT TERM HUP", script)
+        cleanup = script[script.index("cleanup_remote_ui()"):script.index("trap 'cleanup_remote_ui'")]
+        self.assertIn('shell rm -f "$REMOTE_UI"', cleanup)
+        # Cleanup must never delete intentionally produced evidence files.
+        self.assertNotIn("$OUT", cleanup)
+        self.assertNotIn("rm -rf", cleanup)
+
     def test_perfetto_analyze_requires_json(self) -> None:
         result = self.run_tool("perfetto-analyze.sh")
         self.assertEqual(2, result.returncode)
