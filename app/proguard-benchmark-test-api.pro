@@ -17,3 +17,13 @@
 # benchmark app otherwise drops as unused. Keep it so the runner resolves it at runtime.
 -keep class androidx.tracing.** { *; }
 -dontwarn androidx.tracing.**
+
+# The benchmark instrumentation APK excludes libraries that are provided by the app under
+# test and relies on the app's classloader. The app is obfuscated, so keep the shared
+# runtime symbols unobfuscated for the runner and the white-box bootstrap.
+-keep class kotlin.** { *; }
+-keep class kotlinx.** { *; }
+-keep class androidx.annotation.** { *; }
+-keep class androidx.collection.** { *; }
+-dontwarn kotlin.**
+-dontwarn kotlinx.**
