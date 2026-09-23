@@ -41,10 +41,17 @@ adb install -r -t "$app_test_apk" | tee "$out/install-app-test.txt"
 adb logcat -c 2>/dev/null || true
 creds_b64="$(python3 - <<'PY'
 import base64, json, os
+
+def clean(value, *, keep_inner_spaces):
+    # Transport-only normalization: strip a stray trailing newline/CR that a secret may
+    # carry. Access code and username never contain surrounding whitespace; passwords may
+    # contain inner spaces, so only trailing CR/LF is removed.
+    return value.rstrip("\r\n") if keep_inner_spaces else value.strip()
+
 blob = json.dumps({
-    "accessCode": os.environ["HULK_E2E_ACCESS_CODE"],
-    "username": os.environ["HULK_E2E_USERNAME"],
-    "password": os.environ["HULK_E2E_PASSWORD"],
+    "accessCode": clean(os.environ["HULK_E2E_ACCESS_CODE"], keep_inner_spaces=False),
+    "username": clean(os.environ["HULK_E2E_USERNAME"], keep_inner_spaces=False),
+    "password": clean(os.environ["HULK_E2E_PASSWORD"], keep_inner_spaces=True),
 }).encode("utf-8")
 print(base64.b64encode(blob).decode("ascii"))
 PY
