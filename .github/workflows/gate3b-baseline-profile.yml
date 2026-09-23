@@ -112,7 +112,7 @@ jobs:
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin 1920x1080 -http-proxy 10.0.2.2:8118
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -no-snapshot-save -skin 1920x1080 -http-proxy http://127.0.0.1:8118
           script: bash .github/gate3b-generate.sh
 
       - name: Write sanitized evidence summary

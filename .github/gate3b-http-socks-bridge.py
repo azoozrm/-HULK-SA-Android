@@ -86,6 +86,9 @@ def read_headers(reader):
 
 class Handler(socketserver.StreamRequestHandler):
     def handle(self):
+        # Connection counter only; never logs destination hostnames.
+        sys.stderr.write("proxy-conn\n")
+        sys.stderr.flush()
         request_line = self.rfile.readline(65536)
         if not request_line:
             return

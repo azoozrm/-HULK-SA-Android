@@ -64,6 +64,8 @@ adb shell am instrument -w \
   > "$out/auth-bootstrap.txt" 2>&1
 cat "$out/auth-bootstrap.txt"
 adb logcat -d -t 600 > "$out/logcat-bootstrap.txt" 2>/dev/null || true
+bridge_log="${RUNNER_TEMP:-/tmp}/gate3b-egress/bridge.log"
+echo "proxy_connection_count=$(grep -c 'proxy-conn' "$bridge_log" 2>/dev/null || echo 0)" | tee -a "$out/runtime.txt"
 if ! grep -q "OK (1 test)" "$out/auth-bootstrap.txt"; then
   echo "Gate 3B authentication bootstrap did not pass" >&2
   tail -120 "$out/logcat-bootstrap.txt" >&2 || true
