@@ -1,0 +1,37 @@
+{
+  "context": {
+    "compilationMode": "run-from-apk",
+    "cpuCoreCount": 4,
+    "build": {
+      "brand": "Example",
+      "device": "example",
+      "model": "EXAMPLE-TV",
+      "fingerprint": "Example/example/example:9/PI/1:user/release-keys",
+      "type": "user",
+      "version": {"codename": "REL", "sdk": 28}
+    }
+  },
+  "benchmarks": [
+    {
+      "name": "firstEntryNavigationFromTvMain",
+      "className": "sa.hulksa.player.macrobenchmark.FirstEntryNavigationBenchmarks",
+      "params": {},
+      "metrics": {
+        "frameCount": {
+          "minimum": 10.0,
+          "maximum": 12.0,
+          "median": 11.0,
+          "coefficientOfVariation": 0.05,
+          "runs": [10.0, 11.0, 12.0]
+        },
+        "emptyMetric": {
+          "minimum": 0.0,
+          "maximum": 0.0,
+          "median": 0.0,
+          "coefficientOfVariation": 0.0,
+          "runs": []
+        }
+      }
+    }
+  ]
+}

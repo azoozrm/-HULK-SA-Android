@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node index="0" class="android.widget.FrameLayout" package="sa.hulksa.player.benchmark" text="" content-desc="" focused="false" bounds="[0,0][1920,1080]" />
+  <node index="1" class="android.widget.EditText" package="sa.hulksa.player.benchmark" text="" content-desc="كود الدخول" focused="true" bounds="[100,200][900,320]" />
+  <node index="2" class="android.widget.TextView" package="sa.hulksa.player.benchmark" text="تذكر الحساب" content-desc="" focused="false" bounds="[100,400][500,460]" />
+</hierarchy>
