@@ -38,6 +38,7 @@ adb install -r -t "$app_test_apk" | tee "$out/install-app-test.txt"
 
 # Protected authentication bootstrap: authenticate the benchmark target with the
 # production-e2e account, persist the session (remember=true) and enable Direct Entry.
+adb logcat -c 2>/dev/null || true
 adb shell am instrument -w \
   -e class sa.hulksa.player.Gate3bBenchmarkAuthBootstrap \
   -e hulkGate3bAuth true \
@@ -47,8 +48,10 @@ adb shell am instrument -w \
   sa.hulksa.player.benchmark.test/androidx.test.runner.AndroidJUnitRunner \
   > "$out/auth-bootstrap.txt" 2>&1
 cat "$out/auth-bootstrap.txt"
+adb logcat -d -t 600 > "$out/logcat-bootstrap.txt" 2>/dev/null || true
 if ! grep -q "OK (1 test)" "$out/auth-bootstrap.txt"; then
   echo "Gate 3B authentication bootstrap did not pass" >&2
+  tail -120 "$out/logcat-bootstrap.txt" >&2 || true
   exit 1
 fi
 
@@ -62,8 +65,10 @@ fi
   "-Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.macrobenchmark.BaselineProfileGenerator" \
   > "$out/generation.txt" 2>&1
 cat "$out/generation.txt"
+adb logcat -d -t 600 > "$out/logcat-generation.txt" 2>/dev/null || true
 if ! grep -q "BUILD SUCCESSFUL" "$out/generation.txt"; then
   echo "Gate 3B baseline profile generation did not pass" >&2
+  tail -120 "$out/logcat-generation.txt" >&2 || true
   exit 1
 fi
 
