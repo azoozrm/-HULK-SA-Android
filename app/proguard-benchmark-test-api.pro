@@ -12,3 +12,8 @@
 -keep class sa.hulksa.player.model.AuthenticatedSession { *; }
 -keep class sa.hulksa.player.model.UserProfile { *; }
 -keep class sa.hulksa.player.model.ProfileKind { *; }
+
+# The instrumentation runner (androidx.test:runner) links androidx.tracing.Trace, which the
+# benchmark app otherwise drops as unused. Keep it so the runner resolves it at runtime.
+-keep class androidx.tracing.** { *; }
+-dontwarn androidx.tracing.**
