@@ -39,12 +39,20 @@ adb install -r -t "$app_test_apk" | tee "$out/install-app-test.txt"
 # Protected authentication bootstrap: authenticate the benchmark target with the
 # production-e2e account, persist the session (remember=true) and enable Direct Entry.
 adb logcat -c 2>/dev/null || true
+creds_b64="$(python3 - <<'PY'
+import base64, json, os
+blob = json.dumps({
+    "accessCode": os.environ["HULK_E2E_ACCESS_CODE"],
+    "username": os.environ["HULK_E2E_USERNAME"],
+    "password": os.environ["HULK_E2E_PASSWORD"],
+}).encode("utf-8")
+print(base64.b64encode(blob).decode("ascii"))
+PY
+)"
 adb shell am instrument -w \
   -e class sa.hulksa.player.Gate3bBenchmarkAuthBootstrap \
   -e hulkGate3bAuth true \
-  -e hulkE2eAccessCode "$HULK_E2E_ACCESS_CODE" \
-  -e hulkE2eUsername "$HULK_E2E_USERNAME" \
-  -e hulkE2ePassword "$HULK_E2E_PASSWORD" \
+  -e hulkGate3bCreds "$creds_b64" \
   sa.hulksa.player.benchmark.test/androidx.test.runner.AndroidJUnitRunner \
   > "$out/auth-bootstrap.txt" 2>&1
 cat "$out/auth-bootstrap.txt"

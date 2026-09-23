@@ -1,10 +1,12 @@
 package sa.hulksa.player
 
 import android.app.Application
+import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -24,9 +26,10 @@ import sa.hulksa.player.model.Credentials
  * subsequent warm start lands on the authenticated HOME screen required by
  * `sa.hulksa.player.macrobenchmark.TvFirstEntryNavigation`.
  *
- * The session exists only in the app's private storage on the ephemeral runner and is
- * destroyed with the runner. Credentials are read from protected instrumentation arguments
- * and are never written to evidence or logs.
+ * Credentials arrive as a single shell-safe base64 JSON instrumentation argument so the
+ * `adb shell am instrument -e` transport cannot mangle values. The session exists only in
+ * the app's private storage on the ephemeral runner and is destroyed with the runner.
+ * Credentials are never written to evidence or logs.
  */
 @RunWith(AndroidJUnit4::class)
 class Gate3bBenchmarkAuthBootstrap {
@@ -41,14 +44,7 @@ class Gate3bBenchmarkAuthBootstrap {
         )
 
         val repository = HulkRepository(app)
-        repository.login(
-            Credentials(
-                accessCode = requireSecret(ARG_ACCESS_CODE),
-                username = requireSecret(ARG_USERNAME),
-                password = requireSecret(ARG_PASSWORD),
-            ),
-            remember = true,
-        )
+        repository.login(credentials(), remember = true)
 
         assertNotNull(
             "authenticated session metadata was not persisted",
@@ -68,16 +64,22 @@ class Gate3bBenchmarkAuthBootstrap {
         assertTrue("Direct Entry was not persisted", routing.directEntryEnabled)
     }
 
-    private fun requireSecret(name: String): String {
-        val value = arguments.getString(name).orEmpty()
-        assertTrue("Required protected instrumentation argument is missing: $name", value.isNotBlank())
-        return value
+    private fun credentials(): Credentials {
+        val blob = arguments.getString(ARG_CREDENTIALS).orEmpty()
+        assertTrue(
+            "Required protected instrumentation argument is missing: $ARG_CREDENTIALS",
+            blob.isNotBlank(),
+        )
+        val json = JSONObject(String(Base64.decode(blob, Base64.NO_WRAP), Charsets.UTF_8))
+        return Credentials(
+            accessCode = json.getString("accessCode"),
+            username = json.getString("username"),
+            password = json.getString("password"),
+        )
     }
 
     private companion object {
         const val ARG_ENABLED = "hulkGate3bAuth"
-        const val ARG_ACCESS_CODE = "hulkE2eAccessCode"
-        const val ARG_USERNAME = "hulkE2eUsername"
-        const val ARG_PASSWORD = "hulkE2ePassword"
+        const val ARG_CREDENTIALS = "hulkGate3bCreds"
     }
 }
