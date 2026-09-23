@@ -48,13 +48,15 @@ bridge_pid=$!
 echo "$bridge_pid" > "$run_dir/bridge.pid"
 sleep 2
 
-socks_ip="$(curl -fsS --max-time 25 --socks5-hostname 127.0.0.1:1080 https://ifconfig.me || true)"
-http_ip="$(curl -fsS --max-time 25 --proxy http://127.0.0.1:8118 https://ifconfig.me || true)"
+# Force IPv4 egress: local DNS resolution to an IPv4 literal for the SOCKS destination.
+socks_ip="$(curl -4 -fsS --max-time 25 --socks5 127.0.0.1:1080 https://api.ipify.org || true)"
+http_ip="$(curl -4 -fsS --max-time 25 --proxy http://127.0.0.1:8118 https://api.ipify.org || true)"
 
 {
   echo "socks_listener=127.0.0.1:1080"
   echo "http_bridge=127.0.0.1:8118"
   echo "egress_host=${HULK_GATE3B_EGRESS_HOST}"
+  echo "forced_family=ipv4"
   echo "socks_egress_ip=${socks_ip}"
   echo "http_egress_ip=${http_ip}"
 } | tee "$run_dir/egress.txt"
@@ -70,4 +72,8 @@ if [ "$socks_ip" != "$http_ip" ]; then
   exit 1
 fi
 
-echo "Gate 3B egress ready via $socks_ip"
+case "$socks_ip" in
+  *:*) echo "Expected an IPv4 egress identity but observed: $socks_ip" >&2; exit 1 ;;
+esac
+
+echo "Gate 3B egress ready (forced IPv4) via $socks_ip"

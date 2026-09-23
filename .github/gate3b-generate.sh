@@ -33,6 +33,13 @@ done
   echo "emulator_build_type=$(adb shell getprop ro.build.type | tr -d '\r')"
 } | tee "$out/runtime.txt"
 
+# Sanitized forced-IPv4 egress identity for this run (no host, no credentials).
+egress_file="${RUNNER_TEMP:-/tmp}/gate3b-egress/egress.txt"
+if [ -f "$egress_file" ]; then
+  grep -E '^forced_family=|^socks_egress_ip=|^http_egress_ip=' "$egress_file" \
+    | tee -a "$out/runtime.txt" || true
+fi
+
 adb install -r -t "$bench_apk" | tee "$out/install-benchmark.txt"
 adb install -r -t "$app_test_apk" | tee "$out/install-app-test.txt"
 

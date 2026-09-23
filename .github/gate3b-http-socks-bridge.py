@@ -29,14 +29,28 @@ def recvn(sock, count):
     return data
 
 
+def resolve_ipv4(host, port):
+    """Resolve the destination to an IPv4 literal on the runner.
+
+    Sending an IPv4 literal (SOCKS5 ATYP=1) makes the SSH server connect to that IPv4
+    address, so the egress identity observed by the destination is the approved host's
+    IPv4 instead of its preferred IPv6.
+    """
+    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    if not infos:
+        raise OSError("no IPv4 address for %s" % host)
+    return infos[0][4][0]
+
+
 def socks5_connect(host, port):
+    ipv4 = resolve_ipv4(host, port)
+    packed = socket.inet_aton(ipv4)
     sock = socket.create_connection((SOCKS_HOST, SOCKS_PORT), timeout=30)
     try:
         sock.sendall(b"\x05\x01\x00")
         if recvn(sock, 2) != b"\x05\x00":
             raise OSError("socks5 greeting rejected")
-        name = host.encode("idna") if any(ord(c) > 127 for c in host) else host.encode()
-        sock.sendall(b"\x05\x01\x00\x03" + bytes([len(name)]) + name + struct.pack(">H", port))
+        sock.sendall(b"\x05\x01\x00\x01" + packed + struct.pack(">H", port))
         head = recvn(sock, 4)
         if head[0] != 5 or head[1] != 0:
             raise OSError("socks5 connect failed: %d" % head[1])
