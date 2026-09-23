@@ -49,6 +49,13 @@ jobs:
           ./gradlew --no-daemon --console=plain --max-workers=2 \
             :app:assembleBenchmark :macrobenchmark:assembleBenchmark
 
+      - name: Require Linux KVM acceleration
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          ls -l /dev/kvm
+
       - name: Probe TV emulator capabilities and baseline generation
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -56,6 +63,7 @@ jobs:
           target: android-tv
           arch: x86_64
           profile: tv_1080p
+          disable-linux-hw-accel: false
           disable-animations: true
           disk-size: 4096M
           ram-size: 2048M
