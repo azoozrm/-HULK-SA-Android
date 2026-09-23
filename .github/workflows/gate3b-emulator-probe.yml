@@ -9,6 +9,9 @@ name: Gate 3B Emulator Probe (temporary)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - lab/gate3b-emulator-probe
 
 permissions:
   contents: read
