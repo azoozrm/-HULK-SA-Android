@@ -22,16 +22,23 @@ Bounded, read-only helpers for durable evidence. They never write inside the rep
 never use production signing, and refuse to operate on the protected packages
 `sa.hulksa.player` and `sa.hulksa.player.dev`.
 
+Privacy contract: the diagnostics never persist credentials or sensitive UI/account data.
+Editable-field text values are never emitted, and raw UI XML / screenshots are not captured
+by default.
+
 - `apk-inspect.sh <apk>`: deterministic identity evidence — package, versionCode/versionName,
   signer SHA-256, debuggable, profileable declaration, ABI set, packaged baseline profile
   state, and `apk_kind` (`target-app` vs `test-apk`).
-- `runtime-capture.sh <test-package> <outdir> [--launch <component>]`: bounded runtime packet
-  for an explicit TEST package only — package identity, foreground/focused window, compilation
-  state, bounded dumpsys, bounded package-scoped logcat (credential lines filtered), UI
-  hierarchy and screenshot, plus device identity.
+- `runtime-capture.sh <test-package> <outdir> [--launch <component>] [--capture-ui]`: bounded
+  runtime packet for an explicit TEST package only — package identity, foreground/focused
+  window, compilation state, bounded dumpsys, bounded package-scoped logcat (credential lines
+  filtered), plus device identity. UI hierarchy and screenshot are captured **only** with the
+  explicit `--capture-ui` opt-in (use solely when no login/credential UI is present).
 - `focus-dpad-probe.sh <test-package> <outdir> [--component <c>] [--keys DOWN,UP,...]`:
-  repeatable focused-node evidence before and after a requested key sequence. Reports
-  `destination_proven` only when the readable focus label changes.
+  repeatable focused-node evidence before and after a requested key sequence. Raw UI XML is
+  pulled to a temporary file, parsed for non-sensitive focus identity only, then deleted;
+  editable-field text is never retained. Reports `destination_proven` only when the readable
+  focus label changes.
 - `perfetto-analyze.sh <benchmarkData.json> [--traces <dir>] [--target-compilation <file>]`:
   bounded benchmark JSON/trace analysis. Keeps the self-instrumenting test APK context
   compilation mode separate from the target-app compilation state. Reports

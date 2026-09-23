@@ -72,6 +72,27 @@ class UiAutomatorFocusTest(unittest.TestCase):
         nodes = uiautomator_focus.focused_nodes(FIXTURES / "ui-focus.sample.xml")
         self.assertEqual("كود الدخول", uiautomator_focus.primary_label(nodes))
 
+    def test_focus_parser_never_emits_editable_text(self) -> None:
+        nodes = uiautomator_focus.focused_nodes(FIXTURES / "ui-focus-secret.sample.xml")
+        dumped = json.dumps(nodes, ensure_ascii=False)
+        self.assertNotIn("HULK-SECRET-ACCESS-0001", dumped)
+        self.assertNotIn("HULK-SECRET-PASSWORD-9999", dumped)
+        for node in nodes:
+            self.assertNotIn("text", node)
+
+    def test_primary_label_ignores_editable_text(self) -> None:
+        nodes = uiautomator_focus.focused_nodes(FIXTURES / "ui-focus-secret.sample.xml")
+        without_description = [n for n in nodes if n["content_desc"] == ""]
+        self.assertTrue(without_description)
+        for node in without_description:
+            self.assertEqual("", uiautomator_focus.primary_label([node]))
+        self.assertEqual("كود الدخول", uiautomator_focus.primary_label(nodes))
+
+    def test_focus_parser_source_never_references_node_text(self) -> None:
+        source = (TOOLS_DIR / "uiautomator_focus.py").read_text(encoding="utf-8")
+        self.assertNotIn('"text"', source)
+        self.assertNotIn('get("text")', source)
+
 
 class ToolGuardTest(unittest.TestCase):
     def run_tool(self, relative: str, *args: str) -> subprocess.CompletedProcess:
@@ -100,6 +121,19 @@ class ToolGuardTest(unittest.TestCase):
         result = self.run_tool("runtime-capture.sh", "sa.hulksa.player.dev", "/tmp/hulk-lab-guard")
         self.assertEqual(12, result.returncode)
         self.assertIn("protected package", result.stderr)
+
+    def test_focus_probe_never_persists_raw_ui_xml(self) -> None:
+        script = (TOOLS_DIR / "focus-dpad-probe.sh").read_text(encoding="utf-8")
+        self.assertIn("mktemp", script)
+        self.assertNotIn('"$OUT/ui-', script)
+        self.assertNotIn("ui-before.xml", script)
+        self.assertNotIn("ui-after.xml", script)
+
+    def test_runtime_capture_ui_capture_is_opt_in(self) -> None:
+        script = (TOOLS_DIR / "runtime-capture.sh").read_text(encoding="utf-8")
+        self.assertIn("--capture-ui", script)
+        self.assertIn("CAPTURE_UI=false", script)
+        self.assertIn("credential-safe default", script)
 
     def test_perfetto_analyze_requires_json(self) -> None:
         result = self.run_tool("perfetto-analyze.sh")

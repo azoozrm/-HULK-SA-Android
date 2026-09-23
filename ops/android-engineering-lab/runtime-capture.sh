@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # runtime-capture.sh — bounded runtime evidence packet for an explicit TEST package.
 #
-# Usage: runtime-capture.sh <test-package> <outdir> [--launch <component>]
+# Usage: runtime-capture.sh <test-package> <outdir> [--launch <component>] [--capture-ui]
 #
 # Captures only system-level diagnostics for the explicitly supplied isolated test package:
 # package identity, foreground/resumed activity, focused window, compilation state, bounded
-# dumpsys activity/window, a bounded logcat tail for the package process, the current UI
-# hierarchy when available, and a screenshot. Credentials and account data are never
-# intentionally collected and any matching line is filtered out.
+# dumpsys activity/window, and a bounded logcat tail for the package process.
 #
-# Protected production packages (sa.hulksa.player, sa.hulksa.player.dev) are refused.
+# Privacy contract: a screenshot or raw UI hierarchy can contain credential/account data, so
+# they are NEVER captured by default. They are captured only with the explicit --capture-ui
+# opt-in, which the operator must use solely when no login/authentication/credential UI is
+# present. Logcat is redacted. Protected production packages are refused.
 
 set -Eeuo pipefail
 
@@ -18,7 +19,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/lib-lab.sh"
 
 [[ $# -ge 2 ]] || {
-  echo 'Usage: runtime-capture.sh <test-package> <outdir> [--launch <component>]' >&2
+  echo 'Usage: runtime-capture.sh <test-package> <outdir> [--launch <component>] [--capture-ui]' >&2
   exit 2
 }
 
@@ -26,11 +27,16 @@ PKG=$1
 OUT=$2
 shift 2
 COMPONENT=""
+CAPTURE_UI=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --launch)
       COMPONENT=${2:-}
       shift 2
+      ;;
+    --capture-ui)
+      CAPTURE_UI=true
+      shift
       ;;
     *)
       echo "STOP: unknown argument: $1" >&2
@@ -49,6 +55,7 @@ cap() { timeout 25 adb -s "$SERIAL" shell "$@" 2>&1 || true; }
   echo "=== runtime capture utc=$(lab_now_utc) ==="
   lab_kv package "$PKG"
   lab_kv adb_transport "$SERIAL"
+  lab_kv capture_ui "$CAPTURE_UI"
 } >"$OUT/identity.txt"
 
 {
@@ -97,18 +104,24 @@ else
   : >"$OUT/logcat.txt"
 fi
 
-REMOTE_UI=/sdcard/hulk_lab_ui.xml
-if cap uiautomator dump "$REMOTE_UI" | grep -qi 'dumped'; then
-  timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$OUT/ui-hierarchy.xml" >/dev/null 2>&1 || true
-  timeout 20 adb -s "$SERIAL" shell rm -f "$REMOTE_UI" || true
-fi
-[[ -f "$OUT/ui-hierarchy.xml" ]] || echo "ui_dump=unavailable" >"$OUT/ui-hierarchy.unavailable.txt"
+if [[ "$CAPTURE_UI" == true ]]; then
+  REMOTE_UI=/sdcard/hulk_lab_ui.xml
+  if cap uiautomator dump "$REMOTE_UI" | grep -qi 'dumped'; then
+    timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$OUT/ui-hierarchy.xml" >/dev/null 2>&1 || true
+    timeout 20 adb -s "$SERIAL" shell rm -f "$REMOTE_UI" || true
+  fi
+  [[ -f "$OUT/ui-hierarchy.xml" ]] || echo "ui_dump=unavailable" >"$OUT/ui-hierarchy.unavailable.txt"
 
-if timeout 30 adb -s "$SERIAL" exec-out screencap -p >"$OUT/screenshot.png" 2>/dev/null; then
-  : # captured
+  if timeout 30 adb -s "$SERIAL" exec-out screencap -p >"$OUT/screenshot.png" 2>/dev/null; then
+    : # captured
+  else
+    rm -f "$OUT/screenshot.png"
+    echo "screenshot=unavailable" >"$OUT/screenshot.unavailable.txt"
+  fi
+
+  echo "ui_capture=on (operator-confirmed no credential UI present)" >"$OUT/ui-capture.txt"
 else
-  rm -f "$OUT/screenshot.png"
-  echo "screenshot=unavailable" >"$OUT/screenshot.unavailable.txt"
+  echo "ui_capture=skipped (credential-safe default); pass --capture-ui only when no login/credential UI is present" >"$OUT/ui-capture.txt"
 fi
 
 {

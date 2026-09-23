@@ -4,10 +4,13 @@
 # Usage: focus-dpad-probe.sh <test-package> <outdir> [--component <pkg/Activity>] [--keys DOWN,DOWN,DOWN,UP]
 #
 # Wakes the device, optionally launches the explicitly supplied TEST package component,
-# waits for a stable UI, captures the focused accessibility node(s), sends the requested
-# key sequence, and captures the resulting focused node(s). A destination is only reported
-# as proven when the focus label changed and both labels are readable from the accessibility
-# tree. Protected production packages are refused.
+# waits for a stable UI, captures the focused accessibility node(s), sends the requested key
+# sequence, and captures the resulting focused node(s).
+#
+# Privacy contract: raw UiAutomator XML is NEVER persisted. It is pulled to a temporary file,
+# parsed for non-sensitive focus identity (class/content-description/resource-id/bounds) only,
+# and the temporary file is deleted. Editable-field text values are never written to evidence.
+# Protected production packages are refused.
 
 set -Eeuo pipefail
 
@@ -53,17 +56,28 @@ keycode_for() {
   esac
 }
 
+# Pulls the device dump into a temporary file, emits only non-sensitive focus identity, and
+# deletes the raw XML. Marks "<label>.ok" on success so callers can distinguish "no focused
+# node" from "standalone uiautomator unavailable" without retaining raw UI.
 dump_focus() {
   local label=$1
+  local tmp
+  tmp=$(mktemp)
+  local pulled=false
   adb_shell rm -f "$REMOTE_UI" >/dev/null
   if adb_shell uiautomator dump "$REMOTE_UI" | grep -qi 'dumped'; then
-    timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$OUT/ui-$label.xml" >/dev/null 2>&1 || true
-    adb_shell rm -f "$REMOTE_UI" >/dev/null
-    if [[ -f "$OUT/ui-$label.xml" ]]; then
-      python3 "$FOCUS_HELPER" "$OUT/ui-$label.xml" >"$OUT/focus-$label.json" 2>/dev/null || echo '[]' >"$OUT/focus-$label.json"
-      return 0
+    if timeout 25 adb -s "$SERIAL" pull "$REMOTE_UI" "$tmp" >/dev/null 2>&1 && [[ -s "$tmp" ]]; then
+      pulled=true
     fi
+    adb_shell rm -f "$REMOTE_UI" >/dev/null
   fi
+  if [[ "$pulled" == true ]]; then
+    python3 "$FOCUS_HELPER" "$tmp" >"$OUT/focus-$label.json" 2>/dev/null || echo '[]' >"$OUT/focus-$label.json"
+    : >"$OUT/focus-$label.ok"
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
   echo '[]' >"$OUT/focus-$label.json"
   return 1
 }
@@ -121,7 +135,7 @@ dump_focus after || true
 before=$(focus_label "$OUT/focus-before.json")
 after=$(focus_label "$OUT/focus-after.json")
 
-if [[ ! -f "$OUT/ui-before.xml" || ! -f "$OUT/ui-after.xml" ]]; then
+if [[ ! -f "$OUT/focus-before.ok" || ! -f "$OUT/focus-after.ok" ]]; then
   focus_evidence="BLOCKED standalone uiautomator dump unavailable; use instrumentation UiDevice harness"
 elif [[ -n "$before" && -n "$after" && "$before" != "$after" ]]; then
   focus_evidence="PROVEN"

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Extract focused accessibility nodes from a UiAutomator window dump.
 
-Read-only helper used by the lab focus probe and its deterministic tests. It does not
-perform any device operation and never prints non-focus node contents.
+Read-only helper used by the lab focus probe and its deterministic tests.
+
+Privacy contract: this helper NEVER emits the `text` attribute of any node. Editable fields
+(e.g. credential inputs) expose their value through `text`, so only non-sensitive focus
+identity is returned: class, content description, resource id, package and bounds. Focus
+labelling uses content description only and never falls back to text.
 """
 
 from __future__ import annotations
@@ -23,7 +27,6 @@ def focused_nodes(xml_path: str) -> List[Dict[str, Any]]:
         nodes.append(
             {
                 "class": node.get("class", ""),
-                "text": node.get("text", ""),
                 "content_desc": node.get("content-desc", ""),
                 "resource_id": node.get("resource-id", ""),
                 "package": node.get("package", ""),
@@ -34,8 +37,9 @@ def focused_nodes(xml_path: str) -> List[Dict[str, Any]]:
 
 
 def primary_label(nodes: List[Dict[str, Any]]) -> str:
+    """Focus label derived from content description only (never editable text)."""
     for node in nodes:
-        label = (node.get("content_desc") or "").strip() or (node.get("text") or "").strip()
+        label = (node.get("content_desc") or "").strip()
         if label:
             return label
     return ""

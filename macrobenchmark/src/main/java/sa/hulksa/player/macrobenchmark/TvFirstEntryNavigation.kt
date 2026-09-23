@@ -15,12 +15,10 @@ import androidx.test.uiautomator.Until
  * the main TV HOME screen. The measured journey is the proven pure D-pad path from HOME into
  * the navigation rail and to `MainDestination.LIVE` ("البث المباشر").
  *
- * A performance observation is accepted only when every condition below is proven with a
- * stable, non-user semantic:
- *  1. the target package window is foreground;
- *  2. the Optional Update Overlay is absent or was dismissed via the real UI contract;
- *  3. the starting destination is HOME;
- *  4. the resulting destination is LIVE.
+ * Destination proof uses stable, destination-specific semantics only. The ambiguous live-hero
+ * status "على الهواء الان" is deliberately excluded: it can appear on HOME for a LIVE hero and
+ * would otherwise falsely prove LIVE. LIVE is proven only by the combination of the LIVE list
+ * header ("القنوات") plus a LIVE action ("تشغيل القناة" or "اختر قناة").
  */
 object TvFirstEntryNavigation {
     const val OVERLAY_TITLE = "يتوفر تحديث جديد"
@@ -41,20 +39,38 @@ object TvFirstEntryNavigation {
         KeyEvent.KEYCODE_DPAD_CENTER,
     )
 
-    private val HOME_LABELS = listOf(
+    /** HOME-only, user-data-independent semantics. */
+    val HOME_SEMANTICS = listOf(
         "مختار لك",
+        "توصيات ومحتوى جديد",
         "شاهد الان",
         "عرض الحلقات",
-        "توصيات ومحتوى جديد",
-        "نجهز احدث الاضافات…",
+        "نجهز احداث الاضافات…",
         "سيظهر احدث المحتوى هنا",
     )
-    private val LIVE_LABELS = listOf("القنوات", "تشغيل القناة", "على الهواء الان", "اختر قناة")
+
+    /** LIVE destination requires this list header plus one of [LIVE_ACTIONS]. */
+    const val LIVE_REQUIRED_SEMANTIC = "القنوات"
+    val LIVE_ACTIONS = listOf("تشغيل القناة", "اختر قناة")
+
+    /** Complete set of semantics probed on the device for destination classification. */
+    val PROOF_UNIVERSE = HOME_SEMANTICS + LIVE_REQUIRED_SEMANTIC + LIVE_ACTIONS
 
     const val SETTLE_TIMEOUT_MS = 20_000L
     const val OVERLAY_TIMEOUT_MS = 6_000L
     const val DESTINATION_TIMEOUT_MS = 15_000L
     const val PROBE_TIMEOUT_MS = 500L
+
+    /**
+     * LIVE proof: the LIVE list header plus a LIVE action. A single ambiguous live-hero status
+     * or a bare list header is never sufficient.
+     */
+    fun isLiveDestination(present: Set<String>): Boolean =
+        LIVE_REQUIRED_SEMANTIC in present && LIVE_ACTIONS.any { it in present }
+
+    /** HOME proof: a HOME-only semantic is present and LIVE is not proven. */
+    fun isHomeDestination(present: Set<String>): Boolean =
+        HOME_SEMANTICS.any { it in present } && !isLiveDestination(present)
 
     fun awaitForegroundWindow(
         device: UiDevice,
@@ -64,16 +80,20 @@ object TvFirstEntryNavigation {
 
     fun isOptionalUpdatePresent(device: UiDevice): Boolean = device.hasObject(By.text(OVERLAY_TITLE))
 
+    fun presentSemantics(device: UiDevice): Set<String> =
+        PROOF_UNIVERSE.filter { device.hasObject(By.desc(it)) || device.hasObject(By.text(it)) }.toSet()
+
     /** Compact observed-state summary for bounded failure evidence. */
     fun observedSummary(device: UiDevice): String {
+        val present = presentSemantics(device)
         val rail = device.hasObject(By.desc("الرئيسية")) || device.hasObject(By.text("الرئيسية"))
         val picker = listOf("من يشاهد الان ؟", "إضافة ملف", "رجوع")
             .any { device.hasObject(By.desc(it)) || device.hasObject(By.text(it)) }
         val login = device.hasObject(By.desc("كود الدخول")) || device.hasObject(By.text("كود الدخول"))
-        val home = anyPresent(device, HOME_LABELS)
-        val live = anyPresent(device, LIVE_LABELS)
-        return "rail=$rail picker=$picker login=$login home=$home live=$live " +
-            "overlay=${isOptionalUpdatePresent(device)} focus=${focusedSubtreeDescriptions(device)}"
+        return "rail=$rail picker=$picker login=$login " +
+            "home=${isHomeDestination(present)} live=${isLiveDestination(present)} " +
+            "overlay=${isOptionalUpdatePresent(device)} semantics=$present " +
+            "focus=${focusedSubtreeDescriptions(device)}"
     }
 
     /**
@@ -100,15 +120,12 @@ object TvFirstEntryNavigation {
         return !isOptionalUpdatePresent(device)
     }
 
-    private fun anyPresent(device: UiDevice, labels: List<String>): Boolean =
-        labels.any { device.hasObject(By.desc(it)) || device.hasObject(By.text(it)) }
-
     /** Waits until the authenticated main screen is settled on HOME. */
     fun awaitHomeDestination(device: UiDevice, timeoutMs: Long = SETTLE_TIMEOUT_MS): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
-            val mainRail = device.hasObject(By.desc("الرئيسية")) || device.hasObject(By.text("الرئيسية"))
-            if (mainRail && anyPresent(device, HOME_LABELS) && !anyPresent(device, LIVE_LABELS)) return true
+            val rail = device.hasObject(By.desc("الرئيسية")) || device.hasObject(By.text("الرئيسية"))
+            if (rail && isHomeDestination(presentSemantics(device))) return true
             SystemClock.sleep(100L)
         }
         return false
@@ -118,10 +135,10 @@ object TvFirstEntryNavigation {
     fun awaitLiveDestination(device: UiDevice, timeoutMs: Long = DESTINATION_TIMEOUT_MS): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
-            if (anyPresent(device, LIVE_LABELS)) return true
+            if (isLiveDestination(presentSemantics(device))) return true
             SystemClock.sleep(100L)
         }
-        return anyPresent(device, LIVE_LABELS)
+        return isLiveDestination(presentSemantics(device))
     }
 
     /** Current focused content descriptions only (never node text). */
