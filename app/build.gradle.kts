@@ -105,9 +105,32 @@ tasks.register("verifyBenchmarkBaselineProfilePackaging") {
     }
 }
 
+tasks.register("verifyPreviewVersionOverride") {
+    group = "verification"
+    description = "Fails preview builds unless both qualification version override properties are provided."
+
+    doLast {
+        val missing = buildList {
+            if (qualificationVersionCode == null) add("HULK_QUALIFICATION_VERSION_CODE")
+            if (qualificationVersionName == null) add("HULK_QUALIFICATION_VERSION_NAME")
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "Preview builds must pin an explicit version and must never silently reuse the source " +
+                    "Release version. Provide both Gradle properties. Missing: ${missing.joinToString(", ")}. " +
+                    "Example: ./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<versionCode> " +
+                    "-PHULK_QUALIFICATION_VERSION_NAME=<versionName> :app:assemblePreview",
+            )
+        }
+    }
+}
+
 tasks.configureEach {
     if (name == "preReleaseBuild" || name == "prePreviewBuild") {
         dependsOn(verifyProductionRuntimeConfig)
+    }
+    if (name == "prePreviewBuild") {
+        dependsOn("verifyPreviewVersionOverride")
     }
 }
 
