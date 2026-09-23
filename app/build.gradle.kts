@@ -106,7 +106,7 @@ tasks.register("verifyBenchmarkBaselineProfilePackaging") {
 }
 
 tasks.configureEach {
-    if (name == "preReleaseBuild") {
+    if (name == "preReleaseBuild" || name == "prePreviewBuild") {
         dependsOn(verifyProductionRuntimeConfig)
     }
 }
@@ -209,6 +209,21 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             isProfileable = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+        // Persistent Preview: release-derived, owner daily build with its own package
+        // identity and stable lab signing so repeated `adb install -r` preserves data.
+        create("preview") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".preview"
+            resValue("string", "app_name", "HULK SA Preview")
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
