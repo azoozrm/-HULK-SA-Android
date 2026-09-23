@@ -237,6 +237,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Gate 3B: keep the instrumentation APK buildable on the minified benchmark variant.
+            testProguardFiles("proguard-test-rules.pro")
         }
         // Persistent Preview: release-derived, owner daily build with its own package
         // identity and stable lab signing so repeated `adb install -r` preserves data.
@@ -278,6 +280,14 @@ android {
             "META-INF/DEPENDENCIES",
         )
     }
+
+    // Gate 3B: allow the instrumentation test build type to be selected explicitly.
+    // Defaults to "debug" so existing debug/compatibility workflows are unchanged.
+    testBuildType = providers.gradleProperty("HULK_TEST_BUILD_TYPE")
+        .orNull
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: "debug"
 
     testOptions {
         execution = "ANDROIDX_TEST_ORCHESTRATOR"
