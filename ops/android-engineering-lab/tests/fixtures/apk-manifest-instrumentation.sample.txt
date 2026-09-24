@@ -1,0 +1,6 @@
+      E: instrumentation (line=9)
+        A: http://schemas.android.com/apk/res/android:label(0x01010001)="Tests for sa.hulksa.player.dev" (Raw: "Tests for sa.hulksa.player.dev")
+        A: http://schemas.android.com/apk/res/android:name(0x01010003)="androidx.test.runner.AndroidJUnitRunner" (Raw: "androidx.test.runner.AndroidJUnitRunner")
+        A: http://schemas.android.com/apk/res/android:targetPackage(0x01010021)="sa.hulksa.player.dev" (Raw: "sa.hulksa.player.dev")
+        A: http://schemas.android.com/apk/res/android:handleProfiling(0x01010022)=false
+        A: http://schemas.android.com/apk/res/android:functionalTest(0x01010023)=false
