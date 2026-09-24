@@ -35,6 +35,31 @@ lab_apksigner() {
   printf '%s\n' "$bt/apksigner"
 }
 
+# Extracts android:targetPackage from the E: instrumentation element of an
+# `aapt2 dump xmltree` manifest dump, printing the value or nothing. Accepts the
+# current resource-ID annotation form :targetPackage(0x<hex>)="<value>" and the
+# legacy :targetPackage="<value>" form, and is bounded to the instrumentation
+# element so attributes outside it can never be extracted.
+lab_instrumentation_target_package() {
+  local xmltree=$1
+  local block target
+
+  block=$(awk '
+    /^[[:space:]]*E: / {
+      in_instrumentation = ($0 ~ /^[[:space:]]*E: instrumentation([[:space:]]|$)/)
+    }
+    in_instrumentation { print }
+  ' "$xmltree")
+
+  [[ -n "$block" ]] || return 0
+
+  target=$(printf '%s\n' "$block" | sed -n 's/.*:targetPackage(0x[0-9a-fA-F]*)="\([^"]*\)".*/\1/p' | head -n1)
+  if [[ -z "$target" ]]; then
+    target=$(printf '%s\n' "$block" | sed -n 's/.*:targetPackage="\([^"]*\)".*/\1/p' | head -n1)
+  fi
+  printf '%s\n' "$target"
+}
+
 lab_adb_serial() {
   if [[ -n "${HULK_ADB_SERIAL:-}" ]]; then
     printf '%s\n' "$HULK_ADB_SERIAL"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -92,6 +93,77 @@ class UiAutomatorFocusTest(unittest.TestCase):
         source = (TOOLS_DIR / "uiautomator_focus.py").read_text(encoding="utf-8")
         self.assertNotIn('"text"', source)
         self.assertNotIn('get("text")', source)
+
+
+class ApkInspectInstrumentationTargetTest(unittest.TestCase):
+    """Gate 4D1b: annotated aapt2 targetPackage parsing in the APK inspector."""
+
+    def extract_target(self, xmltree: Path) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; lab_instrumentation_target_package "$2"',
+                "bash",
+                str(TOOLS_DIR / "lib-lab.sh"),
+                str(xmltree),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_annotated_aapt2_instrumentation_target_resolves(self) -> None:
+        result = self.extract_target(FIXTURES / "apk-manifest-instrumentation.sample.txt")
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("sa.hulksa.player.dev", result.stdout.strip())
+
+    def test_ordinary_app_manifest_yields_no_instrumentation_target(self) -> None:
+        result = self.extract_target(FIXTURES / "apk-manifest-ordinary-app.sample.txt")
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("", result.stdout.strip())
+
+    def test_resource_id_annotation_value_is_not_hardcoded(self) -> None:
+        fragment = (
+            "      E: instrumentation (line=9)\n"
+            "        A: http://schemas.android.com/apk/res/android:targetPackage(0x01010555)"
+            '="sa.hulksa.player.dev" (Raw: "sa.hulksa.player.dev")\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            xmltree = Path(tmp) / "manifest.xml"
+            xmltree.write_text(fragment, encoding="utf-8")
+            result = self.extract_target(xmltree)
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("sa.hulksa.player.dev", result.stdout.strip())
+
+    def test_legacy_no_resource_id_form_still_resolves(self) -> None:
+        fragment = (
+            "      E: instrumentation (line=9)\n"
+            '        A: android:targetPackage="sa.hulksa.player.dev"\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            xmltree = Path(tmp) / "manifest.xml"
+            xmltree.write_text(fragment, encoding="utf-8")
+            result = self.extract_target(xmltree)
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("sa.hulksa.player.dev", result.stdout.strip())
+
+    def test_target_outside_instrumentation_element_is_ignored(self) -> None:
+        fragment = (
+            "N: android=http://schemas.android.com/apk/res/android (line=2)\n"
+            "  E: manifest (line=2)\n"
+            "    A: http://schemas.android.com/apk/res/android:targetPackage(0x01010021)"
+            '="wrong.package" (Raw: "wrong.package")\n'
+            "    E: instrumentation (line=9)\n"
+            "      A: http://schemas.android.com/apk/res/android:targetPackage(0x01010021)"
+            '="sa.hulksa.player.dev" (Raw: "sa.hulksa.player.dev")\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            xmltree = Path(tmp) / "manifest.xml"
+            xmltree.write_text(fragment, encoding="utf-8")
+            result = self.extract_target(xmltree)
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("sa.hulksa.player.dev", result.stdout.strip())
 
 
 class ToolGuardTest(unittest.TestCase):

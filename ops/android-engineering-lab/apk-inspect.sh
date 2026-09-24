@@ -58,11 +58,7 @@ else
   profileable=no
 fi
 
-instrumentation_target=""
-if grep -qE 'E: instrumentation' "$TMP/manifest.xml"; then
-  instrumentation_target=$(sed -n "s/.*android:targetPackage=\"\([^\"]*\)\".*/\1/p" "$TMP/manifest.xml" 2>/dev/null | head -n1)
-  [[ -z "$instrumentation_target" ]] && instrumentation_target=$(sed -n 's/.*targetPackage="\([^"]*\)".*/\1/p' "$TMP/manifest.xml" | head -n1)
-fi
+instrumentation_target=$(lab_instrumentation_target_package "$TMP/manifest.xml")
 
 if [[ -n "$instrumentation_target" || "$package" == *".macrobenchmark" || "$package" == *".test" ]]; then
   apk_kind=test-apk
