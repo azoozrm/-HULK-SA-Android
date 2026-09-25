@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -389,9 +388,10 @@ internal fun ProfileSmartSearchLayer(
                     onSwitchProfile = onSwitchProfile,
                 )
                 if (!imeVisible) {
-                    SmartSearchBottomNavigation(
-                        selected = MainDestination.SEARCH,
-                        onSelectDestination = onSelectDestination,
+                    Spacer(
+                        Modifier
+                            .navigationBarsPadding()
+                            .height(MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT),
                     )
                 }
             }
@@ -1428,56 +1428,6 @@ private fun SmartSearchRailItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        }
-    }
-}
-
-@Composable
-private fun SmartSearchBottomNavigation(
-    selected: MainDestination,
-    onSelectDestination: (MainDestination) -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF090A07))
-            .navigationBarsPadding()
-            .padding(horizontal = 7.dp, vertical = 4.dp),
-    ) {
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items(items = smartSearchDestinations, key = { it.destination.name }) { entry ->
-                val active = selected == entry.destination
-                Column(
-                    modifier = Modifier
-                        .widthIn(min = 54.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (active) colors.gold.copy(alpha = .10f) else Color.Transparent)
-                        .clickable(role = Role.Button) { onSelectDestination(entry.destination) }
-                        .padding(horizontal = 7.dp, vertical = 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Icon(
-                        imageVector = entry.icon,
-                        contentDescription = entry.label,
-                        tint = if (active) colors.goldBright else colors.textMuted,
-                        modifier = Modifier.size(21.dp),
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = entry.label,
-                        color = if (active) colors.text else colors.textMuted,
-                        fontSize = 8.sp,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1,
-                    )
-                }
-            }
         }
     }
 }

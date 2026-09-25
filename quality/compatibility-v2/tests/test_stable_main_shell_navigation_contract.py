@@ -39,7 +39,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         self.assertNotIn("val queryMemory = remember", shell)
         self.assertNotIn("val categoryMemory = remember", shell)
         self.assertNotIn("rememberingSelectDestination", shell)
-        self.assertEqual(1, shell.count("onSelect = onSelectDestination"))
+        self.assertNotIn("onSelect = onSelectDestination", shell)
         self.assertIn("onSelect = selectTvDestination", shell)
         self.assertIn("onSelectDestination = onSelectDestination", shell)
 

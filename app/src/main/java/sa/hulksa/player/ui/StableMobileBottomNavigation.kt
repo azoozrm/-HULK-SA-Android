@@ -55,6 +55,12 @@ private data class StableMobileEntry(
     val switchesProfile: Boolean = false,
 )
 
+private val MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT = 56.dp
+private val MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING = 6.dp
+
+internal val MOBILE_BOTTOM_NAVIGATION_RESERVED_HEIGHT =
+    MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT + MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING * 2
+
 private val stableMobileEntries = listOf(
     StableMobileEntry(MainDestination.HOME, Icons.Rounded.Home, "الرئيسية"),
     StableMobileEntry(MainDestination.LIVE, Icons.Rounded.LiveTv, "البث المباشر"),
@@ -97,7 +103,7 @@ internal fun StableMobileBottomNavigation(
             .fillMaxWidth()
             .background(Color(0xFF090A07))
             .navigationBarsPadding()
-            .padding(vertical = 6.dp),
+            .padding(vertical = MOBILE_BOTTOM_NAVIGATION_VERTICAL_PADDING),
         state = listState,
         contentPadding = PaddingValues(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -141,7 +147,7 @@ private fun StableMobileNavItem(
     Column(
         modifier = Modifier
             .width(58.dp)
-            .height(56.dp)
+            .height(MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT)
             .clip(shape)
             .background(
                 if (active) colors.gold.copy(alpha = .16f)
