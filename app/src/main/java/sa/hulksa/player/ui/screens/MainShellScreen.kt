@@ -2706,7 +2706,8 @@ private fun LiveCatalogScreen(
             screenHeightDp = adaptiveUi.screenHeightDp,
         )
     }
-    LaunchedEffect(listState, visible) {
+    LaunchedEffect(listState, visible, isTv) {
+        if (isTv) return@LaunchedEffect
         snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
             visible.getOrNull(index)?.let { navigationMemory.save(MainDestination.LIVE, "${it.type}:${it.id}", index) }
         }
