@@ -1021,15 +1021,33 @@ fun MainShellScreen(
     var pendingTvContentFocusHandoff by remember {
         mutableStateOf<TvContentFocusHandoffRequest?>(null)
     }
+    val rememberedPosterContentOwnsTvHandoff: (MainDestination) -> Boolean = { destination ->
+        val type = when (destination) {
+            MainDestination.MOVIES -> ContentType.MOVIE
+            MainDestination.SERIES -> ContentType.SERIES
+            else -> null
+        }
+        val rememberedKey = navigationMemory.position(destination).itemKey
+        type != null &&
+            state.searchQuery.isBlank() &&
+            rememberedKey.isNotBlank() &&
+            state.catalogs[type]?.items?.any { "${it.type}:${it.id}" == rememberedKey } == true
+    }
     val selectTvDestination: (MainDestination) -> Unit = { destination ->
         if (destination != state.destination) {
             onSelectDestination(destination)
         }
+        val contentRestoreOwnsTvHandoff =
+            destination != state.destination && rememberedPosterContentOwnsTvHandoff(destination)
         tvContentFocusRequestId += 1L
-        pendingTvContentFocusHandoff = TvContentFocusHandoffRequest(
-            destination = destination,
-            requestId = tvContentFocusRequestId,
-        )
+        pendingTvContentFocusHandoff = if (contentRestoreOwnsTvHandoff) {
+            null
+        } else {
+            TvContentFocusHandoffRequest(
+                destination = destination,
+                requestId = tvContentFocusRequestId,
+            )
+        }
     }
     val homeModel = if (state.destination == MainDestination.HOME) {
         rememberHomeModelForPresentation(
