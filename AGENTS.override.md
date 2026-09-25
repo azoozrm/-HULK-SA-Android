@@ -27,6 +27,30 @@ The fixed persistent physical engineering packages are:
 
 `sa.hulksa.player.dev` is NOT the default persistent physical engineering instance.
 
+## Persistent approved physical surfaces
+
+The owner-approved persistent qualification surfaces include:
+
+1. Xiaomi Mi Box 4 / `MIBOX4`
+   - primary persistent TV runtime/qualification surface;
+   - its installed `sa.hulksa.player.benchmark` authenticated state is owner engineering state and
+     must be preserved across rounds.
+
+2. Samsung Galaxy A06 / `SM-A065F` / device `a06`
+   - persistent mobile/compact-phone qualification surface;
+   - its installed `sa.hulksa.player.benchmark` instance is owner-authenticated persistent
+     engineering state and must be preserved for future mobile testing;
+   - current installed qualification identity: versionCode `67`, versionName
+     `0.9.3.23.benchmark`;
+   - transport address/ADB port is dynamic runtime state and is NOT part of this contract;
+   - future mobile qualification should reuse this Benchmark instance when appropriate rather than
+     replacing it with `sa.hulksa.player.dev` or another disposable package.
+
+For every persistent surface, the package/data-preservation rules below apply independently. If a
+future implementation round needs to refresh the Galaxy Benchmark for mobile validation, use only a
+same-package/same-signer state-preserving `adb install -r` after the required identity/signature
+checks. Never manufacture a clean phone state by deleting or clearing this persistent instance.
+
 ## Mandatory dual refresh after successful implementation
 
 At the end of every Android IMPLEMENTATION round that reaches a valid, testable state, unless the
