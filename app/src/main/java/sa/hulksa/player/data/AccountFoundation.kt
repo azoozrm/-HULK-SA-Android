@@ -107,9 +107,14 @@ data class AccountSessionMetadata(
  * rollback-safe legacy storage. The first successfully authenticated account
  * claims the old unscoped data exactly once; later accounts start isolated.
  */
-class AccountScopeStore(context: Context) {
-    private val appContext = context.applicationContext
-    private val state = appContext.getSharedPreferences(STATE_PREFERENCES, Context.MODE_PRIVATE)
+class AccountScopeStore internal constructor(
+    private val state: SharedPreferences,
+    private val scopedPreferences: (String) -> SharedPreferences,
+) {
+    constructor(context: Context) : this(
+        context.applicationContext.getSharedPreferences(STATE_PREFERENCES, Context.MODE_PRIVATE),
+        { name -> context.applicationContext.getSharedPreferences(name, Context.MODE_PRIVATE) },
+    )
 
     fun activeAccountId(): String? = state.getString(KEY_ACTIVE_ACCOUNT_ID, null)
         ?.trim()
@@ -144,15 +149,15 @@ class AccountScopeStore(context: Context) {
 
     fun preferences(baseName: String): SharedPreferences {
         val accountId = activeAccountId()
-            ?: return appContext.getSharedPreferences(baseName, Context.MODE_PRIVATE)
+            ?: return scopedPreferences(baseName)
         return preferences(baseName, accountId)
     }
 
     internal fun preferences(baseName: String, accountId: String): SharedPreferences {
         val normalizedAccountId = accountId.trim().takeIf(String::isNotBlank)
-            ?: return appContext.getSharedPreferences(baseName, Context.MODE_PRIVATE)
+            ?: return scopedPreferences(baseName)
         val scopedName = accountScopedPreferencesName(baseName, normalizedAccountId)
-        val scoped = appContext.getSharedPreferences(scopedName, Context.MODE_PRIVATE)
+        val scoped = scopedPreferences(scopedName)
         migrateLegacyPreferencesIfNeeded(
             legacyName = baseName,
             scoped = scoped,
@@ -172,7 +177,7 @@ class AccountScopeStore(context: Context) {
         val editor = scoped.edit()
         val ownsLegacy = state.getString(KEY_LEGACY_OWNER_ACCOUNT_ID, null) == accountId
         if (ownsLegacy) {
-            val legacy = appContext.getSharedPreferences(legacyName, Context.MODE_PRIVATE)
+            val legacy = scopedPreferences(legacyName)
             copyPreferences(legacy, editor)
         }
         editor.putBoolean(KEY_SCOPE_MIGRATED, true).commit()
@@ -207,10 +212,14 @@ class AccountScopeStore(context: Context) {
  * Xtream does not issue an opaque access token, so the protocol credentials
  * remain exclusively in CredentialVault; this store never persists a password.
  */
-class AccountSessionStore(context: Context) {
-    private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-    private val accountScope = AccountScopeStore(appContext)
+class AccountSessionStore internal constructor(
+    private val preferences: SharedPreferences,
+    private val accountScope: AccountScopeStore,
+) {
+    constructor(context: Context) : this(
+        context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
+        AccountScopeStore(context),
+    )
 
     @Synchronized
     fun recordAuthenticated(session: AuthenticatedSession): AccountSessionMetadata {
@@ -241,21 +250,23 @@ class AccountSessionStore(context: Context) {
             sessionId = UUID.randomUUID().toString(),
         )
 
-        preferences.edit()
-            .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
-            .putString(aliasKey, metadata.accountId)
-            .putString(KEY_ACCOUNT_ID, metadata.accountId)
-            .putString(KEY_USERNAME, metadata.username)
-            .putString(KEY_PORTAL_BASE_URL, metadata.portalBaseUrl)
-            .putLong(KEY_AUTHENTICATED_AT, metadata.authenticatedAtEpochMs)
-            .putLong(KEY_EXPIRES_AT, metadata.expiresAtEpochSeconds ?: NO_EXPIRY)
-            .putString(KEY_STATUS, metadata.status)
-            .putString(KEY_INSTALLATION_ID, metadata.installationId)
-            .putString(KEY_SESSION_ID, metadata.sessionId)
-            .putString(KEY_LAST_ACCOUNT_ID, metadata.accountId)
-            .putString(KEY_LAST_USERNAME, metadata.username)
-            .putString(KEY_LAST_ACCESS_CODE, session.credentials.accessCode)
-            .commit()
+        check(
+            preferences.edit()
+                .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+                .putString(aliasKey, metadata.accountId)
+                .putString(KEY_ACCOUNT_ID, metadata.accountId)
+                .putString(KEY_USERNAME, metadata.username)
+                .putString(KEY_PORTAL_BASE_URL, metadata.portalBaseUrl)
+                .putLong(KEY_AUTHENTICATED_AT, metadata.authenticatedAtEpochMs)
+                .putLong(KEY_EXPIRES_AT, metadata.expiresAtEpochSeconds ?: NO_EXPIRY)
+                .putString(KEY_STATUS, metadata.status)
+                .putString(KEY_INSTALLATION_ID, metadata.installationId)
+                .putString(KEY_SESSION_ID, metadata.sessionId)
+                .putString(KEY_LAST_ACCOUNT_ID, metadata.accountId)
+                .putString(KEY_LAST_USERNAME, metadata.username)
+                .putString(KEY_LAST_ACCESS_CODE, session.credentials.accessCode)
+                .commit(),
+        ) { "Unable to persist authenticated account session metadata" }
         return metadata
     }
 
