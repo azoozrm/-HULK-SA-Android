@@ -1,6 +1,7 @@
 package sa.hulksa.player.security
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -15,8 +16,12 @@ import javax.crypto.spec.GCMParameterSpec
  * Stores the account in an Android Keystore-backed AES/GCM envelope. The APK
  * never contains a test username or password and Android backup is disabled.
  */
-class CredentialVault(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+class CredentialVault internal constructor(
+    private val preferences: SharedPreferences,
+) {
+    constructor(context: Context) : this(
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE),
+    )
 
     fun save(credentials: Credentials) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -53,8 +58,16 @@ class CredentialVault(context: Context) {
         return credentials
     }
 
+    /**
+     * Removes the encrypted credential envelope. Android applies the cleared editor to the
+     * in-process map even when the durable write fails, so the commit result is checked: a failed
+     * durable removal throws [CredentialEnvelopeRemovalException] instead of letting callers treat
+     * the old envelope as removed while it stays restart-restorable.
+     */
     fun clear() {
-        preferences.edit().clear().commit()
+        if (!preferences.edit().clear().commit()) {
+            throw CredentialEnvelopeRemovalException()
+        }
     }
 
     private fun getOrCreateKey(): SecretKey {
@@ -76,7 +89,7 @@ class CredentialVault(context: Context) {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val PREFERENCES = "hulk_secure_session"
         const val KEY_IV = "iv"
         const val KEY_PAYLOAD = "payload"
@@ -85,6 +98,14 @@ class CredentialVault(context: Context) {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
     }
 }
+
+/**
+ * Raised when the encrypted credential envelope could not be durably removed. Callers must fail
+ * the enclosing logout / no-remember transition instead of reporting it as completed, because the
+ * old envelope can still be restored after a process restart.
+ */
+internal class CredentialEnvelopeRemovalException :
+    IllegalStateException("Unable to durably remove the remembered credential envelope")
 
 internal object CredentialPayloadCodec {
     private const val VERSION = "2"

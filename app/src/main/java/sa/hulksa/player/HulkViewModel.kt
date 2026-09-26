@@ -96,6 +96,7 @@ import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.tv.TvDeepLinkDispatchDecision
 import sa.hulksa.player.tv.TvDeepLinkResolution
 import sa.hulksa.player.tv.TvDeepLinkRouter
@@ -2836,24 +2837,6 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         downloadResumeMutationGates.clear()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
         downloadPriorityMutationQueues.clear()
-        mutableState.update {
-            it.copy(
-                screen = HulkScreen.LOGIN,
-                isStarting = false,
-                isLoading = false,
-                loadingTypes = emptySet(),
-                account = null,
-                isAccountRefreshing = false,
-                favorites = emptySet(),
-                history = emptyList(),
-                isProfileLibraryReady = false,
-                downloads = emptyList(),
-                notificationPopup = null,
-                errorMessage = errorMessage,
-                accountDecision = null,
-            )
-        }
-
         logoutJob = viewModelScope.launch {
             try {
                 pendingLoginJob?.join()
@@ -2863,6 +2846,23 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 repository.logout()
                 session = null
                 sessionRestorationComplete = true
+                mutableState.update {
+                    it.copy(
+                        screen = HulkScreen.LOGIN,
+                        isStarting = false,
+                        isLoading = false,
+                        loadingTypes = emptySet(),
+                        account = null,
+                        isAccountRefreshing = false,
+                        favorites = emptySet(),
+                        history = emptyList(),
+                        isProfileLibraryReady = false,
+                        downloads = emptyList(),
+                        notificationPopup = null,
+                        errorMessage = errorMessage,
+                        accountDecision = null,
+                    )
+                }
                 val downloadSettings = withContext(Dispatchers.IO) { downloadRepository.settings() }
                 mutableState.value = HulkUiState(
                     isStarting = false,
@@ -2876,6 +2876,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                     operations = operationsState,
                     errorMessage = errorMessage,
                 )
+            } catch (error: CredentialEnvelopeRemovalException) {
+                // Fail closed: durable credential removal did not complete, so the session and
+                // account state stay in place and logout is not reported as completed.
+                showFailure(error)
             } finally {
                 logoutJob = null
             }
@@ -3038,6 +3042,10 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 viewModelScope.launch {
                     try {
                         repository.abandonPendingAuthentication()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: CredentialEnvelopeRemovalException) {
+                        showFailure(error)
                     } finally {
                         if (authenticationAttemptGate.complete(pending.generation)) {
                             loginJob = null
