@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
@@ -22,7 +23,7 @@ internal fun durableDownloadNotificationAction(rawAction: String?): DurableDownl
 
 internal enum class DurableDownloadReceiverExecution {
     ASYNC_PAUSE,
-    DIRECT_RESUME,
+    ASYNC_RESUME,
 }
 
 internal fun durableDownloadReceiverExecution(
@@ -30,31 +31,46 @@ internal fun durableDownloadReceiverExecution(
 ): DurableDownloadReceiverExecution? =
     when (durableDownloadNotificationAction(rawAction)) {
         DurableDownloadNotificationAction.PAUSE -> DurableDownloadReceiverExecution.ASYNC_PAUSE
-        DurableDownloadNotificationAction.RESUME -> DurableDownloadReceiverExecution.DIRECT_RESUME
+        DurableDownloadNotificationAction.RESUME -> DurableDownloadReceiverExecution.ASYNC_RESUME
         null -> null
     }
 
+internal fun durableDownloadReceiverDownloadId(rawDownloadId: Long): Long? =
+    rawDownloadId.takeIf { it > 0L }
+
+internal fun <T : Any> CoroutineScope.launchDurableDownloadReceiverMutation(
+    resolveTarget: () -> T?,
+    finish: () -> Unit,
+    mutation: (T) -> Unit,
+): Job = launch {
+    try {
+        resolveTarget()?.let(mutation)
+    } finally {
+        finish()
+    }
+}
+
 internal class DurableDownloadActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        val downloadId = intent?.getLongExtra(EXTRA_DOWNLOAD_ID, -1L) ?: return
-        if (downloadId <= 0L) return
-        val applicationContext = context.applicationContext
-        when (durableDownloadReceiverExecution(intent.action)) {
-            DurableDownloadReceiverExecution.ASYNC_PAUSE -> pauseAsync(applicationContext, downloadId)
-            DurableDownloadReceiverExecution.DIRECT_RESUME -> {
-                DownloadRepositoryProcessOwner.getActive(applicationContext)?.resume(downloadId)
-            }
-            null -> Unit
-        }
+        val rawDownloadId = intent?.getLongExtra(EXTRA_DOWNLOAD_ID, -1L) ?: return
+        val downloadId = durableDownloadReceiverDownloadId(rawDownloadId) ?: return
+        val execution = durableDownloadReceiverExecution(intent.action) ?: return
+        dispatchAsync(context.applicationContext, execution, downloadId)
     }
 
-    private fun pauseAsync(context: Context, downloadId: Long) {
+    private fun dispatchAsync(
+        context: Context,
+        execution: DurableDownloadReceiverExecution,
+        downloadId: Long,
+    ) {
         val pendingResult = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            try {
-                DownloadRepositoryProcessOwner.getActive(context)?.pause(downloadId)
-            } finally {
-                pendingResult.finish()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launchDurableDownloadReceiverMutation(
+            resolveTarget = { DownloadRepositoryProcessOwner.getActive(context) },
+            finish = pendingResult::finish,
+        ) { repository ->
+            when (execution) {
+                DurableDownloadReceiverExecution.ASYNC_PAUSE -> repository.pause(downloadId)
+                DurableDownloadReceiverExecution.ASYNC_RESUME -> repository.resume(downloadId)
             }
         }
     }
