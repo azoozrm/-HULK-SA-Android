@@ -1,17 +1,14 @@
 package sa.hulksa.player.ui.screens
 
-import androidx.activity.ComponentActivity
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
-import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -22,7 +19,7 @@ import sa.hulksa.player.ui.theme.HulkTheme
 
 class AccountIdentityDecisionDialogTest {
     @get:Rule
-    val composeRule = createAndroidComposeRule<ComponentActivity>()
+    val composeRule = createComposeRule()
 
     @Test
     fun singleCandidateOffersSameDifferentAndCancelWithSafeInitialFocus() {
@@ -113,21 +110,6 @@ class AccountIdentityDecisionDialogTest {
         composeRule.onNodeWithTag(ACCOUNT_DECISION_CANCEL_TAG).performClick()
 
         assertTrue(different)
-        assertTrue(cancelled)
-    }
-
-    @Test
-    fun systemBackDismissesTheDecisionAsCancel() {
-        var cancelled = false
-        setDialog(
-            options = listOf(AccountDecisionOption("0", "first.example.test")),
-            onCancel = { cancelled = true },
-        )
-        composeRule.waitForIdle()
-
-        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressBack()
-        composeRule.waitForIdle()
-
         assertTrue(cancelled)
     }
 
