@@ -17,6 +17,7 @@ jobs:
     environment: production-e2e
     timeout-minutes: 60
     env:
+      HULK_E2E_ACCESS_CODE: ${{ secrets.HULK_E2E_ACCESS_CODE }}
       HULK_E2E_USERNAME: ${{ secrets.HULK_E2E_USERNAME }}
       HULK_E2E_PASSWORD: ${{ secrets.HULK_E2E_PASSWORD }}
 
@@ -40,6 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ -n "$HULK_E2E_ACCESS_CODE" ]] || { echo 'Missing HULK_E2E_ACCESS_CODE in production-e2e environment' >&2; exit 2; }
           [[ -n "$HULK_E2E_USERNAME" ]] || { echo 'Missing HULK_E2E_USERNAME in production-e2e environment' >&2; exit 2; }
           [[ -n "$HULK_E2E_PASSWORD" ]] || { echo 'Missing HULK_E2E_PASSWORD in production-e2e environment' >&2; exit 2; }
           echo 'PASS: protected production E2E credentials are available'
@@ -67,6 +69,7 @@ jobs:
             ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest
             -Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.ProductionAuthenticatedSmokeTest
             -Pandroid.testInstrumentationRunnerArguments.hulkProductionE2e=true
+            -Pandroid.testInstrumentationRunnerArguments.hulkE2eAccessCode="$HULK_E2E_ACCESS_CODE"
             -Pandroid.testInstrumentationRunnerArguments.hulkE2eUsername="$HULK_E2E_USERNAME"
             -Pandroid.testInstrumentationRunnerArguments.hulkE2ePassword="$HULK_E2E_PASSWORD"
 
