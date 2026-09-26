@@ -35,6 +35,35 @@ internal class DownloadSettingsMutationGate {
         }
 }
 
+/**
+ * Keeps only the newest Downloads UI snapshot eligible for publication.
+ *
+ * Ownership transitions (login, logout, profile switch) invalidate in-flight attempts so a
+ * snapshot resolved for a previous account/profile can never publish under a new owner.
+ */
+internal class DownloadSnapshotPublicationGate {
+    data class Attempt internal constructor(val generation: Long)
+
+    private var generation = 0L
+    private var activeGeneration: Long? = null
+
+    @Synchronized
+    fun begin(): Attempt {
+        generation += 1L
+        activeGeneration = generation
+        return Attempt(generation)
+    }
+
+    @Synchronized
+    fun isCurrent(attempt: Attempt): Boolean = activeGeneration == attempt.generation
+
+    @Synchronized
+    fun invalidate() {
+        generation += 1L
+        activeGeneration = null
+    }
+}
+
 /** Serializes every priority intent for one download without sharing resume ownership. */
 internal class DownloadPriorityMutationQueue {
     data class Attempt internal constructor(val generation: Long)

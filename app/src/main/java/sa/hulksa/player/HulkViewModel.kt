@@ -241,6 +241,20 @@ internal suspend fun loadDownloadUiSnapshot(
     snapshotLoader()
 }
 
+internal suspend fun publishDownloadUiSnapshot(
+    state: MutableStateFlow<HulkUiState>,
+    gate: DownloadSnapshotPublicationGate,
+    snapshotLoader: () -> List<OfflineDownload>,
+): List<OfflineDownload> {
+    val attempt = gate.begin()
+    val downloads = loadDownloadUiSnapshot(snapshotLoader)
+    if (!gate.isCurrent(attempt)) return state.value.downloads
+    if (downloads != state.value.downloads) {
+        state.update { it.copy(downloads = downloads) }
+    }
+    return downloads
+}
+
 internal suspend fun runDownloadRemovalOffMain(
     removal: () -> List<OfflineDownload>,
 ): List<OfflineDownload> = withContext(Dispatchers.IO) {
@@ -354,6 +368,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val profileLibraryStartupGate = ProfileLibraryStartupGate()
     private val detailsRequestGate = DetailsRequestGate()
     private val downloadSettingsMutationGate = DownloadSettingsMutationGate()
+    private val downloadSnapshotPublicationGate = DownloadSnapshotPublicationGate()
     private val downloadResumeMutationGates = mutableMapOf<Long, DownloadSettingsMutationGate>()
     private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
@@ -410,10 +425,11 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         restoreSession()
         viewModelScope.launch {
             while (isActive) {
-                val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
-                if (downloads != mutableState.value.downloads) {
-                    mutableState.update { it.copy(downloads = downloads) }
-                }
+                val downloads = publishDownloadUiSnapshot(
+                    state = mutableState,
+                    gate = downloadSnapshotPublicationGate,
+                    snapshotLoader = downloadRepository::snapshot,
+                )
                 val hasActive = downloads.any {
                     it.status == OfflineStatus.QUEUED ||
                         it.status == OfflineStatus.CHECKING ||
@@ -1907,6 +1923,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onProfileChanged() {
         downloadSettingsMutationGate.invalidate()
+        downloadSnapshotPublicationGate.invalidate()
         downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
         downloadResumeMutationGates.clear()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
@@ -2833,6 +2850,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidateDiagnosticsForSessionChange()
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
+        downloadSnapshotPublicationGate.invalidate()
         downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
         downloadResumeMutationGates.clear()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
@@ -3105,6 +3123,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         invalidateDiagnosticsForSessionChange()
         invalidatePlayerProgressPersistence()
         downloadSettingsMutationGate.invalidate()
+        downloadSnapshotPublicationGate.invalidate()
         downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
         downloadResumeMutationGates.clear()
         downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
