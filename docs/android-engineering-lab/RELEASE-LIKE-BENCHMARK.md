@@ -34,7 +34,7 @@ optimization contract:
 | `isShrinkResources` | `true` |
 | `isDebuggable` | `false` |
 | `isProfileable` | `true` (manifest `<profileable android:shell="true" />`) |
-| `signingConfig` | `debug` signing config only (disposable local test key) |
+| `signingConfig` | `debug` signing config (stable lab signer; see note below) |
 | `applicationId` | `sa.hulksa.player.benchmark` (isolated measurement identity/data) |
 | `versionName` | shipping version name + `.benchmark` suffix |
 
@@ -42,6 +42,14 @@ The shipping Release identity is unchanged: `applicationId = sa.hulksa.player`,
 shipping version code/name, endpoints, ABI set and brand are not modified, and the
 Release build type keeps its existing signing behavior (unsigned when release signing
 properties are not supplied). Production signing is never used here.
+
+The `debug` signing config is a local lab test signer, but for the persistent
+`sa.hulksa.player.benchmark` engineering instance it is stable owner state whose continuity
+must be preserved: the installed package can only be refreshed with a same-signer
+`adb install -r`. It is not a disposable per-round key, and it must not be deleted,
+regenerated or replaced merely to make a test pass. See
+`docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md` for the governing
+preservation contract.
 
 The `debug` build type is intentionally **not** used as the measurement target.
 

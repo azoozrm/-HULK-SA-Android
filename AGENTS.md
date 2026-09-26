@@ -280,22 +280,25 @@ At completion, report verified facts as applicable:
 
 For Audit / Review / Diagnosis, report findings and evidence only, with no mutation.
 
-## 15. Persistent Preview refresh (standing rule)
+## 15. Persistent owner refresh (standing rule)
 
-`sa.hulksa.player.preview` is the owner's live daily viewing copy of the latest **successful in-progress** implementation state, including unmerged PR heads. Do not wait for merge.
+`sa.hulksa.player.preview` and `sa.hulksa.player.benchmark` are the owner's persistent physical engineering packages. `sa.hulksa.player.preview` is the owner's live daily viewing copy of the latest **successful in-progress** implementation state, including unmerged PR heads; do not wait for merge.
 
-At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device:
+The specific authoritative contract for persistent package identity, approved physical surfaces, refresh procedure and data preservation is:
 
-1. Build Preview from the exact current task worktree / PR HEAD:
-   `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assemblePreview`
-   Both properties are required and the build fails closed without them, so a stale Preview version is never produced silently.
-2. Verify the APK: package `sa.hulksa.player.preview`, non-debuggable, release-like, R8 + resource shrinking, signed by the permanent Preview/lab signer.
-3. Install with `adb install -r`. Never uninstall, never `pm clear`, never downgrade, never change the signer, and never wipe owner login/data.
-4. Launch once and verify it starts without crash and without a stale Optional Update overlay.
-5. If the change does not build or fails required validation, do not replace the last known-good installed Preview.
-6. Never touch benchmark/dev/production packages while refreshing Preview.
+- `AGENTS.override.md`;
+- `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`.
 
-Use the qualification version override so the installed Preview versionCode/versionName aligns with the live Operations latest and does not trigger a stale Optional Update overlay.
+At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device, refresh **both** persistent packages from the exact current task worktree / PR HEAD with the owner-approved qualification overrides `-PHULK_QUALIFICATION_VERSION_CODE=<n>` and `-PHULK_QUALIFICATION_VERSION_NAME=<name>`:
+
+- `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assemblePreview`;
+- `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assembleBenchmark`.
+
+The Preview build currently fails closed when either override property is missing; the Benchmark variant has no equivalent build-level guard yet, so its built APK version must always be verified explicitly before installation. Using the overrides keeps each installed versionCode/versionName aligned with the live Operations latest and avoids a stale Optional Update overlay.
+
+For each package: verify package identity, qualification version, release-like properties and signer continuity before installation; install only with `adb install -r`; launch once and verify no immediate crash and no stale Optional Update overlay. Never uninstall, never `pm clear`, never wipe owner login/data, never downgrade, never change the signer, and never install a stale source-baseline version. If a build or required validation fails, do not replace the last known-good installed copy. Any test that needs clean state must use a separate isolated disposable package/surface. Audit/Review/Diagnosis rounds do not automatically rebuild or reinstall these packages.
+
+This section grants no merge, signing, tag or release authority; sections 1 and 12 still govern those actions.
 
 ## Final principle
 

@@ -60,12 +60,47 @@ lab_instrumentation_target_package() {
   printf '%s\n' "$target"
 }
 
+# Lists serials currently in adb "device" state (unauthorized/offline excluded).
+lab_adb_device_state_serials() {
+  adb devices | awk 'NR>1 && $2=="device" {print $1}'
+}
+
+# Explicit physical-device selection contract.
+#
+# - an explicit HULK_ADB_SERIAL is honored only while that exact serial is present in
+#   adb "device" state;
+# - zero devices fail closed;
+# - multiple devices without an explicit selection fail closed instead of silently
+#   choosing the first connected device;
+# - a single device is unambiguous and may be selected.
 lab_adb_serial() {
-  if [[ -n "${HULK_ADB_SERIAL:-}" ]]; then
-    printf '%s\n' "$HULK_ADB_SERIAL"
+  local explicit=${HULK_ADB_SERIAL:-}
+  local serials count
+  serials=$(lab_adb_device_state_serials)
+
+  if [[ -n "$explicit" ]]; then
+    if ! printf '%s\n' "$serials" | grep -Fqx -- "$explicit"; then
+      echo "STOP: HULK_ADB_SERIAL=$explicit is not present in adb 'device' state" >&2
+      return 11
+    fi
+    printf '%s\n' "$explicit"
     return 0
   fi
-  adb devices | awk 'NR>1 && $2=="device" {print $1; exit}'
+
+  count=$(printf '%s\n' "$serials" | grep -c . || true)
+  case "$count" in
+    0)
+      echo "STOP: no adb device in 'device' state" >&2
+      return 11
+      ;;
+    1)
+      printf '%s\n' "$serials"
+      ;;
+    *)
+      echo "STOP: multiple adb devices in 'device' state; set HULK_ADB_SERIAL explicitly" >&2
+      return 11
+      ;;
+  esac
 }
 
 lab_require_adb_device() {
@@ -84,15 +119,31 @@ lab_adb() {
   adb -s "$serial" "$@"
 }
 
-# Refuse to operate on protected production identities.
-lab_guard_test_package() {
-  local pkg=$1
-  case "$pkg" in
-    sa.hulksa.player|sa.hulksa.player.dev)
-      echo "STOP: refusing to operate on protected package $pkg" >&2
-      return 12
-      ;;
+# Classifies known HULK SA package identities. This is the single owner of the
+# generic-vs-dedicated safety distinction:
+# - production/dev: never generic diagnostic targets;
+# - persistent-preview/persistent-benchmark: owner-persistent engineering state that
+#   only a dedicated state-preserving refresh/preflight path may select explicitly;
+# - disposable: any other package, allowed for generic diagnostics.
+lab_package_class() {
+  case "$1" in
+    sa.hulksa.player) printf '%s\n' production ;;
+    sa.hulksa.player.dev) printf '%s\n' dev ;;
+    sa.hulksa.player.preview) printf '%s\n' persistent-preview ;;
+    sa.hulksa.player.benchmark) printf '%s\n' persistent-benchmark ;;
+    *) printf '%s\n' disposable ;;
   esac
+}
+
+# Refuse generic diagnostic/test operations on any protected product or
+# owner-persistent engineering package.
+lab_guard_test_package() {
+  local pkg=$1 class
+  class=$(lab_package_class "$pkg")
+  if [[ "$class" != disposable ]]; then
+    echo "STOP: refusing generic diagnostic on protected package $pkg" >&2
+    return 12
+  fi
 }
 
 # Reads stdin and drops any line that may contain credentials or account data.

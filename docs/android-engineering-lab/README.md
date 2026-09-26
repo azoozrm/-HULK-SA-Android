@@ -10,7 +10,7 @@ filesystem, evidence and rebuild behavior.
 - Permanent provider class: Contabo Cloud VPS 4.
 - Qualified lab mode: **Mode B — Hybrid Lab**.
 - Engineering host identity: `hulksa-android-lab-01`.
-- Engineering user: `hulkeng`.
+- Engineering user: `hulkapp`.
 - Canonical repository: `/srv/hulk-android/repos/HULK-SA-Android`.
 - Task worktrees: `/srv/hulk-android/worktrees/<task-id>`.
 - Reports: `/srv/hulk-android/reports/YYYY/<task-id>`.
@@ -103,7 +103,8 @@ The VPS is intentionally serialized.
 - Build wrapper uses the global heavy-work lock.
 - Do not run parallel Gradle builds.
 - Build scope target ceiling: MemoryHigh 4 GiB, MemoryMax 5.5 GiB, CPUQuota 350%.
-- OpenCode scope target ceiling: MemoryHigh 1 GiB, MemoryMax 1.5 GiB, CPUQuota 150%.
+- OpenCode scope ceiling as currently configured by `hulk-opencode-run`: MemoryHigh 1 GiB,
+  MemoryMax 1.5 GiB, with no CPU quota on the OpenCode scope.
 - Start qualified Gradle runs with at most two workers when lab resource pressure matters.
 - Swap is an OOM safety net, not performance capacity. Sustained swap over 1 GiB is a warning;
   over 2 GiB invalidates performance conclusions and requires resource review.
