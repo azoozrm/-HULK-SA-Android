@@ -158,8 +158,11 @@ class ProfileFoundationInstrumentedTest {
         assertNull(sessionStore.activeAccountId())
         assertEquals(FIRST_ACCESS_CODE, sessionStore.lastAccessCode())
 
+        // O2 + O4: the rotated host is attached to the existing account only through the
+        // explicit same-subscription decision; the store never resolves it silently.
         val secondMetadata = sessionStore.recordAuthenticated(
-            session(host = HOST_B, accessCode = SECOND_ACCESS_CODE),
+            session = session(host = HOST_B, accessCode = SECOND_ACCESS_CODE),
+            accountId = firstMetadata.accountId,
         )
 
         assertEquals(firstMetadata.accountId, secondMetadata.accountId)

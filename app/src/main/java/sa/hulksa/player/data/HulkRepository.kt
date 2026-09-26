@@ -42,7 +42,23 @@ class HulkRepository(context: Context) {
     private val accountSessionStore = AccountSessionStore(appContext)
     private val diagnostics = ServerDiagnosticsEngine(appContext)
 
-    suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession {
+    suspend fun login(credentials: Credentials, remember: Boolean): AuthenticatedSession =
+        when (val result = beginAuthentication(credentials, remember)) {
+            is AuthenticationStartResult.Completed -> result.session
+            is AuthenticationStartResult.DecisionRequired ->
+                throw AccountIdentityDecisionRequiredException(result.pending.candidates)
+        }
+
+    /**
+     * Authenticates against the provider and resolves local ownership. An unknown host for a
+     * username that already has local accounts returns [AuthenticationStartResult.DecisionRequired]
+     * without binding a scope, updating the session registry, trusting the host or persisting
+     * credentials. Nothing account-owned becomes reachable before the explicit decision.
+     */
+    internal suspend fun beginAuthentication(
+        credentials: Credentials,
+        remember: Boolean,
+    ): AuthenticationStartResult {
         val session = try {
             val portal = portalResolver.resolve(credentials.accessCode)
             client.authenticate(portal, credentials)
@@ -52,15 +68,28 @@ class HulkRepository(context: Context) {
         }
 
         try {
-            val metadata = withContext(Dispatchers.IO) {
-                synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                    suspendExistingDownloadOwner()
-                    val recorded = accountSessionStore.recordAuthenticated(session)
-                    AuthenticatedSessionRegistry.update(session, recorded)
-                    if (remember) vault.save(credentials) else vault.clear()
-                    recorded
-                }
+            val resolution = withContext(Dispatchers.IO) {
+                accountSessionStore.resolveAuthenticationIdentity(
+                    username = session.credentials.username,
+                    portalBaseUrl = session.portal.baseUrl,
+                )
             }
+            if (resolution is AccountIdentityResolution.Ambiguous) {
+                return AuthenticationStartResult.DecisionRequired(
+                    PendingAccountIdentityDecision(
+                        session = session,
+                        username = session.credentials.username.trim(),
+                        portalBaseUrl = accountTrustedHostKey(session.portal.baseUrl),
+                        candidates = resolution.candidates,
+                    ),
+                )
+            }
+            val accountId = when (resolution) {
+                is AccountIdentityResolution.Known -> resolution.accountId
+                is AccountIdentityResolution.New -> resolution.accountId
+                is AccountIdentityResolution.Ambiguous -> error("Ambiguous resolution handled above")
+            }
+            val metadata = commitAuthenticatedSession(session, accountId, remember)
             // The gate marks an attempt as manual only when it originated from HulkViewModel.login().
             // Startup restore reaches authenticate() directly, so this call records current ownership
             // but intentionally creates no parent-bootstrap proof for restored credentials.
@@ -79,7 +108,77 @@ class HulkRepository(context: Context) {
             }
             throw error
         }
-        return session
+        return AuthenticationStartResult.Completed(session)
+    }
+
+    /**
+     * Applies the user's explicit ambiguity decision. [selectedAccountId] null means the user
+     * confirmed a different subscription; otherwise it must still be a current candidate. The
+     * decision is re-validated against fresh trusted state under the commit lock so a stale or
+     * late result can never rebind ownership.
+     */
+    internal suspend fun completeAuthenticationDecision(
+        pending: PendingAccountIdentityDecision,
+        selectedAccountId: String?,
+        remember: Boolean,
+    ): AuthenticatedSession {
+        val resolution = withContext(Dispatchers.IO) {
+            accountSessionStore.resolveAuthenticationIdentity(
+                username = pending.username,
+                portalBaseUrl = pending.portalBaseUrl,
+            )
+        }
+        val accountId = resolveDecisionAccountId(
+            resolution = resolution,
+            selectedAccountId = selectedAccountId,
+            fallbackAccountId = stableAccountId(pending.portalBaseUrl, pending.username),
+        )
+        try {
+            val metadata = commitAuthenticatedSession(pending.session, accountId, remember)
+            ManualParentAuthProofRegistry.completeAuthenticationSuccess(
+                accountId = metadata.accountId,
+                sessionId = metadata.sessionId,
+            )
+        } catch (error: Throwable) {
+            ManualParentAuthProofRegistry.completeAuthenticationFailure()
+            withContext(NonCancellable + Dispatchers.IO) {
+                synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                    vault.clear()
+                    accountSessionStore.clearActiveSession()
+                    AuthenticatedSessionRegistry.clear()
+                }
+            }
+            throw error
+        }
+        return pending.session
+    }
+
+    /**
+     * Cancel/Back leaves no completed association: no binding, no trusted host and no persisted
+     * credentials for the undecided identity. The retained access code is preserved separately.
+     */
+    internal suspend fun abandonPendingAuthentication() = withContext(Dispatchers.IO) {
+        ManualParentAuthProofRegistry.completeAuthenticationFailure()
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            suspendExistingDownloadOwner()
+            vault.clear()
+            accountSessionStore.clearActiveSession()
+            AuthenticatedSessionRegistry.clear()
+        }
+    }
+
+    private suspend fun commitAuthenticatedSession(
+        session: AuthenticatedSession,
+        accountId: String,
+        remember: Boolean,
+    ): AccountSessionMetadata = withContext(Dispatchers.IO) {
+        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+            suspendExistingDownloadOwner()
+            val recorded = accountSessionStore.recordAuthenticated(session, accountId)
+            AuthenticatedSessionRegistry.update(session, recorded)
+            if (remember) vault.save(session.credentials) else vault.clear()
+            recorded
+        }
     }
 
     suspend fun reauthenticate(session: AuthenticatedSession): AuthenticatedSession {
@@ -100,7 +199,15 @@ class HulkRepository(context: Context) {
         val metadata = withContext(Dispatchers.IO) {
             synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
                 if (!matchesCurrentSessionOwner(owner)) throw staleReauthentication()
-                val recorded = accountSessionStore.recordAuthenticated(refreshed)
+                val continuationAccountId = accountSessionStore.continuationAccountId(
+                    username = refreshed.credentials.username,
+                    portalBaseUrl = refreshed.portal.baseUrl,
+                    currentAccountId = owner.accountId,
+                ) ?: throw staleReauthentication()
+                val recorded = accountSessionStore.recordAuthenticated(
+                    refreshed,
+                    continuationAccountId,
+                )
                 AuthenticatedSessionRegistry.update(refreshed, recorded)
                 recorded
             }
@@ -177,9 +284,21 @@ class HulkRepository(context: Context) {
                         if (!matchesCurrentSessionOwner(owner)) {
                             null
                         } else {
-                            val recorded = accountSessionStore.recordAuthenticated(restored)
-                            AuthenticatedSessionRegistry.update(restored, recorded)
-                            recorded
+                            val continuationAccountId = accountSessionStore.continuationAccountId(
+                                username = restored.credentials.username,
+                                portalBaseUrl = restored.portal.baseUrl,
+                                currentAccountId = owner.accountId,
+                            )
+                            if (continuationAccountId == null) {
+                                null
+                            } else {
+                                val recorded = accountSessionStore.recordAuthenticated(
+                                    restored,
+                                    continuationAccountId,
+                                )
+                                AuthenticatedSessionRegistry.update(restored, recorded)
+                                recorded
+                            }
                         }
                     }
                 }
@@ -222,9 +341,21 @@ class HulkRepository(context: Context) {
                 if (!matchesCurrentSessionOwner(owner)) {
                     null
                 } else {
-                    val recorded = accountSessionStore.recordAuthenticated(restored)
-                    AuthenticatedSessionRegistry.update(restored, recorded)
-                    recorded
+                    val continuationAccountId = accountSessionStore.continuationAccountId(
+                        username = restored.credentials.username,
+                        portalBaseUrl = restored.portal.baseUrl,
+                        currentAccountId = owner.accountId,
+                    )
+                    if (continuationAccountId == null) {
+                        null
+                    } else {
+                        val recorded = accountSessionStore.recordAuthenticated(
+                            restored,
+                            continuationAccountId,
+                        )
+                        AuthenticatedSessionRegistry.update(restored, recorded)
+                        recorded
+                    }
                 }
             }
         } ?: return DurableDownloadSessionRestoreResult.PermanentAuthFailure
@@ -373,6 +504,20 @@ internal sealed interface DurableDownloadSessionRestoreResult {
     data object PermanentAuthFailure : DurableDownloadSessionRestoreResult
     data object TransientFailure : DurableDownloadSessionRestoreResult
 }
+
+internal sealed interface AuthenticationStartResult {
+    data class Completed(val session: AuthenticatedSession) : AuthenticationStartResult
+    data class DecisionRequired(
+        val pending: PendingAccountIdentityDecision,
+    ) : AuthenticationStartResult
+}
+
+internal data class PendingAccountIdentityDecision(
+    val session: AuthenticatedSession,
+    val username: String,
+    val portalBaseUrl: String,
+    val candidates: List<TrustedAccountIdentity>,
+)
 
 internal fun durableDownloadSessionRestoreFailure(
     error: Throwable,

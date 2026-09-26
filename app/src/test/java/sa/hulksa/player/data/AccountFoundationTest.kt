@@ -3,6 +3,7 @@ package sa.hulksa.player.data
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,39 +28,233 @@ class AccountFoundationTest {
     }
 
     @Test
-    fun authenticationIdentityKeepsSameSubscriberScopeAcrossPortalChanges() {
-        val existingAccountId = stableAccountId("http://first.example.test:8080", "subscriber")
+    fun trustedHostResolvesDirectlyToItsAccount() {
+        val accountId = stableAccountId("http://first.example.test:8080", "subscriber")
 
-        val resolved = resolveAccountIdForAuthentication(
-            portalBaseUrl = "http://second.example.test:8080",
+        val resolution = resolveAccountIdentity(
             username = "subscriber",
-            aliasedAccountId = null,
-            currentAccountId = null,
-            currentUsername = null,
-            lastAccountId = existingAccountId,
-            lastUsername = "subscriber",
+            portalBaseUrl = "http://first.example.test:8080/",
+            snapshot = AccountIdentitySnapshot(
+                trustedAccountIds = setOf(accountId),
+                trustedHostsByAccountId = mapOf(
+                    accountId to setOf("http://first.example.test:8080"),
+                ),
+                legacyCandidateAccountIds = emptySet(),
+                activeAccountId = null,
+                activeUsername = null,
+                activePortalBaseUrl = null,
+            ),
         )
 
-        assertEquals(existingAccountId, resolved)
+        assertEquals(AccountIdentityResolution.Known(accountId), resolution)
     }
 
     @Test
-    fun authenticationIdentityDoesNotReuseDifferentUsernameScope() {
-        val existingAccountId = stableAccountId("http://first.example.test:8080", "subscriber")
-        val expected = stableAccountId("http://second.example.test:8080", "another-user")
+    fun unknownHostWithExistingCandidateStaysAmbiguous() {
+        val accountId = stableAccountId("http://first.example.test:8080", "subscriber")
+        val knownHost = "http://first.example.test:8080"
 
-        val resolved = resolveAccountIdForAuthentication(
+        val resolution = resolveAccountIdentity(
+            username = "subscriber",
             portalBaseUrl = "http://second.example.test:8080",
-            username = "another-user",
-            aliasedAccountId = null,
-            currentAccountId = null,
-            currentUsername = null,
-            lastAccountId = existingAccountId,
-            lastUsername = "subscriber",
+            snapshot = AccountIdentitySnapshot(
+                trustedAccountIds = setOf(accountId),
+                trustedHostsByAccountId = mapOf(accountId to setOf(knownHost)),
+                legacyCandidateAccountIds = emptySet(),
+                activeAccountId = null,
+                activeUsername = null,
+                activePortalBaseUrl = null,
+            ),
         )
 
-        assertEquals(expected, resolved)
-        assertNotEquals(existingAccountId, resolved)
+        assertEquals(
+            AccountIdentityResolution.Ambiguous(
+                listOf(TrustedAccountIdentity(accountId, setOf(knownHost))),
+            ),
+            resolution,
+        )
+    }
+
+    @Test
+    fun unknownHostWithoutCandidatesStartsNewIsolatedAccount() {
+        val resolution = resolveAccountIdentity(
+            username = "subscriber",
+            portalBaseUrl = "http://second.example.test:8080",
+            snapshot = AccountIdentitySnapshot(
+                trustedAccountIds = emptySet(),
+                trustedHostsByAccountId = emptyMap(),
+                legacyCandidateAccountIds = emptySet(),
+                activeAccountId = null,
+                activeUsername = null,
+                activePortalBaseUrl = null,
+            ),
+        )
+
+        assertEquals(
+            AccountIdentityResolution.New(
+                stableAccountId("http://second.example.test:8080", "subscriber"),
+            ),
+            resolution,
+        )
+    }
+
+    @Test
+    fun activeSessionHostMatchIsTrustworthySavedEvidence() {
+        val accountId = stableAccountId("http://first.example.test:8080", "subscriber")
+
+        val resolution = resolveAccountIdentity(
+            username = "subscriber",
+            portalBaseUrl = "http://first.example.test:8080",
+            snapshot = AccountIdentitySnapshot(
+                trustedAccountIds = emptySet(),
+                trustedHostsByAccountId = emptyMap(),
+                legacyCandidateAccountIds = setOf(accountId),
+                activeAccountId = accountId,
+                activeUsername = "subscriber",
+                activePortalBaseUrl = "http://first.example.test:8080",
+            ),
+        )
+
+        assertEquals(AccountIdentityResolution.Known(accountId), resolution)
+    }
+
+    @Test
+    fun duplicateTrustedHostClaimsFailClosedToAmbiguous() {
+        val first = "first-account"
+        val second = "second-account"
+        val sharedHost = "http://shared.example.test:8080"
+
+        val resolution = resolveAccountIdentity(
+            username = "subscriber",
+            portalBaseUrl = sharedHost,
+            snapshot = AccountIdentitySnapshot(
+                trustedAccountIds = setOf(first, second),
+                trustedHostsByAccountId = mapOf(
+                    first to setOf(sharedHost),
+                    second to setOf(sharedHost),
+                ),
+                legacyCandidateAccountIds = emptySet(),
+                activeAccountId = null,
+                activeUsername = null,
+                activePortalBaseUrl = null,
+            ),
+        )
+
+        assertTrue(resolution is AccountIdentityResolution.Ambiguous)
+    }
+
+    @Test
+    fun candidateLabelsExposeOnlyPrivacySafeHostIdentity() {
+        val hostAccount = "a".repeat(64)
+        val legacyAccount = "b".repeat(64)
+        val labels = accountIdentityCandidateLabels(
+            listOf(
+                TrustedAccountIdentity(
+                    accountId = hostAccount,
+                    trustedHosts = setOf(
+                        "https://user:secret@first.example.test:8080/path?token=hidden",
+                    ),
+                ),
+                TrustedAccountIdentity(accountId = legacyAccount, trustedHosts = emptySet()),
+            ),
+        )
+
+        assertEquals(2, labels.size)
+        assertEquals(
+            "first.example.test:8080",
+            labels.first { it.accountId == hostAccount }.label,
+        )
+        assertEquals(
+            ACCOUNT_DECISION_LEGACY_ACCOUNT_LABEL,
+            labels.first { it.accountId == legacyAccount }.label,
+        )
+        labels.forEach { label ->
+            assertFalse(label.label.contains("http"))
+            assertFalse(label.label.contains("secret"))
+            assertFalse(label.label.contains("hidden"))
+            assertFalse(label.label.contains(label.accountId))
+        }
+    }
+
+    @Test
+    fun candidateLabelsDisambiguateSchemeOnlyCollisions() {
+        val secure = TrustedAccountIdentity("secure-account", setOf("https://same.example.test:8443"))
+        val plain = TrustedAccountIdentity("plain-account", setOf("http://same.example.test:8443"))
+
+        val labels = accountIdentityCandidateLabels(listOf(secure, plain))
+
+        assertEquals(2, labels.map(AccountIdentityCandidateLabel::label).distinct().size)
+    }
+
+    @Test
+    fun trustedHostDisplayLabelStripsSecretBearingParts() {
+        assertEquals(
+            "host.example.test:8080",
+            trustedHostDisplayLabel("https://user:secret@host.example.test:8080/path?q=1#frag"),
+        )
+    }
+
+    @Test
+    fun decisionResolutionNeverSilentlySelectsAmongCandidates() {
+        val first = "first-account"
+        val second = "second-account"
+        val ambiguous = AccountIdentityResolution.Ambiguous(
+            listOf(
+                TrustedAccountIdentity(first, setOf("http://first.example.test:8080")),
+                TrustedAccountIdentity(second, setOf("http://second.example.test:8080")),
+            ),
+        )
+
+        assertEquals(
+            second,
+            resolveDecisionAccountId(
+                resolution = ambiguous,
+                selectedAccountId = second,
+                fallbackAccountId = "new-account",
+            ),
+        )
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            resolveDecisionAccountId(
+                resolution = ambiguous,
+                selectedAccountId = "unknown-account",
+                fallbackAccountId = "new-account",
+            )
+        }
+    }
+
+    @Test
+    fun staleDecisionCannotRebindAnAlreadyKnownHost() {
+        val known = "known-account"
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            resolveDecisionAccountId(
+                resolution = AccountIdentityResolution.Known(known),
+                selectedAccountId = null,
+                fallbackAccountId = "different-account",
+            )
+        }
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            resolveDecisionAccountId(
+                resolution = AccountIdentityResolution.Known(known),
+                selectedAccountId = "other-account",
+                fallbackAccountId = "different-account",
+            )
+        }
+    }
+
+    @Test
+    fun differentDecisionUsesANewIsolatedAccountIdOnly() {
+        val ambiguous = AccountIdentityResolution.Ambiguous(
+            listOf(TrustedAccountIdentity("existing-account", setOf("http://first.example.test:8080"))),
+        )
+
+        assertEquals(
+            "new-account",
+            resolveDecisionAccountId(
+                resolution = ambiguous,
+                selectedAccountId = null,
+                fallbackAccountId = "new-account",
+            ),
+        )
     }
 
     @Test
