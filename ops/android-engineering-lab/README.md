@@ -19,8 +19,16 @@ It does not contain credentials, IP addresses, caches, active task state or prod
 ## Diagnostics (Gate 3A.5)
 
 Bounded, read-only helpers for durable evidence. They never write inside the repository,
-never use production signing, and refuse to operate on the protected packages
-`sa.hulksa.player` and `sa.hulksa.player.dev`.
+never use production signing, and refuse generic diagnostic operation on all four protected
+identities: `sa.hulksa.player`, `sa.hulksa.player.dev`, `sa.hulksa.player.preview` and
+`sa.hulksa.player.benchmark`. The two owner-persistent packages may only be selected
+explicitly by a dedicated state-preserving refresh/preflight path under
+`docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`, never by a generic
+diagnostic probe.
+
+Explicit physical-device selection is mandatory when device identity matters: `HULK_ADB_SERIAL`
+is honored only while that serial is present in adb `device` state, and zero or multiple
+connected devices fail closed instead of silently choosing the first device.
 
 Privacy contract: the diagnostics never persist credentials or sensitive UI/account data.
 Editable-field text values are never emitted, and raw UI XML / screenshots are not captured
@@ -29,6 +37,13 @@ by default.
 - `apk-inspect.sh <apk>`: deterministic identity evidence — package, versionCode/versionName,
   signer SHA-256, debuggable, profileable declaration, ABI set, packaged baseline profile
   state, and `apk_kind` (`target-app` vs `test-apk`).
+- `physical-preflight.sh --package <pkg> --state-preserving [--apk <apk>] [--expect-*]`:
+  read-only identity preflight before a physical action. Compares selected serial/device
+  identity against an owner-approved surface, target and candidate APK package/version/signer,
+  installed presence/version/signer (pulled base APK inspected with `apk-inspect.sh`), supplied
+  source/worktree commit, and any `--temporary-setting NAME=RESTORE` contract. Fails closed on
+  any mismatch; refuses production; never installs, clears, changes settings or launches.
+  `physical_preflight.py` holds the pure judgment and fixture tests.
 - `runtime-capture.sh <test-package> <outdir> [--launch <component>] [--capture-ui]`: bounded
   runtime packet for an explicit TEST package only — package identity, foreground/focused
   window, compilation state, bounded dumpsys, bounded package-scoped logcat (credential lines
@@ -43,7 +58,8 @@ by default.
   bounded benchmark JSON/trace analysis. Keeps the self-instrumenting test APK context
   compilation mode separate from the target-app compilation state. Reports
   `trace_processor=BLOCKED` rather than guessing when no qualified trace processor exists.
-- `lib-lab.sh`: shared SDK/adb resolution, redaction and package guards.
+- `lib-lab.sh`: shared SDK/adb resolution with explicit device selection, redaction, package
+  classification and generic-diagnostic guards.
 - `uiautomator_focus.py`, `benchmark_analysis.py`: importable, unit-tested parsers.
 - `tests/run-tests.sh`: deterministic tests for the diagnostics tools (no device/SDK needed).
 
