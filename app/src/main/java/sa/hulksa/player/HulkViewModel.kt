@@ -24,10 +24,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import sa.hulksa.player.data.DownloadRepository
+import sa.hulksa.player.data.AccountIdentityCandidateLabel
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.AuthenticatedSessionRegistry
+import sa.hulksa.player.data.AuthenticationStartResult
 import sa.hulksa.player.data.ContentMetadataRequestKey
+import sa.hulksa.player.data.DownloadRepository
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.EpisodeNotificationSubscription
 import sa.hulksa.player.data.EpisodeNotificationStoreResult
@@ -52,6 +54,8 @@ import sa.hulksa.player.data.OperationsServiceStatus
 import sa.hulksa.player.data.OperationsStore
 import sa.hulksa.player.data.OperationsUiState
 import sa.hulksa.player.data.OperationsUpdateDecision
+import sa.hulksa.player.data.PendingAccountIdentityDecision
+import sa.hulksa.player.data.accountIdentityCandidateLabels
 import sa.hulksa.player.data.activePersistentOperationsAnnouncement
 import sa.hulksa.player.data.PortalException
 import sa.hulksa.player.data.PresenceClient
@@ -173,10 +177,38 @@ data class HulkUiState(
     val operations: OperationsUiState = OperationsUiState(),
     val playback: PlaybackRequest? = null,
     val diagnostics: DiagnosticsState = DiagnosticsState(),
+    val accountDecision: AccountDecisionUiState? = null,
 ) {
     companion object {
     }
 }
+
+/**
+ * UI-safe ambiguity options. Keys are opaque positional tokens; accountIds and credentials never
+ * enter UI state.
+ */
+data class AccountDecisionOption(
+    val key: String,
+    val label: String,
+)
+
+data class AccountDecisionUiState(
+    val username: String,
+    val options: List<AccountDecisionOption>,
+)
+
+internal sealed interface AccountDecisionChoice {
+    data class ExistingAccount(val key: String) : AccountDecisionChoice
+    data object DifferentSubscription : AccountDecisionChoice
+    data object Cancel : AccountDecisionChoice
+}
+
+private data class PendingAccountDecision(
+    val generation: Long,
+    val outcome: PendingAccountIdentityDecision,
+    val remember: Boolean,
+    val labeledCandidates: List<AccountIdentityCandidateLabel>,
+)
 
 data class SeriesEpisodeTarget(
     val seriesId: Int,
@@ -325,6 +357,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadPriorityMutationQueues = mutableMapOf<Long, DownloadPriorityMutationQueue>()
     private var loginJob: Job? = null
     private var logoutJob: Job? = null
+    private var pendingAccountDecision: PendingAccountDecision? = null
     private val catalogJobs = mutableMapOf<ContentType, Job>()
     private var catalogGeneration: Long = 0L
     private val loadedCatalogs = mutableMapOf<ContentType, Catalog>()
@@ -2782,6 +2815,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
 
         presenceLifecycleOwner.logout()
         authenticationAttemptGate.invalidate()
+        pendingAccountDecision = null
         invalidateAccountRefresh()
         val pendingLoginJob = loginJob
         pendingLoginJob?.cancel()
@@ -2816,6 +2850,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 downloads = emptyList(),
                 notificationPopup = null,
                 errorMessage = errorMessage,
+                accountDecision = null,
             )
         }
 
@@ -2855,6 +2890,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         val restoreGeneration = authenticationAttemptGate.tryStart() ?: return
         sessionRestorationComplete = false
         loginJob = viewModelScope.launch {
+            var decisionPending = false
             try {
                 val credentials = repository.savedCredentials()
                 if (!authenticationAttemptGate.isCurrent(restoreGeneration)) return@launch
@@ -2871,9 +2907,14 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                         isLoading = true,
                         isAccountRefreshing = false,
                         errorMessage = null,
+                        accountDecision = null,
                     )
                 }
-                runAuthenticationAttempt(credentials, remember = true, restoreGeneration)
+                decisionPending = runAuthenticationAttempt(
+                    credentials = credentials,
+                    remember = true,
+                    attemptGeneration = restoreGeneration,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
@@ -2882,7 +2923,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 showFailure(error)
                 resolvePendingTvDeepLink()
             } finally {
-                if (authenticationAttemptGate.complete(restoreGeneration)) {
+                if (!decisionPending && authenticationAttemptGate.complete(restoreGeneration)) {
                     loginJob = null
                 }
             }
@@ -2901,76 +2942,198 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 isLoading = true,
                 isAccountRefreshing = false,
                 errorMessage = null,
+                accountDecision = null,
             )
         }
         loginJob = viewModelScope.launch {
+            var decisionPending = false
             try {
-                runAuthenticationAttempt(credentials, remember, attemptGeneration)
+                decisionPending = runAuthenticationAttempt(
+                    credentials = credentials,
+                    remember = remember,
+                    attemptGeneration = attemptGeneration,
+                )
             } finally {
-                if (authenticationAttemptGate.complete(attemptGeneration)) {
+                if (!decisionPending && authenticationAttemptGate.complete(attemptGeneration)) {
                     loginJob = null
                 }
             }
         }
     }
 
+    /**
+     * Returns true only while an explicit ownership decision is pending. The attempt generation
+     * stays open in that case so no other authentication can start and a late result cannot
+     * complete the decision after ownership changed.
+     */
     private suspend fun runAuthenticationAttempt(
         credentials: Credentials,
         remember: Boolean,
         attemptGeneration: Long,
-    ) {
+    ): Boolean {
         try {
-            val authenticated = repository.login(credentials, remember)
-            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
-
-            invalidateCatalogRequests()
-            invalidateDiagnosticsForSessionChange()
-            invalidatePlayerProgressPersistence()
-            downloadSettingsMutationGate.invalidate()
-            downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
-            downloadResumeMutationGates.clear()
-            downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
-            downloadPriorityMutationQueues.clear()
-            session = authenticated
-            sessionRestorationComplete = true
-            clearCatalogMemory()
-            val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
-            val downloadSettings = withContext(Dispatchers.IO) {
-                downloadRepository.settings()
+            when (val outcome = repository.beginAuthentication(credentials, remember)) {
+                is AuthenticationStartResult.Completed -> {
+                    if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
+                    completeAuthenticatedLogin(outcome.session)
+                    return false
+                }
+                is AuthenticationStartResult.DecisionRequired -> {
+                    if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
+                    val labeledCandidates = accountIdentityCandidateLabels(
+                        outcome.pending.candidates,
+                    )
+                    pendingAccountDecision = PendingAccountDecision(
+                        generation = attemptGeneration,
+                        outcome = outcome.pending,
+                        remember = remember,
+                        labeledCandidates = labeledCandidates,
+                    )
+                    mutableState.update {
+                        it.copy(
+                            isStarting = false,
+                            isLoading = false,
+                            accountDecision = AccountDecisionUiState(
+                                username = outcome.pending.username,
+                                options = labeledCandidates.mapIndexed { index, candidate ->
+                                    AccountDecisionOption(
+                                        key = index.toString(),
+                                        label = candidate.label,
+                                    )
+                                },
+                            ),
+                        )
+                    }
+                    return true
+                }
             }
-            mutableState.update {
-                it.copy(
-                    screen = HulkScreen.MAIN,
-                    destination = MainDestination.HOME,
-                    isLoading = false,
-                    account = authenticated.account,
-                    isAccountRefreshing = false,
-                    catalogs = emptyMap(),
-                    selectedCategoryId = null,
-                    searchQuery = "",
-                    favorites = emptySet(),
-                    history = emptyList(),
-                    isProfileLibraryReady = false,
-                    downloads = downloads,
-                    downloadSettings = downloadSettings,
-                    errorMessage = null,
-                )
-            }
-            publishPresenceOwnership(authenticated)
-            ensureCatalog(ContentType.MOVIE)
-            ensureCatalog(ContentType.SERIES)
-            refreshOperations(force = false)
-            refreshNotificationState(clearPopup = true)
-            scanSubscribedSeries(NotificationScanTrigger.APP_START)
-            resolvePendingTvDeepLink()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return
+            if (!authenticationAttemptGate.isCurrent(attemptGeneration)) return false
             sessionRestorationComplete = true
             showFailure(error)
             resolvePendingTvDeepLink()
+            return false
         }
+    }
+
+    /**
+     * Applies the user's explicit same/different/cancel decision. Cancel abandons the pending
+     * identity without any binding or trusted host; same/different commit through the repository
+     * only when the decision is still the current attempt.
+     */
+    internal fun resolveAccountDecision(choice: AccountDecisionChoice) {
+        val pending = pendingAccountDecision ?: return
+        pendingAccountDecision = null
+        if (!authenticationAttemptGate.isCurrent(pending.generation)) {
+            mutableState.update { it.copy(accountDecision = null, isLoading = false) }
+            return
+        }
+        when (choice) {
+            is AccountDecisionChoice.Cancel -> {
+                mutableState.update {
+                    it.copy(accountDecision = null, isLoading = false, isStarting = false)
+                }
+                viewModelScope.launch {
+                    try {
+                        repository.abandonPendingAuthentication()
+                    } finally {
+                        if (authenticationAttemptGate.complete(pending.generation)) {
+                            loginJob = null
+                        }
+                    }
+                }
+            }
+
+            is AccountDecisionChoice.ExistingAccount,
+            is AccountDecisionChoice.DifferentSubscription,
+            -> {
+                val selectedAccountId = when (choice) {
+                    is AccountDecisionChoice.ExistingAccount ->
+                        pending.labeledCandidates
+                            .getOrNull(choice.key.toIntOrNull() ?: -1)
+                            ?.accountId
+                    else -> null
+                }
+                if (choice is AccountDecisionChoice.ExistingAccount && selectedAccountId == null) {
+                    mutableState.update { it.copy(accountDecision = null, isLoading = false) }
+                    if (authenticationAttemptGate.complete(pending.generation)) loginJob = null
+                    return
+                }
+                mutableState.update {
+                    it.copy(accountDecision = null, isLoading = true, errorMessage = null)
+                }
+                viewModelScope.launch {
+                    try {
+                        val authenticated = repository.completeAuthenticationDecision(
+                            pending = pending.outcome,
+                            selectedAccountId = selectedAccountId,
+                            remember = pending.remember,
+                        )
+                        if (authenticationAttemptGate.isCurrent(pending.generation)) {
+                            completeAuthenticatedLogin(authenticated)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        if (authenticationAttemptGate.isCurrent(pending.generation)) {
+                            sessionRestorationComplete = true
+                            showFailure(error)
+                            resolvePendingTvDeepLink()
+                        }
+                    } finally {
+                        if (authenticationAttemptGate.complete(pending.generation)) {
+                            loginJob = null
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun completeAuthenticatedLogin(authenticated: AuthenticatedSession) {
+        invalidateCatalogRequests()
+        invalidateDiagnosticsForSessionChange()
+        invalidatePlayerProgressPersistence()
+        downloadSettingsMutationGate.invalidate()
+        downloadResumeMutationGates.values.forEach(DownloadSettingsMutationGate::invalidate)
+        downloadResumeMutationGates.clear()
+        downloadPriorityMutationQueues.values.forEach(DownloadPriorityMutationQueue::invalidate)
+        downloadPriorityMutationQueues.clear()
+        session = authenticated
+        sessionRestorationComplete = true
+        clearCatalogMemory()
+        val downloads = loadDownloadUiSnapshot(downloadRepository::snapshot)
+        val downloadSettings = withContext(Dispatchers.IO) {
+            downloadRepository.settings()
+        }
+        mutableState.update {
+            it.copy(
+                screen = HulkScreen.MAIN,
+                destination = MainDestination.HOME,
+                isLoading = false,
+                account = authenticated.account,
+                isAccountRefreshing = false,
+                catalogs = emptyMap(),
+                selectedCategoryId = null,
+                searchQuery = "",
+                favorites = emptySet(),
+                history = emptyList(),
+                isProfileLibraryReady = false,
+                downloads = downloads,
+                downloadSettings = downloadSettings,
+                errorMessage = null,
+                accountDecision = null,
+            )
+        }
+        publishPresenceOwnership(authenticated)
+        ensureCatalog(ContentType.MOVIE)
+        ensureCatalog(ContentType.SERIES)
+        refreshOperations(force = false)
+        refreshNotificationState(clearPopup = true)
+        scanSubscribedSeries(NotificationScanTrigger.APP_START)
+        resolvePendingTvDeepLink()
     }
 
     private suspend fun publishPresenceOwnership(authenticated: AuthenticatedSession) {
@@ -3443,6 +3606,7 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
                 isLoading = false,
                 isAccountRefreshing = false,
                 errorMessage = error.message ?: "حدث خطا غير متوقع. حاول مرة اخرى.",
+                accountDecision = null,
             )
         }
     }

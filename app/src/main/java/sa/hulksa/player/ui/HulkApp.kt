@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import sa.hulksa.player.AccountDecisionChoice
 import sa.hulksa.player.HulkScreen
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
@@ -31,6 +32,7 @@ import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
+import sa.hulksa.player.ui.screens.AccountIdentityDecisionDialog
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_ALL
 import sa.hulksa.player.ui.screens.LIVE_TV_PRO_CONTEXT_FAVORITES
 import sa.hulksa.player.ui.screens.LocalNotificationCenterScreen
@@ -179,13 +181,34 @@ fun HulkApp(
                     ),
             ) {
                 when (state.screen) {
-                    HulkScreen.LOGIN -> LoginScreen(
-                        isTv = isTv,
-                        isStarting = state.isStarting,
-                        isLoading = state.isLoading,
-                        errorMessage = state.errorMessage,
-                        onLogin = viewModel::login,
-                    )
+                    HulkScreen.LOGIN -> {
+                        LoginScreen(
+                            isTv = isTv,
+                            isStarting = state.isStarting,
+                            isLoading = state.isLoading,
+                            errorMessage = state.errorMessage,
+                            onLogin = viewModel::login,
+                        )
+                        state.accountDecision?.let { decision ->
+                            AccountIdentityDecisionDialog(
+                                username = decision.username,
+                                options = decision.options,
+                                onSelectExisting = { key ->
+                                    viewModel.resolveAccountDecision(
+                                        AccountDecisionChoice.ExistingAccount(key),
+                                    )
+                                },
+                                onDifferentSubscription = {
+                                    viewModel.resolveAccountDecision(
+                                        AccountDecisionChoice.DifferentSubscription,
+                                    )
+                                },
+                                onCancel = {
+                                    viewModel.resolveAccountDecision(AccountDecisionChoice.Cancel)
+                                },
+                            )
+                        }
+                    }
 
                     HulkScreen.MAIN -> {
                         if (state.destination == MainDestination.SEARCH) {
