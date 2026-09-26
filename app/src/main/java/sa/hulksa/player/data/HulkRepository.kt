@@ -18,9 +18,24 @@ import sa.hulksa.player.model.HistoryEntry
 import sa.hulksa.player.model.ServerDiagnosticsReport
 import sa.hulksa.player.model.PlaybackRequest
 import sa.hulksa.player.model.SeriesBundle
+import sa.hulksa.player.security.CredentialEnvelopeRemovalException
 import sa.hulksa.player.security.CredentialVault
 
 private val ACCOUNT_SESSION_COMMIT_LOCK = Any()
+
+/**
+ * Runs a credential-removal transition fail-closed: durable credential removal must succeed
+ * before the session-ownership mutation [advance] may run. A failed removal propagates and leaves
+ * ownership untouched, so no caller can report logout or a no-remember authentication as completed
+ * while the old credential envelope remains restart-restorable.
+ */
+internal fun <T> withDurableCredentialsRemoved(
+    clearDurableCredentials: () -> Unit,
+    advance: () -> T,
+): T {
+    clearDurableCredentials()
+    return advance()
+}
 
 internal suspend fun <T> runKidsSnapshotPersistenceOffMain(operation: () -> T): T =
     withContext(Dispatchers.IO) { operation() }
@@ -111,7 +126,13 @@ class HulkRepository(context: Context) {
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
             withContext(NonCancellable + Dispatchers.IO) {
                 synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                    vault.clear()
+                    try {
+                        vault.clear()
+                    } catch (removalFailure: CredentialEnvelopeRemovalException) {
+                        // The operation is already failing; keep the original cause primary and
+                        // record that the durable credential envelope could not be removed.
+                        error.addSuppressed(removalFailure)
+                    }
                     accountSessionStore.clearActiveSession()
                     AuthenticatedSessionRegistry.clear()
                 }
@@ -156,7 +177,13 @@ class HulkRepository(context: Context) {
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
             withContext(NonCancellable + Dispatchers.IO) {
                 synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-                    vault.clear()
+                    try {
+                        vault.clear()
+                    } catch (removalFailure: CredentialEnvelopeRemovalException) {
+                        // The operation is already failing; keep the original cause primary and
+                        // record that the durable credential envelope could not be removed.
+                        error.addSuppressed(removalFailure)
+                    }
                     accountSessionStore.clearActiveSession()
                     AuthenticatedSessionRegistry.clear()
                 }
@@ -178,9 +205,10 @@ class HulkRepository(context: Context) {
         ManualParentAuthProofRegistry.completeAuthenticationFailure()
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
             suspendExistingDownloadOwner()
-            vault.clear()
-            accountSessionStore.clearActiveSession()
-            AuthenticatedSessionRegistry.clear()
+            withDurableCredentialsRemoved(vault::clear) {
+                accountSessionStore.clearActiveSession()
+                AuthenticatedSessionRegistry.clear()
+            }
         }
     }
 
@@ -194,10 +222,20 @@ class HulkRepository(context: Context) {
         accountId: String,
         remember: Boolean,
     ): AccountSessionMetadata {
-        val recorded = accountSessionStore.recordAuthenticated(session, accountId)
-        AuthenticatedSessionRegistry.update(session, recorded)
-        if (remember) vault.save(session.credentials) else vault.clear()
-        return recorded
+        if (remember) {
+            val recorded = accountSessionStore.recordAuthenticated(session, accountId)
+            AuthenticatedSessionRegistry.update(session, recorded)
+            vault.save(session.credentials)
+            return recorded
+        }
+        // A no-remember authentication must confirm durable credential removal before any
+        // durable session metadata is committed, so a failed removal can never leave a session
+        // that reports remembered credentials as erased.
+        return withDurableCredentialsRemoved(vault::clear) {
+            val recorded = accountSessionStore.recordAuthenticated(session, accountId)
+            AuthenticatedSessionRegistry.update(session, recorded)
+            recorded
+        }
     }
 
     suspend fun reauthenticate(session: AuthenticatedSession): AuthenticatedSession {
@@ -389,9 +427,10 @@ class HulkRepository(context: Context) {
         ManualParentAuthProofRegistry.invalidateAll()
         synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
             suspendExistingDownloadOwner()
-            vault.clear()
-            accountSessionStore.clearActiveSession()
-            AuthenticatedSessionRegistry.clear()
+            withDurableCredentialsRemoved(vault::clear) {
+                accountSessionStore.clearActiveSession()
+                AuthenticatedSessionRegistry.clear()
+            }
         }
     }
 
