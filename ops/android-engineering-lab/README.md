@@ -43,6 +43,11 @@ by default.
   installed presence/version/signer (pulled base APK inspected with `apk-inspect.sh`), supplied
   source/worktree commit, and any `--temporary-setting NAME=RESTORE` contract. Fails closed on
   any mismatch; refuses production; never installs, clears, changes settings or launches.
+  For the persistent `sa.hulksa.player.preview` / `sa.hulksa.player.benchmark` roles the full
+  owner-approved identity proof set is mandatory: expected surface, expected package, expected
+  candidate qualification versionCode/versionName, expected signer, candidate APK with
+  non-empty package/version/signer/SHA-256, installed package identity/signer continuity,
+  source commit, expected source commit and the state-preserving declaration.
   `physical_preflight.py` holds the pure judgment and fixture tests.
 - `runtime-capture.sh <test-package> <outdir> [--launch <component>] [--capture-ui]`: bounded
   runtime packet for an explicit TEST package only — package identity, foreground/focused

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
@@ -407,6 +408,7 @@ class PhysicalPreflightJudgeTest(unittest.TestCase):
             "expect_package": "sa.hulksa.player.preview",
             "expect_surface": "mibox4",
             "installed_present": "yes",
+            "installed_package": "sa.hulksa.player.preview",
             "installed_version_code": "66",
             "installed_version_name": "0.9.3.22",
             "installed_apk_sha256": "1" * 64,
@@ -429,6 +431,27 @@ class PhysicalPreflightJudgeTest(unittest.TestCase):
         facts.update(overrides)
         return facts
 
+    def benchmark_facts(self, **overrides: str) -> dict:
+        signer = "b" * 64
+        facts = {
+            "package": "sa.hulksa.player.benchmark",
+            "expect_package": "sa.hulksa.player.benchmark",
+            "candidate_package": "sa.hulksa.player.benchmark",
+            "installed_package": "sa.hulksa.player.benchmark",
+            "installed_signer_sha256": signer,
+            "candidate_signer_sha256": signer,
+            "expect_signer_sha256": signer,
+            "candidate_version_name": "0.9.3.23.benchmark",
+            "expect_version_name": "0.9.3.23.benchmark",
+            "installed_version_name": "0.9.3.22.benchmark",
+            "expect_installed_version_name": "0.9.3.22.benchmark",
+        }
+        facts.update(overrides)
+        return self.base_facts(**facts)
+
+    def persistent_builders(self) -> tuple[tuple[str, Callable[..., dict]], ...]:
+        return (("preview", self.base_facts), ("benchmark", self.benchmark_facts))
+
     def assert_fails_with(self, message: str, **overrides: str) -> None:
         result = physical_preflight.evaluate(self.base_facts(**overrides))
         self.assertEqual("FAIL", result["status"])
@@ -442,22 +465,75 @@ class PhysicalPreflightJudgeTest(unittest.TestCase):
         self.assertEqual("PASS", result["status"], result["failures"])
 
     def test_dedicated_persistent_benchmark_refresh_passes(self) -> None:
-        signer = "b" * 64
-        result = physical_preflight.evaluate(
-            self.base_facts(
-                package="sa.hulksa.player.benchmark",
-                expect_package="sa.hulksa.player.benchmark",
-                candidate_package="sa.hulksa.player.benchmark",
-                installed_signer_sha256=signer,
-                candidate_signer_sha256=signer,
-                expect_signer_sha256=signer,
-                candidate_version_name="0.9.3.23.benchmark",
-                expect_version_name="0.9.3.23.benchmark",
-                installed_version_name="0.9.3.22.benchmark",
-                expect_installed_version_name="0.9.3.22.benchmark",
-            )
-        )
+        result = physical_preflight.evaluate(self.benchmark_facts())
         self.assertEqual("PASS", result["status"], result["failures"])
+
+    def test_persistent_roles_fail_when_required_expectation_omitted(self) -> None:
+        omissions = (
+            ("expect_surface", "requires --expect-surface"),
+            ("expect_package", "requires --expect-package"),
+            ("expect_version_code", "requires --expect-version-code"),
+            ("expect_version_name", "requires --expect-version-name"),
+            ("expect_signer_sha256", "requires --expect-signer-sha256"),
+            ("expect_source_commit", "requires --expect-source-commit"),
+            ("source_commit", "requires a source/worktree commit identity"),
+        )
+        for role, builder in self.persistent_builders():
+            for key, message in omissions:
+                with self.subTest(role=role, omitted=key):
+                    result = physical_preflight.evaluate(builder(**{key: ""}))
+                    self.assertEqual("FAIL", result["status"])
+                    self.assertTrue(
+                        any(message in failure for failure in result["failures"]),
+                        f"{role}: {message!r} not in {result['failures']}",
+                    )
+
+    def test_persistent_roles_fail_when_candidate_identity_uncollected(self) -> None:
+        fields = (
+            ("candidate_apk_path", "requires an explicit --apk"),
+            ("candidate_package", "non-empty candidate APK package"),
+            ("candidate_version_code", "non-empty candidate APK versionCode"),
+            ("candidate_version_name", "non-empty candidate APK versionName"),
+            ("candidate_signer_sha256", "non-empty candidate APK signer"),
+            ("candidate_apk_sha256", "non-empty candidate APK SHA-256"),
+        )
+        for role, builder in self.persistent_builders():
+            for key, message in fields:
+                with self.subTest(role=role, omitted=key):
+                    result = physical_preflight.evaluate(builder(**{key: ""}))
+                    self.assertEqual("FAIL", result["status"])
+                    self.assertTrue(
+                        any(message in failure for failure in result["failures"]),
+                        f"{role}: {message!r} not in {result['failures']}",
+                    )
+
+    def test_persistent_roles_require_installed_package_identity(self) -> None:
+        for role, builder in self.persistent_builders():
+            with self.subTest(role=role):
+                result = physical_preflight.evaluate(builder(installed_package=""))
+                self.assertEqual("FAIL", result["status"])
+                self.assertTrue(
+                    any(
+                        "non-empty installed package identity" in failure
+                        for failure in result["failures"]
+                    ),
+                    result["failures"],
+                )
+
+    def test_persistent_roles_reject_installed_package_mismatch(self) -> None:
+        result = physical_preflight.evaluate(
+            self.base_facts(installed_package="sa.hulksa.player.benchmark")
+        )
+        self.assertEqual("FAIL", result["status"])
+        self.assertTrue(
+            any("installed APK package" in failure for failure in result["failures"])
+        )
+
+    def test_persistent_roles_require_worktree_bound_source_identity(self) -> None:
+        self.assert_fails_with(
+            "requires a source/worktree commit identity", source_commit=""
+        )
+        self.assert_fails_with("does not match worktree HEAD", worktree_head="e" * 40)
 
     def test_disposable_test_package_remains_allowed(self) -> None:
         result = physical_preflight.evaluate(
@@ -671,6 +747,17 @@ class PhysicalPreflightCliTest(unittest.TestCase):
         self.assertEqual(10, result.returncode)
         self.assertIn("not present", result.stderr)
 
+    def test_unreadable_worktree_fails_before_device_access(self) -> None:
+        result = self.run_tool(
+            "--package",
+            "sa.hulksa.player.preview",
+            "--state-preserving",
+            "--worktree",
+            "/nonexistent/hulk-worktree",
+        )
+        self.assertEqual(3, result.returncode)
+        self.assertIn("not a readable git worktree", result.stderr)
+
 
 class PhysicalPreflightEndToEndTest(unittest.TestCase):
     """ES-07: full read-only collection pipeline against a fake adb + fake SDK."""
@@ -838,6 +925,60 @@ class PhysicalPreflightEndToEndTest(unittest.TestCase):
         result, _ = self.run_preflight("--expect-version-code", "99")
         self.assertEqual(5, result.returncode)
         self.assertIn("preflight_status=FAIL", result.stdout)
+        self.assertIn("does not match expected", result.stdout)
+
+    def make_source_worktree(self) -> tuple[Path, str]:
+        repo = Path(self.tmp.name) / "source-worktree"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        (repo / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.email=lab@example.invalid",
+                "-c",
+                "user.name=Lab",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+            check=True,
+        )
+        head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return repo, head
+
+    def test_worktree_bound_source_identity_passes(self) -> None:
+        repo, head = self.make_source_worktree()
+        result, _ = self.run_preflight(
+            "--worktree",
+            str(repo),
+            "--source-commit",
+            head,
+            "--expect-source-commit",
+            head,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn(f"source_commit={head}", result.stdout)
+
+    def test_worktree_source_mismatch_fails_closed(self) -> None:
+        repo, head = self.make_source_worktree()
+        result, _ = self.run_preflight(
+            "--worktree",
+            str(repo),
+            "--source-commit",
+            head,
+            "--expect-source-commit",
+            "0" * 40,
+        )
+        self.assertEqual(5, result.returncode)
         self.assertIn("does not match expected", result.stdout)
 
 

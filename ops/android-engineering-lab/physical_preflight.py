@@ -12,6 +12,14 @@ It never uninstalls, clears, wipes, changes settings, installs, launches or
 otherwise mutates package/device state. All device access is read-only:
 `adb devices`, `getprop`, `pm path` and `pull`.
 
+For the persistent owner packages (``sa.hulksa.player.preview``,
+``sa.hulksa.player.benchmark``) the full owner-approved identity proof set is
+required: expected surface, expected package, expected candidate qualification
+versionCode/versionName, expected signer, candidate APK, source/worktree
+commit, expected source commit and the state-preserving declaration. Missing,
+uncollected or mismatched proof fails closed; disposable packages keep the
+lighter requirements.
+
 Judgment (``evaluate``) is a pure function so fixture tests can prove
 fail-closed behavior without a device or the Android SDK. The interactive paths
 (``collect_device_facts``, ``collect_apk_facts``) only gather facts; they do not
@@ -168,10 +176,36 @@ def evaluate(
             fail("candidate APK signer missing")
 
     if role.startswith("persistent-"):
+        for key, flag in (
+            ("expect_package", "--expect-package"),
+            ("expect_surface", "--expect-surface"),
+            ("expect_version_code", "--expect-version-code"),
+            ("expect_version_name", "--expect-version-name"),
+            ("expect_signer_sha256", "--expect-signer-sha256"),
+            ("expect_source_commit", "--expect-source-commit"),
+        ):
+            if not facts.get(key, ""):
+                fail(f"{role} package requires {flag}")
         if not facts.get("candidate_apk_path", ""):
-            fail("persistent package requires an explicit --apk candidate artifact")
-        if not facts.get("expect_signer_sha256", ""):
-            fail("persistent package requires --expect-signer-sha256")
+            fail(f"{role} package requires an explicit --apk candidate artifact")
+        for key, label in (
+            ("candidate_package", "candidate APK package"),
+            ("candidate_version_code", "candidate APK versionCode"),
+            ("candidate_version_name", "candidate APK versionName"),
+            ("candidate_signer_sha256", "candidate APK signer"),
+            ("candidate_apk_sha256", "candidate APK SHA-256"),
+        ):
+            if not facts.get(key, ""):
+                fail(f"{role} package requires a non-empty {label}")
+        installed_package = facts.get("installed_package", "")
+        if not installed_package:
+            fail(f"{role} package requires a non-empty installed package identity")
+        elif installed_package != package:
+            fail(
+                f"installed APK package {installed_package} does not match target {package}"
+            )
+        if not facts.get("source_commit", ""):
+            fail(f"{role} package requires a source/worktree commit identity")
 
     for fact_key, expect_key, label in (
         ("candidate_version_code", "expect_version_code", "candidate APK versionCode"),
