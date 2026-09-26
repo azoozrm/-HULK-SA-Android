@@ -67,35 +67,45 @@ class HulkRepository(context: Context) {
             throw error
         }
 
+        var pendingDecision: PendingAccountIdentityDecision? = null
         try {
-            val resolution = withContext(Dispatchers.IO) {
-                accountSessionStore.resolveAuthenticationIdentity(
-                    username = session.credentials.username,
-                    portalBaseUrl = session.portal.baseUrl,
-                )
+            // Resolution and commit share one ownership transaction so a concurrent ownership
+            // change cannot slip between the resolution that authorizes the write and the write.
+            val metadata = withContext(Dispatchers.IO) {
+                synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                    val resolution = accountSessionStore.resolveAuthenticationIdentity(
+                        username = session.credentials.username,
+                        portalBaseUrl = session.portal.baseUrl,
+                    )
+                    if (resolution is AccountIdentityResolution.Ambiguous) {
+                        pendingDecision = PendingAccountIdentityDecision(
+                            session = session,
+                            username = session.credentials.username.trim(),
+                            portalBaseUrl = accountTrustedHostKey(session.portal.baseUrl),
+                            candidates = resolution.candidates,
+                        )
+                        null
+                    } else {
+                        suspendExistingDownloadOwner()
+                        val accountId = when (resolution) {
+                            is AccountIdentityResolution.Known -> resolution.accountId
+                            is AccountIdentityResolution.New -> resolution.accountId
+                            is AccountIdentityResolution.Ambiguous -> error("Ambiguous resolution handled above")
+                        }
+                        commitAuthenticatedSessionLocked(session, accountId, remember)
+                    }
+                }
             }
-            if (resolution is AccountIdentityResolution.Ambiguous) {
-                return AuthenticationStartResult.DecisionRequired(
-                    PendingAccountIdentityDecision(
-                        session = session,
-                        username = session.credentials.username.trim(),
-                        portalBaseUrl = accountTrustedHostKey(session.portal.baseUrl),
-                        candidates = resolution.candidates,
-                    ),
-                )
+            if (pendingDecision != null) {
+                return AuthenticationStartResult.DecisionRequired(pendingDecision)
             }
-            val accountId = when (resolution) {
-                is AccountIdentityResolution.Known -> resolution.accountId
-                is AccountIdentityResolution.New -> resolution.accountId
-                is AccountIdentityResolution.Ambiguous -> error("Ambiguous resolution handled above")
-            }
-            val metadata = commitAuthenticatedSession(session, accountId, remember)
+            val committed = requireNotNull(metadata) { "Committed authentication metadata missing" }
             // The gate marks an attempt as manual only when it originated from HulkViewModel.login().
             // Startup restore reaches authenticate() directly, so this call records current ownership
             // but intentionally creates no parent-bootstrap proof for restored credentials.
             ManualParentAuthProofRegistry.completeAuthenticationSuccess(
-                accountId = metadata.accountId,
-                sessionId = metadata.sessionId,
+                accountId = committed.accountId,
+                sessionId = committed.sessionId,
             )
         } catch (error: Throwable) {
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
@@ -113,32 +123,35 @@ class HulkRepository(context: Context) {
 
     /**
      * Applies the user's explicit ambiguity decision. [selectedAccountId] null means the user
-     * confirmed a different subscription; otherwise it must still be a current candidate. The
-     * decision is re-validated against fresh trusted state under the commit lock so a stale or
-     * late result can never rebind ownership.
+     * confirmed a different subscription; otherwise it must still be a current candidate. Fresh
+     * ownership resolution, decision validation, the final accountId selection and the
+     * trusted-host/session commit all execute inside the same [ACCOUNT_SESSION_COMMIT_LOCK]
+     * ownership transaction, so a stale or late result can never rebind ownership.
      */
     internal suspend fun completeAuthenticationDecision(
         pending: PendingAccountIdentityDecision,
         selectedAccountId: String?,
         remember: Boolean,
     ): AuthenticatedSession {
-        val resolution = withContext(Dispatchers.IO) {
-            accountSessionStore.resolveAuthenticationIdentity(
-                username = pending.username,
-                portalBaseUrl = pending.portalBaseUrl,
-            )
-        }
-        val accountId = resolveDecisionAccountId(
-            resolution = resolution,
-            selectedAccountId = selectedAccountId,
-            fallbackAccountId = stableAccountId(pending.portalBaseUrl, pending.username),
-        )
-        try {
-            val metadata = commitAuthenticatedSession(pending.session, accountId, remember)
-            ManualParentAuthProofRegistry.completeAuthenticationSuccess(
-                accountId = metadata.accountId,
-                sessionId = metadata.sessionId,
-            )
+        val metadata = try {
+            withContext(Dispatchers.IO) {
+                synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
+                    val recorded = accountSessionStore.commitAccountIdentityDecision(
+                        username = pending.username,
+                        portalBaseUrl = pending.portalBaseUrl,
+                        selectedAccountId = selectedAccountId,
+                        session = pending.session,
+                    )
+                    AuthenticatedSessionRegistry.update(pending.session, recorded)
+                    if (remember) vault.save(pending.session.credentials) else vault.clear()
+                    recorded
+                }
+            }
+        } catch (stale: StaleAccountIdentityDecisionException) {
+            // The decision no longer applies to current ownership. Fail closed without touching
+            // any session or scope state that may belong to a newer valid owner.
+            ManualParentAuthProofRegistry.completeAuthenticationFailure()
+            throw stale
         } catch (error: Throwable) {
             ManualParentAuthProofRegistry.completeAuthenticationFailure()
             withContext(NonCancellable + Dispatchers.IO) {
@@ -150,6 +163,10 @@ class HulkRepository(context: Context) {
             }
             throw error
         }
+        ManualParentAuthProofRegistry.completeAuthenticationSuccess(
+            accountId = metadata.accountId,
+            sessionId = metadata.sessionId,
+        )
         return pending.session
     }
 
@@ -167,18 +184,20 @@ class HulkRepository(context: Context) {
         }
     }
 
-    private suspend fun commitAuthenticatedSession(
+    /**
+     * Commits a resolved identity and publishes its process-local ownership. Must be called while
+     * holding [ACCOUNT_SESSION_COMMIT_LOCK] so the metadata/trust write, the session registry and
+     * the credential vault all change as one serialized ownership transaction.
+     */
+    private fun commitAuthenticatedSessionLocked(
         session: AuthenticatedSession,
         accountId: String,
         remember: Boolean,
-    ): AccountSessionMetadata = withContext(Dispatchers.IO) {
-        synchronized(ACCOUNT_SESSION_COMMIT_LOCK) {
-            suspendExistingDownloadOwner()
-            val recorded = accountSessionStore.recordAuthenticated(session, accountId)
-            AuthenticatedSessionRegistry.update(session, recorded)
-            if (remember) vault.save(session.credentials) else vault.clear()
-            recorded
-        }
+    ): AccountSessionMetadata {
+        val recorded = accountSessionStore.recordAuthenticated(session, accountId)
+        AuthenticatedSessionRegistry.update(session, recorded)
+        if (remember) vault.save(session.credentials) else vault.clear()
+        return recorded
     }
 
     suspend fun reauthenticate(session: AuthenticatedSession): AuthenticatedSession {

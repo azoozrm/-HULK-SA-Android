@@ -210,14 +210,14 @@ class AccountFoundationTest {
             resolveDecisionAccountId(
                 resolution = ambiguous,
                 selectedAccountId = second,
-                fallbackAccountId = "new-account",
+                isolatedAccountIdProvider = { "new-account" },
             ),
         )
         assertThrows(StaleAccountIdentityDecisionException::class.java) {
             resolveDecisionAccountId(
                 resolution = ambiguous,
                 selectedAccountId = "unknown-account",
-                fallbackAccountId = "new-account",
+                isolatedAccountIdProvider = { "new-account" },
             )
         }
     }
@@ -229,14 +229,14 @@ class AccountFoundationTest {
             resolveDecisionAccountId(
                 resolution = AccountIdentityResolution.Known(known),
                 selectedAccountId = null,
-                fallbackAccountId = "different-account",
+                isolatedAccountIdProvider = { "different-account" },
             )
         }
         assertThrows(StaleAccountIdentityDecisionException::class.java) {
             resolveDecisionAccountId(
                 resolution = AccountIdentityResolution.Known(known),
                 selectedAccountId = "other-account",
-                fallbackAccountId = "different-account",
+                isolatedAccountIdProvider = { "different-account" },
             )
         }
     }
@@ -252,9 +252,34 @@ class AccountFoundationTest {
             resolveDecisionAccountId(
                 resolution = ambiguous,
                 selectedAccountId = null,
-                fallbackAccountId = "new-account",
+                isolatedAccountIdProvider = { "new-account" },
             ),
         )
+    }
+
+    @Test
+    fun differentDecisionRejectsAGeneratedIdThatCollidesWithACandidate() {
+        val ambiguous = AccountIdentityResolution.Ambiguous(
+            listOf(TrustedAccountIdentity("legacy-account", trustedHosts = emptySet())),
+        )
+
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            resolveDecisionAccountId(
+                resolution = ambiguous,
+                selectedAccountId = null,
+                isolatedAccountIdProvider = { "legacy-account" },
+            )
+        }
+    }
+
+    @Test
+    fun generatedIsolatedAccountIdCanNeverEqualAStableAccountId() {
+        repeat(32) {
+            assertNotEquals(
+                stableAccountId("http://example.test:8080", "subscriber"),
+                generateIsolatedAccountId(),
+            )
+        }
     }
 
     @Test

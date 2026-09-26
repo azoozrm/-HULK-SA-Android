@@ -16,6 +16,7 @@ private const val HOST_A = "http://first.example.test:8080"
 private const val HOST_B = "http://second.example.test:8080"
 private const val HOST_C = "http://third.example.test:8080"
 private const val HOST_D = "http://fourth.example.test:8080"
+private const val HOST_E = "http://fifth.example.test:8080"
 private const val USERNAME = "subscriber"
 private const val OTHER_USERNAME = "other-subscriber"
 
@@ -44,7 +45,7 @@ class TrustedHostSubscriberIdentityTest {
     fun trustedHostsResolveDirectlyWithoutAnyPrompt() {
         val environment = environment()
         val accountId = record(environment, HOST_A, "CODE-1")
-        record(environment, HOST_B, "CODE-2", accountId)
+        decideSame(environment, HOST_B, "CODE-2", accountId)
 
         assertEquals(
             AccountIdentityResolution.Known(accountId),
@@ -83,8 +84,9 @@ class TrustedHostSubscriberIdentityTest {
                 is AccountIdentityResolution.Ambiguous,
         )
 
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountId)
+        val committed = decideSame(environment, HOST_B, "CODE-2", accountId)
 
+        assertEquals(accountId, committed)
         assertEquals(accountId, environment.store.activeAccountId())
         assertEquals(
             AccountIdentityResolution.Known(accountId),
@@ -104,8 +106,7 @@ class TrustedHostSubscriberIdentityTest {
         profilePreferencesA.edit().putString("profiles", "A-ONLY").commit()
         environment.store.clearActiveSession()
 
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b")
 
         assertNotEquals(accountA, accountB)
         assertEquals(accountB, environment.store.activeAccountId())
@@ -124,12 +125,197 @@ class TrustedHostSubscriberIdentityTest {
     }
 
     @Test
+    fun differentDecisionNeverReusesALegacyHostlessCandidateId() {
+        val environment = environment()
+        // The legacy account happened to be derived from the same host+username the user now
+        // authenticates from, but its host association was not persisted by the old install.
+        val legacyAccountId = stableAccountId(HOST_B, USERNAME)
+        environment.scopedPreferences.getOrPut(
+            accountScopedPreferencesName("hulk_user_library", legacyAccountId),
+        ) { FakeSharedPreferences() }.edit()
+            .putStringSet("profile:primary:favorites", setOf("MOVIE:7"))
+            .commit()
+        environment.sessionPreferences.edit()
+            .putString(accountIdentityAliasKey(USERNAME), legacyAccountId)
+            .putString("last_username", USERNAME)
+            .putString("last_account_id", legacyAccountId)
+            .commit()
+
+        assertEquals(
+            AccountIdentityResolution.Ambiguous(
+                listOf(TrustedAccountIdentity(legacyAccountId, emptySet())),
+            ),
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B),
+        )
+
+        val newAccountId = decideDifferent(environment, HOST_B, "CODE-1", "local-isolated-1")
+
+        // Premise of the review finding: the legacy id is exactly the deterministic host+username
+        // id the old fallback would have reused after an explicit DIFFERENT decision.
+        assertEquals(legacyAccountId, stableAccountId(HOST_B, USERNAME))
+        assertNotEquals(legacyAccountId, newAccountId)
+        assertEquals(
+            AccountIdentityResolution.Known(newAccountId),
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B),
+        )
+        // The legacy account's already-collided data is untouched and no historical host was
+        // invented for it; it was not re-claimed by the new H2 owner.
+        assertEquals(
+            setOf("MOVIE:7"),
+            environment.scopedPreferences
+                .getValue(accountScopedPreferencesName("hulk_user_library", legacyAccountId))
+                .getStringSet("profile:primary:favorites", mutableSetOf()),
+        )
+        val candidatesAtUnknownHost = ambiguous(environment, HOST_A).candidates
+        assertFalse(candidatesAtUnknownHost.any { it.accountId == legacyAccountId })
+        assertTrue(candidatesAtUnknownHost.none { HOST_A in it.trustedHosts })
+    }
+
+    @Test
+    fun differentIsolationSurvivesRestartThroughTheTrustedHostAssociation() {
+        val environment = environment()
+        val legacyAccountId = stableAccountId(HOST_B, USERNAME)
+        environment.sessionPreferences.edit()
+            .putString(accountIdentityAliasKey(USERNAME), legacyAccountId)
+            .commit()
+
+        val newAccountId = decideDifferent(environment, HOST_B, "CODE-1", "local-isolated-2")
+        environment.store.clearActiveSession()
+
+        val restarted = environment.restart()
+
+        assertNotEquals(legacyAccountId, newAccountId)
+        assertEquals(
+            AccountIdentityResolution.Known(newAccountId),
+            restarted.store.resolveAuthenticationIdentity(USERNAME, HOST_B),
+        )
+    }
+
+    @Test
+    fun staleDecisionFailsClosedWhenTheHostBecameTrustedBeforeCommit() {
+        val environment = environment()
+        val legacyAccountId = stableAccountId(HOST_B, USERNAME)
+        environment.sessionPreferences.edit()
+            .putString(accountIdentityAliasKey(USERNAME), legacyAccountId)
+            .commit()
+        assertTrue(
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B)
+                is AccountIdentityResolution.Ambiguous,
+        )
+
+        // A concurrent ownership change trusts the host to another same-username account while the
+        // decision dialog is still pending.
+        val concurrentAccountId = "local-concurrent-owner"
+        environment.store.commitAccountIdentityDecision(
+            username = USERNAME,
+            portalBaseUrl = HOST_B,
+            selectedAccountId = null,
+            session = session(HOST_B, "CODE-CONCURRENT"),
+            isolatedAccountIdProvider = { concurrentAccountId },
+        )
+        val durableBeforeStaleDecisions = environment.sessionPreferences.durableSnapshot()
+
+        // Both stale decision forms must fail closed inside the transaction and write nothing.
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            environment.store.commitAccountIdentityDecision(
+                username = USERNAME,
+                portalBaseUrl = HOST_B,
+                selectedAccountId = legacyAccountId,
+                session = session(HOST_B, "CODE-STALE-SAME"),
+            )
+        }
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            environment.store.commitAccountIdentityDecision(
+                username = USERNAME,
+                portalBaseUrl = HOST_B,
+                selectedAccountId = null,
+                session = session(HOST_B, "CODE-STALE-DIFFERENT"),
+                isolatedAccountIdProvider = { "local-stale-different" },
+            )
+        }
+
+        assertEquals(durableBeforeStaleDecisions, environment.sessionPreferences.durableSnapshot())
+        assertEquals(
+            AccountIdentityResolution.Known(concurrentAccountId),
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B),
+        )
+    }
+
+    @Test
+    fun staleDecisionCannotCreateDuplicateHostOwnership() {
+        val environment = environment()
+        val legacyAccountId = stableAccountId(HOST_B, USERNAME)
+        environment.sessionPreferences.edit()
+            .putString(accountIdentityAliasKey(USERNAME), legacyAccountId)
+            .commit()
+        val concurrentAccountId = "local-concurrent-owner"
+        environment.store.commitAccountIdentityDecision(
+            username = USERNAME,
+            portalBaseUrl = HOST_B,
+            selectedAccountId = null,
+            session = session(HOST_B, "CODE-CONCURRENT"),
+            isolatedAccountIdProvider = { concurrentAccountId },
+        )
+
+        assertThrows(StaleAccountIdentityDecisionException::class.java) {
+            environment.store.commitAccountIdentityDecision(
+                username = USERNAME,
+                portalBaseUrl = HOST_B,
+                selectedAccountId = null,
+                session = session(HOST_B, "CODE-STALE-DIFFERENT"),
+                isolatedAccountIdProvider = { "local-stale-different" },
+            )
+        }
+
+        val candidates = (
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_A)
+                as AccountIdentityResolution.Ambiguous
+            ).candidates.associateBy { it.accountId }
+        assertEquals(setOf(concurrentAccountId), candidates.keys)
+        assertEquals(setOf(HOST_B), candidates.getValue(concurrentAccountId).trustedHosts)
+        assertNull(environment.store.continuationAccountId(USERNAME, HOST_B, legacyAccountId))
+    }
+
+    @Test
+    fun multiCandidateDifferentCreatesAnIdOutsideAllExistingCandidates() {
+        val environment = environment()
+        val accountC = decideDifferent(environment, HOST_C, "CODE-1", "local-existing-c")
+        environment.store.clearActiveSession()
+        val accountD = decideDifferent(environment, HOST_D, "CODE-2", "local-existing-d")
+        environment.store.clearActiveSession()
+
+        val presented = environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B)
+        assertEquals(
+            setOf(accountC, accountD),
+            (presented as AccountIdentityResolution.Ambiguous)
+                .candidates
+                .map { it.accountId }
+                .toSet(),
+        )
+
+        val newAccountId = decideDifferent(environment, HOST_B, "CODE-3", "local-isolated-new")
+
+        assertTrue(newAccountId != accountC && newAccountId != accountD)
+        assertEquals(
+            AccountIdentityResolution.Known(newAccountId),
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B),
+        )
+        val candidates = (
+            environment.store.resolveAuthenticationIdentity(USERNAME, HOST_E)
+                as AccountIdentityResolution.Ambiguous
+            ).candidates.associateBy { it.accountId }
+        assertEquals(setOf(accountC, accountD, newAccountId), candidates.keys)
+        assertEquals(setOf(HOST_C), candidates.getValue(accountC).trustedHosts)
+        assertEquals(setOf(HOST_D), candidates.getValue(accountD).trustedHosts)
+        assertEquals(setOf(HOST_B), candidates.getValue(newAccountId).trustedHosts)
+    }
+
+    @Test
     fun returningToTrustedHostsResolvesEachAccountWithoutCrossover() {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b2")
         environment.store.clearActiveSession()
 
         assertEquals(
@@ -141,7 +327,7 @@ class TrustedHostSubscriberIdentityTest {
             environment.store.resolveAuthenticationIdentity(USERNAME, HOST_B),
         )
 
-        environment.store.recordAuthenticated(session(HOST_A, "CODE-3"), accountA)
+        decideSame(environment, HOST_A, "CODE-3", accountA)
 
         assertEquals(accountA, environment.store.activeAccountId())
         assertEquals(
@@ -283,7 +469,13 @@ class TrustedHostSubscriberIdentityTest {
 
         environment.store.recordAuthenticated(session(HOST_A, "CODE-1"), accountA)
         environment.store.clearActiveSession()
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        environment.store.commitAccountIdentityDecision(
+            username = USERNAME,
+            portalBaseUrl = HOST_B,
+            selectedAccountId = null,
+            session = session(HOST_B, "CODE-2"),
+            isolatedAccountIdProvider = { "local-isolated-b3" },
+        )
 
         assertEquals(
             setOf("MOVIE:7"),
@@ -319,12 +511,42 @@ class TrustedHostSubscriberIdentityTest {
     }
 
     @Test
+    fun decisionCommitFailureLeavesNoPartialOwnership() {
+        val environment = environment()
+        val legacyAccountId = stableAccountId(HOST_B, USERNAME)
+        environment.sessionPreferences.edit()
+            .putString(accountIdentityAliasKey(USERNAME), legacyAccountId)
+            .commit()
+        environment.sessionPreferences.commitResult = false
+
+        assertThrows(IllegalStateException::class.java) {
+            environment.store.commitAccountIdentityDecision(
+                username = USERNAME,
+                portalBaseUrl = HOST_B,
+                selectedAccountId = null,
+                session = session(HOST_B, "CODE-1"),
+                isolatedAccountIdProvider = { "local-failed" },
+            )
+        }
+
+        val restarted = environment.restart()
+        restarted.store.clearActiveSession()
+        val durable = restarted.restart().sessionPreferences.durableSnapshot()
+
+        assertFalse(
+            durable.keys.any {
+                it.startsWith("trusted_accounts_") || it.startsWith("trusted_hosts_")
+            },
+        )
+        assertFalse(durable.containsKey("account_id"))
+    }
+
+    @Test
     fun twoSameUsernameAccountsProduceADeterministicExplicitCandidateSet() {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b4")
         environment.store.clearActiveSession()
 
         val first = ambiguous(environment, HOST_C)
@@ -343,11 +565,10 @@ class TrustedHostSubscriberIdentityTest {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b5")
         environment.store.clearActiveSession()
 
-        environment.store.recordAuthenticated(session(HOST_C, "CODE-3"), accountA)
+        decideSame(environment, HOST_C, "CODE-3", accountA)
 
         assertEquals(
             AccountIdentityResolution.Known(accountA),
@@ -363,11 +584,10 @@ class TrustedHostSubscriberIdentityTest {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b6")
         environment.store.clearActiveSession()
 
-        environment.store.recordAuthenticated(session(HOST_C, "CODE-3"), accountB)
+        decideSame(environment, HOST_C, "CODE-3", accountB)
 
         assertEquals(
             AccountIdentityResolution.Known(accountB),
@@ -383,11 +603,9 @@ class TrustedHostSubscriberIdentityTest {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b7")
         environment.store.clearActiveSession()
-        val accountC = stableAccountId(HOST_C, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_C, "CODE-3"), accountC)
+        val accountC = decideDifferent(environment, HOST_C, "CODE-3", "local-isolated-c7")
         environment.store.clearActiveSession()
 
         val candidates = ambiguous(environment, HOST_D).candidates.associateBy { it.accountId }
@@ -403,8 +621,7 @@ class TrustedHostSubscriberIdentityTest {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b8")
         environment.store.clearActiveSession()
 
         val labels = accountIdentityCandidateLabels(ambiguous(environment, HOST_C).candidates)
@@ -424,8 +641,7 @@ class TrustedHostSubscriberIdentityTest {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b9")
 
         assertEquals(
             accountB,
@@ -443,10 +659,9 @@ class TrustedHostSubscriberIdentityTest {
         val environment = environment()
         val accountA = record(environment, HOST_A, "CODE-1")
         environment.store.clearActiveSession()
-        val accountB = stableAccountId(HOST_B, USERNAME)
-        environment.store.recordAuthenticated(session(HOST_B, "CODE-2"), accountB)
+        val accountB = decideDifferent(environment, HOST_B, "CODE-2", "local-isolated-b10")
         environment.store.clearActiveSession()
-        environment.store.recordAuthenticated(session(HOST_C, "CODE-3"), accountA)
+        decideSame(environment, HOST_C, "CODE-3", accountA)
 
         val restarted = environment.restart()
 
@@ -492,6 +707,31 @@ class TrustedHostSubscriberIdentityTest {
         return environment.store.recordAuthenticated(session(host, accessCode), resolvedAccountId)
             .accountId
     }
+
+    private fun decideSame(
+        environment: Environment,
+        host: String,
+        accessCode: String,
+        accountId: String,
+    ): String = environment.store.commitAccountIdentityDecision(
+        username = USERNAME,
+        portalBaseUrl = host,
+        selectedAccountId = accountId,
+        session = session(host, accessCode),
+    ).accountId
+
+    private fun decideDifferent(
+        environment: Environment,
+        host: String,
+        accessCode: String,
+        isolatedAccountId: String,
+    ): String = environment.store.commitAccountIdentityDecision(
+        username = USERNAME,
+        portalBaseUrl = host,
+        selectedAccountId = null,
+        session = session(host, accessCode),
+        isolatedAccountIdProvider = { isolatedAccountId },
+    ).accountId
 
     private fun ambiguous(
         environment: Environment,

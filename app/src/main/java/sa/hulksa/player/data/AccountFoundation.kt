@@ -178,14 +178,23 @@ internal class StaleAccountIdentityDecisionException :
     IllegalStateException("Account identity decision no longer applies")
 
 /**
- * Validates an explicit decision against freshly resolved ownership. Returns the accountId to
+ * Locally generated opaque accountId for an explicit DIFFERENT decision. The "local-" namespace
+ * can never equal a stable host+username id or a legacy alias id, and no provider identity is
+ * invented. Durable ownership is established through the username+trusted-host association.
+ */
+internal fun generateIsolatedAccountId(): String =
+    "local-" + UUID.randomUUID().toString().replace("-", "")
+
+/**
+ * Validates an explicit decision against freshly resolved ownership and returns the accountId to
  * commit, or throws when the decision no longer applies: a currently known host cannot be rebound
- * to another account, and a selected candidate must still be a current same-username account.
+ * to another account, a selected candidate must still be a current same-username account, and an
+ * explicit DIFFERENT decision must not collide with any current candidate accountId.
  */
 internal fun resolveDecisionAccountId(
     resolution: AccountIdentityResolution,
     selectedAccountId: String?,
-    fallbackAccountId: String,
+    isolatedAccountIdProvider: () -> String,
 ): String = when (resolution) {
     is AccountIdentityResolution.Known -> {
         if (resolution.accountId != selectedAccountId) throw StaleAccountIdentityDecisionException()
@@ -198,12 +207,16 @@ internal fun resolveDecisionAccountId(
                 ?.accountId
                 ?: throw StaleAccountIdentityDecisionException()
         } else {
-            fallbackAccountId
+            isolatedAccountIdProvider().also { generated ->
+                if (resolution.candidates.any { it.accountId == generated }) {
+                    throw StaleAccountIdentityDecisionException()
+                }
+            }
         }
     }
     is AccountIdentityResolution.New -> {
         if (selectedAccountId != null) throw StaleAccountIdentityDecisionException()
-        fallbackAccountId
+        isolatedAccountIdProvider()
     }
 }
 
@@ -494,6 +507,29 @@ class AccountSessionStore internal constructor(
                 activePortalBaseUrl = activeMetadata?.portalBaseUrl,
             ),
         )
+    }
+
+    /**
+     * Owns the complete explicit-decision ownership transaction: fresh resolution, decision
+     * validation against that fresh state, and the checked metadata/trust commit all execute
+     * inside this single synchronized boundary. A stale decision can therefore never bind a host
+     * after trusted ownership changed, and a DIFFERENT decision can never reuse a candidate id.
+     */
+    @Synchronized
+    internal fun commitAccountIdentityDecision(
+        username: String,
+        portalBaseUrl: String,
+        selectedAccountId: String?,
+        session: AuthenticatedSession,
+        isolatedAccountIdProvider: () -> String = ::generateIsolatedAccountId,
+    ): AccountSessionMetadata {
+        val resolution = resolveAuthenticationIdentity(username, portalBaseUrl)
+        val accountId = resolveDecisionAccountId(
+            resolution = resolution,
+            selectedAccountId = selectedAccountId,
+            isolatedAccountIdProvider = isolatedAccountIdProvider,
+        )
+        return recordAuthenticated(session, accountId)
     }
 
     /**
