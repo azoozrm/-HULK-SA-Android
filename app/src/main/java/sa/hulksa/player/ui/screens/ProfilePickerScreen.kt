@@ -1,7 +1,6 @@
 package sa.hulksa.player.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,8 +18,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,16 +44,13 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import sa.hulksa.player.R
 import sa.hulksa.player.data.ProfilePreferencesStore
 import sa.hulksa.player.data.ProfileRoutingPreferences
 import sa.hulksa.player.data.ProfileStore
@@ -59,6 +58,9 @@ import sa.hulksa.player.model.ProfileKind
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
+import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryPanelShape
+import sa.hulksa.player.ui.components.EntrySurface
 import sa.hulksa.player.ui.components.ProfileAvatar
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
@@ -145,6 +147,20 @@ internal fun profilePickerTvMetrics(
         },
         focusBorderDp = policy.focusBorderWidthDp,
     )
+}
+
+internal enum class ProfileCardVisualState {
+    IDLE,
+    ACTIVE,
+    FOCUSED,
+    ACTIVE_FOCUSED,
+}
+
+internal fun profileCardVisualState(active: Boolean, focused: Boolean): ProfileCardVisualState = when {
+    active && focused -> ProfileCardVisualState.ACTIVE_FOCUSED
+    focused -> ProfileCardVisualState.FOCUSED
+    active -> ProfileCardVisualState.ACTIVE
+    else -> ProfileCardVisualState.IDLE
 }
 
 @Composable
@@ -348,14 +364,12 @@ fun ProfilePickerScreen(
                         text = "إدارة الملفات",
                         isTv = isTv,
                         enabled = !isSwitching,
-                        focusBorderDp = if (isTv) tvMetrics.focusBorderDp else 2f,
                         onClick = onManageProfiles,
                     )
                     ProfileFooterButton(
                         text = "خيارات الدخول",
                         isTv = isTv,
                         enabled = !isSwitching,
-                        focusBorderDp = if (isTv) tvMetrics.focusBorderDp else 2f,
                         onClick = { showEntryOptions = true },
                     )
                 }
@@ -403,6 +417,7 @@ private fun ProfileEntryOptionsPanel(
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     val firstFocusRequester = remember { FocusRequester() }
+    val panelScrollState = rememberScrollState()
     val compactMobile = !isTv && (
         adaptiveUi.screenHeightDp < 620 || adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
     )
@@ -416,7 +431,7 @@ private fun ProfileEntryOptionsPanel(
         runCatching { firstFocusRequester.requestFocus() }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
@@ -425,100 +440,108 @@ private fun ProfileEntryOptionsPanel(
                 horizontal = if (isTv) metrics.horizontalPaddingDp.dp else 16.dp,
                 vertical = if (isTv) metrics.verticalPaddingDp.dp else if (compactMobile) 12.dp else 20.dp,
             ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = "خيارات الدخول",
-            color = colors.text,
-            fontSize = if (isTv) metrics.titleSizeSp.sp else if (compactMobile) 22.sp else 25.sp,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (compactMobile) 5.dp else 8.dp))
-        Text(
-            text = "حدد هل تريد اختيار المستخدم عند كل تشغيل أو الدخول مباشرة",
-            color = colors.textMuted,
-            fontSize = if (isTv) metrics.subtitleSizeSp.sp else 12.sp,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (isTv) 22.dp else if (compactMobile) 12.dp else 18.dp))
-
-        ProfilePreferenceButton(
-            text = if (directEntryEnabled) "الدخول المباشر: مفعّل" else "الدخول المباشر: متوقف",
-            selected = directEntryEnabled,
-            isTv = isTv,
-            focusRequester = firstFocusRequester,
-            focusBorderDp = if (isTv) metrics.focusBorderDp else 2f,
-            onClick = onToggleDirectEntry,
-        )
-
-        Spacer(Modifier.height(if (compactMobile) 6.dp else 10.dp))
-        Text(
-            text = if (directEntryEnabled) {
-                "عند تشغيل التطبيق سيتم تجاوز صفحة اختيار المستخدم."
-            } else {
-                "سيستمر ظهور صفحة اختيار المستخدم عند تشغيل التطبيق."
-            },
-            color = colors.textMuted,
-            fontSize = if (isTv) 13.sp else 11.sp,
-            textAlign = TextAlign.Center,
-        )
-
-        Spacer(Modifier.height(if (isTv) 24.dp else if (compactMobile) 12.dp else 20.dp))
-        Text(
-            text = "المستخدم الافتراضي: $defaultProfileName",
-            color = colors.text,
-            fontSize = if (isTv) 17.sp else 14.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "اختر مستخدمًا محددًا، أو اختر آخر مستخدم للدخول بآخر ملف استُخدم.",
-            color = colors.textMuted,
-            fontSize = if (isTv) 12.sp else 11.sp,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(if (isTv) 15.dp else if (compactMobile) 8.dp else 12.dp))
-
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = if (isTv) metrics.rowPaddingDp.dp else 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(
-                space = if (isTv) 12.dp else 8.dp,
-                alignment = Alignment.CenterHorizontally,
+        EntrySurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = if (isTv) 720.dp else 560.dp),
+            shape = EntryPanelShape,
+            contentPadding = PaddingValues(
+                horizontal = if (isTv) 32.dp else if (compactMobile) 18.dp else 24.dp,
+                vertical = if (isTv) 28.dp else if (compactMobile) 16.dp else 22.dp,
             ),
-            verticalAlignment = Alignment.CenterVertically,
+            scrollState = if (compactMobile) panelScrollState else null,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            item(key = "last-used") {
-                ProfilePreferenceButton(
-                    text = "آخر مستخدم",
-                    selected = defaultProfileId == null,
-                    isTv = isTv,
-                    focusBorderDp = if (isTv) metrics.focusBorderDp else 2f,
-                    onClick = { onSelectDefaultProfile(null) },
-                )
-            }
-            items(items = profiles, key = UserProfile::id) { profile ->
-                ProfilePreferenceButton(
-                    text = profile.displayName,
-                    selected = defaultProfileId == profile.id,
-                    isTv = isTv,
-                    focusBorderDp = if (isTv) metrics.focusBorderDp else 2f,
-                    onClick = { onSelectDefaultProfile(profile.id) },
-                )
-            }
-        }
+            Text(
+                text = "خيارات الدخول",
+                color = colors.text,
+                fontSize = if (isTv) metrics.titleSizeSp.sp else if (compactMobile) 22.sp else 25.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(if (compactMobile) 5.dp else 8.dp))
+            Text(
+                text = "حدد هل تريد اختيار المستخدم عند كل تشغيل أو الدخول مباشرة",
+                color = colors.textMuted,
+                fontSize = if (isTv) metrics.subtitleSizeSp.sp else 12.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(if (isTv) 22.dp else if (compactMobile) 12.dp else 18.dp))
 
-        Spacer(Modifier.height(if (isTv) 26.dp else if (compactMobile) 12.dp else 22.dp))
-        ProfileFooterButton(
-            text = "رجوع",
-            isTv = isTv,
-            enabled = true,
-            focusBorderDp = if (isTv) metrics.focusBorderDp else 2f,
-            onClick = onClose,
-        )
+            ProfilePreferenceButton(
+                text = if (directEntryEnabled) "الدخول المباشر: مفعّل" else "الدخول المباشر: متوقف",
+                selected = directEntryEnabled,
+                isTv = isTv,
+                focusRequester = firstFocusRequester,
+                onClick = onToggleDirectEntry,
+            )
+
+            Spacer(Modifier.height(if (compactMobile) 6.dp else 10.dp))
+            Text(
+                text = if (directEntryEnabled) {
+                    "عند تشغيل التطبيق سيتم تجاوز صفحة اختيار المستخدم."
+                } else {
+                    "سيستمر ظهور صفحة اختيار المستخدم عند تشغيل التطبيق."
+                },
+                color = colors.textMuted,
+                fontSize = if (isTv) 13.sp else 11.sp,
+                textAlign = TextAlign.Center,
+            )
+
+            Spacer(Modifier.height(if (isTv) 24.dp else if (compactMobile) 12.dp else 20.dp))
+            Text(
+                text = "المستخدم الافتراضي: $defaultProfileName",
+                color = colors.text,
+                fontSize = if (isTv) 17.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "اختر مستخدمًا محددًا، أو اختر آخر مستخدم للدخول بآخر ملف استُخدم.",
+                color = colors.textMuted,
+                fontSize = if (isTv) 12.sp else 11.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(if (isTv) 15.dp else if (compactMobile) 8.dp else 12.dp))
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = if (isTv) 8.dp else 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(
+                    space = if (isTv) 12.dp else 8.dp,
+                    alignment = Alignment.CenterHorizontally,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                item(key = "last-used") {
+                    ProfilePreferenceButton(
+                        text = "آخر مستخدم",
+                        selected = defaultProfileId == null,
+                        isTv = isTv,
+                        onClick = { onSelectDefaultProfile(null) },
+                    )
+                }
+                items(items = profiles, key = UserProfile::id) { profile ->
+                    ProfilePreferenceButton(
+                        text = profile.displayName,
+                        selected = defaultProfileId == profile.id,
+                        isTv = isTv,
+                        onClick = { onSelectDefaultProfile(profile.id) },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(if (isTv) 26.dp else if (compactMobile) 12.dp else 22.dp))
+            ProfileFooterButton(
+                text = "رجوع",
+                isTv = isTv,
+                enabled = true,
+                onClick = onClose,
+            )
+        }
     }
 }
 
@@ -528,62 +551,20 @@ private fun ProfilePreferenceButton(
     selected: Boolean,
     isTv: Boolean,
     focusRequester: FocusRequester? = null,
-    focusBorderDp: Float,
     onClick: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-    var focused by remember(text) { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
-
-    Box(
-        modifier = Modifier
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .clip(shape)
-            .background(
-                when {
-                    selected -> colors.gold
-                    focused -> colors.gold.copy(alpha = .18f)
-                    else -> colors.surfaceRaised
-                },
-            )
-            .border(
-                if (focused) focusBorderDp.dp else 1.dp,
-                when {
-                    focused -> colors.goldBright
-                    selected -> colors.gold.copy(alpha = .65f)
-                    else -> Color.White.copy(alpha = .10f)
-                },
-                shape,
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
-                    false
-                } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> { onClick(); true }
-                        else -> false
-                    }
-                }
-            }
-            .clickable(onClick = onClick)
-            .padding(
-                horizontal = if (isTv) 18.dp else 14.dp,
-                vertical = if (isTv) 11.dp else 9.dp,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            color = if (selected) Color.Black else if (focused) colors.goldBright else colors.text,
-            fontSize = if (isTv) 13.sp else 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    EntryActionButton(
+        text = text,
+        onClick = onClick,
+        modifier = Modifier.then(
+            if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
+        ),
+        selected = selected,
+        minHeight = if (isTv) 42.dp else 40.dp,
+        textSizeSp = if (isTv) 13 else 12,
+        horizontalPadding = if (isTv) 18.dp else 14.dp,
+        verticalPadding = if (isTv) 11.dp else 9.dp,
+    )
 }
 
 @Composable
@@ -591,52 +572,31 @@ private fun ProfileFooterButton(
     text: String,
     isTv: Boolean,
     enabled: Boolean,
-    focusBorderDp: Float,
     onClick: () -> Unit,
 ) {
-    val colors = LocalHulkColors.current
-    var focused by remember(text) { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 15.dp else 13.dp)
-
-    Box(
-        modifier = Modifier
-            .clip(shape)
-            .background(if (focused) colors.gold.copy(alpha = .22f) else colors.surfaceRaised)
-            .border(
-                if (focused) focusBorderDp.dp else 1.dp,
-                if (focused) colors.goldBright else Color.White.copy(alpha = .10f),
-                shape,
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
-                if (!isTv || !remoteSelect) {
-                    false
-                } else if (!enabled) {
-                    true
-                } else {
-                    when (event.type) {
-                        KeyEventType.KeyDown -> true
-                        KeyEventType.KeyUp -> { onClick(); true }
-                        else -> false
-                    }
+    EntryActionButton(
+        text = text,
+        onClick = onClick,
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            val remoteSelect = event.key == Key.Enter || event.key == Key.DirectionCenter
+            if (!isTv || !remoteSelect) {
+                false
+            } else if (!enabled) {
+                true
+            } else {
+                when (event.type) {
+                    KeyEventType.KeyDown -> true
+                    KeyEventType.KeyUp -> { onClick(); true }
+                    else -> false
                 }
             }
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(
-                horizontal = if (isTv) 20.dp else 16.dp,
-                vertical = if (isTv) 11.dp else 9.dp,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            color = if (focused) colors.goldBright else colors.text,
-            fontSize = if (isTv) 14.sp else 13.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-    }
+        },
+        enabled = enabled,
+        minHeight = if (isTv) 44.dp else 42.dp,
+        textSizeSp = if (isTv) 14 else 13,
+        horizontalPadding = if (isTv) 20.dp else 16.dp,
+        verticalPadding = if (isTv) 11.dp else 9.dp,
+    )
 }
 
 @Composable
@@ -656,10 +616,10 @@ private fun AddProfileCard(
         modifier = Modifier
             .width(cardWidthDp.dp)
             .clip(shape)
-            .background(if (focused) colors.surfaceRaised else colors.surface.copy(alpha = .94f))
+            .background(if (focused) colors.surfaceRaised else Color(0xFF0B0C08))
             .border(
                 width = if (focused) focusBorderDp.dp else 1.dp,
-                color = if (focused) colors.goldBright else Color.White.copy(alpha = .10f),
+                color = if (focused) colors.goldBright else Color.White.copy(alpha = .06f),
                 shape = shape,
             )
             .onFocusChanged { focused = it.isFocused }
@@ -687,12 +647,12 @@ private fun AddProfileCard(
         Box(
             modifier = Modifier
                 .size(avatarSizeDp.dp)
-                .clip(RoundedCornerShape(50))
+                .clip(CircleShape)
                 .background(Color.White.copy(alpha = if (focused) .08f else .04f))
                 .border(
                     if (focused) focusBorderDp.dp else 1.dp,
-                    if (focused) colors.goldBright else Color.White.copy(alpha = .22f),
-                    RoundedCornerShape(50),
+                    if (focused) colors.goldBright else Color.White.copy(alpha = .18f),
+                    CircleShape,
                 ),
             contentAlignment = Alignment.Center,
         ) {
@@ -735,28 +695,38 @@ private fun ProfilePickerCard(
     val colors = LocalHulkColors.current
     var focused by remember(profile.id) { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (isTv) 22.dp else 18.dp)
+    val visualState = profileCardVisualState(active = isActive, focused = focused)
 
     Column(
         modifier = Modifier
             .width(cardWidthDp.dp)
             .clip(shape)
             .background(
-                when {
-                    focused -> colors.surfaceRaised
-                    isActive -> colors.surfaceRaised
-                    else -> colors.surface.copy(alpha = .94f)
+                when (visualState) {
+                    ProfileCardVisualState.FOCUSED,
+                    ProfileCardVisualState.ACTIVE_FOCUSED,
+                    -> colors.surfaceRaised
+
+                    ProfileCardVisualState.ACTIVE -> Color(0xFF131408)
+                    ProfileCardVisualState.IDLE -> Color(0xFF0B0C08)
                 },
             )
             .border(
-                width = when {
-                    focused -> focusBorderDp.dp
-                    isActive -> 1.5.dp
-                    else -> 1.dp
+                width = when (visualState) {
+                    ProfileCardVisualState.FOCUSED,
+                    ProfileCardVisualState.ACTIVE_FOCUSED,
+                    -> focusBorderDp.dp
+
+                    ProfileCardVisualState.ACTIVE -> 1.dp
+                    ProfileCardVisualState.IDLE -> 1.dp
                 },
-                color = when {
-                    focused -> colors.goldBright
-                    isActive -> colors.gold.copy(alpha = .60f)
-                    else -> Color.White.copy(alpha = .10f)
+                color = when (visualState) {
+                    ProfileCardVisualState.FOCUSED,
+                    ProfileCardVisualState.ACTIVE_FOCUSED,
+                    -> colors.goldBright
+
+                    ProfileCardVisualState.ACTIVE -> colors.gold.copy(alpha = .40f)
+                    ProfileCardVisualState.IDLE -> Color.White.copy(alpha = .06f)
                 },
                 shape = shape,
             )
@@ -792,7 +762,13 @@ private fun ProfilePickerCard(
         Spacer(Modifier.height(if (isTv) 14.dp else 10.dp))
         Text(
             text = profile.displayName,
-            color = colors.text,
+            color = when (visualState) {
+                ProfileCardVisualState.FOCUSED,
+                ProfileCardVisualState.ACTIVE_FOCUSED,
+                -> colors.goldBright
+
+                else -> colors.text
+            },
             fontSize = if (isTv) 17.sp else 15.sp,
             lineHeight = if (isTv) 21.sp else 19.sp,
             fontWeight = FontWeight.Black,
@@ -802,31 +778,37 @@ private fun ProfilePickerCard(
         )
 
         Spacer(Modifier.height(7.dp))
-        if (isActive) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.gold.copy(alpha = .15f))
-                    .border(1.dp, colors.gold.copy(alpha = .35f), RoundedCornerShape(50))
-                    .padding(horizontal = 9.dp, vertical = 3.dp),
-            ) {
-                Text(
-                    text = "الحالي",
-                    color = colors.goldBright,
+        Box(
+            modifier = Modifier.height(if (isTv) 20.dp else 18.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                isActive -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(colors.goldBright),
+                    )
+                    Text(
+                        text = "الحالي",
+                        color = colors.goldBright,
+                        fontSize = if (isTv) 11.sp else 10.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                profile.kind == ProfileKind.KIDS -> Text(
+                    text = "أطفال",
+                    color = colors.textMuted,
                     fontSize = if (isTv) 11.sp else 10.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
                 )
             }
-        } else if (profile.kind == ProfileKind.KIDS) {
-            Text(
-                text = "أطفال",
-                color = colors.textMuted,
-                fontSize = if (isTv) 11.sp else 10.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-            )
-        } else {
-            Spacer(Modifier.height(if (isTv) 17.dp else 15.dp))
         }
     }
 }

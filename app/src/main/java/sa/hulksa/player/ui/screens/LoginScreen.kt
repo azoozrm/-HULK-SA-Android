@@ -9,12 +9,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -35,6 +35,7 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,7 +48,6 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,7 +65,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -86,7 +85,6 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -104,6 +102,9 @@ import androidx.compose.ui.unit.sp
 import sa.hulksa.player.data.GrowthDestination
 import sa.hulksa.player.data.OperationsGrowthLinkConfig
 import sa.hulksa.player.ui.components.BrandLogo
+import sa.hulksa.player.ui.components.EntryActionButton
+import sa.hulksa.player.ui.components.EntryFieldShape
+import sa.hulksa.player.ui.components.EntrySurface
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -227,7 +228,7 @@ private fun resolveLoginLayoutPolicy(
         else -> 480.dp
     }
     val logoSize = when {
-        isTv -> (minOf(width, height) * .38f).coerceIn(180.dp, 250.dp)
+        isTv -> (minOf(width, height) * .34f).coerceIn(170.dp, 224.dp)
         width >= 600.dp -> (minOf(width, height) * .25f).coerceIn(120.dp, 190.dp)
         else -> (width * .20f).coerceIn(68.dp, 88.dp)
     }
@@ -543,7 +544,7 @@ fun LoginScreen(
                                     returnRequester = lastCardFocusRequester::current,
                                     subscribeRequester = subscribeRequester,
                                     policy = policy,
-                                    modifier = Modifier.width((policy.logoSize + 44.dp) * .84f),
+                                    modifier = Modifier.width((policy.logoSize + 28.dp) * .84f),
                                 )
                             }
                         }
@@ -740,7 +741,7 @@ private fun LoginBrandRegion(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val frameShape = RoundedCornerShape(28.dp)
+    val logoFrameSize = logoSize + 28.dp
 
     Box(
         modifier = modifier,
@@ -748,31 +749,25 @@ private fun LoginBrandRegion(
     ) {
         Box(
             modifier = Modifier
-                .size(logoSize + 44.dp)
-                .shadow(
-                    elevation = 10.dp,
-                    shape = frameShape,
-                    clip = false,
+                .size(logoFrameSize + 96.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            colors.goldDeep.copy(alpha = .14f),
+                            Color.Transparent,
+                        ),
+                    ),
+                    shape = CircleShape,
                 )
-                .clip(frameShape)
-                .background(Color.Black)
-                .border(
-                    width = 1.5.dp,
-                    color = colors.gold.copy(alpha = .72f),
-                    shape = frameShape,
-                )
-                .padding(8.dp)
                 .clearAndSetSemantics { },
-            contentAlignment = Alignment.Center,
-        ) {
-            BrandLogo(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(.98f)
-                    .clearAndSetSemantics { },
-                contentScale = ContentScale.Fit,
-            )
-        }
+        )
+        BrandLogo(
+            modifier = Modifier
+                .size(logoFrameSize)
+                .alpha(.98f)
+                .clearAndSetSemantics { },
+            contentScale = ContentScale.Fit,
+        )
     }
 }
 
@@ -853,41 +848,20 @@ private fun LoginPanel(
         }
     }
 
-    Column(
-        modifier = modifier
-            .then(
-                if (policy.composition == LoginComposition.PREMIUM_SPLIT) {
-                    Modifier.heightIn(max = policy.cardMaxHeight)
-                } else {
-                    Modifier
-                },
-            )
-            .shadow(
-                elevation = if (isTv) 18.dp else 12.dp,
-                shape = panelShape,
-                clip = false,
-            )
-            .clip(panelShape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0xF5151713),
-                        Color(0xF20A0C09),
-                    ),
-                ),
-            )
-            .border(1.dp, Color.White.copy(alpha = .09f), panelShape)
-            .then(
-                if (policy.panelScrollable) {
-                    Modifier.verticalScroll(panelScrollState)
-                } else {
-                    Modifier
-                },
-            )
-            .padding(
-                horizontal = policy.cardHorizontalPadding,
-                vertical = policy.cardVerticalPadding,
-            ),
+    EntrySurface(
+        modifier = modifier.then(
+            if (policy.composition == LoginComposition.PREMIUM_SPLIT) {
+                Modifier.heightIn(max = policy.cardMaxHeight)
+            } else {
+                Modifier
+            },
+        ),
+        shape = panelShape,
+        contentPadding = PaddingValues(
+            horizontal = policy.cardHorizontalPadding,
+            vertical = policy.cardVerticalPadding,
+        ),
+        scrollState = if (policy.panelScrollable) panelScrollState else null,
         horizontalAlignment = Alignment.End,
     ) {
         Text(
@@ -1070,20 +1044,14 @@ private fun LoginPanel(
         }
 
         if (isTv && displayedError != null) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             val errorShape = RoundedCornerShape(10.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (policy.compact) 38.dp else 40.dp)
                     .clip(errorShape)
-                    .background(Color(0xFF240D0F).copy(alpha = .98f))
-                    .border(
-                        width = 1.dp,
-                        color = Color(0xFFA44D56).copy(alpha = .72f),
-                        shape = errorShape,
-                    )
-                    .padding(horizontal = 12.dp)
+                    .background(Color(0xFF1F0C0E).copy(alpha = .96f))
+                    .padding(horizontal = 12.dp, vertical = if (policy.compact) 7.dp else 9.dp)
                     .semantics {
                         liveRegion = LiveRegionMode.Polite
                     },
@@ -1236,18 +1204,18 @@ private fun LoginTextField(
     val colors = LocalHulkColors.current
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(13.dp)
+    val shape = EntryFieldShape
     val background by animateColorAsState(
         targetValue =
             if (focused) {
-                Color(0xFF1A1B15)
+                Color(0xFF15170F)
             } else {
-                Color(0xFF11130F)
+                Color(0xFF0D0F0A)
             },
         label = "loginFieldBackground",
     )
     val border by animateColorAsState(
-        targetValue = if (focused) colors.gold else Color.White.copy(alpha = .13f),
+        targetValue = if (focused) colors.gold else Color.White.copy(alpha = .10f),
         label = "loginFieldBorder",
     )
     val iconTint by animateColorAsState(
@@ -1345,7 +1313,7 @@ private fun LoginOption(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(11.dp)
+    val shape = RoundedCornerShape(12.dp)
     val targetBackground = if (focused) colors.gold.copy(alpha = .08f) else Color.Transparent
     val targetOutline = if (focused) colors.gold.copy(alpha = .78f) else Color.Transparent
     val background = if (animateFocus) {
@@ -1437,97 +1405,20 @@ private fun LoginActionButton(
     featuredSecondary: Boolean = false,
     leadingIcon: ImageVector? = null,
 ) {
-    val colors = LocalHulkColors.current
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (featuredSecondary) 11.dp else 13.dp)
-    val background by animateColorAsState(
-        targetValue = when {
-            !enabled && primary -> colors.gold.copy(alpha = .58f)
-            primary && focused -> colors.goldBright
-            primary -> colors.gold
-            featuredSecondary && focused -> Color(0xFF1E2019)
-            featuredSecondary -> Color(0xFF151710)
-            focused -> Color(0xFF24251D)
-            else -> Color(0xFF12140F)
-        },
-        label = "loginButtonBackground",
+    EntryActionButton(
+        text = if (loading) "جاري الدخول..." else text,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        loading = loading,
+        primary = primary,
+        minHeight = minHeight,
+        textSizeSp = textSizeSp,
+        onFocused = onFocused,
+        leadingIcon = leadingIcon,
+        horizontalPadding = if (featuredSecondary) 16.dp else 18.dp,
+        verticalPadding = if (featuredSecondary) 10.dp else 11.dp,
     )
-    val outline by animateColorAsState(
-        targetValue = when {
-            featuredSecondary && focused -> colors.goldBright
-            featuredSecondary -> Color.White.copy(alpha = .12f)
-            focused -> colors.goldBright
-            primary -> colors.gold.copy(alpha = .64f)
-            else -> colors.gold.copy(alpha = .44f)
-        },
-        label = "loginButtonOutline",
-    )
-    val textColor = if (primary) Color(0xFF111006) else colors.goldBright
-    val displayText = if (loading) "جاري الدخول..." else text
-    val outlineWidth = when {
-        focused -> 2.dp
-        featuredSecondary -> 1.dp
-        else -> 1.dp
-    }
-
-    Box(
-        modifier = modifier
-            .heightIn(min = minHeight)
-            .then(
-                if (featuredSecondary && focused) {
-                    Modifier.shadow(4.dp, shape = shape, clip = false)
-                } else {
-                    Modifier
-                },
-            )
-            .clip(shape)
-            .background(background)
-            .border(outlineWidth, outline, shape)
-            .semantics(mergeDescendants = true) {
-                contentDescription = displayText
-                if (!enabled) disabled()
-            }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
-            .clickable(
-                enabled = true,
-                role = Role.Button,
-                onClick = { if (enabled) onClick() },
-            )
-            .padding(horizontal = 18.dp, vertical = 11.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(19.dp),
-                    color = textColor,
-                    strokeWidth = 2.dp,
-                )
-            } else if (leadingIcon != null) {
-                Icon(
-                    imageVector = leadingIcon,
-                    contentDescription = null,
-                    tint = textColor,
-                    modifier = Modifier.size(if (featuredSecondary) 19.dp else 20.dp),
-                )
-            }
-            Text(
-                text = displayText,
-                color = textColor,
-                fontSize = textSizeSp.sp,
-                lineHeight = (textSizeSp + 5).sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-            )
-        }
-    }
 }
 
 private fun resolveLoginErrorTarget(
