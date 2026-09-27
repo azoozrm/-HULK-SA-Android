@@ -1,6 +1,5 @@
 package sa.hulksa.player.ui
 
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -102,6 +101,8 @@ import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.TvRailDestinationItem
+import sa.hulksa.player.ui.components.TvRailSurface
 import sa.hulksa.player.ui.components.UniversalPosterCard
 import sa.hulksa.player.ui.screens.tvRailMetrics
 import sa.hulksa.player.ui.theme.LocalHulkColors
@@ -1280,10 +1281,6 @@ private fun SmartSearchRail(
     val metrics = tvRailMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus || !isTv
-    val railWidth by animateDpAsState(
-        targetValue = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp,
-        label = "smartSearchRailWidth",
-    )
     val destinationRequesters = remember {
         smartSearchDestinations.associate { entry ->
             entry.destination to if (entry.destination == MainDestination.SEARCH) searchRailRequester else FocusRequester()
@@ -1304,29 +1301,18 @@ private fun SmartSearchRail(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .width(railWidth)
-            .fillMaxHeight()
-            .focusProperties {
-                onEnter = {
-                    if (isTv && preferSearchFieldOnEnter) {
-                        searchFieldRequester.requestFocus()
-                    } else {
-                        selectedRequester.requestFocus()
-                    }
-                }
+    TvRailSurface(
+        metrics = metrics,
+        expanded = expanded,
+        overlayExpansion = isTv,
+        onRailFocusChanged = { railHasFocus = it },
+        onRailEnter = {
+            if (isTv && preferSearchFieldOnEnter) {
+                searchFieldRequester.requestFocus()
+            } else {
+                selectedRequester.requestFocus()
             }
-            .focusGroup()
-            .onFocusChanged { railHasFocus = it.hasFocus }
-            .background(Brush.horizontalGradient(listOf(Color(0xFF090A07), Color(0xF70A0B08))))
-            .padding(
-                start = metrics.outerHorizontalPaddingDp.dp,
-                end = metrics.outerHorizontalPaddingDp.dp,
-                top = metrics.topPaddingDp.dp,
-                bottom = metrics.bottomPaddingDp.dp,
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        },
     ) {
         BrandLogo(Modifier.size(metrics.logoSizeDp.dp))
         Spacer(Modifier.height(metrics.logoItemGapDp.dp))
@@ -1334,10 +1320,12 @@ private fun SmartSearchRail(
         smartSearchDestinations
             .filterNot { it.destination == MainDestination.SETTINGS }
             .forEach { entry ->
-                SmartSearchRailItem(
-                    entry = entry,
+                TvRailDestinationItem(
+                    icon = entry.icon,
+                    label = entry.label,
                     selected = selected == entry.destination,
                     expanded = expanded,
+                    metrics = metrics,
                     modifier = Modifier
                         .focusRequester(destinationRequesters.getValue(entry.destination))
                         .then(
@@ -1358,75 +1346,26 @@ private fun SmartSearchRail(
                 Spacer(Modifier.height(metrics.itemGapDp.dp))
             }
 
-        SmartSearchRailItem(
-            entry = SmartSearchDestination(MainDestination.SEARCH, Icons.Rounded.Person, "تغيير المستخدم"),
+        TvRailDestinationItem(
+            icon = Icons.Rounded.Person,
+            label = "تغيير المستخدم",
             selected = false,
             expanded = expanded,
+            metrics = metrics,
             onClick = onSwitchProfile,
         )
 
         Spacer(Modifier.weight(1f))
 
         smartSearchDestinations.first { it.destination == MainDestination.SETTINGS }.let { entry ->
-            SmartSearchRailItem(
-                entry = entry,
+            TvRailDestinationItem(
+                icon = entry.icon,
+                label = entry.label,
                 selected = false,
                 expanded = expanded,
+                metrics = metrics,
                 modifier = Modifier.focusRequester(destinationRequesters.getValue(entry.destination)),
                 onClick = { onSelectDestination(entry.destination) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun SmartSearchRailItem(
-    entry: SmartSearchDestination,
-    selected: Boolean,
-    expanded: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val metrics = tvRailMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
-    var focused by remember(entry.label) { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val active = selected || showFocused
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(metrics.itemHeightDp.dp)
-            .clip(RoundedCornerShape(metrics.cornerRadiusDp.dp))
-            .background(
-                when {
-                    showFocused -> colors.gold
-                    selected -> colors.gold.copy(alpha = .13f)
-                    else -> Color.Transparent
-                },
-            )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = metrics.itemHorizontalPaddingDp.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = entry.icon,
-            contentDescription = entry.label,
-            tint = if (showFocused) Color.Black else if (active) colors.goldBright else colors.textMuted,
-            modifier = Modifier.size(metrics.iconSizeDp.dp),
-        )
-        if (expanded) {
-            Spacer(Modifier.width(metrics.iconLabelGapDp.dp))
-            Text(
-                text = entry.label,
-                color = if (showFocused) Color.Black else if (active) colors.text else colors.textMuted,
-                fontSize = metrics.labelSizeSp.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
     }

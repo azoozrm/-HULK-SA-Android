@@ -19,6 +19,22 @@ internal data class TvRailMetrics(
     val cornerRadiusDp: Float,
 )
 
+/**
+ * Width the TV shell reserves for the rail in the measured page layout.
+ *
+ * Only the collapsed footprint participates in shell measurement, so expanding the rail can never
+ * remeasure or translate the content beside it.
+ */
+internal fun tvRailShellReservedWidthDp(metrics: TvRailMetrics): Float =
+    metrics.collapsedWidthDp
+
+/**
+ * Width of the rail's visual surface. When expanded on television it exceeds the reserved
+ * footprint because it is drawn over the content-facing side instead of being measured.
+ */
+internal fun tvRailOverlayWidthDp(metrics: TvRailMetrics, expanded: Boolean): Float =
+    if (expanded) metrics.expandedWidthDp else metrics.collapsedWidthDp
+
 internal fun tvRailMetrics(screenWidthDp: Int, screenHeightDp: Int): TvRailMetrics {
     val policy = tvPremiumWindowPolicy(
         screenWidthDp = screenWidthDp,

@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 
@@ -39,6 +40,38 @@ class TvRailResponsivePolicyTest {
         assertEquals(56f, metrics.itemHeightDp, 0.001f)
         assertEquals(28f, metrics.iconSizeDp, 0.001f)
         assertEquals(17f, metrics.labelSizeSp, 0.001f)
+    }
+
+    @Test
+    fun `shell reserves only the collapsed rail footprint for every expansion state`() {
+        listOf(
+            960 to 540,
+            1280 to 720,
+            1920 to 1080,
+        ).forEach { (width, height) ->
+            val metrics = tvRailMetrics(width, height)
+            val reserved = tvRailShellReservedWidthDp(metrics)
+
+            assertEquals(metrics.collapsedWidthDp, reserved, 0.001f)
+            assertEquals(metrics.collapsedWidthDp, tvRailOverlayWidthDp(metrics, expanded = false), 0.001f)
+            assertEquals(metrics.expandedWidthDp, tvRailOverlayWidthDp(metrics, expanded = true), 0.001f)
+            assertTrue(reserved < tvRailOverlayWidthDp(metrics, expanded = true))
+        }
+    }
+
+    @Test
+    fun `rail overlay never reports a width below the reserved footprint`() {
+        listOf(
+            960 to 540,
+            1280 to 720,
+            1920 to 1080,
+        ).forEach { (width, height) ->
+            val metrics = tvRailMetrics(width, height)
+            val reserved = tvRailShellReservedWidthDp(metrics)
+
+            assertTrue(tvRailOverlayWidthDp(metrics, expanded = false) >= reserved)
+            assertTrue(tvRailOverlayWidthDp(metrics, expanded = true) >= reserved)
+        }
     }
 
     @Test

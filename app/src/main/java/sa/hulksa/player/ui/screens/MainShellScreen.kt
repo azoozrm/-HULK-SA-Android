@@ -125,7 +125,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -166,6 +165,8 @@ import sa.hulksa.player.ui.adaptive.HulkNavigationType
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.BrandBadge
+import sa.hulksa.player.ui.components.TvRailDestinationItem
+import sa.hulksa.player.ui.components.TvRailSurface
 import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.UniversalPosterCard
@@ -1278,9 +1279,9 @@ private fun CinematicNavigationRail(
     onSwitchProfile: () -> Unit,
     destinationFocusRequesters: Map<MainDestination, FocusRequester>,
 ) {
+    val adaptiveUi = LocalAdaptiveUi.current
     var railHasFocus by remember { mutableStateOf(false) }
     val expanded = railHasFocus
-    val adaptiveUi = LocalAdaptiveUi.current
     val metrics = tvRailMetrics(
         screenWidthDp = adaptiveUi.screenWidthDp,
         screenHeightDp = adaptiveUi.screenHeightDp,
@@ -1289,32 +1290,13 @@ private fun CinematicNavigationRail(
     val profileRequester = remember { FocusRequester() }
     val settingsRequester = destinationFocusRequesters.getValue(MainDestination.SETTINGS)
     val selectedRequester = destinationFocusRequesters.getValue(selected)
-    val railWidth = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp
 
-    Column(
-        modifier = Modifier
-            .zIndex(1f)
-            .width(railWidth)
-            .fillMaxHeight()
-            .focusProperties {
-                onEnter = {
-                    selectedRequester.requestFocus()
-                }
-            }
-            .focusGroup()
-            .onFocusChanged { railHasFocus = it.hasFocus }
-            .background(
-                Brush.horizontalGradient(
-                    listOf(Color(0xFF090A07), Color(0xFF0A0B08)),
-                ),
-            )
-            .padding(
-                start = metrics.outerHorizontalPaddingDp.dp,
-                end = metrics.outerHorizontalPaddingDp.dp,
-                top = metrics.topPaddingDp.dp,
-                bottom = metrics.bottomPaddingDp.dp,
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    TvRailSurface(
+        metrics = metrics,
+        expanded = expanded,
+        overlayExpansion = adaptiveUi.isTelevision,
+        onRailFocusChanged = { railHasFocus = it },
+        onRailEnter = { selectedRequester.requestFocus() },
     ) {
         BrandLogo(Modifier.size(metrics.logoSizeDp.dp))
         Spacer(Modifier.height(metrics.logoItemGapDp.dp))
@@ -1325,8 +1307,9 @@ private fun CinematicNavigationRail(
             val nextRequester = primaryEntries.getOrNull(index + 1)
                 ?.let { destinationFocusRequesters.getValue(it.destination) }
                 ?: profileRequester
-            NavigationItem(
-                entry = entry,
+            TvRailDestinationItem(
+                icon = entry.icon,
+                label = entry.label,
                 selected = selected == entry.destination,
                 expanded = expanded,
                 metrics = metrics,
@@ -1340,12 +1323,9 @@ private fun CinematicNavigationRail(
             )
             Spacer(Modifier.height(metrics.itemGapDp.dp))
         }
-        NavigationItem(
-            entry = DestinationEntry(
-                MainDestination.SETTINGS,
-                Icons.Rounded.Person,
-                "تغيير المستخدم",
-            ),
+        TvRailDestinationItem(
+            icon = Icons.Rounded.Person,
+            label = "تغيير المستخدم",
             selected = false,
             expanded = expanded,
             metrics = metrics,
@@ -1362,8 +1342,9 @@ private fun CinematicNavigationRail(
         Spacer(Modifier.height(metrics.itemGapDp.dp))
         Spacer(Modifier.weight(1f))
         entries.first { it.destination == MainDestination.SETTINGS }.let { entry ->
-            NavigationItem(
-                entry = entry,
+            TvRailDestinationItem(
+                icon = entry.icon,
+                label = entry.label,
                 selected = selected == entry.destination,
                 expanded = expanded,
                 metrics = metrics,
@@ -1374,69 +1355,6 @@ private fun CinematicNavigationRail(
             )
         }
         Spacer(Modifier.height((metrics.itemGapDp * 2f).dp))
-    }
-}
-
-@Composable
-private fun NavigationItem(
-    entry: DestinationEntry,
-    selected: Boolean,
-    expanded: Boolean,
-    metrics: TvRailMetrics,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val active = selected || showFocused
-    val shape = RoundedCornerShape(metrics.cornerRadiusDp.dp)
-    val focusBorderWidth = adaptiveUi.tvPremiumPolicy.focusBorderWidthDp.dp
-    val background = when {
-        showFocused -> colors.gold.copy(alpha = .19f)
-        selected -> colors.gold.copy(alpha = .11f)
-        else -> Color.Transparent
-    }
-    val borderWidth = when {
-        showFocused -> focusBorderWidth
-        selected -> 1.dp
-        else -> 0.dp
-    }
-    val borderColor = when {
-        showFocused -> colors.goldBright
-        selected -> colors.goldBright.copy(alpha = .38f)
-        else -> Color.Transparent
-    }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(metrics.itemHeightDp.dp)
-            .clip(shape)
-            .background(background)
-            .border(borderWidth, borderColor, shape)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = metrics.itemHorizontalPaddingDp.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = entry.icon,
-            contentDescription = entry.label,
-            tint = if (active) colors.goldBright else colors.textMuted,
-            modifier = Modifier.size(metrics.iconSizeDp.dp),
-        )
-        if (expanded) {
-            Spacer(Modifier.width(metrics.iconLabelGapDp.dp))
-            Text(
-                entry.label,
-                color = if (active) colors.text else colors.textMuted,
-                fontSize = metrics.labelSizeSp.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                maxLines = 1,
-            )
-        }
     }
 }
 
