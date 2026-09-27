@@ -1076,7 +1076,7 @@ private fun AndroidKeyEvent.isRemoteSelectKey(): Boolean =
         keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ||
         keyCode == AndroidKeyEvent.KEYCODE_SPACE
 
-private tailrec fun Context.findViewModelStoreOwner(): ViewModelStoreOwner? = when (this) {
+internal tailrec fun Context.findViewModelStoreOwner(): ViewModelStoreOwner? = when (this) {
     is ViewModelStoreOwner -> this
     is ContextWrapper -> baseContext.findViewModelStoreOwner()
     else -> null

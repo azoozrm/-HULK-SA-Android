@@ -35,17 +35,20 @@ import sa.hulksa.player.MainDestination
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
-import sa.hulksa.player.ui.components.CompactPosterCard
-import sa.hulksa.player.ui.components.SeriesPosterCard
+import sa.hulksa.player.ui.components.MediaCatalogCard
+import sa.hulksa.player.ui.components.rememberMediaCardMetadata
 
 internal data class TvCatalogMetrics(
-    val minCellWidthDp: Float,
     val horizontalSpacingDp: Float,
     val verticalSpacingDp: Float,
     val horizontalContentPaddingDp: Float,
+    val focusSafeEndPaddingDp: Float,
     val bottomContentPaddingDp: Float,
     val focusViewportInsetDp: Float,
 )
+
+private const val TV_CATALOG_MIN_READABLE_CELL_WIDTH_DP = 118f
+private const val TV_CATALOG_MAX_CELL_WIDTH_DP = 240f
 
 internal fun tvCatalogMetrics(
     screenWidthDp: Int,
@@ -64,7 +67,6 @@ internal fun tvCatalogMetrics(
     }
 
     return TvCatalogMetrics(
-        minCellWidthDp = (132f * densityScale).coerceIn(124f, 146f),
         horizontalSpacingDp = (14f * densityScale).coerceIn(12f, 16f),
         verticalSpacingDp = (15f * densityScale).coerceIn(13f, 17f),
         horizontalContentPaddingDp = when {
@@ -72,6 +74,7 @@ internal fun tvCatalogMetrics(
             large -> 12f
             else -> 10f
         },
+        focusSafeEndPaddingDp = 6f,
         bottomContentPaddingDp = maxOf(44f, policy.verticalSafeInsetDp + 30f),
         focusViewportInsetDp = when {
             compact -> 9f
@@ -79,6 +82,31 @@ internal fun tvCatalogMetrics(
             else -> 10f
         },
     )
+}
+
+internal fun tvCatalogTargetColumns(
+    screenWidthDp: Int,
+    screenHeightDp: Int,
+): Int {
+    val width = screenWidthDp.coerceAtLeast(1)
+    val height = screenHeightDp.coerceAtLeast(1)
+    return when {
+        width <= 960 || height <= 540 -> 6
+        width >= 1600 && height >= 900 -> 8
+        else -> 7
+    }
+}
+
+internal fun tvCatalogColumnCellWidth(
+    availableWidthDp: Float,
+    targetColumns: Int,
+    horizontalSpacingDp: Float,
+): Float {
+    val columns = targetColumns.coerceAtLeast(1)
+    val available = availableWidthDp.coerceAtLeast(1f)
+    val spacing = horizontalSpacingDp.coerceAtLeast(0f)
+    val fairShare = (available - (columns - 1) * spacing) / columns
+    return (fairShare - 0.5f).coerceIn(TV_CATALOG_MIN_READABLE_CELL_WIDTH_DP, TV_CATALOG_MAX_CELL_WIDTH_DP)
 }
 
 // Symmetric horizontal spacing plus a top-only inset is used by the TV
@@ -152,11 +180,10 @@ internal fun TvCatalogGrid(
             screenHeightDp = adaptiveUi.screenHeightDp,
         )
     }
-    val minCellWidth = metrics.minCellWidthDp.dp
     val horizontalSpacing = metrics.horizontalSpacingDp.dp
     val verticalSpacing = metrics.verticalSpacingDp.dp
     val horizontalContentPadding = metrics.horizontalContentPaddingDp.dp
-    val focusSafeEndPadding = 6.dp
+    val focusSafeEndPadding = metrics.focusSafeEndPaddingDp.dp
     val bottomContentPadding = metrics.bottomContentPaddingDp.dp
     val focusViewportInset = metrics.focusViewportInsetDp.dp
 
@@ -235,7 +262,12 @@ internal fun TvCatalogGrid(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val availableGridWidth = (
             maxWidth - horizontalContentPadding - focusSafeEndPadding
-        ).coerceAtLeast(minCellWidth)
+        ).coerceAtLeast(1.dp)
+        val minCellWidth = tvCatalogColumnCellWidth(
+            availableWidthDp = availableGridWidth.value,
+            targetColumns = tvCatalogTargetColumns(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp),
+            horizontalSpacingDp = horizontalSpacing.value,
+        ).dp
         val columnCount = (((availableGridWidth + horizontalSpacing).value) /
             (minCellWidth + horizontalSpacing).value)
             .toInt()
@@ -340,25 +372,15 @@ internal fun TvCatalogGrid(
                     navigationMemory.save(destination, key, index)
                 }
 
-                if (destination == MainDestination.SERIES) {
-                    SeriesPosterCard(
-                        item = item,
-                        isFavorite = isFavorite(item),
-                        onClick = { onOpen(item) },
-                        modifier = cardModifier,
-                        onLongClick = { onToggleFavorite(item) },
-                        onFocused = onFocusedCard,
-                    )
-                } else {
-                    CompactPosterCard(
-                        item = item,
-                        isFavorite = isFavorite(item),
-                        onClick = { onOpen(item) },
-                        modifier = cardModifier,
-                        onLongClick = { onToggleFavorite(item) },
-                        onFocused = onFocusedCard,
-                    )
-                }
+                MediaCatalogCard(
+                    item = item,
+                    isFavorite = isFavorite(item),
+                    metadata = rememberMediaCardMetadata(item),
+                    onClick = { onOpen(item) },
+                    modifier = cardModifier,
+                    onLongClick = { onToggleFavorite(item) },
+                    onFocused = onFocusedCard,
+                )
             }
         }
     }

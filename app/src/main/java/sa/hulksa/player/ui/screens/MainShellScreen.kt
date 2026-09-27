@@ -170,6 +170,8 @@ import sa.hulksa.player.ui.components.TvRailSurface
 import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.UniversalPosterCard
+import sa.hulksa.player.ui.components.MediaCatalogCard
+import sa.hulksa.player.ui.components.rememberMediaCardMetadata
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HistoryCard
@@ -4174,30 +4176,58 @@ private fun ContentGrid(
             runCatching { targetRequester.requestFocus() }
         }
     }
-    val horizontalGridPadding = if (
-        isTv && (destination == MainDestination.FAVORITES || destination == MainDestination.SEARCH)
-    ) 12.dp else 5.dp
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Adaptive(if (isTv) 132.dp else 105.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 9.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 15.dp else 10.dp),
-        contentPadding = PaddingValues(
-            start = horizontalGridPadding,
-            top = 5.dp,
-            end = horizontalGridPadding,
-            bottom = 28.dp,
-        ),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
-            val key = contentKeys[index]
-            val restore = remembered.itemKey == key || index == targetIndex
-            UniversalPosterCard(
-                item = item,
-                isFavorite = isFavorite(item),
-                onClick = { onOpen(item) },
-                modifier = Modifier
+    val mediaCatalog = destination != MainDestination.SEARCH
+    val adaptiveUi = LocalAdaptiveUi.current
+    val catalogMetrics = if (isTv && mediaCatalog) {
+        tvCatalogMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
+    } else {
+        null
+    }
+    val horizontalGridPadding = when {
+        catalogMetrics != null -> catalogMetrics.horizontalContentPaddingDp.dp
+        isTv -> 12.dp
+        else -> 5.dp
+    }
+    val endGridPadding = catalogMetrics?.focusSafeEndPaddingDp?.dp ?: horizontalGridPadding
+    val topGridPadding = catalogMetrics?.horizontalContentPaddingDp?.dp ?: 5.dp
+    val bottomGridPadding = catalogMetrics?.bottomContentPaddingDp?.dp ?: 28.dp
+    val horizontalGridSpacing = catalogMetrics?.horizontalSpacingDp?.dp ?: if (isTv) 14.dp else 9.dp
+    val verticalGridSpacing = catalogMetrics?.verticalSpacingDp?.dp ?: if (isTv) 15.dp else 10.dp
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val minCellWidth = when {
+            catalogMetrics != null -> {
+                val availableGridWidth = (
+                    maxWidth - horizontalGridPadding - endGridPadding
+                ).coerceAtLeast(1.dp)
+                tvCatalogColumnCellWidth(
+                    availableWidthDp = availableGridWidth.value,
+                    targetColumns = tvCatalogTargetColumns(
+                        adaptiveUi.screenWidthDp,
+                        adaptiveUi.screenHeightDp,
+                    ),
+                    horizontalSpacingDp = horizontalGridSpacing.value,
+                ).dp
+            }
+            isTv -> 132.dp
+            else -> 105.dp
+        }
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Adaptive(minCellWidth),
+            horizontalArrangement = Arrangement.spacedBy(horizontalGridSpacing),
+            verticalArrangement = Arrangement.spacedBy(verticalGridSpacing),
+            contentPadding = PaddingValues(
+                start = horizontalGridPadding,
+                top = topGridPadding,
+                end = endGridPadding,
+                bottom = bottomGridPadding,
+            ),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
+                val key = contentKeys[index]
+                val restore = remembered.itemKey == key || index == targetIndex
+                val cardModifier = Modifier
                     .fillMaxWidth()
                     .then(
                         if (index == 0 && firstItemFocusRequester != null) {
@@ -4212,10 +4242,28 @@ private fun ContentGrid(
                         } else {
                             Modifier
                         },
-                    ),
-                onLongClick = { onToggleFavorite(item) },
-                onFocused = { navigationMemory.save(destination, key, index) },
-            )
+                    )
+                if (mediaCatalog) {
+                    MediaCatalogCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        metadata = rememberMediaCardMetadata(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = { navigationMemory.save(destination, key, index) },
+                    )
+                } else {
+                    UniversalPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = { navigationMemory.save(destination, key, index) },
+                    )
+                }
+            }
         }
     }
 }
@@ -4648,7 +4696,16 @@ private fun CatalogHeader(
             Text(title, color = colors.text, fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE, fontWeight = FontWeight.Bold)
             Text("$resultCount عنصر", color = colors.textMuted, fontSize = if (isTv) 10.sp else MOBILE_SECTION_COUNT_SIZE)
         }
-        HulkTextField(query, onSearch, "ابحث في $title…", Modifier.weight(1f).widthIn(max = 630.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            HulkTextField(
+                query,
+                onSearch,
+                "ابحث في $title…",
+                Modifier
+                    .widthIn(max = if (isTv) 430.dp else 630.dp)
+                    .fillMaxWidth(),
+            )
+        }
         RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh)
     }
 }
@@ -4872,6 +4929,7 @@ private fun ReorderableCatalogCategoryBar(
                         isTv, category.id, selectedId, categoryBarHasFocus,
                         categoryFocusRequesters.getValue(category.id), focusRestoreController,
                     ),
+                mediaFilter = true,
             )
         }
     }
@@ -4880,18 +4938,16 @@ private fun ReorderableCatalogCategoryBar(
 @Composable
 private fun CatalogInteractionHints(isTv: Boolean) {
     val colors = LocalHulkColors.current
-    Column(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-        Text(
-            if (isTv) "ترتيب الفئات: اضغط مطولا OK، حرك بالاسهم، ثم اضغط OK للحفظ" else "لترتيب الفئات: اضغط مطولا على الفئة، اسحبها يمينا او يسارا، ثم اضغط عليها للحفظ",
-            color = colors.textMuted,
-            fontSize = 9.sp,
-        )
-        Text(
-            if (isTv) "المفضلة: اضغط مطولا OK فوق العنصر" else "المفضلة: اضغط مطولا على العنصر",
-            color = colors.textMuted,
-            fontSize = 9.sp,
-        )
-    }
+    Text(
+        text = if (isTv) {
+            "مطولا OK على الفئة للترتيب • مطولا OK على العنصر للمفضلة"
+        } else {
+            "مطولا على الفئة للترتيب • مطولا على العنصر للمفضلة"
+        },
+        color = colors.textMuted.copy(alpha = .82f),
+        fontSize = 9.sp,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    )
 }
 
 @Composable
@@ -5093,6 +5149,7 @@ private fun LiveCategoryChip(
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
     modifier: Modifier = Modifier,
+    mediaFilter: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -5121,8 +5178,12 @@ private fun LiveCategoryChip(
                 },
             )
             .border(
-                if (focused || moving) 2.dp else 1.dp,
-                if (focused || moving) colors.goldBright else colors.line.copy(alpha = .40f),
+                if (focused || moving) 2.dp else if (mediaFilter) 0.dp else 1.dp,
+                when {
+                    focused || moving -> colors.goldBright
+                    mediaFilter -> Color.Transparent
+                    else -> colors.line.copy(alpha = .40f)
+                },
                 shape,
             )
             .pointerInput(category.id) {
@@ -5181,7 +5242,7 @@ private fun LiveCategoryChip(
     ) {
         if (representative != null) {
             ChannelLogo(representative, Modifier.size(24.dp))
-        } else {
+        } else if (!mediaFilter) {
             Box(
                 modifier = Modifier
                     .size(24.dp)
