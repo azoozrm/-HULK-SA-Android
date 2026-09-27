@@ -31,10 +31,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
@@ -61,6 +65,7 @@ private const val TV_RAIL_SELECTED_BORDER_ALPHA = 0.30f
 private val TvRailSelectionMarkerWidth = 3.dp
 private val TvRailSelectionMarkerInset = 5.dp
 private const val TV_RAIL_SELECTION_MARKER_HEIGHT_FRACTION = 0.52f
+private val TvRailEdgeScrimWidth = 28.dp
 
 /**
  * Visual meaning of a rail destination. Selection and D-pad focus stay separate meanings; when a
@@ -93,6 +98,45 @@ internal fun tvRailOverlayAnchorOffsetPx(
     surfaceWidthPx: Int,
     isRtl: Boolean,
 ): Int = if (isRtl) reportedWidthPx - surfaceWidthPx else 0
+
+/**
+ * Opacity of the local content-edge scrim attached to the expanded rail.
+ *
+ * It is driven by the expansion fraction so it fades in as the rail grows and is exactly zero when
+ * the rail is collapsed, leaving no residual mask over the page. The scrim softens only the rail's
+ * content-facing edge; it never dims the page.
+ */
+internal fun tvRailEdgeScrimAlpha(expansionFraction: Float): Float =
+    expansionFraction.coerceIn(0f, 1f)
+
+private fun DrawScope.drawTvRailEdgeScrim(alpha: Float) {
+    if (alpha <= 0f) return
+    val scrimWidth = TvRailEdgeScrimWidth.toPx()
+    if (scrimWidth <= 0f) return
+    val surfaceColor = TvRailSurfaceStart.copy(alpha = alpha)
+    val transparent = TvRailSurfaceStart.copy(alpha = 0f)
+    if (layoutDirection == LayoutDirection.Rtl) {
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(transparent, surfaceColor),
+                startX = -scrimWidth,
+                endX = 0f,
+            ),
+            topLeft = Offset(-scrimWidth, 0f),
+            size = Size(scrimWidth, size.height),
+        )
+    } else {
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(surfaceColor, transparent),
+                startX = size.width,
+                endX = size.width + scrimWidth,
+            ),
+            topLeft = Offset(size.width, 0f),
+            size = Size(scrimWidth, size.height),
+        )
+    }
+}
 
 /**
  * Measures the rail surface at [width] while reporting only the parent's collapsed footprint.
@@ -153,6 +197,15 @@ internal fun TvRailSurface(
         label = "tvRailOverlayWidth",
     )
     val surfaceWidth = if (overlayExpansion) animatedWidth else targetWidth
+    val expansionFraction = if (overlayExpansion && metrics.expandedWidthDp > metrics.collapsedWidthDp) {
+        (
+            (surfaceWidth.value - metrics.collapsedWidthDp) /
+                (metrics.expandedWidthDp - metrics.collapsedWidthDp)
+            ).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val edgeScrimAlpha = tvRailEdgeScrimAlpha(expansionFraction)
 
     Box(
         modifier = Modifier
@@ -169,6 +222,13 @@ internal fun TvRailSurface(
                         Modifier.tvRailOverlayWidth(surfaceWidth)
                     } else {
                         Modifier.width(surfaceWidth)
+                    },
+                )
+                .then(
+                    if (overlayExpansion) {
+                        Modifier.drawBehind { drawTvRailEdgeScrim(edgeScrimAlpha) }
+                    } else {
+                        Modifier
                     },
                 )
                 .fillMaxHeight()

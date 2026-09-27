@@ -74,4 +74,16 @@ class TvRailPresentationPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `content edge scrim leaves no residual mask when the rail is collapsed`() {
+        assertEquals(0f, tvRailEdgeScrimAlpha(0f), 0.001f)
+    }
+
+    @Test
+    fun `content edge scrim tracks expansion with a bounded alpha`() {
+        assertEquals(0.5f, tvRailEdgeScrimAlpha(0.5f), 0.001f)
+        assertEquals(0f, tvRailEdgeScrimAlpha(-0.5f), 0.001f)
+        assertEquals(1f, tvRailEdgeScrimAlpha(1.4f), 0.001f)
+    }
 }

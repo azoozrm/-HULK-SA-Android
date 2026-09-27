@@ -96,6 +96,21 @@ class TvRailSharedPresentationContractTest(unittest.TestCase):
         self.assertIn("placeable.place(", presentation)
         self.assertIn("constraints.hasBoundedWidth", presentation)
 
+    def test_expanded_overlay_uses_a_local_content_edge_scrim(self) -> None:
+        presentation = self.read(TV_RAIL_PRESENTATION)
+
+        self.assertIn("TvRailEdgeScrimWidth", presentation)
+        self.assertIn("internal fun tvRailEdgeScrimAlpha(", presentation)
+        self.assertIn("drawBehind { drawTvRailEdgeScrim(edgeScrimAlpha) }", presentation)
+        self.assertIn("if (alpha <= 0f) return", presentation)
+        self.assertIn("Brush.horizontalGradient(", presentation)
+        self.assertGreaterEqual(presentation.count("if (overlayExpansion)"), 3)
+        self.assertIn(
+            ".background(Brush.horizontalGradient(listOf(TvRailSurfaceStart, TvRailSurfaceEnd)))",
+            presentation,
+        )
+        self.assertEqual(1, presentation.count("drawBehind {"))
+
     def test_overlay_expansion_is_tv_only_and_focus_contracts_stay_with_each_controller(self) -> None:
         main_rail = self.main_rail()
         search_rail = self.search_rail()
