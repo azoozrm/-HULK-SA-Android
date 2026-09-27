@@ -71,7 +71,9 @@ class TvRailSharedPresentationContractTest(unittest.TestCase):
         presentation = self.read(TV_RAIL_PRESENTATION)
 
         self.assertIn(".width(metrics.collapsedWidthDp.dp)", presentation)
-        self.assertIn("Modifier.requiredWidth(surfaceWidth)", presentation)
+        self.assertIn(".tvRailOverlayWidth(surfaceWidth)", presentation)
+        self.assertNotIn("Modifier.requiredWidth(", presentation)
+        self.assertNotIn(".requiredWidth(surfaceWidth)", presentation)
         self.assertIn("Modifier.width(surfaceWidth)", presentation)
         self.assertIn("animateDpAsState(", presentation)
         self.assertIn("TV_RAIL_EXPANSION_DURATION_MILLIS", presentation)
@@ -81,6 +83,18 @@ class TvRailSharedPresentationContractTest(unittest.TestCase):
         self.assertEqual(1, presentation.count(".clickable("))
         self.assertIn(".onFocusChanged { onRailFocusChanged(it.hasFocus) }", presentation)
         self.assertIn(".onFocusChanged { itemFocused = it.isFocused }", presentation)
+
+    def test_overlay_start_edge_is_anchored_and_expands_only_toward_content(self) -> None:
+        presentation = self.read(TV_RAIL_PRESENTATION)
+
+        self.assertIn(
+            "internal fun tvRailOverlayAnchorOffsetPx(",
+            presentation,
+        )
+        self.assertIn("tvRailOverlayAnchorOffsetPx(", presentation)
+        self.assertIn("layoutDirection == LayoutDirection.Rtl", presentation)
+        self.assertIn("placeable.place(", presentation)
+        self.assertIn("constraints.hasBoundedWidth", presentation)
 
     def test_overlay_expansion_is_tv_only_and_focus_contracts_stay_with_each_controller(self) -> None:
         main_rail = self.main_rail()

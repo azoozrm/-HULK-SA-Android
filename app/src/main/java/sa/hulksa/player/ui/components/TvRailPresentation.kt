@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,9 +36,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -77,6 +79,50 @@ internal fun tvRailVisualState(selected: Boolean, highlighted: Boolean): TvRailV
     highlighted -> TvRailVisualState.FOCUSED
     selected -> TvRailVisualState.SELECTED
     else -> TvRailVisualState.IDLE
+}
+
+/**
+ * Horizontal offset for the oversized rail surface inside its collapsed footprint.
+ *
+ * The surface must stay anchored to the layout's start edge (the right edge in RTL television
+ * layouts), so expansion can only grow toward the content. A positive non-start offset would push
+ * the surface's start edge past the screen's safe edge, which is the reported clipping defect.
+ */
+internal fun tvRailOverlayAnchorOffsetPx(
+    reportedWidthPx: Int,
+    surfaceWidthPx: Int,
+    isRtl: Boolean,
+): Int = if (isRtl) reportedWidthPx - surfaceWidthPx else 0
+
+/**
+ * Measures the rail surface at [width] while reporting only the parent's collapsed footprint.
+ *
+ * Unlike `requiredWidth`, which centers oversized content within the coerced space and therefore
+ * bleeds past both edges, this anchors the surface to the parent's start edge: in RTL the right
+ * edge stays fixed on screen and the rail expands leftward over the content.
+ */
+private fun Modifier.tvRailOverlayWidth(width: Dp): Modifier = layout { measurable, constraints ->
+    val requestedWidth = width.roundToPx().coerceAtLeast(0)
+    val placeable = measurable.measure(
+        constraints.copy(minWidth = requestedWidth, maxWidth = requestedWidth),
+    )
+    if (!constraints.hasBoundedWidth) {
+        layout(placeable.width, placeable.height) {
+            placeable.place(0, 0)
+        }
+    } else {
+        val reportedWidth = constraints.maxWidth
+        layout(reportedWidth, placeable.height) {
+            placeable.place(
+                tvRailOverlayAnchorOffsetPx(
+                    reportedWidthPx = reportedWidth,
+                    surfaceWidthPx = placeable.width,
+                    isRtl = layoutDirection == LayoutDirection.Rtl,
+                ),
+                0,
+            )
+        }
+    }
 }
 
 /**
@@ -120,7 +166,7 @@ internal fun TvRailSurface(
             modifier = Modifier
                 .then(
                     if (overlayExpansion) {
-                        Modifier.requiredWidth(surfaceWidth)
+                        Modifier.tvRailOverlayWidth(surfaceWidth)
                     } else {
                         Modifier.width(surfaceWidth)
                     },
