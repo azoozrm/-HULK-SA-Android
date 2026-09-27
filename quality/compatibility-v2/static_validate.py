@@ -188,16 +188,16 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
     )
     add(
         "version-name",
-        'versionName = "0.9.3.20"' in build_text,
-        "versionName is 0.9.3.20",
-        "versionName is not 0.9.3.20",
+        'versionName = "1.0.0"' in build_text,
+        "versionName is 1.0.0",
+        "versionName is not 1.0.0",
         [str(build_file)],
     )
     add(
         "version-code",
-        re.search(r"\bversionCode\s*=\s*64\b", build_text) is not None,
-        "versionCode is 64",
-        "versionCode is not 64",
+        re.search(r"\bversionCode\s*=\s*68\b", build_text) is not None,
+        "versionCode is 68",
+        "versionCode is not 68",
         [str(build_file)],
     )
     add(

@@ -49,7 +49,7 @@ class StaticValidationTest(unittest.TestCase):
             asset.write_bytes(self.png_bytes(*dimensions))
         (root / "app/build.gradle.kts").write_text(
             'namespace = "sa.hulksa.player"\napplicationId = "sa.hulksa.player"\n'
-            'versionCode = 64\nversionName = "0.9.3.20"\n'
+            'versionCode = 68\nversionName = "1.0.0"\n'
             'val resellerApiUrl = "https://hulksa.com"\n'
             'val verifyProductionRuntimeConfig = tasks.register("verifyProductionRuntimeConfig")\n'
             'buildConfigField("String", "RESELLER_API_URL", resellerApiUrl)\n'

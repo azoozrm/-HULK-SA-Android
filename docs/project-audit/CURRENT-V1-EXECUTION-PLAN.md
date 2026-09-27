@@ -6,7 +6,7 @@
 **Official branch:** `phase-3-v0.9.3.0-adaptive-foundation`  
 **Official checkpoint SHA:** `3ae0f744a2fbef54c769c0f5e43716da3a0b8b30`  
 **Application ID:** `sa.hulksa.player`  
-**Current version:** `0.9.3.20` / `versionCode 64`
+**Current version:** `1.0.0` / `versionCode 68`
 
 > This checkpoint does not replace the permanent engineering requirements in `HULK-SA-OFFICIAL-PROJECT-PLAN.md`. It records the current truth after the later rescue, Compatibility Lab V2, adaptive qualification, and physical-device work. Older audit documents that still mention `0.9.3.18 / 62` are historical evidence, not the current execution state.
 
@@ -49,8 +49,8 @@ Current product source is the direct canonical Gradle project on the official br
 Current release identity:
 
 - `applicationId = sa.hulksa.player`
-- `versionName = 0.9.3.20`
-- `versionCode = 64`
+- `versionName = 1.0.0`
+- `versionCode = 68`
 - Required ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`
 - Forbidden ABI: legacy `x86`
 - Release build uses R8 and resource shrinking.
