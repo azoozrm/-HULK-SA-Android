@@ -119,8 +119,8 @@ jobs:
           apk='app/build/outputs/apk/release/app-release-unsigned.apk'
           test -f "$apk"
           test "$(apkanalyzer manifest application-id "$apk")" = 'sa.hulksa.player'
-          test "$(apkanalyzer manifest version-code "$apk")" = '64'
-          test "$(apkanalyzer manifest version-name "$apk")" = '0.9.3.20'
+          test "$(apkanalyzer manifest version-code "$apk")" = '68'
+          test "$(apkanalyzer manifest version-name "$apk")" = '1.0.0'
 
           mkdir -p build/reports/architecture
           count=0
@@ -148,8 +148,8 @@ jobs:
           {
             echo "commit=${GITHUB_SHA}"
             echo 'package=sa.hulksa.player'
-            echo 'versionName=0.9.3.20'
-            echo 'versionCode=64'
+            echo 'versionName=1.0.0'
+            echo 'versionCode=68'
           } > build-evidence/BUILD-METADATA.txt
           (
             cd build-evidence

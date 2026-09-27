@@ -169,8 +169,8 @@ android {
         applicationId = "sa.hulksa.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 64
-        versionName = "0.9.3.20"
+        versionCode = 68
+        versionName = "1.0.0"
         if (qualificationVersionCode != null && qualificationVersionName != null) {
             versionCode = qualificationVersionCode
             versionName = qualificationVersionName

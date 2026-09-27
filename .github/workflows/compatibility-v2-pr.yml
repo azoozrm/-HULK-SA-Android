@@ -104,8 +104,8 @@ jobs:
             echo "base_ref=${GITHUB_BASE_REF:-none}"
             echo "base_already_v2=${{ steps.migration.outputs.base_already_v2 }}"
             echo 'package=sa.hulksa.player'
-            echo 'versionName=0.9.3.20'
-            echo 'versionCode=64'
+            echo 'versionName=1.0.0'
+            echo 'versionCode=68'
           } > "$EVIDENCE/BUILD-METADATA.txt"
           (
             cd "$EVIDENCE"
