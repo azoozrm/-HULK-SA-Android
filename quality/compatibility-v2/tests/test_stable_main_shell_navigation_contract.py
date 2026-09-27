@@ -7,6 +7,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HULK_APP = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
 MAIN_SHELL = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt"
 SETTINGS_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/SettingsProScreen.kt"
+TV_RAIL_PRESENTATION = (
+    REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/components/TvRailPresentation.kt"
+)
 
 
 class StableMainShellNavigationContractTest(unittest.TestCase):
@@ -50,11 +53,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
             "fun MainShellScreen(",
             "private fun CinematicNavigationRail(",
         )
-        rail = self.section(
-            source,
-            "private fun CinematicNavigationRail(",
-            "private fun NavigationItem(",
-        )
+        presentation = self.read(TV_RAIL_PRESENTATION)
         catalog = self.section(
             source,
             "private fun ReorderableCatalogCategoryBar(",
@@ -64,7 +63,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
 
         self.assertIn("Row(Modifier.fillMaxSize())", shell)
         self.assertIn("Modifier.weight(1f).fillMaxHeight()", shell)
-        self.assertIn(".zIndex(1f)", rail)
+        self.assertIn(".zIndex(1f)", presentation)
         for category_bar in (catalog, live):
             self.assertIn("rememberCategorySidebarUnderlap", category_bar)
             self.assertIn(".extendCategoryViewportTowardStart", category_bar)
@@ -75,7 +74,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
             + live.count(".extendCategoryViewportTowardStart"),
         )
 
-    def test_sidebar_width_change_is_discrete_and_content_remains_sibling(self) -> None:
+    def test_rail_expansion_is_an_overlay_that_never_resizes_sibling_content(self) -> None:
         source = self.read(MAIN_SHELL)
         shell = self.section(
             source,
@@ -85,31 +84,34 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
         rail = self.section(
             source,
             "private fun CinematicNavigationRail(",
-            "private fun NavigationItem(",
+            "private fun DestinationContent(",
         )
+        presentation = self.read(TV_RAIL_PRESENTATION)
 
         self.assertIn("Row(Modifier.fillMaxSize())", shell)
         self.assertIn("Modifier.weight(1f).fillMaxHeight()", shell)
-        self.assertIn(
-            "val railWidth = if (expanded) metrics.expandedWidthDp.dp else metrics.collapsedWidthDp.dp",
-            rail,
-        )
-        self.assertIn(".width(railWidth)", rail)
-        self.assertNotIn("animateDpAsState(", rail)
-        self.assertNotIn('label = "railWidth"', rail)
+        self.assertIn("TvRailSurface(", rail)
+        self.assertIn("overlayExpansion = adaptiveUi.isTelevision", rail)
+        self.assertIn(".width(metrics.collapsedWidthDp.dp)", presentation)
+        self.assertIn("Modifier.requiredWidth(surfaceWidth)", presentation)
+        self.assertIn("animateDpAsState(", presentation)
+        self.assertIn("TV_RAIL_EXPANSION_DURATION_MILLIS", presentation)
+        self.assertNotIn("val railWidth = if (expanded)", source)
 
     def test_sidebar_expansion_remains_derived_from_actual_focus(self) -> None:
         source = self.read(MAIN_SHELL)
         rail = self.section(
             source,
             "private fun CinematicNavigationRail(",
-            "private fun NavigationItem(",
+            "private fun DestinationContent(",
         )
+        presentation = self.read(TV_RAIL_PRESENTATION)
 
         self.assertIn("val expanded = railHasFocus", rail)
-        self.assertIn(".onFocusChanged { railHasFocus = it.hasFocus }", rail)
+        self.assertIn("onRailFocusChanged = { railHasFocus = it }", rail)
         self.assertEqual(1, rail.count("railHasFocus ="))
         self.assertNotIn("railHasFocus = false", rail)
+        self.assertIn(".onFocusChanged { onRailFocusChanged(it.hasFocus) }", presentation)
 
     def test_destination_selection_hands_focus_off_after_navigation(self) -> None:
         source = self.read(MAIN_SHELL)
