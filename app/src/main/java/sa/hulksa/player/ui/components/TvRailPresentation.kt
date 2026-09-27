@@ -65,7 +65,7 @@ private const val TV_RAIL_SELECTED_BORDER_ALPHA = 0.30f
 private val TvRailSelectionMarkerWidth = 3.dp
 private val TvRailSelectionMarkerInset = 5.dp
 private const val TV_RAIL_SELECTION_MARKER_HEIGHT_FRACTION = 0.52f
-private val TvRailEdgeScrimWidth = 40.dp
+private val TvRailEdgeScrimWidth = 56.dp
 
 /**
  * Visual meaning of a rail destination. Selection and D-pad focus stay separate meanings; when a
@@ -115,11 +115,15 @@ private fun DrawScope.drawTvRailEdgeScrim(alpha: Float) {
     if (scrimWidth <= 0f) return
     val surfaceColor = TvRailSurfaceStart.copy(alpha = alpha)
     val transparent = TvRailSurfaceStart.copy(alpha = 0f)
-    val softStop = TvRailSurfaceStart.copy(alpha = alpha * 0.45f)
+    val softStop = TvRailSurfaceStart.copy(alpha = alpha * 0.40f)
+    val nearStop = TvRailSurfaceStart.copy(alpha = alpha * 0.95f)
     if (layoutDirection == LayoutDirection.Rtl) {
         drawRect(
             brush = Brush.horizontalGradient(
-                colors = listOf(transparent, softStop, surfaceColor),
+                0f to transparent,
+                0.5f to softStop,
+                0.8f to nearStop,
+                1f to surfaceColor,
                 startX = -scrimWidth,
                 endX = 0f,
             ),
@@ -129,7 +133,10 @@ private fun DrawScope.drawTvRailEdgeScrim(alpha: Float) {
     } else {
         drawRect(
             brush = Brush.horizontalGradient(
-                colors = listOf(surfaceColor, softStop, transparent),
+                0f to surfaceColor,
+                0.2f to nearStop,
+                0.5f to softStop,
+                1f to transparent,
                 startX = size.width,
                 endX = size.width + scrimWidth,
             ),
