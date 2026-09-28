@@ -65,6 +65,7 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -87,6 +88,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -1625,19 +1627,20 @@ private fun CinemaHomeScreen(
         contentPadding = PaddingValues(bottom = homeBottomInset),
         verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
     ) {
-        item {
-            HomeHeader(
-                isTv = isTv,
-                loading = loading,
-                unreadNotificationCount = state.unreadNotificationCount,
-                downloadsEnabled = homeDownloadsEnabled,
-                gutter = homeGutter,
-                onOpenNotifications = onOpenNotifications,
-                onRefresh = onRefresh,
-                onSearch = { onSelectDestination(MainDestination.SEARCH) },
-                onOpenDownloads = onOpenDownloads,
-                onOpenSettings = { onSelectDestination(MainDestination.SETTINGS) },
-            )
+        if (!isTv) {
+            item {
+                HomeHeader(
+                    loading = loading,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    downloadsEnabled = homeDownloadsEnabled,
+                    gutter = homeGutter,
+                    onOpenNotifications = onOpenNotifications,
+                    onRefresh = onRefresh,
+                    onSearch = { onSelectDestination(MainDestination.SEARCH) },
+                    onOpenDownloads = onOpenDownloads,
+                    onOpenSettings = { onSelectDestination(MainDestination.SETTINGS) },
+                )
+            }
         }
         item {
             if (featured != null) {
@@ -1651,6 +1654,10 @@ private fun CinemaHomeScreen(
                     isFavorite = isFavorite(featured),
                     onOpen = { onOpen(featured) },
                     onToggleFavorite = { onToggleFavorite(featured) },
+                    loading = loading,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
+                    onRefresh = onRefresh,
                     watchModifier = Modifier.restoreFocus(remembered.rowKey == "hero", heroRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
                 )
@@ -1898,13 +1905,46 @@ internal fun homeVerticalSafeInsetDp(isTv: Boolean, screenHeightDp: Int): Float 
     if (isTv) maxOf(24f, screenHeightDp * .04f).coerceAtMost(48f) else 12f
 
 /**
- * Restrained Home header. The TV variant keeps only the quiet title and system actions because the
- * rail owns navigation; the phone variant adds the approved header Search action and a profile
- * entry that exposes the gated Downloads/Settings destinations.
+ * P02 correction: premium cinematic hero heights shared by the Home hero and its loading
+ * placeholder. The TV minimum keeps the first landscape Continue Watching row fully visible at
+ * 960x540 while restoring a substantial cinematic proportion.
+ */
+internal fun cinemaHeroHeightDp(
+    isTv: Boolean,
+    isPortraitPhone: Boolean,
+    screenHeightDp: Int,
+): Float {
+    val height = screenHeightDp.coerceAtLeast(1).toFloat()
+    return when {
+        isTv -> (height * .46f).coerceIn(280f, 380f)
+        isPortraitPhone -> (height * .50f).coerceIn(300f, 400f)
+        else -> 280f
+    }
+}
+
+/** Text region that always stays above the pinned hero actions, so CTAs can never be pushed out. */
+internal fun cinemaHeroTextBudgetDp(heroHeightDp: Float, isTv: Boolean): Float {
+    val topOverlay = if (isTv) 64f else 0f
+    val bottomInset = if (isTv) 18f else 14f
+    return (heroHeightDp - topOverlay - bottomInset - 44f - 10f).coerceAtLeast(72f)
+}
+
+/** Synopsis lines that fit without pushing the CTAs out; the approved maximum stays two lines. */
+internal fun cinemaHeroSynopsisMaxLines(heroHeightDp: Float, titleLineCount: Int): Int = when {
+    heroHeightDp >= 300f -> 2
+    titleLineCount >= 2 -> 1
+    else -> 2
+}
+
+/**
+ * Restrained phone Home header.
+ *
+ * P02 correction keeps only the approved header actions — Search and Refresh — plus the
+ * account/services entry. Notifications, Downloads, Settings and profile switch live inside that
+ * services presentation, so every existing route, gate and action stays reachable.
  */
 @Composable
 private fun HomeHeader(
-    isTv: Boolean,
     loading: Boolean,
     unreadNotificationCount: Int,
     downloadsEnabled: Boolean,
@@ -1917,11 +1957,11 @@ private fun HomeHeader(
 ) {
     val colors = LocalHulkColors.current
     val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
-    var profileMenuOpen by remember { mutableStateOf(false) }
+    var servicesMenuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+            .statusBarsPadding()
             .heightIn(min = 44.dp)
             .padding(horizontal = gutter),
         verticalAlignment = Alignment.CenterVertically,
@@ -1929,7 +1969,7 @@ private fun HomeHeader(
         Text(
             text = "الرئيسية",
             color = colors.text,
-            fontSize = if (isTv) 16.sp else 15.sp,
+            fontSize = 15.sp,
             lineHeight = 20.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -1938,46 +1978,61 @@ private fun HomeHeader(
         )
         if (loading) LoadingRing()
         Spacer(Modifier.width(4.dp))
-        if (!isTv) {
-            RoundAction(Icons.Rounded.Search, "البحث", onSearch)
-        }
-        NotificationBellButton(
-            unreadCount = unreadNotificationCount,
-            isTv = isTv,
-            onClick = onOpenNotifications,
-        )
+        RoundAction(Icons.Rounded.Search, "البحث", onSearch)
         RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
-        if (!isTv) {
-            Box {
-                RoundAction(Icons.Rounded.Person, "الحساب", { profileMenuOpen = true })
-                DropdownMenu(
-                    expanded = profileMenuOpen,
-                    onDismissRequest = { profileMenuOpen = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("تغيير المستخدم", color = colors.text) },
-                        onClick = {
-                            profileMenuOpen = false
-                            requestProfileSwitch()
-                        },
-                    )
-                    if (downloadsEnabled) {
-                        DropdownMenuItem(
-                            text = { Text("التنزيلات", color = colors.text) },
-                            onClick = {
-                                profileMenuOpen = false
-                                onOpenDownloads()
-                            },
+        Box {
+            RoundAction(Icons.Rounded.Person, "الحساب والخدمات", { servicesMenuOpen = true })
+            DropdownMenu(
+                expanded = servicesMenuOpen,
+                onDismissRequest = { servicesMenuOpen = false },
+            ) {
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(Icons.Rounded.Notifications, contentDescription = null, tint = colors.textMuted)
+                    },
+                    text = {
+                        Text(
+                            if (unreadNotificationCount > 0) "الإشعارات ($unreadNotificationCount)" else "الإشعارات",
+                            color = colors.text,
                         )
-                    }
+                    },
+                    onClick = {
+                        servicesMenuOpen = false
+                        onOpenNotifications()
+                    },
+                )
+                if (downloadsEnabled) {
                     DropdownMenuItem(
-                        text = { Text("الاعدادات", color = colors.text) },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.textMuted)
+                        },
+                        text = { Text("التنزيلات", color = colors.text) },
                         onClick = {
-                            profileMenuOpen = false
-                            onOpenSettings()
+                            servicesMenuOpen = false
+                            onOpenDownloads()
                         },
                     )
                 }
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(Icons.Rounded.Settings, contentDescription = null, tint = colors.textMuted)
+                    },
+                    text = { Text("الإعدادات", color = colors.text) },
+                    onClick = {
+                        servicesMenuOpen = false
+                        onOpenSettings()
+                    },
+                )
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(Icons.Rounded.Person, contentDescription = null, tint = colors.textMuted)
+                    },
+                    text = { Text("تغيير المستخدم", color = colors.text) },
+                    onClick = {
+                        servicesMenuOpen = false
+                        requestProfileSwitch()
+                    },
+                )
             }
         }
     }
@@ -1991,6 +2046,10 @@ private fun CinemaHero(
     isFavorite: Boolean,
     onOpen: () -> Unit,
     onToggleFavorite: () -> Unit,
+    loading: Boolean,
+    unreadNotificationCount: Int,
+    onOpenNotifications: () -> Unit,
+    onRefresh: () -> Unit,
     watchModifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
 ) {
@@ -1999,13 +2058,15 @@ private fun CinemaHero(
     val screenWidthDp = configuration.screenWidthDp
     val screenHeightDp = configuration.screenHeightDp
     val isPortraitPhone = !isTv && screenWidthDp < 600 && screenHeightDp > screenWidthDp
-    val heroHeight = when {
-        isTv -> (screenHeightDp * .44f).coerceIn(224f, 320f).dp
-        isPortraitPhone -> (screenHeightDp * .44f).coerceIn(240f, 330f).dp
-        else -> 240.dp
-    }
+    val heroHeightDp = cinemaHeroHeightDp(
+        isTv = isTv,
+        isPortraitPhone = isPortraitPhone,
+        screenHeightDp = screenHeightDp,
+    )
+    val heroHeight = heroHeightDp.dp
+    val textBudget = cinemaHeroTextBudgetDp(heroHeightDp, isTv).dp
     // P02: copy occupies the start (right in RTL) side of the hero, artwork stays visible opposite.
-    val copyWidthFraction = if (isTv) .42f else if (isPortraitPhone) .94f else .62f
+    val copyWidthFraction = if (isTv) .44f else if (isPortraitPhone) .94f else .62f
     val gutter = homeHorizontalSafeInsetDp(isTv, screenWidthDp).dp
     val titleSize = when {
         isTv && screenWidthDp >= 1280 -> 42.sp
@@ -2017,7 +2078,9 @@ private fun CinemaHero(
         isTv -> 44.sp
         else -> 34.sp
     }
-    val showEyebrow = !isTv || screenHeightDp > 540
+    var titleLineCount by remember(item.id) { mutableIntStateOf(1) }
+    val showEyebrow = !isTv || heroHeightDp >= 300f
+    val synopsisMaxLines = cinemaHeroSynopsisMaxLines(heroHeightDp, titleLineCount)
     val metadataFactsBeforePills = listOfNotNull(
         item.rating?.takeIf(String::isNotBlank)?.let { "★ $it" },
         item.genre?.takeIf(String::isNotBlank)?.let { it.take(27) },
@@ -2027,6 +2090,7 @@ private fun CinemaHero(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
+            .clipToBounds()
             .background(Color(0xFF0A0B08)),
     ) {
         if (!image.isNullOrBlank()) {
@@ -2042,7 +2106,7 @@ private fun CinemaHero(
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = .18f),
+                    0f to Color.Black.copy(alpha = .22f),
                     .55f to Color.Transparent,
                     1f to colors.background,
                 ),
@@ -2056,6 +2120,46 @@ private fun CinemaHero(
             ),
         )
 
+        if (isTv) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = .62f), Color.Transparent),
+                        ),
+                    ),
+            )
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = gutter, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "الرئيسية",
+                    color = colors.text,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (loading) LoadingRing()
+                Spacer(Modifier.width(4.dp))
+                NotificationBellButton(
+                    unreadCount = unreadNotificationCount,
+                    isTv = true,
+                    onClick = onOpenNotifications,
+                )
+                RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -2063,38 +2167,53 @@ private fun CinemaHero(
                 .padding(
                     start = gutter,
                     end = gutter,
-                    bottom = if (isTv) (homeVerticalSafeInsetDp(isTv, screenHeightDp) * .75f).dp else 14.dp,
+                    bottom = if (isTv) 18.dp else 14.dp,
                 ),
         ) {
-            if (showEyebrow) {
-                Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-            }
-            Text(
-                item.name,
-                color = Color.White,
-                fontSize = titleSize,
-                lineHeight = titleLineHeight,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(6.dp))
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                maxItemsInEachRow = 3,
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = textBudget),
+                verticalArrangement = Arrangement.Bottom,
             ) {
-                metadataFactsBeforePills.forEach { fact -> InfoPill(fact) }
-                val remainingFactSlots = (3 - metadataFactsBeforePills.size).coerceAtLeast(0)
-                if (remainingFactSlots > 0) {
-                    HomeHeroTechnicalPills(item, isTv = isTv, maxFacts = remainingFactSlots)
+                if (showEyebrow) {
+                    Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
                 }
-            }
-            item.plot?.takeIf(String::isNotBlank)?.let {
+                Text(
+                    item.name,
+                    color = Color.White,
+                    fontSize = titleSize,
+                    lineHeight = titleLineHeight,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { layout -> titleLineCount = layout.lineCount.coerceAtLeast(1) },
+                )
                 Spacer(Modifier.height(6.dp))
-                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    maxItemsInEachRow = 3,
+                ) {
+                    metadataFactsBeforePills.forEach { fact -> InfoPill(fact) }
+                    val remainingFactSlots = (3 - metadataFactsBeforePills.size).coerceAtLeast(0)
+                    if (remainingFactSlots > 0) {
+                        HomeHeroTechnicalPills(item, isTv = isTv, maxFacts = remainingFactSlots)
+                    }
+                }
+                item.plot?.takeIf(String::isNotBlank)?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        it,
+                        color = Color(0xFFD4D0C5),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        maxLines = synopsisMaxLines,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -2119,11 +2238,13 @@ private fun HomePlaceholder(
 ) {
     val colors = LocalHulkColors.current
     val configuration = LocalConfiguration.current
-    val placeholderHeight = if (isTv) {
-        (configuration.screenHeightDp * .44f).coerceIn(224f, 320f).dp
-    } else {
-        236.dp
-    }
+    val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 &&
+        configuration.screenHeightDp > configuration.screenWidthDp
+    val placeholderHeight = cinemaHeroHeightDp(
+        isTv = isTv,
+        isPortraitPhone = isPortraitPhone,
+        screenHeightDp = configuration.screenHeightDp,
+    ).dp
     Box(
         Modifier.fillMaxWidth().height(placeholderHeight).background(colors.surface),
         contentAlignment = Alignment.Center,
