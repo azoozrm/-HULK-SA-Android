@@ -40,9 +40,57 @@ class P02CinemaHeroContainmentTest {
     }
 
     @Test
-    fun `long two line titles reduce synopsis lines so ctas stay inside the hero`() {
-        assertEquals(1, cinemaHeroSynopsisMaxLines(heroHeightDp = 280f, titleLineCount = 2))
-        assertEquals(2, cinemaHeroSynopsisMaxLines(heroHeightDp = 280f, titleLineCount = 1))
-        assertEquals(2, cinemaHeroSynopsisMaxLines(heroHeightDp = 331.2f, titleLineCount = 2))
+    fun `a two line compact title drops the synopsis so the ctas stay inside the hero`() {
+        assertEquals(
+            0,
+            cinemaHeroSynopsisMaxLines(
+                heroHeightDp = 280f,
+                isTv = true,
+                titleLineCount = 2,
+                titleLineHeightDp = 44f,
+            ),
+        )
+        assertEquals(
+            2,
+            cinemaHeroSynopsisMaxLines(
+                heroHeightDp = 280f,
+                isTv = true,
+                titleLineCount = 1,
+                titleLineHeightDp = 44f,
+            ),
+        )
+        assertEquals(
+            2,
+            cinemaHeroSynopsisMaxLines(
+                heroHeightDp = 331.2f,
+                isTv = true,
+                titleLineCount = 2,
+                titleLineHeightDp = 44f,
+            ),
+        )
+    }
+
+    @Test
+    fun `larger font scales reduce synopsis lines deterministically`() {
+        assertEquals(
+            0,
+            cinemaHeroSynopsisMaxLines(
+                heroHeightDp = 280f,
+                isTv = true,
+                titleLineCount = 2,
+                titleLineHeightDp = 44f,
+                fontScale = 1.5f,
+            ),
+        )
+        assertEquals(
+            1,
+            cinemaHeroSynopsisMaxLines(
+                heroHeightDp = 331.2f,
+                isTv = true,
+                titleLineCount = 2,
+                titleLineHeightDp = 44f,
+                fontScale = 1.2f,
+            ),
+        )
     }
 }

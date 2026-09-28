@@ -121,6 +121,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -1929,11 +1930,27 @@ internal fun cinemaHeroTextBudgetDp(heroHeightDp: Float, isTv: Boolean): Float {
     return (heroHeightDp - topOverlay - bottomInset - 44f - 10f).coerceAtLeast(72f)
 }
 
-/** Synopsis lines that fit without pushing the CTAs out; the approved maximum stays two lines. */
-internal fun cinemaHeroSynopsisMaxLines(heroHeightDp: Float, titleLineCount: Int): Int = when {
-    heroHeightDp >= 300f -> 2
-    titleLineCount >= 2 -> 1
-    else -> 2
+/**
+ * Synopsis lines that fit without pushing the CTAs out. The estimate is deterministic from the
+ * current title line count and font scale, so a later Column child is never measured with zero
+ * remaining height; the approved maximum stays two lines and zero hides an impossible synopsis.
+ */
+internal fun cinemaHeroSynopsisMaxLines(
+    heroHeightDp: Float,
+    isTv: Boolean,
+    titleLineCount: Int,
+    titleLineHeightDp: Float,
+    fontScale: Float = 1f,
+): Int {
+    val budget = cinemaHeroTextBudgetDp(heroHeightDp, isTv)
+    val titleBlock = titleLineCount.coerceAtLeast(1) * titleLineHeightDp * fontScale
+    val metadataBlock = 36f * fontScale
+    val remaining = budget - titleBlock - 6f - metadataBlock - 6f
+    return when {
+        remaining >= 34f * fontScale -> 2
+        remaining >= 17f * fontScale -> 1
+        else -> 0
+    }
 }
 
 /**
@@ -2078,9 +2095,16 @@ private fun CinemaHero(
         isTv -> 44.sp
         else -> 34.sp
     }
-    var titleLineCount by remember(item.id) { mutableIntStateOf(1) }
+    val fontScale = LocalDensity.current.fontScale
+    var titleLineCount by remember(item.id) { mutableIntStateOf(2) }
     val showEyebrow = !isTv || heroHeightDp >= 300f
-    val synopsisMaxLines = cinemaHeroSynopsisMaxLines(heroHeightDp, titleLineCount)
+    val synopsisMaxLines = cinemaHeroSynopsisMaxLines(
+        heroHeightDp = heroHeightDp,
+        isTv = isTv,
+        titleLineCount = titleLineCount,
+        titleLineHeightDp = titleLineHeight.value,
+        fontScale = fontScale,
+    )
     val metadataFactsBeforePills = listOfNotNull(
         item.rating?.takeIf(String::isNotBlank)?.let { "★ $it" },
         item.genre?.takeIf(String::isNotBlank)?.let { it.take(27) },
@@ -2203,16 +2227,18 @@ private fun CinemaHero(
                         HomeHeroTechnicalPills(item, isTv = isTv, maxFacts = remainingFactSlots)
                     }
                 }
-                item.plot?.takeIf(String::isNotBlank)?.let {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        it,
-                        color = Color(0xFFD4D0C5),
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        maxLines = synopsisMaxLines,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (synopsisMaxLines > 0) {
+                    item.plot?.takeIf(String::isNotBlank)?.let {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            it,
+                            color = Color(0xFFD4D0C5),
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            maxLines = synopsisMaxLines,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(10.dp))
