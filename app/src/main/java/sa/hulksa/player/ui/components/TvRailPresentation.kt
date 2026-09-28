@@ -292,7 +292,7 @@ internal fun TvRailDestinationItem(
     val borderWidth = when (visualState) {
         TvRailVisualState.FOCUSED,
         TvRailVisualState.SELECTED_FOCUSED,
-        -> adaptiveUi.tvPremiumPolicy.focusBorderWidthDp.dp
+        -> 3.dp
 
         TvRailVisualState.SELECTED -> 1.dp
         TvRailVisualState.IDLE -> 0.dp

@@ -74,6 +74,8 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -1405,6 +1407,7 @@ private fun DestinationContent(
             onOpenNotifications = onOpenNotifications,
             onGrowthAction = onGrowthAction,
             onOpenDownloads = { onSelectDestination(MainDestination.DOWNLOADS) },
+            onSelectDestination = onSelectDestination,
         )
         MainDestination.LIVE -> LiveCatalogScreen(
             state = state,
@@ -1516,6 +1519,7 @@ private fun CinemaHomeScreen(
     onOpenNotifications: () -> Unit,
     onGrowthAction: (GrowthDestination) -> Unit,
     onOpenDownloads: () -> Unit,
+    onSelectDestination: (MainDestination) -> Unit,
 ) {
     val movies = homeContent.movies
     val series = homeContent.series
@@ -1589,6 +1593,10 @@ private fun CinemaHomeScreen(
         growth = state.operations.growth,
         expiresAtEpochSeconds = state.account?.expiresAtEpochSeconds,
     )
+    val configuration = LocalConfiguration.current
+    val homeGutter = homeHorizontalSafeInsetDp(isTv, configuration.screenWidthDp).dp
+    val homeBottomInset = homeVerticalSafeInsetDp(isTv, configuration.screenHeightDp).dp
+    val homeDownloadsEnabled = state.operations.features.downloadsEnabled
 
     var rowCursor = 1
     val renewalBannerRow = if (renewalBanner != null) rowCursor++ else -1
@@ -1614,9 +1622,23 @@ private fun CinemaHomeScreen(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
-        verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
+        contentPadding = PaddingValues(bottom = homeBottomInset),
+        verticalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
     ) {
+        item {
+            HomeHeader(
+                isTv = isTv,
+                loading = loading,
+                unreadNotificationCount = state.unreadNotificationCount,
+                downloadsEnabled = homeDownloadsEnabled,
+                gutter = homeGutter,
+                onOpenNotifications = onOpenNotifications,
+                onRefresh = onRefresh,
+                onSearch = { onSelectDestination(MainDestination.SEARCH) },
+                onOpenDownloads = onOpenDownloads,
+                onOpenSettings = { onSelectDestination(MainDestination.SETTINGS) },
+            )
+        }
         item {
             if (featured != null) {
                 val heroRequester = remember { FocusRequester() }
@@ -1624,10 +1646,11 @@ private fun CinemaHomeScreen(
                     if (remembered.rowKey == "hero") { runCatching { heroRequester.requestFocus() } }
                 }
                 CinemaHero(
-                    featured, isTv, isFavorite(featured), { onOpen(featured) },
-                    { onToggleFavorite(featured) }, onRefresh, loading,
-                    unreadNotificationCount = state.unreadNotificationCount,
-                    onOpenNotifications = onOpenNotifications,
+                    item = featured,
+                    isTv = isTv,
+                    isFavorite = isFavorite(featured),
+                    onOpen = { onOpen(featured) },
+                    onToggleFavorite = { onToggleFavorite(featured) },
                     watchModifier = Modifier.restoreFocus(remembered.rowKey == "hero", heroRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
                 )
@@ -1636,8 +1659,6 @@ private fun CinemaHomeScreen(
                     loading = loading,
                     onRefresh = onRefresh,
                     isTv = isTv,
-                    unreadNotificationCount = state.unreadNotificationCount,
-                    onOpenNotifications = onOpenNotifications,
                 )
             }
         }
@@ -1649,7 +1670,7 @@ private fun CinemaHomeScreen(
                         runCatching { bannerRequester.requestFocus() }
                     }
                 }
-                HomeSectionPadding(isTv) {
+                HomeSectionPadding(homeGutter) {
                     RenewalBanner(
                         content = renewalBanner,
                         isTv = isTv,
@@ -1672,35 +1693,48 @@ private fun CinemaHomeScreen(
             }
         }
         if (state.errorMessage != null) {
-            item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = if (isTv) 25.dp else 14.dp)) }
+            item { ErrorNotice(state.errorMessage, Modifier.padding(horizontal = homeGutter)) }
         }
         if (continueWatching.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { HistorySection("متابعة المشاهدة", "continue", continueRow, continueWatching, isTv, navigationMemory, onOpenHistory) } }
+            item {
+                HomeSectionPadding(homeGutter) {
+                    HistorySection(
+                        title = "متابعة المشاهدة",
+                        rowKey = "continue",
+                        rowIndex = continueRow,
+                        entries = continueWatching,
+                        isTv = isTv,
+                        navigationMemory = navigationMemory,
+                        onOpen = onOpenHistory,
+                        emphasized = true,
+                    )
+                }
+            }
         }
-        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding(isTv) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
+        if (activeDownloads.isNotEmpty()) item { HomeSectionPadding(homeGutter) { ActiveDownloadsSection(activeDownloads, isTv, onOpenDownloads) } }
         if (becauseYouWatched.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("لانك شاهدت", "because-watched", becauseRow, becauseYouWatched, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (suggested.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("مقترح لك", "recommended", recommendedRow, suggested, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeMovies.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("احدث اضافات HULK — افلام", "recent-movies", moviesRow, homeMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (homeSeries.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("احدث اضافات HULK — مسلسلات", "recent-series", seriesRow, homeSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularMovies.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("الاعلى تقييما — افلام", "top-movies", topMoviesRow, popularMovies, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (popularSeries.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (lastLive != null) {
-            item { HomeSectionPadding(isTv) { HistorySection("اخر قناة شاهدتها", "last-live", lastLiveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
+            item { HomeSectionPadding(homeGutter) { HistorySection("اخر قناة شاهدتها", "last-live", lastLiveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
         }
         if (suggestedLive.isNotEmpty()) {
-            item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
+            item { HomeSectionPadding(homeGutter) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
     }
 }
@@ -1715,12 +1749,12 @@ private fun RenewalBanner(
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(if (isTv) 18.dp else 15.dp)
+    val shape = RoundedCornerShape(if (isTv) 12.dp else 10.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .then(if (isTv) Modifier else Modifier.padding(horizontal = 14.dp))
-            .heightIn(min = if (isTv) 88.dp else 76.dp)
+            .heightIn(min = if (isTv) 64.dp else 56.dp)
             .clip(shape)
             .background(
                 if (focused) colors.gold.copy(alpha = .16f) else Color(0xFF13140F),
@@ -1737,15 +1771,15 @@ private fun RenewalBanner(
             .clickable(role = Role.Button, onClick = onClick)
             .focusable()
             .padding(
-                horizontal = if (isTv) 22.dp else 16.dp,
-                vertical = if (isTv) 15.dp else 12.dp,
+                horizontal = if (isTv) 16.dp else 12.dp,
+                vertical = if (isTv) 9.dp else 7.dp,
             ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 16.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 10.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(if (isTv) 48.dp else 42.dp)
+                .size(if (isTv) 34.dp else 30.dp)
                 .clip(CircleShape)
                 .background(colors.gold.copy(alpha = if (focused) .22f else .12f))
                 .border(1.dp, colors.gold.copy(alpha = .38f), CircleShape),
@@ -1755,23 +1789,25 @@ private fun RenewalBanner(
                 imageVector = Icons.Rounded.Language,
                 contentDescription = null,
                 tint = colors.goldBright,
-                modifier = Modifier.size(if (isTv) 25.dp else 22.dp),
+                modifier = Modifier.size(if (isTv) 18.dp else 16.dp),
             )
         }
         Column(Modifier.weight(1f)) {
             Text(
                 text = content.title,
                 color = colors.text,
-                fontSize = if (isTv) 19.sp else 16.sp,
+                fontSize = if (isTv) 15.sp else 14.sp,
+                lineHeight = if (isTv) 19.sp else 18.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = content.subtitle,
                 color = colors.textMuted,
-                fontSize = if (isTv) 13.sp else 12.sp,
+                fontSize = if (isTv) 11.sp else 10.sp,
+                lineHeight = if (isTv) 14.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1779,12 +1815,12 @@ private fun RenewalBanner(
         Text(
             text = if (isTv) "اضغط OK" else "فتح",
             color = colors.goldBright,
-            fontSize = if (isTv) 12.sp else 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .clip(RoundedCornerShape(99.dp))
                 .background(colors.gold.copy(alpha = .12f))
-                .padding(horizontal = 11.dp, vertical = 7.dp),
+                .padding(horizontal = 9.dp, vertical = 6.dp),
         )
     }
 }
@@ -1800,7 +1836,13 @@ private fun ActiveDownloadsSection(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Download, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(21.dp))
             Spacer(Modifier.width(8.dp))
-            Text("التنزيلات الجارية", color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "التنزيلات الجارية",
+                color = colors.text,
+                fontSize = if (isTv) 20.sp else 17.sp,
+                lineHeight = if (isTv) 28.sp else 24.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
         Spacer(Modifier.height(10.dp))
         LazyRow(
@@ -1843,8 +1885,102 @@ private fun ActiveDownloadsSection(
 }
 
 @Composable
-private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 0.dp)) { content() }
+private fun HomeSectionPadding(horizontal: Dp, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = horizontal)) { content() }
+}
+
+/** P02 approved safe horizontal inset: max(32dp, 3% width) capped at 64dp on TV. */
+internal fun homeHorizontalSafeInsetDp(isTv: Boolean, screenWidthDp: Int): Float =
+    if (isTv) maxOf(32f, screenWidthDp * .03f).coerceAtMost(64f) else 16f
+
+/** P02 approved safe vertical inset: max(24dp, 4% height) capped at 48dp on TV. */
+internal fun homeVerticalSafeInsetDp(isTv: Boolean, screenHeightDp: Int): Float =
+    if (isTv) maxOf(24f, screenHeightDp * .04f).coerceAtMost(48f) else 12f
+
+/**
+ * Restrained Home header. The TV variant keeps only the quiet title and system actions because the
+ * rail owns navigation; the phone variant adds the approved header Search action and a profile
+ * entry that exposes the gated Downloads/Settings destinations.
+ */
+@Composable
+private fun HomeHeader(
+    isTv: Boolean,
+    loading: Boolean,
+    unreadNotificationCount: Int,
+    downloadsEnabled: Boolean,
+    gutter: Dp,
+    onOpenNotifications: () -> Unit,
+    onRefresh: () -> Unit,
+    onSearch: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val colors = LocalHulkColors.current
+    val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
+    var profileMenuOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (isTv) Modifier else Modifier.statusBarsPadding())
+            .heightIn(min = 44.dp)
+            .padding(horizontal = gutter),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "الرئيسية",
+            color = colors.text,
+            fontSize = if (isTv) 16.sp else 15.sp,
+            lineHeight = 20.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (loading) LoadingRing()
+        Spacer(Modifier.width(4.dp))
+        if (!isTv) {
+            RoundAction(Icons.Rounded.Search, "البحث", onSearch)
+        }
+        NotificationBellButton(
+            unreadCount = unreadNotificationCount,
+            isTv = isTv,
+            onClick = onOpenNotifications,
+        )
+        RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
+        if (!isTv) {
+            Box {
+                RoundAction(Icons.Rounded.Person, "الحساب", { profileMenuOpen = true })
+                DropdownMenu(
+                    expanded = profileMenuOpen,
+                    onDismissRequest = { profileMenuOpen = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("تغيير المستخدم", color = colors.text) },
+                        onClick = {
+                            profileMenuOpen = false
+                            requestProfileSwitch()
+                        },
+                    )
+                    if (downloadsEnabled) {
+                        DropdownMenuItem(
+                            text = { Text("التنزيلات", color = colors.text) },
+                            onClick = {
+                                profileMenuOpen = false
+                                onOpenDownloads()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("الاعدادات", color = colors.text) },
+                        onClick = {
+                            profileMenuOpen = false
+                            onOpenSettings()
+                        },
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1855,21 +1991,37 @@ private fun CinemaHero(
     isFavorite: Boolean,
     onOpen: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onRefresh: () -> Unit,
-    isLoading: Boolean,
-    unreadNotificationCount: Int,
-    onOpenNotifications: () -> Unit,
     watchModifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     val configuration = LocalConfiguration.current
-    val isPortraitPhone = !isTv && configuration.screenWidthDp < 600 && configuration.screenHeightDp > configuration.screenWidthDp
+    val screenWidthDp = configuration.screenWidthDp
+    val screenHeightDp = configuration.screenHeightDp
+    val isPortraitPhone = !isTv && screenWidthDp < 600 && screenHeightDp > screenWidthDp
     val heroHeight = when {
-        isTv -> 410.dp
-        isPortraitPhone -> (configuration.screenHeightDp * .58f).coerceIn(420f, 520f).dp
-        else -> 288.dp
+        isTv -> (screenHeightDp * .44f).coerceIn(224f, 320f).dp
+        isPortraitPhone -> (screenHeightDp * .44f).coerceIn(240f, 330f).dp
+        else -> 240.dp
     }
+    // P02: copy occupies the start (right in RTL) side of the hero, artwork stays visible opposite.
+    val copyWidthFraction = if (isTv) .42f else if (isPortraitPhone) .94f else .62f
+    val gutter = homeHorizontalSafeInsetDp(isTv, screenWidthDp).dp
+    val titleSize = when {
+        isTv && screenWidthDp >= 1280 -> 42.sp
+        isTv -> 34.sp
+        else -> 26.sp
+    }
+    val titleLineHeight = when {
+        isTv && screenWidthDp >= 1280 -> 54.sp
+        isTv -> 44.sp
+        else -> 34.sp
+    }
+    val showEyebrow = !isTv || screenHeightDp > 540
+    val metadataFactsBeforePills = listOfNotNull(
+        item.rating?.takeIf(String::isNotBlank)?.let { "★ $it" },
+        item.genre?.takeIf(String::isNotBlank)?.let { it.take(27) },
+    )
     val image = item.backdropUrl ?: item.posterUrl
     Box(
         modifier = Modifier
@@ -1904,69 +2056,47 @@ private fun CinemaHero(
             ),
         )
 
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .then(if (isTv) Modifier else Modifier.statusBarsPadding())
-                .padding(
-                    horizontal = if (isTv) 26.dp else 18.dp,
-                    vertical = if (isTv) 18.dp else 10.dp,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("الرئيسية", color = colors.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("توصيات ومحتوى جديد", color = colors.textMuted, fontSize = 11.sp)
-            }
-            if (isLoading) LoadingRing()
-            Spacer(Modifier.width(10.dp))
-            NotificationBellButton(
-                unreadCount = unreadNotificationCount,
-                isTv = isTv,
-                onClick = onOpenNotifications,
-            )
-            Spacer(Modifier.width(8.dp))
-            RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh)
-        }
-
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isTv) .64f else 1f)
+                .fillMaxWidth(copyWidthFraction)
                 .padding(
-                    start = if (isTv) 27.dp else 18.dp,
-                    end = if (isTv) 27.dp else 18.dp,
-                    bottom = if (isTv) 28.dp else 24.dp,
+                    start = gutter,
+                    end = gutter,
+                    bottom = if (isTv) (homeVerticalSafeInsetDp(isTv, screenHeightDp) * .75f).dp else 14.dp,
                 ),
         ) {
-            Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(5.dp))
+            if (showEyebrow) {
+                Text("مختار لك", color = colors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+            }
             Text(
                 item.name,
                 color = Color.White,
-                fontSize = if (isTv) 36.sp else 28.sp,
-                lineHeight = if (isTv) 42.sp else 34.sp,
+                fontSize = titleSize,
+                lineHeight = titleLineHeight,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(if (isTv) 8.dp else 9.dp))
+            Spacer(Modifier.height(6.dp))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                maxItemsInEachRow = if (isTv) 5 else 3,
+                maxItemsInEachRow = 3,
             ) {
-                item.rating?.let { InfoPill("★ $it") }
-                item.genre?.takeIf(String::isNotBlank)?.let { InfoPill(it.take(27)) }
-                HomeHeroTechnicalPills(item, isTv = true)
+                metadataFactsBeforePills.forEach { fact -> InfoPill(fact) }
+                val remainingFactSlots = (3 - metadataFactsBeforePills.size).coerceAtLeast(0)
+                if (remainingFactSlots > 0) {
+                    HomeHeroTechnicalPills(item, isTv = isTv, maxFacts = remainingFactSlots)
+                }
             }
             item.plot?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.height(if (isTv) 8.dp else 10.dp))
-                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = if (isTv) 17.sp else 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = Color(0xFFD4D0C5), fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.height(if (isTv) 12.dp else 15.dp))
+            Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 FocusButton(
                     if (item.type == ContentType.SERIES) "عرض الحلقات" else "شاهد الان",
@@ -1986,31 +2116,26 @@ private fun HomePlaceholder(
     loading: Boolean,
     onRefresh: () -> Unit,
     isTv: Boolean,
-    unreadNotificationCount: Int,
-    onOpenNotifications: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
+    val configuration = LocalConfiguration.current
+    val placeholderHeight = if (isTv) {
+        (configuration.screenHeightDp * .44f).coerceIn(224f, 320f).dp
+    } else {
+        236.dp
+    }
     Box(
-        Modifier.fillMaxWidth().height(if (isTv) 360.dp else 270.dp).background(colors.surface),
+        Modifier.fillMaxWidth().height(placeholderHeight).background(colors.surface),
         contentAlignment = Alignment.Center,
     ) {
-        NotificationBellButton(
-            unreadCount = unreadNotificationCount,
-            isTv = isTv,
-            onClick = onOpenNotifications,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .then(if (isTv) Modifier else Modifier.statusBarsPadding())
-                .padding(
-                    horizontal = if (isTv) 26.dp else 18.dp,
-                    vertical = if (isTv) 18.dp else 10.dp,
-                ),
-        )
-        if (loading) LoadingRing(label = "نجهز احدث الاضافات…")
-        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)
-            Spacer(Modifier.height(12.dp))
-            FocusButton("تحديث", onRefresh, compact = true)
+        if (loading) {
+            LoadingRing(label = "نجهز احدث الاضافات…")
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("سيظهر احدث المحتوى هنا", color = colors.textMuted)
+                Spacer(Modifier.height(12.dp))
+                FocusButton("تحديث", onRefresh, compact = true)
+            }
         }
     }
 }
@@ -2039,8 +2164,14 @@ private fun PosterSection(
         }
     }
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(10.dp))
+        Text(
+            title,
+            color = colors.text,
+            fontSize = if (isTv) 20.sp else 17.sp,
+            lineHeight = if (isTv) 28.sp else 24.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(if (isTv) 8.dp else 6.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 7.dp),
@@ -2072,6 +2203,7 @@ private fun HistorySection(
     isTv: Boolean,
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
+    emphasized: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val remembered = navigationMemory.position(MainDestination.HOME)
@@ -2084,17 +2216,22 @@ private fun HistorySection(
             runCatching { targetRequester.requestFocus() }
         }
     }
-    val polishContinueWatching = isTv && rowKey == "continue"
     Column {
-        Text(title, color = colors.text, fontSize = if (isTv) 20.sp else 17.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(if (polishContinueWatching) 11.dp else 10.dp))
+        Text(
+            title,
+            color = colors.text,
+            fontSize = if (isTv) 20.sp else 17.sp,
+            lineHeight = if (isTv) 28.sp else 24.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(if (isTv) 8.dp else 6.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(
-                horizontal = if (polishContinueWatching) 8.dp else 5.dp,
-                vertical = if (polishContinueWatching) 10.dp else 7.dp,
+                horizontal = if (emphasized) 8.dp else 5.dp,
+                vertical = if (emphasized) 10.dp else 7.dp,
             ),
-            horizontalArrangement = Arrangement.spacedBy(if (polishContinueWatching) 16.dp else 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (emphasized) 16.dp else 14.dp),
         ) {
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
                 val restore = remembered.rowKey == rowKey &&
@@ -2103,9 +2240,16 @@ private fun HistorySection(
                     entry,
                     { onOpen(entry) },
                     Modifier
-                        .width(if (polishContinueWatching) 226.dp else if (isTv) 214.dp else 190.dp)
+                        .width(
+                            if (emphasized) {
+                                if (isTv) 272.dp else 226.dp
+                            } else {
+                                if (isTv) 214.dp else 190.dp
+                            },
+                        )
                         .restoreFocus(restore, targetRequester),
                     onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
+                    emphasized = emphasized,
                 )
             }
         }

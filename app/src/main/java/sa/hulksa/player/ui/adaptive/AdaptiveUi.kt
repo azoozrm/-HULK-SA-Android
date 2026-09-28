@@ -105,10 +105,11 @@ fun tvPremiumWindowPolicy(
     val compactTv = width <= 960f || height <= 540f
     val standardTv = !compactTv && (width <= 1280f || height <= 720f)
 
-    // These rail calculations intentionally preserve the already-qualified shell proportions.
-    // v2.0 centralizes them here so every TV surface can share one deterministic source of truth.
-    val railCollapsedWidth = (width / 14f).coerceIn(88f, 102f)
-    val railExpandedWidth = (width / 6.2f).coerceIn(194f, 236f)
+    // P02 rail presentation: one quiet 72dp collapsed rail for every TV window with a bounded
+    // label-overlay expansion between 208dp and 224dp. The expanded surface stays an overlay and
+    // never remeasures the page.
+    val railCollapsedWidth = 72f
+    val railExpandedWidth = (width * .17f).coerceIn(208f, 224f)
     val railLogoSize = (shortSide / 10f).coerceIn(54f, 78f)
     val railItemHeight = (height / 14.5f).coerceIn(46f, 56f)
     val railIconSize = (height / 30f).coerceIn(23f, 28f)
