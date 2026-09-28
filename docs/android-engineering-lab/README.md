@@ -95,6 +95,10 @@ A normal repository task starts with:
 4. this lab contract only when lab/runtime/maintenance behavior is relevant;
 5. subsystem contracts only when the active task enters that subsystem.
 
+Substantive authorized Implementation/Correction tasks also follow
+`docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`; the task packet supplies scope and live
+fields, and subsystem/physical contracts still govern their areas.
+
 ## 6. Resource policy
 
 The VPS is intentionally serialized.

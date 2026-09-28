@@ -170,6 +170,9 @@ In particular:
 - Compatibility Lab V2: `quality/compatibility-v2/README.md`
 - HULK Operations, when in scope: `hosting/hulk-operations/README.md`
 - Android Engineering Lab, for lab/runtime/maintenance work: `docs/android-engineering-lab/README.md`
+- Task execution contract, for substantive authorized Implementation/Correction tasks: `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`
+
+Substantive authorized Implementation/Correction tasks follow `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`. The active task packet supplies scope and live fields; applicable repository, subsystem and physical contracts still govern.
 
 Do not copy old contract text from chat or Project Sources over the current repository version.
 
