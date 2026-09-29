@@ -1941,10 +1941,14 @@ internal fun homeHorizontalSafeInsetDp(isTv: Boolean, screenWidthDp: Int): Float
 internal fun homeVerticalSafeInsetDp(isTv: Boolean, screenHeightDp: Int): Float =
     if (isTv) maxOf(24f, screenHeightDp * .04f).coerceAtMost(48f) else 12f
 
-/** Astra overscan-safe inset: 5% of the whole logical viewport plus 4dp clearance on the 4dp grid. */
-internal fun tvOverscanSafeInsetDp(viewportDp: Int): Float {
-    val fivePercentPlusClearance = viewportDp.coerceAtLeast(1) * .05f + 4f
-    return ceil(fivePercentPlusClearance / 4f) * 4f
+/**
+ * Owner-directed utility safe inset: 4% of the whole logical viewport plus 4dp clearance on the
+ * 4dp grid. It keeps the utility group visibly inside the physical panel while moving it closer to
+ * the upper-left safe edge than the development-time 5% rule.
+ */
+internal fun tvUtilitySafeInsetDp(viewportDp: Int): Float {
+    val fourPercentPlusClearance = viewportDp.coerceAtLeast(1) * .04f + 4f
+    return ceil(fourPercentPlusClearance / 4f) * 4f
 }
 
 /** First list index that holds a Home content row: the hero block, plus the phone services row. */
@@ -2149,8 +2153,8 @@ private fun HomeTvBlockOverlay(
 ) {
     val colors = LocalHulkColors.current
     val configuration = LocalConfiguration.current
-    val horizontalInset = tvOverscanSafeInsetDp(configuration.screenWidthDp).dp
-    val verticalInset = tvOverscanSafeInsetDp(configuration.screenHeightDp).dp
+    val horizontalInset = tvUtilitySafeInsetDp(configuration.screenWidthDp).dp
+    val verticalInset = tvUtilitySafeInsetDp(configuration.screenHeightDp).dp
     val titleGutter = homeHorizontalSafeInsetDp(isTv = true, configuration.screenWidthDp).dp
     Box(modifier = modifier.fillMaxWidth()) {
         Text(

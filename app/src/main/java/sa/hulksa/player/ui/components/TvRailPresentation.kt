@@ -59,7 +59,7 @@ internal const val TV_RAIL_EXPANSION_DURATION_MILLIS = 160
 
 private val TvRailSurfaceStart = Color(0xFF090A07)
 private val TvRailSurfaceEnd = Color(0xFF0A0B08)
-private const val TV_RAIL_FOCUSED_BACKGROUND_ALPHA = 0.16f
+private const val TV_RAIL_FOCUSED_BACKGROUND_ALPHA = 0.06f
 private const val TV_RAIL_SELECTED_BACKGROUND_ALPHA = 0.10f
 private const val TV_RAIL_SELECTED_BORDER_ALPHA = 0.30f
 private val TvRailEdgeScrimWidth = 56.dp
