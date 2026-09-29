@@ -46,8 +46,10 @@ import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -74,6 +76,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -251,6 +254,36 @@ fun BrandBadge(
     }
 }
 
+/**
+ * Home-approved focus language: a pale-gold outline separated from the control by a slim dark gap.
+ * The ring is drawn outside the control bounds so focus never changes layout geometry or typography.
+ * Defaults on shared components leave every non-Home surface on its existing focus presentation.
+ */
+internal fun Modifier.homeFocusRing(
+    enabled: Boolean,
+    showFocused: Boolean,
+    cornerRadius: Dp,
+    color: Color,
+): Modifier = if (!enabled) {
+    this
+} else {
+    drawWithContent {
+        drawContent()
+        if (showFocused) {
+            val stroke = 1.5.dp.toPx()
+            val gap = 2.dp.toPx()
+            val inset = stroke / 2f
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(-(gap + inset), -(gap + inset)),
+                size = Size(size.width + 2f * (gap + inset), size.height + 2f * (gap + inset)),
+                cornerRadius = CornerRadius(cornerRadius.toPx() + gap + inset),
+                style = Stroke(width = stroke),
+            )
+        }
+    }
+}
+
 @Composable
 fun FocusButton(
     text: String,
@@ -267,6 +300,8 @@ fun FocusButton(
     leadingIcon: ImageVector? = null,
     textMaxLines: Int = 1,
     textSizeSp: Int? = null,
+    trailingIcon: ImageVector? = null,
+    homeCta: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -279,8 +314,9 @@ fun FocusButton(
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
-        primary && showFocused -> colors.goldBright
+        primary && !homeCta && showFocused -> colors.goldBright
         primary -> colors.gold
+        homeCta -> Color(0xFF181914)
         showFocused -> Color(0xFF2A281B)
         outlined -> Color(0xFF151711)
         else -> Color(0xFF181914)
@@ -298,16 +334,19 @@ fun FocusButton(
                 scaleX = scale
                 scaleY = scale
             }
+            .homeFocusRing(homeCta, showFocused, 12.dp, colors.goldBright)
             .clip(shape)
             .background(background)
             .border(
                 width = when {
+                    homeCta -> 0.dp
                     showFocused -> 2.dp
                     accent -> 1.5.dp
                     outlined -> 1.dp
                     else -> 0.dp
                 },
                 color = when {
+                    homeCta -> Color.Transparent
                     showFocused -> colors.goldBright
                     accent -> colors.goldBright.copy(alpha = .88f)
                     outlined -> colors.gold.copy(alpha = .42f)
@@ -328,7 +367,8 @@ fun FocusButton(
             ),
     ) {
         val icon = leadingIcon
-        if (icon == null) {
+        val trail = trailingIcon
+        if (icon == null && trail == null) {
             Text(
                 text = text,
                 color = textColor,
@@ -341,12 +381,14 @@ fun FocusButton(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = textColor,
-                    modifier = Modifier.size(if (compact) 17.dp else 19.dp),
-                )
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = textColor,
+                        modifier = Modifier.size(if (compact) 17.dp else 19.dp),
+                    )
+                }
                 Text(
                     text = text,
                     color = textColor,
@@ -356,6 +398,14 @@ fun FocusButton(
                     maxLines = textMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (trail != null) {
+                    Icon(
+                        imageVector = trail,
+                        contentDescription = null,
+                        tint = textColor,
+                        modifier = Modifier.size(if (compact) 17.dp else 19.dp),
+                    )
+                }
             }
         }
     }
@@ -511,6 +561,7 @@ fun CompactPosterCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
+    homePresentation: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -549,12 +600,12 @@ fun CompactPosterCard(
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale = if (adaptiveUi.isTelevision) {
+    val scale = if (adaptiveUi.isTelevision || homePresentation) {
         1f
     } else {
         animateFloatAsState(if (showFocused) 1.04f else 1f, label = "posterScale").value
     }
-    val focusTransform = if (adaptiveUi.isTelevision) {
+    val focusTransform = if (adaptiveUi.isTelevision || homePresentation) {
         Modifier
     } else {
         Modifier.graphicsLayer {
@@ -567,11 +618,12 @@ fun CompactPosterCard(
     Box(
         modifier = modifier
             .then(focusTransform)
+            .homeFocusRing(homePresentation, showFocused, 12.dp, colors.goldBright)
             .aspectRatio(2f / 3f)
             .clip(shape)
             .background(Color(0xFF15160F))
             .border(
-                if (showFocused) 3.dp else 0.dp,
+                if (showFocused && !homePresentation) 3.dp else 0.dp,
                 if (focused) colors.goldBright else Color.Transparent,
                 shape,
             )
@@ -683,7 +735,49 @@ fun CompactPosterCard(
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = if (polishMovieCard && adaptiveUi.isTelevision) 16.sp else 15.sp,
             )
-            if (polishMovieCard) {
+            if (homePresentation) {
+                val rating = compactMovieRating(item.rating)
+                val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
+                if (rating != null || duration != null) {
+                    Spacer(Modifier.height(4.dp))
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            rating?.let {
+                                Text(
+                                    "★ $it",
+                                    color = colors.text,
+                                    fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
+                                    lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                )
+                            }
+                            duration?.let {
+                                if (rating != null) {
+                                    Text(
+                                        "  ·  ",
+                                        color = colors.textMuted,
+                                        fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
+                                        lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
+                                        maxLines = 1,
+                                    )
+                                }
+                                Text(
+                                    it,
+                                    color = colors.text.copy(alpha = .86f),
+                                    fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
+                                    lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (polishMovieCard) {
                 val rating = compactMovieRating(item.rating)
                 val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
                 if (rating != null || duration != null) {
@@ -1075,6 +1169,130 @@ fun ChannelLogo(
                 contentDescription = "HULK SA",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
+            )
+        }
+    }
+}
+
+/**
+ * Home-approved channel card: 16:9 artwork with the full logo proportionally contained, then a
+ * connected dark caption block with the channel name and the live label centered on the same axis.
+ * Favorite state is rendered independently of focus. Home-only call surface.
+ */
+@Composable
+fun HomeChannelCard(
+    name: String,
+    artworkUrl: String?,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember(name) { mutableStateOf(false) }
+    var artworkFailed by remember(artworkUrl) { mutableStateOf(false) }
+    var remoteLongPressHandled by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 14.dp else 12.dp)
+    Column(
+        modifier = modifier
+            .homeFocusRing(true, showFocused, if (adaptiveUi.isTelevision) 14.dp else 12.dp, colors.goldBright)
+            .clip(shape)
+            .background(Color(0xFF101109))
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .onPreviewKeyEvent { event ->
+                if (onLongClick == null || !event.nativeKeyEvent.isRemoteSelectKey()) {
+                    false
+                } else if (event.type == KeyEventType.KeyDown) {
+                    if (
+                        (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
+                        !remoteLongPressHandled
+                    ) {
+                        remoteLongPressHandled = true
+                        onLongClick()
+                    }
+                    true
+                } else if (event.type == KeyEventType.KeyUp) {
+                    if (!remoteLongPressHandled) onClick()
+                    remoteLongPressHandled = false
+                    true
+                } else {
+                    false
+                }
+            }
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(Color(0xFF15160F)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!artworkUrl.isNullOrBlank() && !artworkFailed) {
+                AsyncImage(
+                    model = artworkUrl,
+                    contentDescription = name,
+                    modifier = Modifier.fillMaxSize().padding(if (adaptiveUi.isTelevision) 10.dp else 8.dp),
+                    contentScale = ContentScale.Fit,
+                    onError = { artworkFailed = true },
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.hulk_sa_channel_placeholder),
+                    contentDescription = "HULK SA",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+            if (isFavorite) {
+                Box(
+                    modifier = Modifier
+                        .align(AbsoluteAlignment.TopRight)
+                        .padding(7.dp)
+                        .size(25.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = .78f))
+                        .border(1.dp, Color.White.copy(alpha = .16f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("★", color = colors.goldBright, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = if (adaptiveUi.isTelevision) 8.dp else 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = name,
+                color = colors.text,
+                fontSize = if (adaptiveUi.isTelevision) 13.sp else 12.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 17.sp else 16.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "بث مباشر",
+                color = colors.text.copy(alpha = .82f),
+                fontSize = if (adaptiveUi.isTelevision) 10.sp else 9.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 13.sp else 12.sp,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
             )
         }
     }

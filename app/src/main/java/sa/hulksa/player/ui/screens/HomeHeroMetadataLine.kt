@@ -1,24 +1,36 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.sp
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.ContentType
-import sa.hulksa.player.ui.components.InfoPill
+import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
+/**
+ * Approved Home hero metadata: one quiet line that preserves every real fact (rating, genre,
+ * quality, duration / seasons / episodes). The line is composed left-to-right inside the RTL page
+ * so "★ 10" reads exactly as owner-approved, and the block stays anchored to the hero copy side.
+ */
 @Composable
-internal fun HomeHeroTechnicalPills(
+internal fun HomeHeroMetadataLine(
     item: ContentItem,
     isTv: Boolean,
-    maxFacts: Int = Int.MAX_VALUE,
+    leadingFacts: List<String>,
 ) {
+    val colors = LocalHulkColors.current
     val context = LocalContext.current
     val store = remember(context) { HomeHeroMetadataStore.get(context) }
     val metadataOwner = store.currentOwner()
@@ -32,7 +44,7 @@ internal fun HomeHeroTechnicalPills(
         store.publishIfCurrent(owner) { metadata = loaded }
     }
 
-    val facts = when (item.type) {
+    val technicalFacts = when (item.type) {
         ContentType.MOVIE -> listOfNotNull(
             metadata.quality?.trim()?.takeIf(String::isNotBlank),
             heroMovieDurationLabel(metadata.durationMs),
@@ -46,7 +58,21 @@ internal fun HomeHeroTechnicalPills(
 
         ContentType.LIVE -> emptyList()
     }
-    facts.take(maxFacts.coerceAtLeast(0)).forEach { fact -> InfoPill(fact) }
+    val facts = (leadingFacts + technicalFacts)
+        .map(String::trim)
+        .filter(String::isNotBlank)
+    if (facts.isEmpty()) return
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Text(
+            text = facts.joinToString(" · "),
+            color = colors.text.copy(alpha = if (isTv) .96f else .92f),
+            fontSize = if (isTv) 13.sp else 12.sp,
+            lineHeight = if (isTv) 17.sp else 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 private fun heroMovieDurationLabel(durationMs: Long?): String? {

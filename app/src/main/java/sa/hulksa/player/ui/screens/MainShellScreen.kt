@@ -70,6 +70,7 @@ import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -102,6 +103,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -186,7 +188,7 @@ import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HistoryCard
 import sa.hulksa.player.ui.components.HulkTextField
-import sa.hulksa.player.ui.components.InfoPill
+import sa.hulksa.player.ui.components.HomeChannelCard
 import sa.hulksa.player.ui.components.LoadingRing
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.text.SimpleDateFormat
@@ -1755,7 +1757,7 @@ private fun CinemaHomeScreen(
             item { HomeSectionPadding(homeGutter) { PosterSection("الاعلى تقييما — مسلسلات", "top-series", topSeriesRow, popularSeries, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
         if (lastLive != null) {
-            item { HomeSectionPadding(homeGutter) { HistorySection("اخر قناة شاهدتها", "last-live", lastLiveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory) } }
+            item { HomeSectionPadding(homeGutter) { HistorySection("اخر قناة شاهدتها", "last-live", lastLiveRow, listOf(lastLive), isTv, navigationMemory, onOpenHistory, channelCards = true) } }
         }
         if (suggestedLive.isNotEmpty()) {
             item { HomeSectionPadding(homeGutter) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
@@ -1977,6 +1979,27 @@ internal fun cinemaHeroTextBudgetDp(heroHeightDp: Float, isTv: Boolean): Float {
     val topOverlay = if (isTv) 64f else 0f
     val bottomInset = if (isTv) 18f else 14f
     return (heroHeightDp - topOverlay - bottomInset - 44f - 10f).coerceAtLeast(72f)
+}
+
+/** Owner-approved hero copy column: approximately 40% of the content width on TV. */
+internal fun cinemaHeroCopyWidthFraction(isTv: Boolean, isPortraitPhone: Boolean): Float =
+    if (isTv) .40f else if (isPortraitPhone) .94f else .62f
+
+/**
+ * Owner-approved hero artwork treatment. A genuine wide backdrop fills and crops as a cinematic
+ * backdrop; a vertical-poster fallback is contained at its natural aspect so subjects are never
+ * enlarged into cropped torsos; absent artwork falls back to the brand mark.
+ */
+internal enum class HomeHeroArtworkMode {
+    WIDE_BACKDROP,
+    VERTICAL_POSTER,
+    BRAND_MARK,
+}
+
+internal fun homeHeroArtworkMode(backdropUrl: String?, posterUrl: String?): HomeHeroArtworkMode = when {
+    !backdropUrl.isNullOrBlank() -> HomeHeroArtworkMode.WIDE_BACKDROP
+    !posterUrl.isNullOrBlank() -> HomeHeroArtworkMode.VERTICAL_POSTER
+    else -> HomeHeroArtworkMode.BRAND_MARK
 }
 
 /**
@@ -2276,8 +2299,8 @@ private fun CinemaHero(
     )
     val heroHeight = heroHeightDp.dp
     val textBudget = cinemaHeroTextBudgetDp(heroHeightDp, isTv).dp
-    // P02: copy occupies the start (right in RTL) side of the hero, artwork stays visible opposite.
-    val copyWidthFraction = if (isTv) .44f else if (isPortraitPhone) .94f else .62f
+    // Approved Home hero: copy occupies the start (right in RTL) side, artwork stays visible opposite.
+    val copyWidthFraction = cinemaHeroCopyWidthFraction(isTv, isPortraitPhone)
     val gutter = homeHorizontalSafeInsetDp(isTv, screenWidthDp).dp
     val titleSize = when {
         isTv && screenWidthDp >= 1280 -> 42.sp
@@ -2299,11 +2322,10 @@ private fun CinemaHero(
         titleLineHeightDp = titleLineHeight.value,
         fontScale = fontScale,
     )
-    val metadataFactsBeforePills = listOfNotNull(
+    val metadataFacts = listOfNotNull(
         item.rating?.takeIf(String::isNotBlank)?.let { "★ $it" },
         item.genre?.takeIf(String::isNotBlank)?.let { it.take(27) },
     )
-    val image = item.backdropUrl ?: item.posterUrl
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -2311,15 +2333,25 @@ private fun CinemaHero(
             .clipToBounds()
             .background(Color(0xFF0A0B08)),
     ) {
-        if (!image.isNullOrBlank()) {
-            AsyncImage(
-                model = image,
+        when (homeHeroArtworkMode(item.backdropUrl, item.posterUrl)) {
+            HomeHeroArtworkMode.WIDE_BACKDROP -> AsyncImage(
+                model = item.backdropUrl,
                 contentDescription = item.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            BrandLogo(Modifier.align(Alignment.Center).size(190.dp).graphicsLayer { alpha = .38f })
+            HomeHeroArtworkMode.VERTICAL_POSTER -> AsyncImage(
+                model = item.posterUrl,
+                contentDescription = item.name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(heroHeight * (2f / 3f))
+                    .align(AbsoluteAlignment.CenterLeft),
+            )
+            HomeHeroArtworkMode.BRAND_MARK -> BrandLogo(
+                Modifier.align(Alignment.Center).size(190.dp).graphicsLayer { alpha = .38f },
+            )
         }
         Box(
             Modifier.fillMaxSize().background(
@@ -2369,18 +2401,7 @@ private fun CinemaHero(
                     onTextLayout = { layout -> titleLineCount = layout.lineCount.coerceAtLeast(1) },
                 )
                 Spacer(Modifier.height(6.dp))
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    maxItemsInEachRow = 3,
-                ) {
-                    metadataFactsBeforePills.forEach { fact -> InfoPill(fact) }
-                    val remainingFactSlots = (3 - metadataFactsBeforePills.size).coerceAtLeast(0)
-                    if (remainingFactSlots > 0) {
-                        HomeHeroTechnicalPills(item, isTv = isTv, maxFacts = remainingFactSlots)
-                    }
-                }
+                HomeHeroMetadataLine(item = item, isTv = isTv, leadingFacts = metadataFacts)
                 if (synopsisMaxLines > 0) {
                     item.plot?.takeIf(String::isNotBlank)?.let {
                         Spacer(Modifier.height(6.dp))
@@ -2403,8 +2424,16 @@ private fun CinemaHero(
                     modifier = watchModifier,
                     compact = true,
                     onFocused = onFocused,
+                    trailingIcon = Icons.Rounded.PlayArrow,
+                    homeCta = true,
                 )
-                FocusButton(if (isFavorite) "★ في قائمتي" else "+ قائمتي", onToggleFavorite, primary = false, compact = true)
+                FocusButton(
+                    if (isFavorite) "★ في قائمتي" else "+ قائمتي",
+                    onToggleFavorite,
+                    primary = false,
+                    compact = true,
+                    homeCta = true,
+                )
             }
         }
     }
@@ -2482,14 +2511,29 @@ private fun PosterSection(
                 val itemKey = "${item.type}:${item.id}"
                 val restore = remembered.rowKey == rowKey &&
                     (remembered.itemKey == itemKey || (remembered.itemKey.isBlank() && index == targetIndex))
-                UniversalPosterCard(
-                    item = item,
-                    isFavorite = isFavorite(item),
-                    onClick = { onOpen(item) },
-                    modifier = Modifier.width(if (isTv) 136.dp else 111.dp).restoreFocus(restore, targetRequester),
-                    onLongClick = { onToggleFavorite(item) },
-                    onFocused = { navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex) },
-                )
+                if (item.type == ContentType.LIVE) {
+                    HomeChannelCard(
+                        name = item.name,
+                        artworkUrl = item.posterUrl,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = Modifier
+                            .width(if (isTv) 160.dp else 132.dp)
+                            .restoreFocus(restore, targetRequester),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = { navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex) },
+                    )
+                } else {
+                    UniversalPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = Modifier.width(if (isTv) 136.dp else 111.dp).restoreFocus(restore, targetRequester),
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = { navigationMemory.save(MainDestination.HOME, itemKey, index, rowKey, rowIndex) },
+                        homePresentation = true,
+                    )
+                }
             }
         }
     }
@@ -2505,6 +2549,7 @@ private fun HistorySection(
     navigationMemory: NavigationMemoryStore,
     onOpen: (HistoryEntry) -> Unit,
     emphasized: Boolean = false,
+    channelCards: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val remembered = navigationMemory.position(MainDestination.HOME)
@@ -2537,21 +2582,34 @@ private fun HistorySection(
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
                 val restore = remembered.rowKey == rowKey &&
                     (remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex))
-                HistoryCard(
-                    entry,
-                    { onOpen(entry) },
-                    Modifier
-                        .width(
-                            if (emphasized) {
-                                if (isTv) 272.dp else 226.dp
-                            } else {
-                                if (isTv) 214.dp else 190.dp
-                            },
-                        )
-                        .restoreFocus(restore, targetRequester),
-                    onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
-                    emphasized = emphasized,
-                )
+                if (channelCards) {
+                    HomeChannelCard(
+                        name = entry.title,
+                        artworkUrl = entry.posterUrl,
+                        isFavorite = false,
+                        onClick = { onOpen(entry) },
+                        modifier = Modifier
+                            .width(if (isTv) 240.dp else 200.dp)
+                            .restoreFocus(restore, targetRequester),
+                        onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
+                    )
+                } else {
+                    HistoryCard(
+                        entry,
+                        { onOpen(entry) },
+                        Modifier
+                            .width(
+                                if (emphasized) {
+                                    if (isTv) 272.dp else 226.dp
+                                } else {
+                                    if (isTv) 214.dp else 190.dp
+                                },
+                            )
+                            .restoreFocus(restore, targetRequester),
+                        onFocused = { navigationMemory.save(MainDestination.HOME, entry.key, index, rowKey, rowIndex) },
+                        emphasized = emphasized,
+                    )
+                }
             }
         }
     }
