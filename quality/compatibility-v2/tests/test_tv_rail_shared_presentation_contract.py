@@ -134,7 +134,8 @@ class TvRailSharedPresentationContractTest(unittest.TestCase):
         self.assertIn("TvRailVisualState.SELECTED ->", presentation)
         self.assertIn("TvRailVisualState.FOCUSED,", presentation)
         self.assertIn("adaptiveUi.tvPremiumPolicy.focusBorderWidthDp.dp", presentation)
-        self.assertIn("RoundedCornerShape(percent = 50)", presentation)
+        self.assertIn("val contentTint = when (visualState)", presentation)
+        self.assertNotIn("TvRailSelectionMarker", presentation)
 
     def test_destination_order_and_profile_placement_are_unchanged(self) -> None:
         shell = self.read(MAIN_SHELL)

@@ -71,6 +71,21 @@ class P02CinemaHeroContainmentTest {
     }
 
     @Test
+    fun `tv overscan safe inset follows the 5 percent plus 4dp rule on the 4dp grid`() {
+        assertEquals(52f, tvOverscanSafeInsetDp(960), 0.001f)
+        assertEquals(32f, tvOverscanSafeInsetDp(540), 0.001f)
+        assertEquals(68f, tvOverscanSafeInsetDp(1280), 0.001f)
+        assertEquals(40f, tvOverscanSafeInsetDp(720), 0.001f)
+        assertEquals(60f, tvOverscanSafeInsetDp(1080), 0.001f)
+    }
+
+    @Test
+    fun `home row cursor accounts for the hero block and the phone services row`() {
+        assertEquals(1, homeRowCursorStart(isTv = true))
+        assertEquals(2, homeRowCursorStart(isTv = false))
+    }
+
+    @Test
     fun `larger font scales reduce synopsis lines deterministically`() {
         assertEquals(
             0,

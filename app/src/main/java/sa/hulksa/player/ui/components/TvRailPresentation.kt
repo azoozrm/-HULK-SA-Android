@@ -62,9 +62,6 @@ private val TvRailSurfaceEnd = Color(0xFF0A0B08)
 private const val TV_RAIL_FOCUSED_BACKGROUND_ALPHA = 0.16f
 private const val TV_RAIL_SELECTED_BACKGROUND_ALPHA = 0.10f
 private const val TV_RAIL_SELECTED_BORDER_ALPHA = 0.30f
-private val TvRailSelectionMarkerWidth = 3.dp
-private val TvRailSelectionMarkerInset = 5.dp
-private const val TV_RAIL_SELECTION_MARKER_HEIGHT_FRACTION = 0.52f
 private val TvRailEdgeScrimWidth = 56.dp
 
 /**
@@ -279,7 +276,6 @@ internal fun TvRailDestinationItem(
     var itemFocused by remember { mutableStateOf(false) }
     val focusHighlighted = itemFocused && adaptiveUi.showFocusHighlights
     val visualState = tvRailVisualState(selected = selected, highlighted = focusHighlighted)
-    val active = visualState != TvRailVisualState.IDLE
     val shape = RoundedCornerShape(metrics.cornerRadiusDp.dp)
     val background = when (visualState) {
         TvRailVisualState.FOCUSED,
@@ -305,6 +301,14 @@ internal fun TvRailDestinationItem(
         TvRailVisualState.SELECTED -> colors.goldBright.copy(alpha = TV_RAIL_SELECTED_BORDER_ALPHA)
         TvRailVisualState.IDLE -> Color.Transparent
     }
+    val contentTint = when (visualState) {
+        TvRailVisualState.SELECTED,
+        TvRailVisualState.SELECTED_FOCUSED,
+        -> colors.gold
+
+        TvRailVisualState.FOCUSED -> colors.text
+        TvRailVisualState.IDLE -> colors.textMuted
+    }
 
     Box(
         modifier = modifier
@@ -316,16 +320,6 @@ internal fun TvRailDestinationItem(
             .onFocusChanged { itemFocused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick),
     ) {
-        if (selected) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = TvRailSelectionMarkerInset)
-                    .width(TvRailSelectionMarkerWidth)
-                    .fillMaxHeight(TV_RAIL_SELECTION_MARKER_HEIGHT_FRACTION)
-                    .background(colors.goldBright, RoundedCornerShape(percent = 50)),
-            )
-        }
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -336,16 +330,16 @@ internal fun TvRailDestinationItem(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (active) colors.goldBright else colors.textMuted,
+                tint = contentTint,
                 modifier = Modifier.size(metrics.iconSizeDp.dp),
             )
             if (expanded) {
                 Spacer(Modifier.width(metrics.iconLabelGapDp.dp))
                 Text(
                     text = label,
-                    color = if (active) colors.text else colors.textMuted,
+                    color = contentTint,
                     fontSize = metrics.labelSizeSp.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                    fontWeight = if (visualState == TvRailVisualState.IDLE) FontWeight.Medium else FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
