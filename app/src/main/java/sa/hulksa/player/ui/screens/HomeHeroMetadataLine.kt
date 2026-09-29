@@ -1,5 +1,8 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -8,10 +11,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.model.ContentItem
@@ -52,8 +58,8 @@ internal fun HomeHeroMetadataLine(
 
         ContentType.SERIES -> listOfNotNull(
             metadata.quality?.trim()?.takeIf(String::isNotBlank),
-            metadata.seasonCount?.takeIf { it > 0 }?.let { "$it موسم" },
-            metadata.episodeCount?.takeIf { it > 0 }?.let { "$it حلقة" },
+            metadata.seasonCount?.takeIf { it > 0 }?.let { "موسم $it" },
+            metadata.episodeCount?.takeIf { it > 0 }?.let { "حلقة $it" },
         )
 
         ContentType.LIVE -> emptyList()
@@ -63,15 +69,38 @@ internal fun HomeHeroMetadataLine(
         .filter(String::isNotBlank)
     if (facts.isEmpty()) return
 
+    val fontSize = if (isTv) 13.sp else 12.sp
+    val lineHeight = if (isTv) 17.sp else 16.sp
+    // Each fact is its own text node so Arabic words and Latin digits keep their approved visual
+    // order without cross-token bidi reordering. The row is LTR so "★ 10" reads star-then-number,
+    // and it is anchored to the copy side (right in the RTL page) by Arrangement.End.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Text(
-            text = facts.joinToString(" · "),
-            color = colors.text.copy(alpha = if (isTv) .96f else .92f),
-            fontSize = if (isTv) 13.sp else 12.sp,
-            lineHeight = if (isTv) 17.sp else 16.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            facts.forEachIndexed { index, fact ->
+                if (index > 0) {
+                    Text(
+                        text = "·",
+                        color = colors.textMuted,
+                        fontSize = fontSize,
+                        lineHeight = lineHeight,
+                        maxLines = 1,
+                    )
+                }
+                Text(
+                    text = fact,
+                    color = colors.text.copy(alpha = if (isTv) .96f else .92f),
+                    fontSize = fontSize,
+                    lineHeight = lineHeight,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
+        }
     }
 }
 
