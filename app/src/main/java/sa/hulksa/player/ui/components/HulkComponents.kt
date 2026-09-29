@@ -745,6 +745,7 @@ fun HistoryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: (() -> Unit)? = null,
+    emphasized: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -804,7 +805,15 @@ fun HistoryCard(
             .aspectRatio(16f / 9f)
             .clip(shape)
             .background(Color(0xFF15160F))
-            .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+            .border(
+                if (showFocused) {
+                    if (adaptiveUi.isTelevision) 3.dp else 2.dp
+                } else {
+                    0.dp
+                },
+                if (showFocused) colors.goldBright else Color.Transparent,
+                shape,
+            )
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
@@ -868,11 +877,12 @@ fun HistoryCard(
                 .fillMaxWidth()
                 .padding(horizontal = if (adaptiveUi.isTelevision) 12.dp else 10.dp, vertical = if (adaptiveUi.isTelevision) 10.dp else 9.dp),
         ) {
+            val emphasizedTv = emphasized && adaptiveUi.isTelevision
             Text(
                 primaryTitle,
                 color = Color.White,
-                fontSize = if (adaptiveUi.isTelevision) 12.sp else 12.sp,
-                lineHeight = if (adaptiveUi.isTelevision) 14.sp else 14.sp,
+                fontSize = if (emphasizedTv) 17.sp else 12.sp,
+                lineHeight = if (emphasizedTv) 25.sp else 14.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = if (adaptiveUi.isTelevision) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
