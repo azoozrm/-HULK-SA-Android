@@ -13,7 +13,6 @@ fun UniversalPosterCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
-    homePresentation: Boolean = false,
 ) {
     if (item.type == ContentType.SERIES) {
         SeriesPosterCard(
@@ -23,7 +22,6 @@ fun UniversalPosterCard(
             modifier = modifier,
             onLongClick = onLongClick,
             onFocused = onFocused,
-            homePresentation = homePresentation,
         )
     } else {
         CompactPosterCard(
@@ -33,7 +31,6 @@ fun UniversalPosterCard(
             modifier = modifier,
             onLongClick = onLongClick,
             onFocused = onFocused,
-            homePresentation = homePresentation,
         )
     }
 }

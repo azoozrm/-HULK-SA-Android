@@ -63,7 +63,6 @@ fun SeriesPosterCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
-    homePresentation: Boolean = false,
 ) {
     require(item.type == ContentType.SERIES)
 
@@ -86,12 +85,12 @@ fun SeriesPosterCard(
     var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val scale = if (adaptiveUi.isTelevision || homePresentation) {
+    val scale = if (adaptiveUi.isTelevision) {
         1f
     } else {
         animateFloatAsState(if (showFocused) 1.04f else 1f, label = "seriesPosterScale").value
     }
-    val focusTransform = if (adaptiveUi.isTelevision || homePresentation) {
+    val focusTransform = if (adaptiveUi.isTelevision) {
         Modifier
     } else {
         Modifier.graphicsLayer {
@@ -105,12 +104,11 @@ fun SeriesPosterCard(
     Box(
         modifier = modifier
             .then(focusTransform)
-            .homeFocusRing(homePresentation, showFocused, 12.dp, colors.goldBright)
             .aspectRatio(2f / 3f)
             .clip(shape)
             .background(Color(0xFF15160F))
             .border(
-                if (showFocused && !homePresentation) 3.dp else 0.dp,
+                if (showFocused) 3.dp else 0.dp,
                 if (focused) colors.goldBright else Color.Transparent,
                 shape,
             )
@@ -224,55 +222,7 @@ fun SeriesPosterCard(
 
             val rating = compactSeriesRating(item.rating)
             val seasonCount = metadata.seasonCount?.takeIf { it > 0 }
-            if (homePresentation) {
-                if (rating != null || seasonCount != null) {
-                    Spacer(Modifier.height(4.dp))
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            rating?.let {
-                                Text(
-                                    "★ $it",
-                                    color = colors.text,
-                                    fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
-                                    lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                )
-                            }
-                            seasonCount?.let {
-                                if (rating != null) {
-                                    Text(
-                                        "  ·  ",
-                                        color = colors.textMuted,
-                                        fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
-                                        lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
-                                        maxLines = 1,
-                                    )
-                                }
-                                Text(
-                                    "موسم",
-                                    color = colors.text.copy(alpha = .86f),
-                                    fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
-                                    lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
-                                    maxLines = 1,
-                                )
-                                Spacer(Modifier.size(3.dp))
-                                Text(
-                                    "$it",
-                                    color = colors.text.copy(alpha = .86f),
-                                    fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
-                                    lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                }
-            } else if (rating != null || seasonCount != null) {
+            if (rating != null || seasonCount != null) {
                 Spacer(Modifier.height(5.dp))
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     Row(
