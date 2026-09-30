@@ -267,6 +267,7 @@ fun FocusButton(
     leadingIcon: ImageVector? = null,
     textMaxLines: Int = 1,
     textSizeSp: Int? = null,
+    keepPrimaryFillOnFocus: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -279,7 +280,7 @@ fun FocusButton(
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
-        primary && showFocused -> colors.goldBright
+        primary && showFocused && !keepPrimaryFillOnFocus -> colors.goldBright
         primary -> colors.gold
         showFocused -> Color(0xFF2A281B)
         outlined -> Color(0xFF151711)

@@ -2162,6 +2162,7 @@ private fun CinemaHero(
                     modifier = watchModifier,
                     compact = true,
                     onFocused = onFocused,
+                    keepPrimaryFillOnFocus = true,
                 )
                 FocusButton(if (isFavorite) "★ في قائمتي" else "+ قائمتي", onToggleFavorite, primary = false, compact = true)
             }
