@@ -253,7 +253,15 @@ fun SeriesPosterCard(
                                     )
                                 }
                                 Text(
-                                    "موسم $it",
+                                    "موسم",
+                                    color = colors.text.copy(alpha = .86f),
+                                    fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
+                                    lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
+                                    maxLines = 1,
+                                )
+                                Spacer(Modifier.size(3.dp))
+                                Text(
+                                    "$it",
                                     color = colors.text.copy(alpha = .86f),
                                     fontSize = if (adaptiveUi.isTelevision) 11.sp else 10.sp,
                                     lineHeight = if (adaptiveUi.isTelevision) 14.sp else 13.sp,
