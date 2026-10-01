@@ -9,8 +9,8 @@ Normative execution chain:
 
 live verification → ownership/evidence → bounded scope → implementation → complete diff review →
 focused validation → build/provenance when applicable → physical qualification when applicable →
-capture/open/inspect/fix when applicable → final source freeze → durable evidence → PR/report →
-evidence-based verdict.
+bounded runtime verification when applicable → capture only when explicitly authorized →
+final source freeze → durable evidence → PR/report → evidence-based verdict.
 
 This contract owns execution flow only and grants no authority. Root `AGENTS.md`, any applicable
 `AGENTS.override.md`, and the active task packet remain authoritative and are read first.
@@ -44,6 +44,7 @@ chat context. The packet states, as applicable:
 - explicit out-of-scope list;
 - validation expected to prove the change;
 - physical state matrix, or `NONE`;
+- capture authorization for the current task, default OFF when the packet does not state it;
 - stop conditions;
 - required completion report and allowed verdicts;
 - secret-handling constraints.
@@ -164,29 +165,44 @@ packet explicitly forbids or bounds device contact; no actor may exceed that bou
   substitute another device/package and never destroy state to recover reachability.
 - Audit, Review and Diagnosis rounds do not rebuild or reinstall persistent packages.
 
-## 11. Runtime visual loop
+## 11. Bounded runtime verification and owner visual review
 
-For visible or device-specific changes, compiling is not completion. The mandatory loop is:
+For visible or device-specific changes, compiling is not completion. Runtime verification is
+bounded to the active task, its capture policy, and the live physical contracts:
 
 1. freeze the candidate source revision;
 2. build the correct variant from that revision;
-3. refresh/install per the live physical contract;
-4. perform the recorded interaction for each required screen and state;
-5. capture the actual screen and relevant transition frames;
-6. open the actual image files and compare them against the approved specification;
-7. record specific visible findings;
-8. fix in-scope defects and repeat the loop from step 1.
+3. refresh/install per the live physical contract only when the task authorizes device contact;
+4. perform or record only the interaction needed to verify the changed technical contract;
+5. verify launch, crash-free operation and the behavior signals available without screen capture;
+6. leave visual review to the owner on the actual devices.
 
-A capture file existing is not proof of inspection. A passing build is not proof of visual
-correctness. Required states that were not captured and inspected remain BLOCKED or NOT RUN.
-Screenshot baselines are never created, accepted or updated automatically; owner/Sol review is
-required before a new baseline becomes accepted.
+Capture policy (default OFF):
+
+- Screenshots, screen recordings, transition-frame capture, frame extraction, montage generation
+  and screenshot comparison are OFF by default.
+- They are enabled only when the owner explicitly requests capture for the current task.
+- Capture authorization is never inferred from a UI change, ADB access, device installation, or
+  the existence of capture tools.
+- Without capture authorization, do not run the capture → open images → compare → fix → rebuild →
+  recapture loop, and do not block a routine task solely because captures are missing.
+- Report automated visual validation as `NOT RUN — OWNER REVIEW PENDING`; attribute owner
+  acceptance only after the owner actually confirms it.
+- When capture is explicitly authorized, a capture file existing is not proof of inspection, and
+  captures are compared against the approved specification before any visual claim.
+
+A passing build is not proof of visual correctness or universal device coverage. Screenshot
+baselines are never created, accepted or updated automatically; owner review is required before a
+new baseline becomes accepted.
 
 ## 12. Final source freeze and stale evidence
 
-- Once final evidence is captured, the source revision used is the frozen final revision.
-- Any later source edit invalidates the affected evidence; the work must be rebuilt, recaptured and
-  re-reviewed on the new revision before any completion claim.
+- Once final evidence is recorded, the source revision used is the frozen final revision.
+- Any later source edit invalidates the affected evidence; the affected evidence must be
+  regenerated or re-validated on the new revision before any completion claim.
+- Recapture is required only when the task's capture policy is ON. When capture policy is OFF,
+  earlier captures are not refreshed automatically and owner visual review remains
+  `NOT RUN — OWNER REVIEW PENDING` for the new revision.
 - Evidence is valid only for the exact immutable revision and dirty state recorded with it.
 - Do not mix artifacts, captures or build results from different revisions in one evidence set.
 - The final diff reviewed for completion is the frozen revision's diff.
@@ -208,8 +224,9 @@ Minimum retained files:
 
 Runtime evidence (diffs, captures, logs, manifests) follows
 `docs/android-engineering-lab/README.md` section 8 and the established packet/evidence convention,
-including per-artifact `source_sha`, build/package/device context, capture hashes, image-open
-records, specific findings, reviewer and timestamp.
+including per-artifact `source_sha`, build/package/device context, and specific findings, reviewer
+and timestamp. Capture hashes and image-open records apply only to captures the owner explicitly
+authorized for the task.
 
 No raw credentials, tokens, access codes, account secrets, signing material, IPTV credentials or
 private account data may appear in any packet, log, capture or PR text.
@@ -227,8 +244,10 @@ private account data may appear in any packet, log, capture or PR text.
 
 ## 15. Completion and PR boundary
 
-- Completion means: the frozen diff is reviewed, required validation ran, required physical/visual
-  evidence exists, the durable packet is written, and the authorized branch/PR is updated.
+- Technical completion means: the frozen diff is reviewed, required validation ran, required
+  physical/technical evidence exists, the durable packet is written, and the authorized branch/PR
+  is updated. Owner visual acceptance is not a condition of technical completion; when captures
+  were not authorized it stays separately reported as `NOT RUN — OWNER REVIEW PENDING`.
 - The PR/report is the boundary. Merge, signing, tag, release, production deployment and device data
   changes are separate protected operations requiring explicit owner authorization.
 - A completed task is not a merge recommendation and does not imply production readiness.
@@ -240,8 +259,10 @@ private account data may appear in any packet, log, capture or PR text.
 
 Use exactly one final verdict:
 
-- `PASS` — all mandatory criteria have evidence and pass on the frozen revision; the PR/report is
-  review-ready.
+- `PASS` — all mandatory technical criteria have evidence and pass on the frozen revision; the
+  PR/report is review-ready. `PASS` is technical completion and is not owner visual acceptance,
+  universal device coverage, or production readiness; pending owner visual review is reported
+  separately as `NOT RUN — OWNER REVIEW PENDING`.
 - `FAIL` — the task executed, but a mandatory criterion failed or the diff is incorrect; correction
   is required.
 - `BLOCKED` — execution cannot proceed or complete because of an external dependency or owner

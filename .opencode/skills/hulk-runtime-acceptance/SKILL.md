@@ -1,6 +1,6 @@
 ---
 name: hulk-runtime-acceptance
-description: Use during HULK SA Android visual implementation and before claiming completion, to bind the approved screen specification to final-source tests, physical captures, visual inspection, and an honest evidence verdict.
+description: Use during HULK SA Android visual implementation and before claiming completion, to bind the approved screen specification to final-source tests, bounded runtime verification, and an honest evidence verdict. Screen capture is OFF unless the owner explicitly authorizes it for the current task.
 ---
 
 # HULK runtime acceptance
@@ -37,7 +37,20 @@ Final evidence must use the immutable final source revision.
 Follow the live physical-instance contract; never improvise package refresh.
 
 ## Inspect
-For every required screen/state:
+Capture policy, default OFF: screenshots, screen recordings, transition-frame
+capture, frame extraction, montage generation and screenshot comparison are
+enabled only when the owner explicitly requests capture for the current task.
+Never infer capture authorization from a UI change, ADB access, device
+installation, or the existence of capture tools; ADB use alone is not capture
+authorization.
+
+Without capture authorization:
+- do not run the capture → open images → compare → fix → rebuild → recapture loop;
+- do not block a routine task only because captures are missing;
+- report automated visual validation as `NOT RUN — OWNER REVIEW PENDING`;
+- leave visual review to the owner on the actual devices.
+
+When capture is explicitly authorized, for every required screen/state:
 - perform the recorded interaction;
 - capture the full screen and relevant transition frames;
 - open the actual image attachments;
@@ -51,19 +64,26 @@ clipping, safe edges, loading, empty, error, missing artwork, Back/return,
 deep scroll, and required adaptive states.
 
 A capture file existing is not proof of inspection.
-A passing build is not proof of visual correctness.
+A passing build is not proof of visual correctness or universal device coverage.
+Owner acceptance is attributed only after the owner actually confirms it.
 
 ## Evidence
 For each artifact record:
 criterion/state ID; source SHA; APK SHA-256; package/variant; device/window;
-locale/font scale; interaction; capture path and SHA-256; image-open record;
-visible findings; result; reviewer; timestamp.
+locale/font scale; interaction; result; reviewer; timestamp. Capture path and
+SHA-256 plus image-open record apply only to captures the owner explicitly
+authorized; otherwise record automated visual validation as
+`NOT RUN — OWNER REVIEW PENDING`.
 Protect credentials and owner-private data.
 
 ## Finish
 Re-read the task packet. Recheck remote HEAD and the final complete diff.
 Every mandatory criterion must have evidence.
-Missing required states remain BLOCKED or NOT RUN.
-Report PASS only when all mandatory criteria pass.
+Missing captures alone do not block a routine task whose capture policy is OFF;
+report its owner visual review separately as `NOT RUN — OWNER REVIEW PENDING`.
+Under an authorized capture policy, missing required capture states remain
+BLOCKED or NOT RUN.
+Report PASS only when all mandatory technical criteria pass; PASS is technical
+completion, not owner visual acceptance or universal device coverage.
 Otherwise report FAIL, BLOCKED, or STOP with the exact reason.
 Never declare merge, release, or production readiness from this skill.
