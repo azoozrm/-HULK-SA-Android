@@ -1595,6 +1595,7 @@ private fun CinemaHomeScreen(
         growth = state.operations.growth,
         expiresAtEpochSeconds = state.account?.expiresAtEpochSeconds,
     )
+
     var rowCursor = homeRowCursorStart(isTv)
     val renewalBannerRow = if (renewalBanner != null) rowCursor++ else -1
     if (state.errorMessage != null) rowCursor++
@@ -1616,44 +1617,36 @@ private fun CinemaHomeScreen(
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
 
-    Column(Modifier.fillMaxSize()) {
-        if (!isTv) {
-            HomeHeader(
-                loading = loading,
-                onRefresh = onRefresh,
-                onSearch = { onSelectDestination(MainDestination.SEARCH) },
-            )
-        }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().weight(1f),
-            contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
-            verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
-        ) {
-            item {
-                if (featured != null) {
-                    val heroRequester = remember { FocusRequester() }
-                    LaunchedEffect(Unit) {
-                        if (remembered.rowKey == "hero") { runCatching { heroRequester.requestFocus() } }
-                    }
-                    CinemaHero(
-                        featured, isTv, isFavorite(featured), { onOpen(featured) },
-                        { onToggleFavorite(featured) }, onRefresh, loading,
-                        unreadNotificationCount = state.unreadNotificationCount,
-                        onOpenNotifications = onOpenNotifications,
-                        watchModifier = Modifier.restoreFocus(remembered.rowKey == "hero", heroRequester),
-                        onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
-                    )
-                } else {
-                    HomePlaceholder(
-                        loading = loading,
-                        onRefresh = onRefresh,
-                        isTv = isTv,
-                        unreadNotificationCount = state.unreadNotificationCount,
-                        onOpenNotifications = onOpenNotifications,
-                    )
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = if (isTv) 32.dp else 48.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isTv) 24.dp else 17.dp),
+    ) {
+        item {
+            if (featured != null) {
+                val heroRequester = remember { FocusRequester() }
+                LaunchedEffect(Unit) {
+                    if (remembered.rowKey == "hero") { runCatching { heroRequester.requestFocus() } }
                 }
+                CinemaHero(
+                    featured, isTv, isFavorite(featured), { onOpen(featured) },
+                    { onToggleFavorite(featured) }, onRefresh, loading,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
+                    watchModifier = Modifier.restoreFocus(remembered.rowKey == "hero", heroRequester),
+                    onFocused = { navigationMemory.save(MainDestination.HOME, "${featured.type}:${featured.id}", 0, "hero", 0) },
+                )
+            } else {
+                HomePlaceholder(
+                    loading = loading,
+                    onRefresh = onRefresh,
+                    isTv = isTv,
+                    unreadNotificationCount = state.unreadNotificationCount,
+                    onOpenNotifications = onOpenNotifications,
+                )
             }
+        }
         if (renewalBanner != null) {
             item {
                 val bannerRequester = remember { FocusRequester() }
@@ -1715,7 +1708,6 @@ private fun CinemaHomeScreen(
         if (suggestedLive.isNotEmpty()) {
             item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
-    }
     }
 }
 
@@ -1861,42 +1853,8 @@ private fun HomeSectionPadding(isTv: Boolean, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(horizontal = if (isTv) TV_PAGE_GUTTER else 0.dp)) { content() }
 }
 
-/** First list index that holds a Home content row: the hero block, plus the phone services row. */
-internal fun homeRowCursorStart(isTv: Boolean): Int = if (isTv) 1 else 2
-
-/**
- * Restrained phone Home header. Search and Refresh are the only header actions; Notifications,
- * Downloads, Settings and Change User live in the Home services row and sheet below the Hero.
- */
-@Composable
-private fun HomeHeader(
-    loading: Boolean,
-    onRefresh: () -> Unit,
-    onSearch: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "الرئيسية",
-            color = colors.text,
-            fontSize = 15.sp,
-            lineHeight = 20.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        RoundAction(Icons.Rounded.Search, "البحث", onSearch)
-        RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh, loading = loading)
-    }
-}
+/** First list index that holds a Home content row: only the Hero/placeholder occupies index 0. */
+internal fun homeRowCursorStart(isTv: Boolean): Int = 1
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

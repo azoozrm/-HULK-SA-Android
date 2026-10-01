@@ -5,8 +5,8 @@ import org.junit.Test
 
 class HomeRowCursorPolicyTest {
     @Test
-    fun `home row cursor accounts for the hero block and the phone services row`() {
+    fun `home row cursor starts content rows after the hero block`() {
         assertEquals(1, homeRowCursorStart(isTv = true))
-        assertEquals(2, homeRowCursorStart(isTv = false))
+        assertEquals(1, homeRowCursorStart(isTv = false))
     }
 }
