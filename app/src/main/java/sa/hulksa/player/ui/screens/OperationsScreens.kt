@@ -64,6 +64,7 @@ import sa.hulksa.player.data.OperationsAnnouncementSeverity
 import sa.hulksa.player.data.OperationsDownloadStatus
 import sa.hulksa.player.data.OperationsServiceConfig
 import sa.hulksa.player.data.OperationsUiState
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -133,14 +134,15 @@ private fun OperationsActionButton(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
+    val goldFocused = primary && focused
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .62f)
-        primary && focused -> colors.goldBright
         primary -> colors.gold.copy(alpha = .88f)
         focused -> colors.gold.copy(alpha = .26f)
         else -> Color(0xFF151711)
     }
     val borderColor = when {
+        goldFocused -> Color.Transparent
         focused -> colors.goldBright
         primary -> colors.goldBright.copy(alpha = .42f)
         else -> colors.gold.copy(alpha = .42f)
@@ -157,7 +159,8 @@ private fun OperationsActionButton(
         modifier = modifier
             .clip(shape)
             .background(background)
-            .border(if (focused) 3.dp else 1.dp, borderColor, shape)
+            .goldFocusEdge(shape = shape, visible = goldFocused)
+            .border(if (goldFocused) 0.dp else if (focused) 3.dp else 1.dp, borderColor, shape)
             .semantics(mergeDescendants = true) { contentDescription = text }
             .onFocusChanged { focused = it.isFocused }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)

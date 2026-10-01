@@ -80,6 +80,7 @@ import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.rememberAdaptiveUiState
 import sa.hulksa.player.ui.adaptive.trackAdaptiveInput
 import sa.hulksa.player.ui.components.HulkTextField
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.screens.KidsMobileMovieDetailsScreen
 import sa.hulksa.player.ui.screens.KidsMobileSeriesDetailsScreen
 import sa.hulksa.player.ui.screens.MovieDetailsScreen
@@ -834,14 +835,17 @@ private fun KidsCategoryChip(
     val compactTv = isTv && (adaptiveUi.screenWidthDp <= 960 || adaptiveUi.screenHeightDp <= 540)
     val phoneLandscape = !isTv && adaptiveUi.screenWidthDp > adaptiveUi.screenHeightDp
     var focused by remember(text) { mutableStateOf(false) }
+    val shape = RoundedCornerShape(50)
+    val goldFocused = selected && focused
     Box(
         Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(shape)
             .background(if (selected) colors.gold else if (focused) colors.gold.copy(alpha = .15f) else colors.surfaceRaised)
+            .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(
-                if (focused) 2.dp else 1.dp,
-                if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
-                RoundedCornerShape(50),
+                if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
+                if (goldFocused) Color.Transparent else if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
+                shape,
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
@@ -1065,13 +1069,15 @@ private fun KidsTextButton(
     val colors = LocalHulkColors.current
     var focused by remember(text) { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
+    val goldFocused = primary && focused
     Box(
         Modifier
             .clip(shape)
             .background(if (primary) colors.gold else if (focused) colors.gold.copy(alpha = .15f) else colors.surfaceRaised)
+            .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(
-                if (focused) 2.dp else 1.dp,
-                if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
+                if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
+                if (goldFocused) Color.Transparent else if (focused) colors.goldBright else Color.White.copy(alpha = .08f),
                 shape,
             )
             .onFocusChanged { focused = it.isFocused }

@@ -17,7 +17,6 @@ import java.util.Locale
 internal fun HomeHeroTechnicalPills(
     item: ContentItem,
     isTv: Boolean,
-    maxFacts: Int = Int.MAX_VALUE,
 ) {
     val context = LocalContext.current
     val store = remember(context) { HomeHeroMetadataStore.get(context) }
@@ -32,21 +31,30 @@ internal fun HomeHeroTechnicalPills(
         store.publishIfCurrent(owner) { metadata = loaded }
     }
 
-    val facts = when (item.type) {
-        ContentType.MOVIE -> listOfNotNull(
-            metadata.quality?.trim()?.takeIf(String::isNotBlank),
-            heroMovieDurationLabel(metadata.durationMs),
-        )
+    when (item.type) {
+        ContentType.MOVIE -> {
+            metadata.quality
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let { InfoPill(it) }
+            heroMovieDurationLabel(metadata.durationMs)?.let { InfoPill(it) }
+        }
 
-        ContentType.SERIES -> listOfNotNull(
-            metadata.quality?.trim()?.takeIf(String::isNotBlank),
-            metadata.seasonCount?.takeIf { it > 0 }?.let { "$it موسم" },
-            metadata.episodeCount?.takeIf { it > 0 }?.let { "$it حلقة" },
-        )
+        ContentType.SERIES -> {
+            metadata.quality
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let { InfoPill(it) }
+            metadata.seasonCount
+                ?.takeIf { it > 0 }
+                ?.let { InfoPill("$it موسم") }
+            metadata.episodeCount
+                ?.takeIf { it > 0 }
+                ?.let { InfoPill("$it حلقة") }
+        }
 
-        ContentType.LIVE -> emptyList()
+        ContentType.LIVE -> Unit
     }
-    facts.take(maxFacts.coerceAtLeast(0)).forEach { fact -> InfoPill(fact) }
 }
 
 private fun heroMovieDurationLabel(durationMs: Long?): String? {

@@ -279,7 +279,6 @@ fun FocusButton(
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .5f)
-        primary && showFocused -> colors.goldBright
         primary -> colors.gold
         showFocused -> Color(0xFF2A281B)
         outlined -> Color(0xFF151711)
@@ -300,8 +299,10 @@ fun FocusButton(
             }
             .clip(shape)
             .background(background)
+            .goldFocusEdge(shape = shape, visible = showFocused && primary)
             .border(
                 width = when {
+                    showFocused && primary -> 0.dp
                     showFocused -> 2.dp
                     accent -> 1.5.dp
                     outlined -> 1.dp
@@ -745,7 +746,6 @@ fun HistoryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: (() -> Unit)? = null,
-    emphasized: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -805,15 +805,7 @@ fun HistoryCard(
             .aspectRatio(16f / 9f)
             .clip(shape)
             .background(Color(0xFF15160F))
-            .border(
-                if (showFocused) {
-                    if (adaptiveUi.isTelevision) 3.dp else 2.dp
-                } else {
-                    0.dp
-                },
-                if (showFocused) colors.goldBright else Color.Transparent,
-                shape,
-            )
+            .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
@@ -877,12 +869,11 @@ fun HistoryCard(
                 .fillMaxWidth()
                 .padding(horizontal = if (adaptiveUi.isTelevision) 12.dp else 10.dp, vertical = if (adaptiveUi.isTelevision) 10.dp else 9.dp),
         ) {
-            val emphasizedTv = emphasized && adaptiveUi.isTelevision
             Text(
                 primaryTitle,
                 color = Color.White,
-                fontSize = if (emphasizedTv) 17.sp else 12.sp,
-                lineHeight = if (emphasizedTv) 25.sp else 14.sp,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 12.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 14.sp else 14.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = if (adaptiveUi.isTelevision) 2 else 1,
                 overflow = TextOverflow.Ellipsis,

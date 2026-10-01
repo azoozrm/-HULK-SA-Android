@@ -52,6 +52,7 @@ import kotlinx.coroutines.delay
 import sa.hulksa.player.data.ProfileStore
 import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.components.HulkTextField
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 @Composable
@@ -704,6 +705,7 @@ private fun ActionButton(
         label = "profileActionScale",
     )
     val shape = RoundedCornerShape(if (isTv) 13.dp else 11.dp)
+    val goldFocused = !danger && !secondary && focused
     val background = when {
         danger -> colors.danger.copy(alpha = if (focused) .24f else .14f)
         secondary && focused -> colors.gold.copy(alpha = .16f)
@@ -728,9 +730,11 @@ private fun ActionButton(
             )
             .clip(shape)
             .background(background)
+            .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(
-                if (focused) 2.dp else 1.dp,
+                if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
                 when {
+                    goldFocused -> Color.Transparent
                     focused -> colors.goldBright
                     danger -> colors.danger.copy(alpha = .42f)
                     secondary -> Color.White.copy(alpha = .08f)

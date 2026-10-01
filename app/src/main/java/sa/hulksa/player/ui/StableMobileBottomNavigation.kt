@@ -21,10 +21,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -45,9 +49,10 @@ import sa.hulksa.player.MainDestination
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private data class StableMobileEntry(
-    val destination: MainDestination,
+    val destination: MainDestination?,
     val icon: ImageVector,
     val label: String,
+    val switchesProfile: Boolean = false,
 )
 
 private val MOBILE_BOTTOM_NAVIGATION_ITEM_HEIGHT = 56.dp
@@ -62,26 +67,36 @@ private val stableMobileEntries = listOf(
     StableMobileEntry(MainDestination.MOVIES, Icons.Rounded.Movie, "الافلام"),
     StableMobileEntry(MainDestination.SERIES, Icons.Rounded.Tv, "المسلسلات"),
     StableMobileEntry(MainDestination.FAVORITES, Icons.Rounded.Favorite, "قائمتي"),
+    StableMobileEntry(MainDestination.SEARCH, Icons.Rounded.Search, "البحث"),
+    StableMobileEntry(MainDestination.DOWNLOADS, Icons.Rounded.Download, "التنزيلات"),
+    StableMobileEntry(null, Icons.Rounded.Person, "تغيير المستخدم", switchesProfile = true),
+    StableMobileEntry(MainDestination.SETTINGS, Icons.Rounded.Settings, "الاعدادات"),
 )
 
 /**
  * Stable phone navigation shared by the normal shell and Smart Search.
  *
- * P02 keeps the primary five destinations in one scrollable strip in a fixed order. Search lives in
- * the Home header and the profile entry exposes the gated Downloads/Settings actions. Selection
- * never auto-scrolls or reorders the strip; the active destination uses a restrained gold
+ * All actions live in one scrollable strip in a fixed order. Selection never auto-scrolls or
+ * reorders the strip; users can swipe it manually. The active destination uses a restrained gold
  * surface/icon treatment without a top indicator line or any geometry change.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun StableMobileBottomNavigation(
     selected: MainDestination,
+    downloadsEnabled: Boolean,
     onSelectDestination: (MainDestination) -> Unit,
+    onSwitchProfile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (WindowInsets.isImeVisible) return
 
     val listState = rememberLazyListState()
+    val visibleEntries = if (downloadsEnabled) {
+        stableMobileEntries
+    } else {
+        stableMobileEntries.filterNot { it.destination == MainDestination.DOWNLOADS }
+    }
 
     LazyRow(
         modifier = modifier
@@ -95,14 +110,21 @@ internal fun StableMobileBottomNavigation(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items(
-            items = stableMobileEntries,
-            key = { entry -> entry.destination.name },
+            items = visibleEntries,
+            key = { entry -> entry.destination?.name ?: "profile-switch" },
         ) { entry ->
+            val active = entry.destination != null && selected == entry.destination
             StableMobileNavItem(
                 icon = entry.icon,
                 label = entry.label,
-                active = selected == entry.destination,
-                onClick = { onSelectDestination(entry.destination) },
+                active = active,
+                onClick = {
+                    if (entry.switchesProfile) {
+                        onSwitchProfile()
+                    } else {
+                        entry.destination?.let(onSelectDestination)
+                    }
+                },
             )
         }
     }

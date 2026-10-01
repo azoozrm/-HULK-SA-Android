@@ -68,6 +68,7 @@ import sa.hulksa.player.ui.components.HulkArtworkSurface
 import sa.hulksa.player.ui.components.HulkFallbackArtwork
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 internal class LiveTvProCategoryReturnGate {
@@ -530,11 +531,16 @@ internal fun LiveChannelBrowser(
                 .clip(shape)
                 .background(
                     when {
+                        focused && selectedCategory == category.id && searchQuery.isBlank() -> colors.gold
                         focused -> colors.goldBright
                         selectedCategory == category.id && searchQuery.isBlank() -> colors.gold
                         moving -> colors.gold.copy(alpha = .30f)
                         else -> Color.White.copy(alpha = .055f)
                     },
+                )
+                .goldFocusEdge(
+                    shape = shape,
+                    visible = focused,
                 )
                 .border(
                     if (focused || moving) 2.dp else 1.dp,

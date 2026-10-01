@@ -475,7 +475,9 @@ fun HulkApp(
                 ) {
                     StableMobileBottomNavigation(
                         selected = state.destination,
+                        downloadsEnabled = state.operations.features.downloadsEnabled,
                         onSelectDestination = selectDestinationWithProfileContext,
+                        onSwitchProfile = requestProfileSwitch,
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
                 }

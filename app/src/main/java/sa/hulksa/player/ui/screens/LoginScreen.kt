@@ -106,6 +106,7 @@ import sa.hulksa.player.data.OperationsGrowthLinkConfig
 import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 private const val HULK_WEBSITE = "https://hulksa.com/"
@@ -1440,10 +1441,10 @@ private fun LoginActionButton(
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (featuredSecondary) 11.dp else 13.dp)
+    val goldFocused = primary && focused
     val background by animateColorAsState(
         targetValue = when {
             !enabled && primary -> colors.gold.copy(alpha = .58f)
-            primary && focused -> colors.goldBright
             primary -> colors.gold
             featuredSecondary && focused -> Color(0xFF1E2019)
             featuredSecondary -> Color(0xFF151710)
@@ -1465,8 +1466,8 @@ private fun LoginActionButton(
     val textColor = if (primary) Color(0xFF111006) else colors.goldBright
     val displayText = if (loading) "جاري الدخول..." else text
     val outlineWidth = when {
+        goldFocused -> 0.dp
         focused -> 2.dp
-        featuredSecondary -> 1.dp
         else -> 1.dp
     }
 
@@ -1482,6 +1483,7 @@ private fun LoginActionButton(
             )
             .clip(shape)
             .background(background)
+            .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(outlineWidth, outline, shape)
             .semantics(mergeDescendants = true) {
                 contentDescription = displayText

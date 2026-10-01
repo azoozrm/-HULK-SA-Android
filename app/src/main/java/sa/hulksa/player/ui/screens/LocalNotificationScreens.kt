@@ -82,6 +82,7 @@ import kotlinx.coroutines.launch
 import sa.hulksa.player.data.EpisodeNotificationPopup
 import sa.hulksa.player.data.LocalNotificationItem
 import sa.hulksa.player.ui.components.BrandLogo
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.roundToInt
 
@@ -409,9 +410,10 @@ fun NotificationBellButton(
                 .size(visualSize)
                 .clip(CircleShape)
                 .background(if (focused) colors.gold else Color.Black.copy(alpha = .46f))
+                .goldFocusEdge(shape = CircleShape, visible = focused)
                 .border(
-                    width = if (focused) 2.dp else 1.dp,
-                    color = if (focused) colors.goldBright else colors.line,
+                    width = if (focused) 0.dp else 1.dp,
+                    color = if (focused) Color.Transparent else colors.line,
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -536,8 +538,10 @@ private fun NotificationActionButton(
             else -> 12.dp
         },
     )
+    val goldFocused = focused && primary && !isTv
     val background = when {
         !enabled -> colors.surfaceRaised.copy(alpha = .50f)
+        goldFocused -> colors.gold
         focused -> colors.goldBright
         primary && isTv -> colors.gold.copy(alpha = .14f)
         primary -> colors.gold
@@ -545,7 +549,7 @@ private fun NotificationActionButton(
     }
     val borderColor = when {
         !enabled -> colors.line.copy(alpha = .36f)
-        focused -> Color.White.copy(alpha = .94f)
+        focused -> Color.Transparent
         primary -> colors.goldBright.copy(alpha = .62f)
         else -> colors.gold.copy(alpha = .46f)
     }
@@ -568,7 +572,8 @@ private fun NotificationActionButton(
             .then(if (tvFocusTag != null) Modifier.testTag(tvFocusTag) else Modifier)
             .clip(shape)
             .background(background)
-            .border(if (focused) 3.dp else 1.dp, borderColor, shape)
+            .goldFocusEdge(shape = shape, visible = focused)
+            .border(if (focused) 0.dp else 1.dp, borderColor, shape)
             .semantics(mergeDescendants = true) { contentDescription = text }
             .focusProperties {
                 canFocus = enabled
