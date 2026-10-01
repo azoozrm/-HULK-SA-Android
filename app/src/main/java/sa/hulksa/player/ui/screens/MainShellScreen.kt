@@ -52,14 +52,11 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Downloading
@@ -80,9 +77,7 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -1600,8 +1595,6 @@ private fun CinemaHomeScreen(
         growth = state.operations.growth,
         expiresAtEpochSeconds = state.account?.expiresAtEpochSeconds,
     )
-    val homeDownloadsEnabled = state.operations.features.downloadsEnabled
-
     var rowCursor = homeRowCursorStart(isTv)
     val renewalBannerRow = if (renewalBanner != null) rowCursor++ else -1
     if (state.errorMessage != null) rowCursor++
@@ -1622,7 +1615,6 @@ private fun CinemaHomeScreen(
     )
     val initialRow = rowIndexByKey[remembered.rowKey]?.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialRow)
-    var servicesSheetOpen by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         if (!isTv) {
@@ -1659,14 +1651,6 @@ private fun CinemaHomeScreen(
                         isTv = isTv,
                         unreadNotificationCount = state.unreadNotificationCount,
                         onOpenNotifications = onOpenNotifications,
-                    )
-                }
-            }
-            if (!isTv) {
-                item {
-                    HomeServicesRow(
-                        unreadNotificationCount = state.unreadNotificationCount,
-                        onClick = { servicesSheetOpen = true },
                     )
                 }
             }
@@ -1732,25 +1716,6 @@ private fun CinemaHomeScreen(
             item { HomeSectionPadding(isTv) { PosterSection("قنوات مقترحة لك", "popular-live", popularLiveRow, suggestedLive, isTv, navigationMemory, isFavorite, onOpen, onToggleFavorite) } }
         }
     }
-    }
-    if (servicesSheetOpen) {
-        HomeServicesSheet(
-            unreadNotificationCount = state.unreadNotificationCount,
-            downloadsEnabled = homeDownloadsEnabled,
-            onDismiss = { servicesSheetOpen = false },
-            onOpenNotifications = {
-                servicesSheetOpen = false
-                onOpenNotifications()
-            },
-            onOpenDownloads = {
-                servicesSheetOpen = false
-                onOpenDownloads()
-            },
-            onOpenSettings = {
-                servicesSheetOpen = false
-                onSelectDestination(MainDestination.SETTINGS)
-            },
-        )
     }
 }
 
@@ -1930,109 +1895,6 @@ private fun HomeHeader(
         )
         RoundAction(Icons.Rounded.Search, "البحث", onSearch)
         RoundAction(Icons.Rounded.Refresh, "تحديث المحتوى", onRefresh, loading = loading)
-    }
-}
-
-/** Quiet phone services entry below the Hero; opens the account and services sheet. */
-@Composable
-private fun HomeServicesRow(
-    unreadNotificationCount: Int,
-    onClick: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.surface.copy(alpha = .55f))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Rounded.Person, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = "الحساب والخدمات",
-            color = colors.text,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f),
-        )
-        if (unreadNotificationCount > 0) {
-            Text(
-                text = if (unreadNotificationCount > 999) "999+" else unreadNotificationCount.toString(),
-                color = colors.goldBright,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.width(6.dp))
-        }
-        Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = colors.textMuted, modifier = Modifier.size(18.dp))
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun HomeServicesSheet(
-    unreadNotificationCount: Int,
-    downloadsEnabled: Boolean,
-    onDismiss: () -> Unit,
-    onOpenNotifications: () -> Unit,
-    onOpenDownloads: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    val colors = LocalHulkColors.current
-    val requestProfileSwitch = sa.hulksa.player.ui.LocalProfileSwitchRequester.current
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = colors.surface,
-        scrimColor = Color.Black.copy(alpha = .55f),
-        dragHandle = null,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(vertical = 8.dp),
-        ) {
-            ServicesSheetRow(
-                icon = Icons.Rounded.Notifications,
-                label = if (unreadNotificationCount > 0) "الإشعارات ($unreadNotificationCount)" else "الإشعارات",
-                onClick = onOpenNotifications,
-            )
-            if (downloadsEnabled) {
-                ServicesSheetRow(Icons.Rounded.Download, "التنزيلات", onOpenDownloads)
-            }
-            ServicesSheetRow(Icons.Rounded.Settings, "الإعدادات", onOpenSettings)
-            ServicesSheetRow(
-                icon = Icons.Rounded.Person,
-                label = "تغيير المستخدم",
-                onClick = {
-                    onDismiss()
-                    requestProfileSwitch()
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun ServicesSheetRow(icon: ImageVector, label: String, onClick: () -> Unit) {
-    val colors = LocalHulkColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = colors.goldBright, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(label, color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 
