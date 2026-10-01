@@ -58,6 +58,7 @@ import sa.hulksa.player.data.FOUR_DIGIT_CREDENTIAL_LENGTH
 import sa.hulksa.player.data.FourDigitCredentialLockedException
 import sa.hulksa.player.data.FourDigitCredentialProtectionUnavailableException
 import sa.hulksa.player.model.UserProfile
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 internal const val CREDENTIAL_PROTECTION_UNAVAILABLE_MESSAGE =
@@ -1152,10 +1153,11 @@ private fun SecurityButton(
         label = "profileSecurityActionScale",
     )
     val shape = RoundedCornerShape(if (isTv) 13.dp else 13.dp)
+    val goldFocused = !danger && !secondary && focused
     val background = when {
         danger -> colors.danger.copy(alpha = if (focused) .24f else .14f)
         secondary -> colors.surfaceRaised
-        else -> if (focused) colors.goldBright else colors.gold
+        else -> colors.gold
     }
     val foreground = when {
         danger -> colors.danger
@@ -1175,9 +1177,11 @@ private fun SecurityButton(
             )
             .clip(shape)
             .background(background)
+            .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(
-                if (focused) 2.dp else 1.dp,
+                if (goldFocused) 0.dp else if (focused) 2.dp else 1.dp,
                 when {
+                    goldFocused -> Color.Transparent
                     focused -> colors.goldBright
                     danger -> colors.danger.copy(alpha = .45f)
                     secondary -> Color.White.copy(alpha = .10f)

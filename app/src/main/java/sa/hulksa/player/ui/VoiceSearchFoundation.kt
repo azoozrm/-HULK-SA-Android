@@ -53,6 +53,7 @@ import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.HulkViewModel
 import sa.hulksa.player.MainDestination
 import sa.hulksa.player.VoiceSearchOwner
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
@@ -432,9 +433,10 @@ internal fun InlineVoiceSearchAction(
             .background(
                 if (focused) colors.goldBright else Color.Black.copy(alpha = .46f),
             )
+            .goldFocusEdge(shape = CircleShape, visible = focused)
             .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) Color.White else colors.gold.copy(alpha = .55f),
+                width = if (focused) 0.dp else 1.dp,
+                color = if (focused) Color.Transparent else colors.gold.copy(alpha = .55f),
                 shape = CircleShape,
             )
             .semantics { contentDescription = "بحث صوتي" }

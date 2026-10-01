@@ -180,6 +180,7 @@ import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.UniversalPosterCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.components.HistoryCard
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.InfoPill
@@ -2162,7 +2163,6 @@ private fun CinemaHero(
                     modifier = watchModifier,
                     compact = true,
                     onFocused = onFocused,
-                    keepPrimaryFillOnFocus = true,
                 )
                 FocusButton(if (isFavorite) "★ في قائمتي" else "+ قائمتي", onToggleFavorite, primary = false, compact = true)
             }
@@ -5303,12 +5303,14 @@ private fun LiveCategoryChip(
             .clip(shape)
             .background(
                 when {
+                    focused && selected -> colors.gold
                     focused -> colors.goldBright
                     selected -> colors.gold
                     moving -> colors.gold.copy(alpha = .30f)
                     else -> Color(0xFF181914)
                 },
             )
+            .goldFocusEdge(shape = shape, visible = focused)
             .border(
                 if (focused || moving) 2.dp else 1.dp,
                 if (focused || moving) colors.goldBright else colors.line.copy(alpha = .40f),
@@ -5472,9 +5474,10 @@ private fun RoundAction(
                 .size(homeHeaderActionVisualSizeDp().dp)
                 .clip(CircleShape)
                 .background(if (focused) colors.gold else Color.Black.copy(alpha = .46f))
+                .goldFocusEdge(shape = CircleShape, visible = focused)
                 .border(
-                    if (focused) 2.dp else 1.dp,
-                    if (focused) colors.goldBright else colors.line,
+                    if (focused) 0.dp else 1.dp,
+                    if (focused) Color.Transparent else colors.line,
                     CircleShape,
                 ),
             contentAlignment = Alignment.Center,

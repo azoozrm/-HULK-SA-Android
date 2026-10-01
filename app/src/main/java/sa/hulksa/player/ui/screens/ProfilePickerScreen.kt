@@ -60,6 +60,7 @@ import sa.hulksa.player.model.UserProfile
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.ProfileAvatar
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 internal data class ProfilePickerTvMetrics(
@@ -534,6 +535,7 @@ private fun ProfilePreferenceButton(
     val colors = LocalHulkColors.current
     var focused by remember(text) { mutableStateOf(false) }
     val shape = RoundedCornerShape(if (isTv) 14.dp else 12.dp)
+    val goldFocused = selected && focused
 
     Box(
         modifier = Modifier
@@ -546,9 +548,15 @@ private fun ProfilePreferenceButton(
                     else -> colors.surfaceRaised
                 },
             )
+            .goldFocusEdge(shape = shape, visible = goldFocused)
             .border(
-                if (focused) focusBorderDp.dp else 1.dp,
                 when {
+                    goldFocused -> 0.dp
+                    focused -> focusBorderDp.dp
+                    else -> 1.dp
+                },
+                when {
+                    goldFocused -> Color.Transparent
                     focused -> colors.goldBright
                     selected -> colors.gold.copy(alpha = .65f)
                     else -> Color.White.copy(alpha = .10f)
