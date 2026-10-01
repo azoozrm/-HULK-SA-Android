@@ -198,6 +198,8 @@ For a workflow failure:
 
 CI/emulator success does not replace physical validation for device-specific behavior, TV focus, player behavior, or UI issues that require real hardware evidence.
 
+Screen capture is OFF by default. Screenshots, screen recordings, transition-frame capture, frame extraction, montage generation and screenshot comparison require explicit owner authorization for the current task; never infer it from a UI change, ADB access, device installation or the existence of capture tools. ADB may be used for authorized installation, launch checks, diagnostics and relevant runtime verification, but ADB access neither authorizes nor obligates screen capture. Without capture authorization, do not run the capture/open/compare/rebuild loop and do not block a routine task solely because captures are missing; report automated visual validation as `NOT RUN — OWNER REVIEW PENDING` and attribute owner acceptance only after the owner confirms it. The capture policy and the bounded runtime-verification rules in `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md` section 11 govern.
+
 ## 11. Subagents and mid-task steering
 
 Use subagents only when they provide a clear benefit for independent work, especially read-only source, log, CI, test, regression, or documentation analysis.
