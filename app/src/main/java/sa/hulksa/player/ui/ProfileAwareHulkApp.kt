@@ -68,6 +68,7 @@ import sa.hulksa.player.ui.screens.ProfilePickerScreen
 import sa.hulksa.player.ui.screens.ProfilePinProtectionScreen
 import sa.hulksa.player.ui.screens.ProfilePinUnlockScreen
 import sa.hulksa.player.ui.screens.RequiredUpdateScreen
+import sa.hulksa.player.ui.screens.removeLiveCategoryVisibilityProfileState
 import sa.hulksa.player.ui.screens.removeLiveTvProProfileState
 
 internal val LocalProfileSwitchRequester = staticCompositionLocalOf<() -> Unit> { {} }
@@ -1139,6 +1140,7 @@ fun ProfileAwareHulkApp(
                             ProfileContentSearchHistoryStore(context)
                                 .removeProfileHistory(expectedAccountId, profileId)
                             context.removeLiveTvProProfileState(expectedAccountId, profileId)
+                            context.removeLiveCategoryVisibilityProfileState(expectedAccountId, profileId)
                             profilePreferencesStore.removeProfilePreferences(
                                 expectedAccountId,
                                 profileId,
