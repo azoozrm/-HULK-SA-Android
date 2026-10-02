@@ -5,6 +5,7 @@ import android.view.KeyEvent as AndroidKeyEvent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -25,6 +26,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +54,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -64,12 +75,12 @@ import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.components.BrandLogo
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.HulkArtworkSurface
 import sa.hulksa.player.ui.components.HulkFallbackArtwork
 import sa.hulksa.player.ui.components.HulkTextField
 import sa.hulksa.player.ui.components.LoadingRing
-import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 
 internal class LiveTvProCategoryReturnGate {
@@ -233,14 +244,6 @@ internal fun LiveChannelBrowser(
     }
     var searchQuery by remember { mutableStateOf("") }
 
-    val categoryArtwork = remember(catalog) {
-        catalog?.items.orEmpty()
-            .groupBy(ContentItem::categoryId)
-            .mapValues { (_, channels) ->
-                channels.firstOrNull { !it.posterUrl.isNullOrBlank() } ?: channels.first()
-            }
-    }
-
     val categoryChannels = when (selectedCategory) {
         LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> recentChannels
         LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> catalog?.items.orEmpty().filter { it.id in favoriteIds }
@@ -256,14 +259,6 @@ internal fun LiveChannelBrowser(
                 channel.id.toString().contains(normalizedQuery)
         }
     }
-    val selectedCategoryTitle = when {
-        normalizedQuery.isNotBlank() -> "نتائج البحث"
-        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "اخر مشاهدة"
-        selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> "القنوات المفضلة"
-        selectedCategory == null -> "كل القنوات"
-        else -> orderedCategories.firstOrNull { it.id == selectedCategory }?.name ?: "كل القنوات"
-    }
-
     val listState = rememberLazyListState()
     val categoryListState = rememberLazyListState()
     val categoryFocusScope = rememberCoroutineScope()
@@ -419,15 +414,19 @@ internal fun LiveChannelBrowser(
                 .clip(shape)
                 .background(
                     when {
-                        showFocused -> colors.gold
-                        currentPlaying -> colors.gold.copy(alpha = .14f)
-                        else -> Color.Transparent
+                        showFocused -> colors.gold.copy(alpha = .20f)
+                        currentPlaying -> colors.gold.copy(alpha = .10f)
+                        else -> Color(0xFF14150F)
                     },
                 )
                 .border(
-                    if (showFocused) 2.dp else 0.dp,
-                    if (showFocused) colors.goldBright else Color.Transparent,
-                    shape,
+                    width = if (showFocused) 2.dp else 1.dp,
+                    color = when {
+                        showFocused -> colors.goldBright
+                        currentPlaying -> colors.gold.copy(alpha = .45f)
+                        else -> Color.White.copy(alpha = .08f)
+                    },
+                    shape = shape,
                 )
                 .onFocusChanged { focused = it.isFocused }
                 .onPreviewKeyEvent { event ->
@@ -475,7 +474,7 @@ internal fun LiveChannelBrowser(
             BrowserArtwork(channel.posterUrl, channel.name, Modifier.size(48.dp))
             Text(
                 text = channel.name,
-                color = if (showFocused) Color.Black else colors.text,
+                color = colors.text,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -483,29 +482,51 @@ internal fun LiveChannelBrowser(
                 modifier = Modifier.weight(1f),
             )
             if (currentPlaying) {
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(22.dp)
+                        .background(Color.White.copy(alpha = .18f)),
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "تشاهد الان",
-                        color = if (showFocused) Color.Black else colors.goldBright,
+                        color = colors.goldBright,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                     )
                     Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "▶",
-                        color = if (showFocused) Color.Black else colors.goldBright,
-                        fontSize = 12.sp,
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = colors.goldBright,
+                        modifier = Modifier.size(14.dp),
                     )
                 }
             }
-            if (favorite) {
-                Text(
-                    text = "★",
-                    color = if (showFocused) Color.Black else colors.goldBright,
-                    fontSize = 16.sp,
+            Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = null,
+                    tint = if (favorite) colors.gold else colors.textMuted,
+                    modifier = Modifier.size(17.dp),
                 )
             }
+        }
+    }
+
+    @Composable
+    fun BrowserCategoryBadge() {
+        Box(
+            modifier = Modifier
+                .size(if (tvLayout) 24.dp else 22.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Color(0xFF10110D))
+                .border(1.dp, colors.gold.copy(alpha = .70f), RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            BrandLogo(Modifier.fillMaxSize().padding(3.dp))
         }
     }
 
@@ -519,6 +540,7 @@ internal fun LiveChannelBrowser(
         var longPressHandled by remember(category.id) { mutableStateOf(false) }
         var dragAccumulator by remember(category.id) { mutableFloatStateOf(0f) }
         val moving = movingCategoryId == category.id
+        val showFocused = focused && adaptiveUi.showFocusHighlights
         val shape = RoundedCornerShape(11.dp)
 
         LaunchedEffect(selectPressed, moving) {
@@ -537,21 +559,21 @@ internal fun LiveChannelBrowser(
                 .clip(shape)
                 .background(
                     when {
-                        focused && selectedCategory == category.id && searchQuery.isBlank() -> colors.gold
-                        focused -> colors.goldBright
-                        selectedCategory == category.id && searchQuery.isBlank() -> colors.gold
-                        moving -> colors.gold.copy(alpha = .30f)
-                        else -> Color.White.copy(alpha = .055f)
+                        showFocused -> colors.gold.copy(alpha = .24f)
+                        selectedCategory == category.id && searchQuery.isBlank() -> colors.gold.copy(alpha = .14f)
+                        moving -> colors.gold.copy(alpha = .20f)
+                        else -> Color.White.copy(alpha = .045f)
                     },
                 )
-                .goldFocusEdge(
-                    shape = shape,
-                    visible = focused,
-                )
                 .border(
-                    if (focused || moving) 2.dp else 1.dp,
-                    if (focused || moving) colors.goldBright else Color.White.copy(alpha = .11f),
-                    shape,
+                    width = if (showFocused) 2.dp else 1.dp,
+                    color = when {
+                        showFocused -> colors.goldBright
+                        selectedCategory == category.id && searchQuery.isBlank() -> colors.gold.copy(alpha = .60f)
+                        moving -> colors.gold.copy(alpha = .45f)
+                        else -> Color.White.copy(alpha = .10f)
+                    },
+                    shape = shape,
                 )
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .onFocusChanged { focused = it.isFocused }
@@ -616,15 +638,11 @@ internal fun LiveChannelBrowser(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BrowserArtwork(
-                categoryArtwork[category.id]?.posterUrl,
-                category.name,
-                Modifier.size(29.dp),
-            )
+            BrowserCategoryBadge()
             Text(
                 text = if (moving) "↕ ${category.name}" else category.name,
                 modifier = Modifier.weight(1f),
-                color = if (focused || (selectedCategory == category.id && searchQuery.isBlank())) Color.Black else colors.text,
+                color = colors.text,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -634,14 +652,81 @@ internal fun LiveChannelBrowser(
     }
 
     @Composable
+    fun BrowserCategoryRow(
+        text: String,
+        icon: ImageVector,
+        selected: Boolean,
+        onClick: () -> Unit,
+        focusRequester: FocusRequester,
+        iconTint: Color? = null,
+    ) {
+        var focused by remember { mutableStateOf(false) }
+        val showFocused = focused && adaptiveUi.showFocusHighlights
+        val shape = RoundedCornerShape(11.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(
+                    when {
+                        showFocused -> colors.gold.copy(alpha = .24f)
+                        selected -> colors.gold.copy(alpha = .14f)
+                        else -> Color.White.copy(alpha = .045f)
+                    },
+                )
+                .border(
+                    width = if (showFocused) 2.dp else 1.dp,
+                    color = when {
+                        showFocused -> colors.goldBright
+                        selected -> colors.gold.copy(alpha = .60f)
+                        else -> Color.White.copy(alpha = .10f)
+                    },
+                    shape = shape,
+                )
+                .focusRequester(focusRequester)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(horizontal = 9.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = text,
+                color = colors.text,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint ?: if (selected) colors.gold else colors.textMuted,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+
+    @Composable
     fun CategoryPane(paneModifier: Modifier) {
-        Column(modifier = paneModifier) {
+        Column(
+            modifier = paneModifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x66101108))
+                .border(1.dp, Color.White.copy(alpha = .10f), RoundedCornerShape(14.dp))
+                .padding(if (tvLayout) 9.dp else 8.dp),
+        ) {
             Text(
                 "الفئات",
                 color = colors.text,
-                fontSize = if (tvLayout) 18.sp else 16.sp,
+                fontSize = if (tvLayout) 15.sp else 13.sp,
                 fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(7.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = .08f)))
             Spacer(Modifier.height(7.dp))
             LazyColumn(
                 state = categoryListState,
@@ -650,31 +735,31 @@ internal fun LiveChannelBrowser(
                 contentPadding = PaddingValues(bottom = 8.dp),
             ) {
                 item("all") {
-                    FocusButton(
+                    BrowserCategoryRow(
                         text = "الكل",
+                        icon = Icons.Rounded.GridView,
+                        selected = selectedCategory == null && searchQuery.isBlank(),
                         onClick = { selectCategory(null) },
-                        modifier = Modifier.fillMaxWidth().focusRequester(allCategoryFocus),
-                        primary = selectedCategory == null && searchQuery.isBlank(),
-                        compact = true,
+                        focusRequester = allCategoryFocus,
                     )
                 }
                 item("favorites") {
-                    FocusButton(
-                        text = "★ المفضلة (${favoriteIds.size})",
+                    BrowserCategoryRow(
+                        text = "المفضلة",
+                        icon = Icons.Rounded.Star,
+                        iconTint = colors.gold,
+                        selected = selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY && searchQuery.isBlank(),
                         onClick = { selectCategory(LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY) },
-                        modifier = Modifier.fillMaxWidth().focusRequester(favoritesCategoryFocus),
-                        primary = selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY && searchQuery.isBlank(),
-                        compact = true,
+                        focusRequester = favoritesCategoryFocus,
                     )
                 }
                 item("continue") {
-                    FocusButton(
+                    BrowserCategoryRow(
                         text = "اخر مشاهدة",
+                        icon = Icons.Outlined.Schedule,
+                        selected = selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY && searchQuery.isBlank(),
                         onClick = { selectCategory(LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY) },
-                        modifier = Modifier.fillMaxWidth().focusRequester(recentCategoryFocus),
-                        primary = selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY && searchQuery.isBlank(),
-                        compact = true,
-                        enabled = recentChannels.isNotEmpty(),
+                        focusRequester = recentCategoryFocus,
                     )
                 }
                 items(orderedCategories, key = { it.id }) { category ->
@@ -723,19 +808,22 @@ internal fun LiveChannelBrowser(
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                 )
-                Text(
-                    copy.description,
-                    color = colors.textMuted,
-                    fontSize = if (tvLayout) 10.sp else 9.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                )
+                if (origin == LiveChannelBrowserOrigin.ERROR_RECOVERY) {
+                    Text(
+                        copy.description,
+                        color = colors.textMuted,
+                        fontSize = if (tvLayout) 10.sp else 9.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
             FocusButton(
-                "اغلاق",
+                "إغلاق",
                 onClose,
                 primary = false,
+                outlined = true,
                 compact = true,
                 modifier = Modifier.align(Alignment.CenterStart),
             )
@@ -745,47 +833,23 @@ internal fun LiveChannelBrowser(
     @Composable
     fun ChannelPane(paneModifier: Modifier) {
         Column(modifier = paneModifier) {
-            Row(
+            Text(
+                text = "${visible.size} قناة",
+                color = colors.textMuted,
+                fontSize = if (tvLayout) 11.sp else 10.sp,
+                maxLines = 1,
+                textAlign = TextAlign.Start,
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    selectedCategoryTitle,
-                    color = colors.text,
-                    fontSize = if (tvLayout) 16.sp else 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = "${visible.size} قناة",
-                    color = colors.textMuted,
-                    fontSize = if (tvLayout) 11.sp else 10.sp,
-                    maxLines = 1,
-                )
-            }
+            )
             Spacer(Modifier.height(7.dp))
             HulkTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 label = "بحث عن قناة",
                 modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+                leadingIcon = Icons.Rounded.Search,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = if (tvLayout) {
-                    "تفضيل القناة : اضغط OK مطولا على القناة"
-                } else {
-                    "تفضيل القناة : اضغط مطولا على القناة"
-                },
-                color = colors.textMuted,
-                fontSize = hintFontSize,
-                lineHeight = hintLineHeight,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(9.dp))
 
             when {
                 catalog == null -> LoadingRing(
@@ -905,6 +969,15 @@ internal fun LiveChannelBrowser(
                             Modifier
                                 .width(if (tvLayout) 246.dp else 210.dp)
                                 .fillMaxHeight(),
+                        )
+                    }
+                    if (tvLayout) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "رجوع: إغلاق    |    OK: اختيار",
+                            color = colors.textMuted,
+                            fontSize = 10.sp,
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
                         )
                     }
                 }

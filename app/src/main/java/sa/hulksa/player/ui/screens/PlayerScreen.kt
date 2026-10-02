@@ -54,10 +54,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
@@ -66,8 +68,6 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -149,6 +149,7 @@ import sa.hulksa.player.ui.adaptive.HulkInputMode
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.BrandBadge
+import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.LoadingRing
@@ -1373,6 +1374,7 @@ fun PlayerScreen(
                 isLive = request.isLive,
                 quality = qualityLabel(videoHeight),
                 speed = playbackSpeed,
+                channel = currentChannel.takeIf { request.isLive },
                 onBack = ::saveAndBack,
             )
         }
@@ -1679,6 +1681,7 @@ private fun PlayerTopBar(
     isLive: Boolean,
     quality: String,
     speed: Float,
+    channel: ContentItem?,
     onBack: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
@@ -1697,12 +1700,25 @@ private fun PlayerTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        FocusButton("رجوع", onBack, primary = false, compact = true)
+        FocusButton("رجوع", onBack, primary = false, outlined = true, compact = true)
+        if (isLive && channel != null) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF7F5EF))
+                    .border(1.dp, colors.gold.copy(alpha = .45f), RoundedCornerShape(10.dp))
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ChannelLogo(channel, Modifier.fillMaxSize())
+            }
+        }
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = if (isLive) "● مباشر" else "HULK SA",
+                    text = if (isLive) "● بث مباشر" else "HULK SA",
                     color = if (isLive) Color(0xFFFF4E55) else colors.goldBright,
                     fontSize = 11.sp,
                     fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal,
@@ -1863,6 +1879,7 @@ private fun LivePlayerControls(
     metrics: LivePlayerControlsMetrics,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalHulkColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1870,8 +1887,8 @@ private fun LivePlayerControls(
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = .58f),
-                        Color.Black.copy(alpha = .94f),
+                        Color.Black.copy(alpha = .42f),
+                        Color.Black.copy(alpha = .78f),
                     ),
                 ),
             )
@@ -1883,100 +1900,53 @@ private fun LivePlayerControls(
                 bottom = layoutMetrics.outerBottomPaddingDp.dp,
             ),
     ) {
-        if (metrics.approvedSingleRow) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-            ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xF00C0D0A))
+                .border(1.dp, colors.gold.copy(alpha = .55f), RoundedCornerShape(18.dp))
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+        ) {
+            if (metrics.approvedSingleRow) {
                 Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    LiveControlUtility(
-                        icon = Icons.AutoMirrored.Rounded.List,
-                        caption = "القنوات",
-                        onClick = onChannels,
-                        enabled = true,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                    LiveControlUtility(
-                        icon = if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                        caption = "المفضلة",
-                        onClick = onFavorite,
-                        enabled = favoriteEnabled,
-                        selected = favorite,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                    LiveControlCircleIcon(
-                        icon = Icons.Rounded.SkipPrevious,
-                        caption = "القناة السابقة",
-                        onClick = onPrevious,
-                        sizeDp = metrics.secondaryButtonDp,
-                        iconSizeDp = metrics.circleIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                }
-                LiveControlPlayPause(
-                    isPlaying = isPlaying,
-                    onClick = onPlayPause,
-                    focusRequester = primaryFocus,
-                    sizeDp = metrics.centerButtonDp,
-                    iconSizeDp = metrics.circleIconDp,
-                    captionSizeSp = metrics.captionSizeSp,
-                )
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    LiveControlCircleIcon(
-                        icon = Icons.Rounded.SkipNext,
-                        caption = "القناة التالية",
-                        onClick = onNext,
-                        sizeDp = metrics.secondaryButtonDp,
-                        iconSizeDp = metrics.circleIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                    LiveControlUtility(
-                        icon = Icons.Rounded.History,
-                        caption = "آخر قناة",
-                        onClick = onLastChannel,
-                        enabled = lastChannelEnabled,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                    LiveControlUtility(
-                        icon = Icons.Rounded.MoreHoriz,
-                        caption = "المزيد",
-                        onClick = onMore,
-                        enabled = true,
-                        selected = moreOpen,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                        focusRequester = moreTriggerFocus,
-                    )
-                }
-            }
-        } else {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    LiveControlCircleIcon(
-                        icon = Icons.Rounded.SkipPrevious,
-                        caption = "القناة السابقة",
-                        onClick = onPrevious,
-                        sizeDp = metrics.secondaryButtonDp,
-                        iconSizeDp = metrics.circleIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        LiveControlUtility(
+                            icon = Icons.AutoMirrored.Rounded.List,
+                            caption = "القنوات",
+                            onClick = onChannels,
+                            enabled = true,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlSeparator()
+                        LiveControlUtility(
+                            icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                            caption = "المفضلة",
+                            onClick = onFavorite,
+                            enabled = favoriteEnabled,
+                            selected = favorite,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlSeparator()
+                        LiveControlCircleIcon(
+                            icon = Icons.Rounded.SkipPrevious,
+                            caption = "القناة السابقة",
+                            onClick = onPrevious,
+                            sizeDp = metrics.secondaryButtonDp,
+                            iconSizeDp = metrics.circleIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlSeparator()
+                    }
                     LiveControlPlayPause(
                         isPlaying = isPlaying,
                         onClick = onPlayPause,
@@ -1985,60 +1955,139 @@ private fun LivePlayerControls(
                         iconSizeDp = metrics.circleIconDp,
                         captionSizeSp = metrics.captionSizeSp,
                     )
-                    LiveControlCircleIcon(
-                        icon = Icons.Rounded.SkipNext,
-                        caption = "القناة التالية",
-                        onClick = onNext,
-                        sizeDp = metrics.secondaryButtonDp,
-                        iconSizeDp = metrics.circleIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        LiveControlSeparator()
+                        LiveControlCircleIcon(
+                            icon = Icons.Rounded.SkipNext,
+                            caption = "القناة التالية",
+                            onClick = onNext,
+                            sizeDp = metrics.secondaryButtonDp,
+                            iconSizeDp = metrics.circleIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlSeparator()
+                        LiveControlUtility(
+                            icon = Icons.Rounded.History,
+                            caption = "آخر قناة",
+                            onClick = onLastChannel,
+                            enabled = lastChannelEnabled,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlSeparator()
+                        LiveControlUtility(
+                            icon = Icons.Rounded.MoreHoriz,
+                            caption = "المزيد",
+                            onClick = onMore,
+                            enabled = true,
+                            selected = moreOpen,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                            focusRequester = moreTriggerFocus,
+                        )
+                    }
                 }
-                Spacer(Modifier.height(metrics.itemSpacingDp.dp))
-                Row(
+            } else {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Bottom,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    LiveControlUtility(
-                        icon = Icons.AutoMirrored.Rounded.List,
-                        caption = "القنوات",
-                        onClick = onChannels,
-                        enabled = true,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        LiveControlCircleIcon(
+                            icon = Icons.Rounded.SkipPrevious,
+                            caption = "القناة السابقة",
+                            onClick = onPrevious,
+                            sizeDp = metrics.secondaryButtonDp,
+                            iconSizeDp = metrics.circleIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlPlayPause(
+                            isPlaying = isPlaying,
+                            onClick = onPlayPause,
+                            focusRequester = primaryFocus,
+                            sizeDp = metrics.centerButtonDp,
+                            iconSizeDp = metrics.circleIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlCircleIcon(
+                            icon = Icons.Rounded.SkipNext,
+                            caption = "القناة التالية",
+                            onClick = onNext,
+                            sizeDp = metrics.secondaryButtonDp,
+                            iconSizeDp = metrics.circleIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                    }
+                    Spacer(Modifier.height(metrics.itemSpacingDp.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = .08f)),
                     )
-                    LiveControlUtility(
-                        icon = if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                        caption = "المفضلة",
-                        onClick = onFavorite,
-                        enabled = favoriteEnabled,
-                        selected = favorite,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                    LiveControlUtility(
-                        icon = Icons.Rounded.History,
-                        caption = "آخر قناة",
-                        onClick = onLastChannel,
-                        enabled = lastChannelEnabled,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                    )
-                    LiveControlUtility(
-                        icon = Icons.Rounded.MoreHoriz,
-                        caption = "المزيد",
-                        onClick = onMore,
-                        enabled = true,
-                        selected = moreOpen,
-                        iconSizeDp = metrics.utilityIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                        focusRequester = moreTriggerFocus,
-                    )
+                    Spacer(Modifier.height(metrics.itemSpacingDp.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        LiveControlUtility(
+                            icon = Icons.AutoMirrored.Rounded.List,
+                            caption = "القنوات",
+                            onClick = onChannels,
+                            enabled = true,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlUtility(
+                            icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                            caption = "المفضلة",
+                            onClick = onFavorite,
+                            enabled = favoriteEnabled,
+                            selected = favorite,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlUtility(
+                            icon = Icons.Rounded.History,
+                            caption = "آخر قناة",
+                            onClick = onLastChannel,
+                            enabled = lastChannelEnabled,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                        )
+                        LiveControlUtility(
+                            icon = Icons.Rounded.MoreHoriz,
+                            caption = "المزيد",
+                            onClick = onMore,
+                            enabled = true,
+                            selected = moreOpen,
+                            iconSizeDp = metrics.utilityIconDp,
+                            captionSizeSp = metrics.captionSizeSp,
+                            focusRequester = moreTriggerFocus,
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun LiveControlSeparator() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(34.dp)
+            .background(Color.White.copy(alpha = .08f)),
+    )
 }
 
 @Composable

@@ -440,6 +440,7 @@ fun HulkTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
+    leadingIcon: ImageVector? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -466,9 +467,20 @@ fun HulkTextField(
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         decorationBox = { innerField ->
-            Box(contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) Text(label, color = colors.textMuted, fontSize = 14.sp)
-                innerField()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) Text(label, color = colors.textMuted, fontSize = 14.sp)
+                    innerField()
+                }
+                leadingIcon?.let { icon ->
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         },
     )
@@ -980,15 +992,32 @@ fun ChannelListItem(
     var focused by remember { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
-    val active = showFocused || selected
     val shape = RoundedCornerShape(11.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(64.dp)
             .clip(shape)
-            .background(if (active) colors.gold.copy(alpha = .14f) else Color.Transparent)
-            .border(if (showFocused) 2.dp else 0.dp, if (showFocused) colors.goldBright else Color.Transparent, shape)
+            .background(
+                when {
+                    showFocused -> colors.gold.copy(alpha = .16f)
+                    selected -> colors.gold.copy(alpha = .10f)
+                    else -> Color(0xFF14150F)
+                },
+            )
+            .border(
+                width = when {
+                    showFocused -> 2.dp
+                    selected -> 1.dp
+                    else -> 1.dp
+                },
+                color = when {
+                    showFocused -> colors.goldBright
+                    selected -> colors.gold.copy(alpha = .50f)
+                    else -> Color.White.copy(alpha = .08f)
+                },
+                shape = shape,
+            )
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -1023,19 +1052,27 @@ fun ChannelListItem(
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         ChannelLogo(item, Modifier.size(48.dp))
-        Column(Modifier.weight(1f)) {
-            Text(item.name, color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("● بث مباشر", color = if (active) colors.goldBright else colors.textMuted, fontSize = 10.sp)
-        }
+        Text(
+            text = item.name,
+            color = colors.text,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
                 contentDescription = null,
-                tint = if (isFavorite) colors.gold else colors.textMuted,
+                tint = when {
+                    isFavorite -> colors.gold
+                    showFocused -> colors.goldBright
+                    else -> colors.textMuted
+                },
                 modifier = Modifier.size(17.dp),
             )
         }
-        Text("▶", color = if (active) colors.goldBright else colors.textMuted, fontSize = 14.sp)
     }
 }
 
