@@ -1,6 +1,28 @@
 # HULK SA Android — Official Project Plan and Handoff
 
-This file is the permanent source of truth for every new ChatGPT conversation and every future development session.
+This file preserves product direction and historical engineering handoffs. Current owner instructions and live repository contracts govern each development session.
+
+## Execution-scope clarification — 2026-10-02
+
+This plan preserves product direction and historical phase records. Current owner instructions,
+root `AGENTS.md`, applicable overrides and live subsystem/physical contracts govern execution.
+Old versions, pending-PR labels and next-stage lists below are checkpoint history, not live facts
+or instructions to repeat completed work; verify the current source and GitHub state.
+
+OpenCode / DeepSeek is the normal executor. An owner-authorized Implementation/Correction round
+follows the standing root AGENTS workflow through bounded source edits, relevant checks, applicable
+build/state-preserving device refresh, coherent commit, normal push, one PR and final CI results,
+unless the owner explicitly narrows it. Read-only tasks have no mutation authority; work involving
+documentation only requires no Android build/install. Merge, signing, tags, release and deployment
+remain separate protected decisions. Versioned delivery/tag requirements below concern separately
+approved releases, not every engineering correction.
+
+Explicitly read `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md` for the adopted English
+packet method and `TASK-EXECUTION-CONTRACT.md` in the same directory for execution. Captures,
+recordings, screenshot comparison and visual journeys are OFF without current task authorization.
+Full visual/device/release qualification gates remain unproven until their actual authorized
+evidence exists; they are not permission to start a routine capture journey. Technical completion
+and owner visual acceptance are separate.
 
 ## Core rule
 
@@ -37,7 +59,7 @@ This file is the permanent source of truth for every new ChatGPT conversation an
 
 The first major feature after v1.0 is Multi Profile.
 
-## Current verified source facts
+## Historical verified source facts — Phases 0–3 checkpoint
 
 - package/applicationId: `sa.hulksa.player`
 - Debug applicationId: `sa.hulksa.player.dev`
@@ -54,7 +76,7 @@ The first major feature after v1.0 is Multi Profile.
 - Kotlin: `2.2.21`
 - Source audit found 23 Kotlin files, 7 XML files, and 41 total files before Phase 3 adaptive additions.
 
-## Current GitHub state
+## Historical GitHub state — Phases 0–3 checkpoint
 
 Repository: `azoozrm/-HULK-SA-Android`
 
@@ -206,7 +228,7 @@ Produced SHA256 values:
 - Android App Bundle: `2f332575459de6c2c2bd9c86a1edf48b9689d9c2a0a403591bda965d3be90cd3`
 - Prepared source ZIP: `bdc59199d13103be41e07d103612b8186f3e6023281b9ad5db013f3dc35a96aa`
 
-## Next engineering stage
+## Historical next engineering stage — Phase 3 checkpoint
 
 First complete manual Phase 3 acceptance on:
 
@@ -249,4 +271,4 @@ A version is not approved merely because an APK was produced. It must have no kn
 
 ## Instruction for a new conversation
 
-Read this file first, inspect the latest commits, workflows, runs, jobs, and logs in the repository, then continue from the current GitHub state. Do not ask the user to re-explain the project, do not restart from scratch, and do not use an APK as the development source.
+Read root `AGENTS.md` and applicable overrides first, then relevant plan/contracts. Inspect the latest commits, workflows, runs, jobs, and logs, and continue from the verified current GitHub state. Do not ask the user to re-explain the project, do not restart from scratch, and do not use an APK as the development source.

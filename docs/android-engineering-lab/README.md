@@ -99,6 +99,14 @@ Substantive authorized Implementation/Correction tasks also follow
 `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`; the task packet supplies scope and live
 fields, and subsystem/physical contracts still govern their areas.
 
+Explicitly read the adopted packet method at
+`docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md` before drafting or executing these tasks;
+a referenced filename is not automatic instruction loading. Follow the standing implementation
+workflow in root `AGENTS.md` through relevant checks, applicable build/refresh, normal commit/push,
+one PR and final CI results unless the current owner scope narrows it. Captures and visual journeys
+remain OFF without current task authorization. This requires no OpenCode `/init`, provider/model
+change or configuration rewrite.
+
 ## 6. Resource policy
 
 The VPS is intentionally serialized.

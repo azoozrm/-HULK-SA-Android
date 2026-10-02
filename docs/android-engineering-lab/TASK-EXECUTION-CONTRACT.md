@@ -10,7 +10,8 @@ Normative execution chain:
 live verification → ownership/evidence → bounded scope → implementation → complete diff review →
 focused validation → build/provenance when applicable → physical qualification when applicable →
 bounded runtime verification when applicable → capture only when explicitly authorized →
-final source freeze → durable evidence → PR/report → evidence-based verdict.
+final source freeze → durable evidence → authorized commit/push/PR → configured CI conclusion →
+final report → evidence-based verdict.
 
 This contract owns execution flow only and grants no authority. Root `AGENTS.md`, any applicable
 `AGENTS.override.md`, and the active task packet remain authoritative and are read first.
@@ -21,8 +22,10 @@ This contract owns execution flow only and grants no authority. Root `AGENTS.md`
   behavior, tests, tooling, lab automation, and repository governance.
 - Audit, Review and Diagnosis remain read-only unless the active packet explicitly authorizes write
   actions.
-- Only the active task packet, root `AGENTS.md` and any applicable `AGENTS.override.md` define
-  authority. No contract, skill, helper, model, agent, or past chat may widen it.
+- Current owner instructions, the active task packet, root `AGENTS.md` and any applicable
+  `AGENTS.override.md` define authority. Follow the standing owner-authorized implementation
+  workflow in root `AGENTS.md` unless the current owner instruction explicitly narrows it.
+  No contract, skill, helper, model, agent, or past chat may widen it.
 - The contract binds the work, not the worker. Every executor — any vendor, model, agent or human —
   follows the same chain, evidence and verdict rules.
 - Model capability, reasoning variant, agent name and vendor never expand scope, authority or risk.
@@ -50,7 +53,14 @@ chat context. The packet states, as applicable:
 - secret-handling constraints.
 
 If the packet lacks fields required to execute safely, the executor does not guess. It records what
-is missing and returns `BLOCKED` (owner decision needed) or `STOP` (contract/live-state conflict).
+is missing. First resolve routine discoverable facts by safe live inspection; do not ask the owner
+to supply facts already accessible on GitHub/VPS/devices. Return `BLOCKED` for a missing owner
+decision or external dependency, or `STOP` for a contract/live-state conflict.
+
+Read `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md` explicitly for the adopted English
+packet method, NEW/RESUME continuity, exact task delta, preservation and completion fields. It does
+not replace this execution contract or add permission. Historical examples that deferred tests or
+Git actions are not standing deferrals for a new task.
 
 ## 3. Live verification before mutation
 
@@ -145,6 +155,9 @@ When a build applies:
 - record artifact SHA-256, package, version identity and signer evidence where applicable;
 - a dirty iteration build is not exact-HEAD evidence;
 - final evidence binds to the immutable final source revision;
+- if a final commit is made after the build, retain the build only when recorded tree/input hashes
+  prove its exact build inputs match that final revision. Keep the original dirty-build attribution;
+  a later commit never retroactively makes it a clean-HEAD build. Rebuild when affected inputs differ;
 - never present debug, benchmark or lab artifacts as production release artifacts.
 
 ## 10. Physical qualification
@@ -177,6 +190,10 @@ bounded to the active task, its capture policy, and the live physical contracts:
 5. verify launch, crash-free operation and the behavior signals available without screen capture;
 6. leave visual review to the owner on the actual devices.
 
+Do not add a full screen/device census or visual journey to a bounded correction. The task's
+approved state matrix selects runtime coverage; an unavailable mandatory surface remains BLOCKED
+or NOT RUN. Work involving documentation only has no Android build/refresh obligation.
+
 Capture policy (default OFF):
 
 - Screenshots, screen recordings, transition-frame capture, frame extraction, montage generation
@@ -186,7 +203,8 @@ Capture policy (default OFF):
   the existence of capture tools.
 - Without capture authorization, do not run the capture → open images → compare → fix → rebuild →
   recapture loop, and do not block a routine task solely because captures are missing.
-- Report automated visual validation as `NOT RUN — OWNER REVIEW PENDING`; attribute owner
+- Report automated visual validation as `NOT RUN — CAPTURE NOT AUTHORIZED`. Record owner visual
+  review separately as PENDING, ACCEPTED or REJECTED for the exact candidate/scope; attribute
   acceptance only after the owner actually confirms it.
 - When capture is explicitly authorized, a capture file existing is not proof of inspection, and
   captures are compared against the approved specification before any visual claim.
@@ -201,8 +219,8 @@ new baseline becomes accepted.
 - Any later source edit invalidates the affected evidence; the affected evidence must be
   regenerated or re-validated on the new revision before any completion claim.
 - Recapture is required only when the task's capture policy is ON. When capture policy is OFF,
-  earlier captures are not refreshed automatically and owner visual review remains
-  `NOT RUN — OWNER REVIEW PENDING` for the new revision.
+  earlier captures are not refreshed automatically. Owner visual review is PENDING for a new
+  candidate until an actual owner decision; a decision on an older candidate is not copied forward.
 - Evidence is valid only for the exact immutable revision and dirty state recorded with it.
 - Do not mix artifacts, captures or build results from different revisions in one evidence set.
 - The final diff reviewed for completion is the frozen revision's diff.
@@ -246,8 +264,17 @@ private account data may appear in any packet, log, capture or PR text.
 
 - Technical completion means: the frozen diff is reviewed, required validation ran, required
   physical/technical evidence exists, the durable packet is written, and the authorized branch/PR
-  is updated. Owner visual acceptance is not a condition of technical completion; when captures
-  were not authorized it stays separately reported as `NOT RUN — OWNER REVIEW PENDING`.
+  is updated with final configured CI results. Owner visual acceptance is not a condition of
+  technical completion; report it separately without treating missing unauthorized captures as
+  a technical blocker.
+- Unless the current owner scope narrows Git actions, finish the standing implementation workflow:
+  one coherent commit per correction round, normal fast-forward push and one PR create/update.
+  Do not commit while applicable task Actions are queued/running. A push, pending CI or failed
+  mandatory check is not completion. Inspect failed logs/artifacts, identify the first causal
+  failure and correct only an in-scope defect in the same task/PR; continue until final checks or
+  a real BLOCKED/STOP condition. Do not bypass checks, fix unrelated failures or rewrite history.
+- If path filters do not trigger CI, report CI as NOT RUN with that reason and record the relevant
+  local checks. Do not start Android builds or rerun successful workflows merely for a docs-only PR.
 - The PR/report is the boundary. Merge, signing, tag, release, production deployment and device data
   changes are separate protected operations requiring explicit owner authorization.
 - A completed task is not a merge recommendation and does not imply production readiness.
@@ -261,8 +288,8 @@ Use exactly one final verdict:
 
 - `PASS` — all mandatory technical criteria have evidence and pass on the frozen revision; the
   PR/report is review-ready. `PASS` is technical completion and is not owner visual acceptance,
-  universal device coverage, or production readiness; pending owner visual review is reported
-  separately as `NOT RUN — OWNER REVIEW PENDING`.
+  universal device coverage, or production readiness; owner visual review is reported separately
+  as PENDING, ACCEPTED or REJECTED for the reviewed candidate/scope.
 - `FAIL` — the task executed, but a mandatory criterion failed or the diff is incorrect; correction
   is required.
 - `BLOCKED` — execution cannot proceed or complete because of an external dependency or owner

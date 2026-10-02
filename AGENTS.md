@@ -16,6 +16,10 @@ Audit / Review / Diagnosis is read-only. Do not modify files, create branches, c
 
 No merge, signing, tag, or release without explicit user authorization.
 
+Standing owner-authorized Implementation/Correction workflow: complete the bounded source change, relevant focused checks and affected regressions, applicable builds and state-preserving installation/launch verification on approved surfaces, durable evidence, one coherent commit per correction round, normal fast-forward push, and creation/update of one PR. Continue through the configured CI checks to their final result; do not stop at a push, pending CI, or an in-scope failure. The current owner instruction may explicitly narrow this workflow or defer a step. Read-only tasks do not inherit write authority, and documentation-only work does not require Android builds or device refresh.
+
+ChatGPT / Sol prepares and independently reviews the task packet; OpenCode / DeepSeek is the normal executor. Routine execution does not require Codex/Astra or a new approval at each authorized step. Owner visual acceptance and protected actions remain separate.
+
 Prefer boring, explicit, deterministic, existing-pattern, production-safe code over clever, generic, speculative, or over-engineered code.
 
 ## 2. Applicable instructions and live truth
@@ -171,6 +175,7 @@ In particular:
 - HULK Operations, when in scope: `hosting/hulk-operations/README.md`
 - Android Engineering Lab, for lab/runtime/maintenance work: `docs/android-engineering-lab/README.md`
 - Task execution contract, for substantive authorized Implementation/Correction tasks: `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`
+- Adopted DeepSeek task-packet method, read explicitly before drafting or executing substantive Implementation/Correction packets: `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md`
 
 Substantive authorized Implementation/Correction tasks follow `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`. The active task packet supplies scope and live fields; applicable repository, subsystem and physical contracts still govern.
 
@@ -198,7 +203,7 @@ For a workflow failure:
 
 CI/emulator success does not replace physical validation for device-specific behavior, TV focus, player behavior, or UI issues that require real hardware evidence.
 
-Screen capture is OFF by default. Screenshots, screen recordings, transition-frame capture, frame extraction, montage generation and screenshot comparison require explicit owner authorization for the current task; never infer it from a UI change, ADB access, device installation or the existence of capture tools. ADB may be used for authorized installation, launch checks, diagnostics and relevant runtime verification, but ADB access neither authorizes nor obligates screen capture. Without capture authorization, do not run the capture/open/compare/rebuild loop and do not block a routine task solely because captures are missing; report automated visual validation as `NOT RUN — OWNER REVIEW PENDING` and attribute owner acceptance only after the owner confirms it. The capture policy and the bounded runtime-verification rules in `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md` section 11 govern.
+Screen capture is OFF by default. Screenshots, screen recordings, transition-frame capture, frame extraction, montage generation and screenshot comparison require explicit owner authorization for the current task; never infer it from a UI change, ADB access, device installation or the existence of capture tools. ADB may be used for authorized installation, launch checks, diagnostics and relevant runtime verification, but ADB access neither authorizes nor obligates screen capture. Without capture authorization, do not run the capture/open/compare/rebuild loop and do not block a routine task solely because captures are missing; report automated visual validation as `NOT RUN — CAPTURE NOT AUTHORIZED` and record owner review separately: default PENDING until reviewed; ACCEPTED or REJECTED requires an actual owner decision for the exact candidate/scope. The capture policy and the bounded runtime-verification rules in `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md` section 11 govern.
 
 ## 11. Subagents and mid-task steering
 
@@ -235,6 +240,8 @@ Before commit:
 - verify unrelated changes are excluded.
 
 Use one coherent commit per authorized correction round. Do not create experimental or diagnostic commits.
+
+Do not commit while the current task's applicable GitHub Actions checks are queued or running. Inspect their final result first. Repair an in-scope CI defect in the same task/PR after identifying its cause; do not bypass a failed check, widen scope to unrelated failures, or rerun a successful workflow without reason. Missing CI due to path filters is NOT RUN with a reason, never PASS.
 
 Before push:
 

@@ -7,7 +7,10 @@ description: Use during HULK SA Android visual implementation and before claimin
 
 This skill grants no authority. Read the applicable live AGENTS.md,
 AGENTS.override.md, engineering-lab README, physical-instance contract,
-subsystem contracts, and the current task packet. They govern execution.
+TASK-EXECUTION-CONTRACT.md, DEEPSEEK-PROMPT-CONTRACT.md, subsystem contracts,
+and the current task packet. Read referenced contracts explicitly from
+`docs/android-engineering-lab/`; a filename does not load its contents.
+They govern execution.
 
 ## Start
 1. Verify all task live fields, task worktree, branch, base HEAD, overlapping
@@ -47,8 +50,9 @@ authorization.
 Without capture authorization:
 - do not run the capture → open images → compare → fix → rebuild → recapture loop;
 - do not block a routine task only because captures are missing;
-- report automated visual validation as `NOT RUN — OWNER REVIEW PENDING`;
-- leave visual review to the owner on the actual devices.
+- report automated visual validation as `NOT RUN — CAPTURE NOT AUTHORIZED`;
+- leave visual review to the owner on the actual devices; record PENDING,
+  ACCEPTED or REJECTED separately for the exact candidate/scope.
 
 When capture is explicitly authorized, for every required screen/state:
 - perform the recorded interaction;
@@ -58,6 +62,8 @@ When capture is explicitly authorized, for every required screen/state:
 - record specific visible findings;
 - fix in-scope defects and repeat build/refresh/capture/inspection.
 
+For states selected by the task, review the applicable source and authorized
+runtime evidence. Capture-based inspection applies only when capture is ON.
 Check composition, hierarchy, spacing, typography, artwork, control placement,
 categories, focus, selected-versus-focused, RTL, long Arabic/Latin/mixed text,
 clipping, safe edges, loading, empty, error, missing artwork, Back/return,
@@ -73,17 +79,24 @@ criterion/state ID; source SHA; APK SHA-256; package/variant; device/window;
 locale/font scale; interaction; result; reviewer; timestamp. Capture path and
 SHA-256 plus image-open record apply only to captures the owner explicitly
 authorized; otherwise record automated visual validation as
-`NOT RUN — OWNER REVIEW PENDING`.
+`NOT RUN — CAPTURE NOT AUTHORIZED`.
 Protect credentials and owner-private data.
 
 ## Finish
 Re-read the task packet. Recheck remote HEAD and the final complete diff.
 Every mandatory criterion must have evidence.
 Missing captures alone do not block a routine task whose capture policy is OFF;
-report its owner visual review separately as `NOT RUN — OWNER REVIEW PENDING`.
+report its owner visual review separately: default PENDING until reviewed;
+ACCEPTED or REJECTED requires an actual owner decision for the exact candidate/scope.
 Under an authorized capture policy, missing required capture states remain
 BLOCKED or NOT RUN.
 Report PASS only when all mandatory technical criteria pass; PASS is technical
 completion, not owner visual acceptance or universal device coverage.
 Otherwise report FAIL, BLOCKED, or STOP with the exact reason.
 Never declare merge, release, or production readiness from this skill.
+For an authorized implementation round, complete the standing root AGENTS.md
+workflow through the coherent commit, normal push, same PR and final configured
+CI results unless the current owner scope narrows those actions. A push or
+pending/failed CI is not technical completion. Diagnose and fix an in-scope
+failure without bypassing checks or expanding scope; honor real blockers and
+STOP conditions. Report owner visual acceptance separately.
