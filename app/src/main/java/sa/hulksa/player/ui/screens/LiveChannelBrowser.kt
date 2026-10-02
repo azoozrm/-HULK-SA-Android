@@ -52,6 +52,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -257,7 +258,7 @@ internal fun LiveChannelBrowser(
     }
     val selectedCategoryTitle = when {
         normalizedQuery.isNotBlank() -> "نتائج البحث"
-        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "استكمال اخر مشاهدة"
+        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "اخر مشاهدة"
         selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> "القنوات المفضلة"
         selectedCategory == null -> "كل القنوات"
         else -> orderedCategories.firstOrNull { it.id == selectedCategory }?.name ?: "كل القنوات"
@@ -410,7 +411,6 @@ internal fun LiveChannelBrowser(
         var remoteLongPressHandled by remember(channel.id) { mutableStateOf(false) }
         val showFocused = focused && adaptiveUi.showFocusHighlights
         val currentPlaying = selected
-        val active = showFocused || currentPlaying
         val shape = RoundedCornerShape(11.dp)
         Row(
             modifier = rowModifier
@@ -419,8 +419,8 @@ internal fun LiveChannelBrowser(
                 .clip(shape)
                 .background(
                     when {
-                        showFocused -> colors.gold.copy(alpha = .20f)
-                        currentPlaying -> colors.gold.copy(alpha = .10f)
+                        showFocused -> colors.gold
+                        currentPlaying -> colors.gold.copy(alpha = .14f)
                         else -> Color.Transparent
                     },
                 )
@@ -473,33 +473,39 @@ internal fun LiveChannelBrowser(
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             BrowserArtwork(channel.posterUrl, channel.name, Modifier.size(48.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    channel.name,
-                    color = colors.text,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = if (currentPlaying) "● تشاهد الآن" else "● بث مباشر",
-                    color = if (active) colors.goldBright else colors.textMuted,
-                    fontSize = 10.sp,
-                )
-            }
+            Text(
+                text = channel.name,
+                color = if (showFocused) Color.Black else colors.text,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             if (currentPlaying) {
-                Text(
-                    "الآن",
-                    color = colors.goldBright,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "تشاهد الان",
+                        color = if (showFocused) Color.Black else colors.goldBright,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "▶",
+                        color = if (showFocused) Color.Black else colors.goldBright,
+                        fontSize = 12.sp,
+                    )
+                }
             }
             if (favorite) {
-                Text("★", color = colors.goldBright, fontSize = 16.sp)
+                Text(
+                    text = "★",
+                    color = if (showFocused) Color.Black else colors.goldBright,
+                    fontSize = 16.sp,
+                )
             }
-            Text("▶", color = if (active) colors.goldBright else colors.textMuted, fontSize = 14.sp)
         }
     }
 
@@ -629,14 +635,7 @@ internal fun LiveChannelBrowser(
 
     @Composable
     fun CategoryPane(paneModifier: Modifier) {
-        val paneShape = RoundedCornerShape(if (tvLayout) 16.dp else 15.dp)
-        Column(
-            modifier = paneModifier
-                .clip(paneShape)
-                .background(if (tvLayout) Color(0xF20B0C09) else Color(0xF60D0E0B))
-                .border(1.dp, Color.White.copy(alpha = .12f), paneShape)
-                .padding(if (tvLayout) 11.dp else 9.dp),
-        ) {
+        Column(modifier = paneModifier) {
             Text(
                 "الفئات",
                 color = colors.text,
@@ -670,7 +669,7 @@ internal fun LiveChannelBrowser(
                 }
                 item("continue") {
                     FocusButton(
-                        text = "▶ استكمال اخر مشاهدة (${recentChannels.size})",
+                        text = "اخر مشاهدة",
                         onClick = { selectCategory(LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY) },
                         modifier = Modifier.fillMaxWidth().focusRequester(recentCategoryFocus),
                         primary = selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY && searchQuery.isBlank(),
@@ -683,123 +682,110 @@ internal fun LiveChannelBrowser(
                 }
             }
             Spacer(Modifier.height(7.dp))
-            Box(
+            Text(
+                text = if (movingCategoryId != null) {
+                    if (tvLayout) {
+                        "وضع الترتيب : حرك الفئة ↑ ↓ ثم اضغط OK للحفظ"
+                    } else {
+                        "وضع الترتيب : اسحب الفئة ↑ ↓ ثم اضغط عليها للحفظ"
+                    }
+                } else {
+                    if (tvLayout) {
+                        "ترتيب الفئات : اضغط OK مطولا على الفئة، ثم حرك ↑ ↓ واضغط OK للحفظ"
+                    } else {
+                        "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها ↑ ↓"
+                    }
+                },
+                color = if (movingCategoryId != null) colors.goldBright else colors.textMuted,
+                fontSize = hintFontSize,
+                lineHeight = hintLineHeight,
+                fontWeight = if (movingCategoryId != null) FontWeight.Bold else FontWeight.Medium,
+            )
+        }
+    }
+
+    @Composable
+    fun BrowserHeader() {
+        Box(Modifier.fillMaxWidth()) {
+            Column(
                 modifier = Modifier
+                    .align(Alignment.Center)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color.White.copy(alpha = .055f))
-                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                    .padding(horizontal = if (tvLayout) 96.dp else 72.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = if (movingCategoryId != null) {
-                        if (tvLayout) {
-                            "وضع الترتيب : حرك الفئة ↑ ↓ ثم اضغط OK للحفظ"
-                        } else {
-                            "وضع الترتيب : اسحب الفئة ↑ ↓ ثم اضغط عليها للحفظ"
-                        }
-                    } else {
-                        if (tvLayout) {
-                            "ترتيب الفئات : اضغط OK مطولا على الفئة، ثم حرك ↑ ↓ واضغط OK للحفظ"
-                        } else {
-                            "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها ↑ ↓"
-                        }
-                    },
-                    color = if (movingCategoryId != null) colors.goldBright else colors.textMuted,
-                    fontSize = hintFontSize,
-                    lineHeight = hintLineHeight,
-                    fontWeight = if (movingCategoryId != null) FontWeight.Bold else FontWeight.Medium,
+                    copy.title,
+                    color = colors.text,
+                    fontSize = if (tvLayout) 21.sp else 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    copy.description,
+                    color = colors.textMuted,
+                    fontSize = if (tvLayout) 10.sp else 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                 )
             }
+            FocusButton(
+                "اغلاق",
+                onClose,
+                primary = false,
+                compact = true,
+                modifier = Modifier.align(Alignment.CenterStart),
+            )
         }
     }
 
     @Composable
     fun ChannelPane(paneModifier: Modifier) {
-        val paneShape = RoundedCornerShape(if (tvLayout) 16.dp else 15.dp)
-        Column(
-            modifier = paneModifier
-                .clip(paneShape)
-                .background(if (tvLayout) Color(0xF011120E) else Color(0xF612130F))
-                .border(1.dp, Color.White.copy(alpha = .11f), paneShape)
-                .padding(if (tvLayout) 13.dp else 10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        copy.title,
-                        color = colors.text,
-                        fontSize = if (tvLayout) 21.sp else 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        copy.description,
-                        color = colors.textMuted,
-                        fontSize = if (tvLayout) 10.sp else 9.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                FocusButton("اغلاق", onClose, primary = false, compact = true)
-            }
-
-            Spacer(Modifier.height(7.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color.White.copy(alpha = .055f))
-                    .padding(horizontal = 9.dp, vertical = 7.dp),
+        Column(modifier = paneModifier) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     selectedCategoryTitle,
                     color = colors.text,
-                    fontSize = if (tvLayout) 15.sp else 13.sp,
+                    fontSize = if (tvLayout) 16.sp else 14.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
                 Text(
-                    buildString {
-                        append("${visible.size} قناة")
-                        current?.let { append("  •  تشاهد الان : ${it.name}") }
-                    },
-                    color = if (current != null) colors.goldBright else colors.textMuted,
-                    fontSize = if (tvLayout) 10.sp else 9.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Spacer(Modifier.height(7.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color.White.copy(alpha = .055f))
-                    .padding(horizontal = 9.dp, vertical = 7.dp),
-            ) {
-                Text(
-                    text = if (tvLayout) {
-                        "تفضيل القناة : اضغط OK مطولا على القناة"
-                    } else {
-                        "تفضيل القناة : اضغط مطولا على القناة"
-                    },
+                    text = "${visible.size} قناة",
                     color = colors.textMuted,
-                    fontSize = hintFontSize,
-                    lineHeight = hintLineHeight,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = if (tvLayout) 11.sp else 10.sp,
+                    maxLines = 1,
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(7.dp))
             HulkTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                label = "بحث سريع عن قناة",
+                label = "بحث عن قناة",
                 modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
             )
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = if (tvLayout) {
+                    "تفضيل القناة : اضغط OK مطولا على القناة"
+                } else {
+                    "تفضيل القناة : اضغط مطولا على القناة"
+                },
+                color = colors.textMuted,
+                fontSize = hintFontSize,
+                lineHeight = hintLineHeight,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(8.dp))
 
             when {
                 catalog == null -> LoadingRing(
@@ -809,7 +795,7 @@ internal fun LiveChannelBrowser(
                 visible.isEmpty() -> Text(
                     when {
                         normalizedQuery.isNotBlank() -> "لا توجد قناة مطابقة للبحث"
-                        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "لا توجد قنوات في استكمال اخر مشاهدة"
+                        selectedCategory == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY -> "لا توجد قنوات في اخر مشاهدة"
                         selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY -> "لا توجد قنوات مفضلة"
                         else -> "لا توجد قنوات في هذه الفئة"
                     },
@@ -873,35 +859,54 @@ internal fun LiveChannelBrowser(
                         .fillMaxHeight(.96f)
                         .clip(shellShape)
                         .background(Brush.verticalGradient(listOf(Color(0xFA080907), Color(0xF814150F))))
-                        .border(1.dp, colors.gold.copy(alpha = .30f), shellShape)
+                        .border(1.dp, colors.gold.copy(alpha = .42f), shellShape)
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    BrowserHeader()
                     CategoryPane(
                         Modifier
                             .fillMaxWidth()
                             .height((adaptiveUi.screenHeightDp * .31f).coerceIn(190f, 255f).dp),
                     )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = .12f)),
+                    )
                     ChannelPane(Modifier.fillMaxWidth().weight(1f))
                 }
             } else {
-                Row(
+                Column(
                     modifier = Modifier
-                        .align(if (tvLayout) Alignment.CenterEnd else Alignment.Center)
-                        .fillMaxHeight(if (tvLayout) 1f else .90f)
+                        .align(Alignment.Center)
+                        .fillMaxHeight(if (tvLayout) .94f else .90f)
                         .fillMaxWidth(if (tvLayout) .82f else .94f)
                         .clip(shellShape)
                         .background(Brush.horizontalGradient(listOf(Color(0xFA080907), Color(0xF814150F))))
-                        .border(1.dp, colors.gold.copy(alpha = .30f), shellShape)
+                        .border(1.dp, colors.gold.copy(alpha = .42f), shellShape)
                         .padding(if (tvLayout) 14.dp else 11.dp),
-                    horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 13.dp else 10.dp),
                 ) {
-                    ChannelPane(Modifier.weight(1f).fillMaxHeight())
-                    CategoryPane(
-                        Modifier
-                            .width(if (tvLayout) 246.dp else 210.dp)
-                            .fillMaxHeight(),
-                    )
+                    BrowserHeader()
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(if (tvLayout) 13.dp else 10.dp),
+                    ) {
+                        ChannelPane(Modifier.weight(1f).fillMaxHeight())
+                        Box(
+                            Modifier
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(Color.White.copy(alpha = .12f)),
+                        )
+                        CategoryPane(
+                            Modifier
+                                .width(if (tvLayout) 246.dp else 210.dp)
+                                .fillMaxHeight(),
+                        )
+                    }
                 }
             }
         }

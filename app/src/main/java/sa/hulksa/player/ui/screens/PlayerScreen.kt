@@ -19,6 +19,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +50,25 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SettingsInputAntenna
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -72,6 +92,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -79,6 +100,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -128,6 +152,7 @@ import sa.hulksa.player.ui.components.BrandBadge
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
@@ -242,6 +267,7 @@ fun PlayerScreen(
     isFavorite: (ContentItem) -> Boolean,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
+    onLastChannel: (() -> Unit)? = null,
     onBack: () -> Unit,
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
     nextEpisodeTitle: String? = null,
@@ -304,6 +330,9 @@ fun PlayerScreen(
     var browserVisible by remember(request) { mutableStateOf(false) }
     var browserOrigin by remember(request) { mutableStateOf(LiveChannelBrowserOrigin.NORMAL_LIVE) }
     var activePanel by remember(request) { mutableStateOf<PlayerPanel?>(null) }
+    var liveMorePanel by remember(request) { mutableStateOf<PlayerLiveMorePanelView?>(null) }
+    var liveMoreMenuFocusRow by remember(request) { mutableStateOf(PlayerLiveMoreRow.MUTE) }
+    var moreFocusRestoreTick by remember(request) { mutableIntStateOf(0) }
     var isPlaying by remember(request) { mutableStateOf(false) }
     var isMuted by remember(request) { mutableStateOf(false) }
     var videoHeight by remember(request) { mutableIntStateOf(0) }
@@ -346,6 +375,7 @@ fun PlayerScreen(
     }
     val playerFocus = remember { FocusRequester() }
     val primaryFocus = remember { FocusRequester() }
+    val moreTriggerFocus = remember { FocusRequester() }
     val seekBarFocus = remember { FocusRequester() }
     val resumeFocus = remember { FocusRequester() }
     val unlockFocus = remember { FocusRequester() }
@@ -354,6 +384,25 @@ fun PlayerScreen(
     val errorRetryFocus = remember { FocusRequester() }
     val currentChannel = remember(liveCatalog, request.streamId) {
         liveCatalog?.items?.firstOrNull { it.id == request.streamId }
+    }
+    val liveFavoriteChannel = currentChannel.takeIf { request.isLive }
+    val liveFavoriteControl = livePlayerFavoriteControl(
+        currentChannel = liveFavoriteChannel,
+        isFavorite = liveFavoriteChannel?.let(isFavorite) == true,
+    )
+    val liveControlsLayout = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, tvRemoteInput) {
+        liveControlsLayoutMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            remoteLayout = tvRemoteInput,
+        )
+    }
+    val liveControlMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, tvRemoteInput) {
+        livePlayerControlsMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            remoteLayout = tvRemoteInput,
+        )
     }
     val channelSequence = remember(liveCatalog, currentChannel) {
         val inCategory = currentChannel?.let { current ->
@@ -584,11 +633,38 @@ fun PlayerScreen(
         revealControls()
     }
 
+    fun openLiveMorePanel() {
+        liveMoreMenuFocusRow = PlayerLiveMoreRow.MUTE
+        liveMorePanel = PlayerLiveMorePanelView.MENU
+    }
+
+    fun closeLiveMorePanelToTrigger() {
+        liveMorePanel = null
+        moreFocusRestoreTick += 1
+    }
+
+    fun closeLiveMorePanelForSelection() {
+        liveMorePanel = null
+        revealControls()
+    }
+
+    fun handleLiveMoreBack() {
+        val currentView = liveMorePanel ?: return
+        val nextView = playerLiveMorePanelBack(currentView)
+        if (nextView == null) {
+            closeLiveMorePanelToTrigger()
+        } else {
+            liveMoreMenuFocusRow = playerLiveMorePanelOriginRow(currentView) ?: liveMoreMenuFocusRow
+            liveMorePanel = nextView
+        }
+    }
+
     fun handleBackAction() {
         when {
             browserVisible -> browserVisible = false
             finalError != null -> saveAndBack()
             activePanel != null -> activePanel = null
+            liveMorePanel != null -> handleLiveMoreBack()
             resumePromptVisible -> {
                 resumePromptVisible = false
                 player.seekTo(0L)
@@ -1003,14 +1079,15 @@ fun PlayerScreen(
         isPlaying,
         browserVisible,
         activePanel,
+        liveMorePanel,
         resumePromptVisible,
         controlsLocked,
         manualSeekTargetMs,
     ) {
         if (
             playbackSettings.autoHideControls &&
-            controlsVisible && !browserVisible && activePanel == null && !resumePromptVisible &&
-            !buffering && finalError == null && isPlaying && !controlsLocked &&
+            controlsVisible && !browserVisible && activePanel == null && liveMorePanel == null &&
+            !resumePromptVisible && !buffering && finalError == null && isPlaying && !controlsLocked &&
             manualSeekTargetMs == null
         ) {
             delay(CONTROLS_TIMEOUT_MS)
@@ -1067,6 +1144,12 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(moreFocusRestoreTick) {
+        if (moreFocusRestoreTick == 0) return@LaunchedEffect
+        withFrameNanos { }
+        runCatching { moreTriggerFocus.requestFocus() }
+    }
+
     val errorModalInputActive = finalError != null || suspendedFinalError != null
     val latestOnErrorModalActiveChanged by rememberUpdatedState(onErrorModalActiveChanged)
     DisposableEffect(errorModalInputActive) {
@@ -1080,7 +1163,7 @@ fun PlayerScreen(
         onDispose { latestOnBrowserVisibilityChanged(false) }
     }
 
-    val panelInputActive = activePanel != null
+    val panelInputActive = playerChildPanelInputActive(activePanel != null, liveMorePanel != null)
     val latestOnPanelActiveChanged by rememberUpdatedState(onPanelActiveChanged)
     DisposableEffect(panelInputActive) {
         latestOnPanelActiveChanged(panelInputActive)
@@ -1091,7 +1174,11 @@ fun PlayerScreen(
         .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
                 if (finalError != null) return@detectTapGestures
-                if (controlsLocked) { unlockVisible = true; controlsVisible = true } else controlsVisible = !controlsVisible
+                when {
+                    liveMorePanel != null -> closeLiveMorePanelToTrigger()
+                    controlsLocked -> { unlockVisible = true; controlsVisible = true }
+                    else -> controlsVisible = !controlsVisible
+                }
             })
         }
         .pointerInput(request.isLive, finalError) {
@@ -1137,7 +1224,7 @@ fun PlayerScreen(
                 }
                 if (
                     event.type != KeyEventType.KeyDown || browserVisible || activePanel != null ||
-                    resumePromptVisible || unlockVisible || nextCountdown >= 0
+                    liveMorePanel != null || resumePromptVisible || unlockVisible || nextCountdown >= 0
                 ) {
                     return@onPreviewKeyEvent false
                 }
@@ -1292,24 +1379,29 @@ fun PlayerScreen(
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
-                ModernLiveControls(
+                LivePlayerControls(
                     isPlaying = isPlaying,
-                    isMuted = isMuted,
-                    quality = qualityLabel(videoHeight),
-                    resizeLabel = resizeLabel(resizeModeIndex),
-                    hasMultipleSources = canOfferPlayerLiveSourcePicker(request.candidates.size),
+                    favorite = liveFavoriteControl.favorite,
+                    favoriteEnabled = liveFavoriteControl.enabled,
+                    lastChannelEnabled = onLastChannel != null,
+                    moreOpen = liveMorePanel != null,
+                    onMore = ::openLiveMorePanel,
+                    onLastChannel = { onLastChannel?.invoke() },
                     onPrevious = { switchRelative(-1) },
                     onNext = { switchRelative(1) },
                     onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                    onReload = { retryManually(candidateIndex) },
-                    onMute = {
-                        val muted = !isMuted
-                        isMuted = muted
-                        player.volume = if (muted) 0f else 1f
+                    onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
+                    onChannels = {
+                        controlsVisible = false
+                        activePanel = null
+                        liveMorePanel = null
+                        browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
+                        browserVisible = true
                     },
-                    onServers = { activePanel = PlayerPanel.SERVERS },
-                    onResize = { activePanel = PlayerPanel.RESIZE },
                     primaryFocus = primaryFocus,
+                    moreTriggerFocus = moreTriggerFocus,
+                    layoutMetrics = liveControlsLayout,
+                    metrics = liveControlMetrics,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             } else {
@@ -1459,11 +1551,7 @@ fun PlayerScreen(
                     onSelectLiveChannel(channel)
                 },
                 onClose = ::closeBrowserAndRestoreError,
-                modifier = if (tvRemoteInput) {
-                    Modifier.align(Alignment.CenterEnd)
-                } else {
-                    Modifier.align(Alignment.Center)
-                },
+                modifier = Modifier.align(Alignment.Center),
             )
         }
 
@@ -1535,6 +1623,53 @@ fun PlayerScreen(
                 )
             }
         }
+
+        liveMorePanel?.let { panelView ->
+            LiveMorePanel(
+                view = panelView,
+                isMuted = isMuted,
+                sourceCount = request.candidates.size,
+                candidateIndex = candidateIndex,
+                resizeModeIndex = resizeModeIndex,
+                menuFocusRow = liveMoreMenuFocusRow,
+                onClose = ::closeLiveMorePanelToTrigger,
+                onBackToMenu = ::handleLiveMoreBack,
+                onToggleMute = {
+                    val muted = !isMuted
+                    isMuted = muted
+                    player.volume = if (muted) 0f else 1f
+                },
+                onReload = {
+                    closeLiveMorePanelForSelection()
+                    retryManually(candidateIndex)
+                },
+                onOpenSource = {
+                    liveMoreMenuFocusRow = PlayerLiveMoreRow.SOURCE
+                    liveMorePanel = PlayerLiveMorePanelView.SOURCE
+                },
+                onOpenResize = {
+                    liveMoreMenuFocusRow = PlayerLiveMoreRow.RESIZE
+                    liveMorePanel = PlayerLiveMorePanelView.RESIZE
+                },
+                onSelectSource = { index ->
+                    closeLiveMorePanelForSelection()
+                    suspendedFinalError = null
+                    retryManually(index)
+                },
+                onSelectResize = { index ->
+                    resizeModeIndex = index
+                    closeLiveMorePanelForSelection()
+                },
+                metrics = liveControlMetrics,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(
+                        end = liveControlsLayout.outerHorizontalPaddingDp.dp,
+                        bottom = liveControlMetrics.morePanelBottomInsetDp.dp,
+                    ),
+            )
+        }
     }
 }
 
@@ -1566,7 +1701,12 @@ private fun PlayerTopBar(
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (isLive) "● مباشر الان" else "HULK SA", color = if (isLive) Color(0xFFFF5A61) else colors.goldBright, fontSize = 11.sp)
+                Text(
+                    text = if (isLive) "● مباشر" else "HULK SA",
+                    color = if (isLive) Color(0xFFFF4E55) else colors.goldBright,
+                    fontSize = 11.sp,
+                    fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal,
+                )
                 Text(quality, color = colors.textMuted, fontSize = 11.sp)
                 if (!isLive && speed != 1f) Text(speedLabel(speed), color = colors.textMuted, fontSize = 11.sp)
             }
@@ -1704,33 +1844,25 @@ private const val LIVE_CONTROL_FOCUS_REFERENCE_WIDTH_DP = 150f
 private const val LIVE_CONTROL_FOCUS_REFERENCE_HEIGHT_DP = 40f
 
 @Composable
-private fun ModernLiveControls(
+private fun LivePlayerControls(
     isPlaying: Boolean,
-    isMuted: Boolean,
-    quality: String,
-    resizeLabel: String,
-    hasMultipleSources: Boolean,
+    favorite: Boolean,
+    favoriteEnabled: Boolean,
+    lastChannelEnabled: Boolean,
+    moreOpen: Boolean,
+    onMore: () -> Unit,
+    onLastChannel: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onPlayPause: () -> Unit,
-    onReload: () -> Unit,
-    onMute: () -> Unit,
-    onServers: () -> Unit,
-    onResize: () -> Unit,
+    onFavorite: () -> Unit,
+    onChannels: () -> Unit,
     primaryFocus: FocusRequester,
+    moreTriggerFocus: FocusRequester,
+    layoutMetrics: LiveControlsLayoutMetrics,
+    metrics: LivePlayerControlsMetrics,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val remoteLayout = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
-    val layoutMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, remoteLayout) {
-        liveControlsLayoutMetrics(
-            screenWidthDp = adaptiveUi.screenWidthDp,
-            screenHeightDp = adaptiveUi.screenHeightDp,
-            remoteLayout = remoteLayout,
-        )
-    }
-
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1738,8 +1870,8 @@ private fun ModernLiveControls(
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = .84f),
-                        Color.Black.copy(alpha = .985f),
+                        Color.Black.copy(alpha = .58f),
+                        Color.Black.copy(alpha = .94f),
                     ),
                 ),
             )
@@ -1751,76 +1883,586 @@ private fun ModernLiveControls(
                 bottom = layoutMetrics.outerBottomPaddingDp.dp,
             ),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFFF4E55).copy(alpha = .16f))
-                    .border(1.dp, Color(0xFFFF4E55).copy(alpha = .55f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 9.dp, vertical = 5.dp),
+        if (metrics.approvedSingleRow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Text(
-                    "● LIVE",
-                    color = Color(0xFFFF6268),
-                    fontSize = if (remoteLayout) 12.sp else 10.sp,
-                    fontWeight = FontWeight.Black,
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    LiveControlUtility(
+                        icon = Icons.AutoMirrored.Rounded.List,
+                        caption = "القنوات",
+                        onClick = onChannels,
+                        enabled = true,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlUtility(
+                        icon = if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                        caption = "المفضلة",
+                        onClick = onFavorite,
+                        enabled = favoriteEnabled,
+                        selected = favorite,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlCircleIcon(
+                        icon = Icons.Rounded.SkipPrevious,
+                        caption = "القناة السابقة",
+                        onClick = onPrevious,
+                        sizeDp = metrics.secondaryButtonDp,
+                        iconSizeDp = metrics.circleIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                }
+                LiveControlPlayPause(
+                    isPlaying = isPlaying,
+                    onClick = onPlayPause,
+                    focusRequester = primaryFocus,
+                    sizeDp = metrics.centerButtonDp,
+                    iconSizeDp = metrics.circleIconDp,
+                    captionSizeSp = metrics.captionSizeSp,
                 )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    LiveControlCircleIcon(
+                        icon = Icons.Rounded.SkipNext,
+                        caption = "القناة التالية",
+                        onClick = onNext,
+                        sizeDp = metrics.secondaryButtonDp,
+                        iconSizeDp = metrics.circleIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlUtility(
+                        icon = Icons.Rounded.History,
+                        caption = "آخر قناة",
+                        onClick = onLastChannel,
+                        enabled = lastChannelEnabled,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlUtility(
+                        icon = Icons.Rounded.MoreHoriz,
+                        caption = "المزيد",
+                        onClick = onMore,
+                        enabled = true,
+                        selected = moreOpen,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        focusRequester = moreTriggerFocus,
+                    )
+                }
             }
-            Text(
-                quality,
-                color = colors.goldBright,
-                fontSize = if (remoteLayout) 12.sp else 10.sp,
-                fontWeight = FontWeight.Bold,
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    LiveControlCircleIcon(
+                        icon = Icons.Rounded.SkipPrevious,
+                        caption = "القناة السابقة",
+                        onClick = onPrevious,
+                        sizeDp = metrics.secondaryButtonDp,
+                        iconSizeDp = metrics.circleIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlPlayPause(
+                        isPlaying = isPlaying,
+                        onClick = onPlayPause,
+                        focusRequester = primaryFocus,
+                        sizeDp = metrics.centerButtonDp,
+                        iconSizeDp = metrics.circleIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlCircleIcon(
+                        icon = Icons.Rounded.SkipNext,
+                        caption = "القناة التالية",
+                        onClick = onNext,
+                        sizeDp = metrics.secondaryButtonDp,
+                        iconSizeDp = metrics.circleIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                }
+                Spacer(Modifier.height(metrics.itemSpacingDp.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    LiveControlUtility(
+                        icon = Icons.AutoMirrored.Rounded.List,
+                        caption = "القنوات",
+                        onClick = onChannels,
+                        enabled = true,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlUtility(
+                        icon = if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                        caption = "المفضلة",
+                        onClick = onFavorite,
+                        enabled = favoriteEnabled,
+                        selected = favorite,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlUtility(
+                        icon = Icons.Rounded.History,
+                        caption = "آخر قناة",
+                        onClick = onLastChannel,
+                        enabled = lastChannelEnabled,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                    )
+                    LiveControlUtility(
+                        icon = Icons.Rounded.MoreHoriz,
+                        caption = "المزيد",
+                        onClick = onMore,
+                        enabled = true,
+                        selected = moreOpen,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        focusRequester = moreTriggerFocus,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveControlPlayPause(
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester,
+    sizeDp: Int,
+    iconSizeDp: Int,
+    captionSizeSp: Int,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val caption = if (isPlaying) "إيقاف مؤقت" else "تشغيل"
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(sizeDp.dp)
+                .clip(CircleShape)
+                .background(colors.gold)
+                .goldFocusEdge(CircleShape, visible = showFocused)
+                .focusRequester(focusRequester)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(role = Role.Button, onClick = onClick)
+                .semantics(mergeDescendants = true) { contentDescription = caption },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = Color(0xFF16130A),
+                modifier = Modifier.size(iconSizeDp.dp),
             )
-            Text(
-                "تحكم البث المباشر",
-                color = Color.White,
-                fontSize = if (remoteLayout) 14.sp else 12.sp,
-                fontWeight = FontWeight.Bold,
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = caption,
+            color = colors.gold,
+            fontSize = captionSizeSp.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun LiveControlCircleIcon(
+    icon: ImageVector,
+    caption: String,
+    onClick: () -> Unit,
+    sizeDp: Int,
+    iconSizeDp: Int,
+    captionSizeSp: Int,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(sizeDp.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = .58f))
+                .border(
+                    width = if (showFocused) 2.dp else 1.dp,
+                    color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .30f),
+                    shape = CircleShape,
+                )
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(role = Role.Button, onClick = onClick)
+                .semantics(mergeDescendants = true) { contentDescription = caption },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (showFocused) colors.goldBright else Color.White,
+                modifier = Modifier.size(iconSizeDp.dp),
             )
-            Spacer(Modifier.weight(1f))
-            Text(
-                if (remoteLayout) {
-                    "OK للقنوات  •  ↑ ↓ تبديل سريع  •  ← → ادوات المشغل"
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = caption,
+            color = if (showFocused) colors.goldBright else colors.text,
+            fontSize = captionSizeSp.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun LiveControlUtility(
+    icon: ImageVector,
+    caption: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    iconSizeDp: Int,
+    captionSizeSp: Int,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    focusRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(14.dp)
+    val tint = when {
+        !enabled -> colors.textMuted.copy(alpha = .45f)
+        showFocused -> colors.goldBright
+        selected -> colors.gold
+        else -> colors.text
+    }
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size((iconSizeDp + 22).dp)
+                .clip(shape)
+                .background(if (showFocused) colors.gold.copy(alpha = .22f) else Color.Transparent)
+                .border(
+                    width = if (showFocused) 2.dp else 0.dp,
+                    color = if (showFocused) colors.goldBright else Color.Transparent,
+                    shape = shape,
+                )
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .semantics(mergeDescendants = true) { contentDescription = caption },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(iconSizeDp.dp),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = caption,
+            color = tint,
+            fontSize = captionSizeSp.sp,
+            fontWeight = if (selected || showFocused) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun LiveMorePanel(
+    view: PlayerLiveMorePanelView,
+    isMuted: Boolean,
+    sourceCount: Int,
+    candidateIndex: Int,
+    resizeModeIndex: Int,
+    menuFocusRow: PlayerLiveMoreRow,
+    onClose: () -> Unit,
+    onBackToMenu: () -> Unit,
+    onToggleMute: () -> Unit,
+    onReload: () -> Unit,
+    onOpenSource: () -> Unit,
+    onOpenResize: () -> Unit,
+    onSelectSource: (Int) -> Unit,
+    onSelectResize: (Int) -> Unit,
+    metrics: LivePlayerControlsMetrics,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(16.dp)
+    val muteFocus = remember { FocusRequester() }
+    val reloadFocus = remember { FocusRequester() }
+    val sourceFocus = remember { FocusRequester() }
+    val resizeFocus = remember { FocusRequester() }
+    val selectedOptionFocus = remember { FocusRequester() }
+
+    LaunchedEffect(view, menuFocusRow, candidateIndex, resizeModeIndex, sourceCount) {
+        val target = when (view) {
+            PlayerLiveMorePanelView.MENU -> when (menuFocusRow) {
+                PlayerLiveMoreRow.MUTE -> muteFocus
+                PlayerLiveMoreRow.RELOAD -> reloadFocus
+                PlayerLiveMoreRow.SOURCE -> sourceFocus
+                PlayerLiveMoreRow.RESIZE -> resizeFocus
+            }
+            PlayerLiveMorePanelView.SOURCE,
+            PlayerLiveMorePanelView.RESIZE,
+            -> selectedOptionFocus
+        }
+        withFrameNanos { }
+        runCatching { target.requestFocus() }
+    }
+
+    Column(
+        modifier = modifier
+            .width(metrics.morePanelWidthDp.dp)
+            .clip(shape)
+            .background(Color(0xF20A0B08))
+            .border(1.dp, colors.gold.copy(alpha = .45f), shape)
+            .pointerInput(Unit) { detectTapGestures { } }
+            .onPreviewKeyEvent { event ->
+                val code = event.nativeKeyEvent.keyCode
+                val isBack = code == AndroidKeyEvent.KEYCODE_BACK || code == AndroidKeyEvent.KEYCODE_ESCAPE
+                if (isBack) {
+                    if (event.type == KeyEventType.KeyDown) onBackToMenu()
+                    true
                 } else {
-                    "اسحب ↑ للقناة التالية  •  اسحب ↓ للقناة السابقة"
+                    false
+                }
+            }
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = when (view) {
+                    PlayerLiveMorePanelView.MENU -> "المزيد"
+                    PlayerLiveMorePanelView.SOURCE -> "اختيار المصدر"
+                    PlayerLiveMorePanelView.RESIZE -> "حجم الصورة"
                 },
-                color = colors.textMuted,
-                fontSize = if (remoteLayout) 10.sp else 9.sp,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            LiveMoreHeaderAction(
+                icon = if (view == PlayerLiveMorePanelView.MENU) Icons.Rounded.Close else Icons.Rounded.ChevronLeft,
+                caption = if (view == PlayerLiveMorePanelView.MENU) "اغلاق" else "رجوع",
+                onClick = if (view == PlayerLiveMorePanelView.MENU) onClose else onBackToMenu,
+            )
         }
-
-        Spacer(Modifier.height(if (remoteLayout) 13.dp else 10.dp))
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(if (remoteLayout) 8.dp else 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(
-                horizontal = layoutMetrics.rowHorizontalContentPaddingDp.dp,
-                vertical = layoutMetrics.rowVerticalContentPaddingDp.dp,
-            ),
-        ) {
-            item { FocusButton("القناة السابقة", onPrevious, primary = false, compact = true) }
-            item {
-                FocusButton(
-                    if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                    onPlayPause,
-                    modifier = Modifier.focusRequester(primaryFocus),
-                    compact = true,
+        Spacer(Modifier.height(8.dp))
+        when (view) {
+            PlayerLiveMorePanelView.MENU -> {
+                LiveMoreRow(
+                    text = if (isMuted) "تشغيل الصوت" else "كتم الصوت",
+                    icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
+                    onClick = onToggleMute,
+                    focusRequester = muteFocus,
+                )
+                Spacer(Modifier.height(6.dp))
+                LiveMoreRow(
+                    text = "إعادة التحميل",
+                    icon = Icons.Rounded.Refresh,
+                    onClick = onReload,
+                    focusRequester = reloadFocus,
+                )
+                if (canOfferPlayerLiveSourcePicker(sourceCount)) {
+                    Spacer(Modifier.height(6.dp))
+                    LiveMoreRow(
+                        text = "اختيار المصدر",
+                        icon = Icons.Rounded.SettingsInputAntenna,
+                        value = "المصدر ${candidateIndex + 1}",
+                        showChevron = true,
+                        onClick = onOpenSource,
+                        focusRequester = sourceFocus,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                LiveMoreRow(
+                    text = "حجم الصورة",
+                    icon = Icons.Rounded.AspectRatio,
+                    value = resizeLabel(resizeModeIndex),
+                    showChevron = true,
+                    onClick = onOpenResize,
+                    focusRequester = resizeFocus,
                 )
             }
-            item { FocusButton("القناة التالية", onNext, primary = false, compact = true) }
-            item { FocusButton("اعادة تحميل", onReload, primary = false, compact = true) }
-            item { FocusButton(if (isMuted) "تشغيل الصوت" else "كتم الصوت", onMute, primary = false, compact = true) }
-            if (hasMultipleSources) {
-                item { FocusButton("اختيار المصدر", onServers, primary = false, compact = true) }
+            PlayerLiveMorePanelView.SOURCE -> {
+                repeat(sourceCount) { index ->
+                    if (index > 0) Spacer(Modifier.height(6.dp))
+                    LiveMoreRow(
+                        text = "المصدر ${index + 1}",
+                        icon = Icons.Rounded.SettingsInputAntenna,
+                        selected = index == candidateIndex,
+                        onClick = { onSelectSource(index) },
+                        focusRequester = if (index == candidateIndex) selectedOptionFocus else null,
+                    )
+                }
             }
-            item { FocusButton("الصورة: $resizeLabel", onResize, primary = false, compact = true) }
+            PlayerLiveMorePanelView.RESIZE -> {
+                listOf("ملائم", "تكبير", "ملء الشاشة").forEachIndexed { index, label ->
+                    if (index > 0) Spacer(Modifier.height(6.dp))
+                    LiveMoreRow(
+                        text = label,
+                        icon = Icons.Rounded.AspectRatio,
+                        selected = index == resizeModeIndex,
+                        onClick = { onSelectResize(index) },
+                        focusRequester = if (index == resizeModeIndex) selectedOptionFocus else null,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveMoreHeaderAction(
+    icon: ImageVector,
+    caption: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (showFocused) colors.gold else Color.Transparent)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = caption }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (showFocused) Color(0xFF14120A) else colors.text,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = caption,
+            color = if (showFocused) Color(0xFF14120A) else colors.text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun LiveMoreRow(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    value: String? = null,
+    selected: Boolean = false,
+    showChevron: Boolean = false,
+    focusRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(11.dp)
+    val foreground = if (showFocused) Color(0xFF14120A) else colors.text
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                when {
+                    showFocused -> colors.gold
+                    selected -> colors.gold.copy(alpha = .16f)
+                    else -> Color.Transparent
+                },
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = text }
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (showFocused) Color(0xFF14120A) else colors.goldBright,
+            modifier = Modifier.size(19.dp),
+        )
+        Text(
+            text = text,
+            color = foreground,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        value?.let {
+            Text(
+                text = it,
+                color = if (showFocused) Color(0xFF14120A) else colors.textMuted,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = if (showFocused) Color(0xFF14120A) else colors.goldBright,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        if (showChevron) {
+            Icon(
+                imageVector = Icons.Rounded.ChevronLeft,
+                contentDescription = null,
+                tint = if (showFocused) Color(0xFF14120A) else colors.textMuted,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }

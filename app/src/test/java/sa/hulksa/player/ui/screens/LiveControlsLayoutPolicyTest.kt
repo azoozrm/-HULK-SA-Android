@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
@@ -69,5 +70,49 @@ class LiveControlsLayoutPolicyTest {
         assertEquals(18f, touch.outerBottomPaddingDp, 0.001f)
         assertEquals(0f, touch.rowHorizontalContentPaddingDp, 0.001f)
         assertEquals(2f, touch.rowVerticalContentPaddingDp, 0.001f)
+    }
+
+    @Test
+    fun livePlayerControlsKeepCircleGeometryBoundedAndAdaptive() {
+        listOf(compactTv, standardTv, largeTv).forEach { (width, height) ->
+            val metrics = livePlayerControlsMetrics(width, height, remoteLayout = true)
+
+            assertTrue(metrics.approvedSingleRow)
+            assertTrue(metrics.centerButtonDp in 56..92)
+            assertTrue(metrics.secondaryButtonDp < metrics.centerButtonDp)
+            assertTrue(metrics.utilityIconDp in 20..30)
+            assertTrue(metrics.morePanelWidthDp in 300..430)
+        }
+
+        val large = livePlayerControlsMetrics(largeTv.first, largeTv.second, remoteLayout = true)
+        val standard = livePlayerControlsMetrics(standardTv.first, standardTv.second, remoteLayout = true)
+        assertTrue(large.centerButtonDp >= standard.centerButtonDp)
+        assertTrue(large.morePanelBottomInsetDp > standard.morePanelBottomInsetDp)
+    }
+
+    @Test
+    fun compactTouchWindowsUseTheTwoRowControlsAndKeepPanelAboveThem() {
+        val compact = livePlayerControlsMetrics(411, 891, remoteLayout = false)
+        val wideTouch = livePlayerControlsMetrics(800, 360, remoteLayout = false)
+
+        assertFalse(compact.approvedSingleRow)
+        assertTrue(wideTouch.approvedSingleRow)
+        assertTrue(compact.morePanelWidthDp <= 430)
+        assertTrue(compact.morePanelBottomInsetDp > compact.centerButtonDp)
+    }
+
+    @Test
+    fun morePanelBottomInsetAlwaysClearsTheControlsSafeBottom() {
+        listOf(
+            Triple(411, 891, false),
+            Triple(800, 360, false),
+            Triple(compactTv.first, compactTv.second, true),
+            Triple(largeTv.first, largeTv.second, true),
+        ).forEach { (width, height, remote) ->
+            val layout = liveControlsLayoutMetrics(width, height, remoteLayout = remote)
+            val metrics = livePlayerControlsMetrics(width, height, remoteLayout = remote)
+
+            assertTrue(metrics.morePanelBottomInsetDp > layout.outerBottomPaddingDp)
+        }
     }
 }
