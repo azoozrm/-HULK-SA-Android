@@ -820,7 +820,7 @@ internal fun LiveChannelBrowser(
                 }
             }
             FocusButton(
-                "إغلاق",
+                "اغلاق",
                 onClose,
                 primary = false,
                 outlined = true,

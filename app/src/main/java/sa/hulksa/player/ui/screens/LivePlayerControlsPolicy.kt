@@ -92,22 +92,31 @@ internal fun playerProLiveLastChannelActionEnabled(
 
 internal data class LivePlayerControlsMetrics(
     val approvedSingleRow: Boolean,
-    val centerButtonDp: Int,
-    val secondaryButtonDp: Int,
-    val circleIconDp: Int,
+    val transportIconDp: Int,
+    val transportContainerDp: Int,
     val utilityIconDp: Int,
     val captionSizeSp: Int,
     val itemSpacingDp: Int,
     val morePanelWidthDp: Int,
-    val morePanelBottomInsetDp: Int,
+    val morePanelMaxHeightDp: Int,
 )
 
+/** Live-local aspect labels requested by the owner text system (VOD labels stay unchanged). */
+internal val LIVE_PLAYER_RESIZE_LABELS = listOf("ملايم", "تكبير", "كامل الشاشة")
+
+internal fun livePlayerResizeLabel(index: Int): String = when (index) {
+    1 -> "تكبير"
+    2 -> "كامل الشاشة"
+    else -> "ملايم"
+}
+
 /**
- * Adaptive geometry for the approved Live controls and the More panel.
+ * Adaptive geometry for the compact Live controls and the More panel.
  *
- * Geometry is derived from the current window and the existing Live controls safe-area policy so
- * TV overscan, compact phones and wide touch windows all stay inside the viewport without
- * hardcoded device values.
+ * The transport controls share the accepted utility glyph and interaction container so the strip
+ * keeps one small footprint. Geometry is derived from the current window and the existing Live
+ * controls safe-area policy so TV overscan, compact phones and wide touch windows all stay inside
+ * the viewport without hardcoded device values.
  */
 internal fun livePlayerControlsMetrics(
     screenWidthDp: Int,
@@ -118,11 +127,7 @@ internal fun livePlayerControlsMetrics(
     val height = screenHeightDp.coerceAtLeast(1)
     val shortSide = min(width, height)
     val approvedSingleRow = remoteLayout || width >= 720
-    val layout = liveControlsLayoutMetrics(width, height, remoteLayout)
 
-    val centerButton = (shortSide * .115f).roundToInt().coerceIn(56, 92)
-    val secondaryButton = (centerButton * .72f).roundToInt().coerceIn(42, 68)
-    val circleIcon = (centerButton * .46f).roundToInt().coerceIn(24, 40)
     val utilityIcon = (shortSide * .03f).roundToInt().coerceIn(20, 30)
     val captionSize = when {
         shortSide >= 900 -> 15
@@ -135,21 +140,16 @@ internal fun livePlayerControlsMetrics(
     } else {
         (width * .86f).roundToInt().coerceIn(280, 430)
     }
-
-    val singleRowHeight = centerButton + captionSize * 2 + 8
-    val compactStackHeight = singleRowHeight + utilityIcon + captionSize * 2 + spacing
-    val controlsStackHeight = if (approvedSingleRow) singleRowHeight else compactStackHeight
-    val panelBottomInset = layout.outerBottomPaddingDp.roundToInt() + controlsStackHeight + spacing
+    val panelMaxHeight = (height * .58f).roundToInt().coerceIn(240, 520)
 
     return LivePlayerControlsMetrics(
         approvedSingleRow = approvedSingleRow,
-        centerButtonDp = centerButton,
-        secondaryButtonDp = secondaryButton,
-        circleIconDp = circleIcon,
+        transportIconDp = utilityIcon,
+        transportContainerDp = utilityIcon + 22,
         utilityIconDp = utilityIcon,
         captionSizeSp = captionSize,
         itemSpacingDp = spacing,
         morePanelWidthDp = panelWidth,
-        morePanelBottomInsetDp = panelBottomInset,
+        morePanelMaxHeightDp = panelMaxHeight,
     )
 }

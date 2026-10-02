@@ -171,6 +171,7 @@ fun PlayerProScreen(
     liveTvProEnabled: Boolean,
     liveCatalog: Catalog?,
     isFavorite: (ContentItem) -> Boolean,
+    favoriteKeys: Set<String>,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onBack: () -> Unit,
@@ -442,6 +443,7 @@ fun PlayerProScreen(
             request = request,
             liveCatalog = liveCatalog,
             isFavorite = isFavorite,
+            favoriteKeys = favoriteKeys,
             onSelectLiveChannel = ::queuePlayerRequestedLiveChannel,
             onToggleFavorite = onToggleFavorite,
             onLastChannel = if (

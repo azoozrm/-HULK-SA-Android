@@ -73,46 +73,37 @@ class LiveControlsLayoutPolicyTest {
     }
 
     @Test
-    fun livePlayerControlsKeepCircleGeometryBoundedAndAdaptive() {
+    fun livePlayerTransportControlsShareTheCompactUtilityFootprint() {
         listOf(compactTv, standardTv, largeTv).forEach { (width, height) ->
             val metrics = livePlayerControlsMetrics(width, height, remoteLayout = true)
 
             assertTrue(metrics.approvedSingleRow)
-            assertTrue(metrics.centerButtonDp in 56..92)
-            assertTrue(metrics.secondaryButtonDp < metrics.centerButtonDp)
-            assertTrue(metrics.utilityIconDp in 20..30)
+            assertEquals(metrics.utilityIconDp, metrics.transportIconDp)
+            assertEquals(metrics.utilityIconDp + 22, metrics.transportContainerDp)
+            assertTrue(metrics.transportIconDp in 20..30)
             assertTrue(metrics.morePanelWidthDp in 300..430)
+            assertTrue(metrics.morePanelMaxHeightDp in 240..520)
         }
-
-        val large = livePlayerControlsMetrics(largeTv.first, largeTv.second, remoteLayout = true)
-        val standard = livePlayerControlsMetrics(standardTv.first, standardTv.second, remoteLayout = true)
-        assertTrue(large.centerButtonDp >= standard.centerButtonDp)
-        assertTrue(large.morePanelBottomInsetDp > standard.morePanelBottomInsetDp)
     }
 
     @Test
-    fun compactTouchWindowsUseTheTwoRowControlsAndKeepPanelAboveThem() {
+    fun compactTouchWindowsUseTheTwoRowControlsAndBoundedPanelHeight() {
         val compact = livePlayerControlsMetrics(411, 891, remoteLayout = false)
         val wideTouch = livePlayerControlsMetrics(800, 360, remoteLayout = false)
 
         assertFalse(compact.approvedSingleRow)
         assertTrue(wideTouch.approvedSingleRow)
         assertTrue(compact.morePanelWidthDp <= 430)
-        assertTrue(compact.morePanelBottomInsetDp > compact.centerButtonDp)
+        assertTrue(compact.morePanelMaxHeightDp < 891)
+        assertEquals(compact.utilityIconDp, compact.transportIconDp)
     }
 
     @Test
-    fun morePanelBottomInsetAlwaysClearsTheControlsSafeBottom() {
-        listOf(
-            Triple(411, 891, false),
-            Triple(800, 360, false),
-            Triple(compactTv.first, compactTv.second, true),
-            Triple(largeTv.first, largeTv.second, true),
-        ).forEach { (width, height, remote) ->
-            val layout = liveControlsLayoutMetrics(width, height, remoteLayout = remote)
-            val metrics = livePlayerControlsMetrics(width, height, remoteLayout = remote)
-
-            assertTrue(metrics.morePanelBottomInsetDp > layout.outerBottomPaddingDp)
-        }
+    fun livePlayerResizeLabelsUseTheLiveLocalSpellings() {
+        assertEquals(listOf("ملايم", "تكبير", "كامل الشاشة"), LIVE_PLAYER_RESIZE_LABELS)
+        assertEquals("ملايم", livePlayerResizeLabel(0))
+        assertEquals("تكبير", livePlayerResizeLabel(1))
+        assertEquals("كامل الشاشة", livePlayerResizeLabel(2))
+        assertEquals("ملايم", livePlayerResizeLabel(99))
     }
 }

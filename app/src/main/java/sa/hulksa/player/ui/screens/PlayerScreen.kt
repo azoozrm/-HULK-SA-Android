@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,13 +55,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -104,6 +106,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -153,7 +156,6 @@ import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.LoadingRing
-import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
@@ -266,6 +268,7 @@ fun PlayerScreen(
     request: PlaybackRequest,
     liveCatalog: Catalog?,
     isFavorite: (ContentItem) -> Boolean,
+    favoriteKeys: Set<String> = emptySet(),
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onLastChannel: (() -> Unit)? = null,
@@ -387,10 +390,15 @@ fun PlayerScreen(
         liveCatalog?.items?.firstOrNull { it.id == request.streamId }
     }
     val liveFavoriteChannel = currentChannel.takeIf { request.isLive }
-    val liveFavoriteControl = livePlayerFavoriteControl(
-        currentChannel = liveFavoriteChannel,
-        isFavorite = liveFavoriteChannel?.let(isFavorite) == true,
-    )
+    // The observed favorites snapshot is an explicit reactive input. The authoritative predicate
+    // reads the view model's StateFlow, so keying the derived control on the snapshot guarantees
+    // the HUD repaints on the same state publication instead of waiting for the player-health tick.
+    val liveFavoriteControl = remember(liveFavoriteChannel, favoriteKeys) {
+        livePlayerFavoriteControl(
+            currentChannel = liveFavoriteChannel,
+            isFavorite = liveFavoriteChannel?.let(isFavorite) == true,
+        )
+    }
     val liveControlsLayout = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, tvRemoteInput) {
         liveControlsLayoutMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
@@ -805,13 +813,13 @@ fun PlayerScreen(
                     controlsVisible = true
                     finalError = when {
                         failureClass == RecoveryFailureClass.AUDIO && request.isLive -> {
-                            "تعذر تشغيل صوت هذه القناة. اعد المحاولة او افتح قناة اخرى."
+                            "تعذر تشغيل صوت هذه القناة. اعد المحاولة او افتح قناة اخرى"
                         }
                         failureClass == RecoveryFailureClass.AUDIO -> {
                             "تعذر تشغيل الصوت لهذا المحتوى. اعد المحاولة."
                         }
                         request.isLive -> {
-                            "السيرفر لا يرسل بث هذه القناة الان. اعد التحميل او افتح قناة اخرى."
+                            "البث غير متاح حاليا ، جرب اعادة المحاولة او اختر قناة اخرى"
                         }
                         else -> {
                             "تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره."
@@ -1381,31 +1389,80 @@ fun PlayerScreen(
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
-                LivePlayerControls(
-                    isPlaying = isPlaying,
-                    favorite = liveFavoriteControl.favorite,
-                    favoriteEnabled = liveFavoriteControl.enabled,
-                    lastChannelEnabled = onLastChannel != null,
-                    moreOpen = liveMorePanel != null,
-                    onMore = ::openLiveMorePanel,
-                    onLastChannel = { onLastChannel?.invoke() },
-                    onPrevious = { switchRelative(-1) },
-                    onNext = { switchRelative(1) },
-                    onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                    onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
-                    onChannels = {
-                        controlsVisible = false
-                        activePanel = null
-                        liveMorePanel = null
-                        browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
-                        browserVisible = true
-                    },
-                    primaryFocus = primaryFocus,
-                    moreTriggerFocus = moreTriggerFocus,
-                    layoutMetrics = liveControlsLayout,
-                    metrics = liveControlMetrics,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    liveMorePanel?.let { panelView ->
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
+                            LiveMorePanel(
+                                view = panelView,
+                                isMuted = isMuted,
+                                sourceCount = request.candidates.size,
+                                candidateIndex = candidateIndex,
+                                resizeModeIndex = resizeModeIndex,
+                                menuFocusRow = liveMoreMenuFocusRow,
+                                onClose = ::closeLiveMorePanelToTrigger,
+                                onBackToMenu = ::handleLiveMoreBack,
+                                onToggleMute = {
+                                    val muted = !isMuted
+                                    isMuted = muted
+                                    player.volume = if (muted) 0f else 1f
+                                },
+                                onReload = {
+                                    closeLiveMorePanelForSelection()
+                                    retryManually(candidateIndex)
+                                },
+                                onOpenSource = {
+                                    liveMoreMenuFocusRow = PlayerLiveMoreRow.SOURCE
+                                    liveMorePanel = PlayerLiveMorePanelView.SOURCE
+                                },
+                                onOpenResize = {
+                                    liveMoreMenuFocusRow = PlayerLiveMoreRow.RESIZE
+                                    liveMorePanel = PlayerLiveMorePanelView.RESIZE
+                                },
+                                onSelectSource = { index ->
+                                    closeLiveMorePanelForSelection()
+                                    suspendedFinalError = null
+                                    retryManually(index)
+                                },
+                                onSelectResize = { index ->
+                                    resizeModeIndex = index
+                                    closeLiveMorePanelForSelection()
+                                },
+                                metrics = liveControlMetrics,
+                                modifier = Modifier.padding(
+                                    end = liveControlsLayout.outerHorizontalPaddingDp.dp,
+                                    bottom = 10.dp,
+                                ),
+                            )
+                        }
+                    }
+                    LivePlayerControls(
+                        isPlaying = isPlaying,
+                        favorite = liveFavoriteControl.favorite,
+                        favoriteEnabled = liveFavoriteControl.enabled,
+                        lastChannelEnabled = onLastChannel != null,
+                        moreOpen = liveMorePanel != null,
+                        onMore = ::openLiveMorePanel,
+                        onLastChannel = { onLastChannel?.invoke() },
+                        onPrevious = { switchRelative(-1) },
+                        onNext = { switchRelative(1) },
+                        onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
+                        onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
+                        onChannels = {
+                            controlsVisible = false
+                            activePanel = null
+                            liveMorePanel = null
+                            browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
+                            browserVisible = true
+                        },
+                        primaryFocus = primaryFocus,
+                        moreTriggerFocus = moreTriggerFocus,
+                        layoutMetrics = liveControlsLayout,
+                        metrics = liveControlMetrics,
+                    )
+                }
             } else {
                 ModernVodControls(
                     isPlaying = isPlaying,
@@ -1509,6 +1566,7 @@ fun PlayerScreen(
 
         if (finalError != null) {
             PlayerErrorPanel(
+                title = if (request.isLive) "تعذر تشغيل القناة" else null,
                 message = finalError!!,
                 canChooseChannel = request.isLive && liveCatalog?.items?.isNotEmpty() == true,
                 canChooseServer = canOfferPlayerErrorSourcePicker(
@@ -1626,52 +1684,6 @@ fun PlayerScreen(
             }
         }
 
-        liveMorePanel?.let { panelView ->
-            LiveMorePanel(
-                view = panelView,
-                isMuted = isMuted,
-                sourceCount = request.candidates.size,
-                candidateIndex = candidateIndex,
-                resizeModeIndex = resizeModeIndex,
-                menuFocusRow = liveMoreMenuFocusRow,
-                onClose = ::closeLiveMorePanelToTrigger,
-                onBackToMenu = ::handleLiveMoreBack,
-                onToggleMute = {
-                    val muted = !isMuted
-                    isMuted = muted
-                    player.volume = if (muted) 0f else 1f
-                },
-                onReload = {
-                    closeLiveMorePanelForSelection()
-                    retryManually(candidateIndex)
-                },
-                onOpenSource = {
-                    liveMoreMenuFocusRow = PlayerLiveMoreRow.SOURCE
-                    liveMorePanel = PlayerLiveMorePanelView.SOURCE
-                },
-                onOpenResize = {
-                    liveMoreMenuFocusRow = PlayerLiveMoreRow.RESIZE
-                    liveMorePanel = PlayerLiveMorePanelView.RESIZE
-                },
-                onSelectSource = { index ->
-                    closeLiveMorePanelForSelection()
-                    suspendedFinalError = null
-                    retryManually(index)
-                },
-                onSelectResize = { index ->
-                    resizeModeIndex = index
-                    closeLiveMorePanelForSelection()
-                },
-                metrics = liveControlMetrics,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(
-                        end = liveControlsLayout.outerHorizontalPaddingDp.dp,
-                        bottom = liveControlMetrics.morePanelBottomInsetDp.dp,
-                    ),
-            )
-        }
     }
 }
 
@@ -1906,7 +1918,7 @@ private fun LivePlayerControls(
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color(0xF00C0D0A))
                 .border(1.dp, colors.gold.copy(alpha = .55f), RoundedCornerShape(18.dp))
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
         ) {
             if (metrics.approvedSingleRow) {
                 Row(
@@ -1926,7 +1938,7 @@ private fun LivePlayerControls(
                             iconSizeDp = metrics.utilityIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator()
+                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
                         LiveControlUtility(
                             icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
                             caption = "المفضلة",
@@ -1936,49 +1948,51 @@ private fun LivePlayerControls(
                             iconSizeDp = metrics.utilityIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator()
-                        LiveControlCircleIcon(
+                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
+                        LiveControlUtility(
                             icon = Icons.Rounded.SkipPrevious,
                             caption = "القناة السابقة",
                             onClick = onPrevious,
-                            sizeDp = metrics.secondaryButtonDp,
-                            iconSizeDp = metrics.circleIconDp,
+                            enabled = true,
+                            iconSizeDp = metrics.transportIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator()
+                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
                     }
-                    LiveControlPlayPause(
-                        isPlaying = isPlaying,
+                    LiveControlUtility(
+                        icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
                         onClick = onPlayPause,
-                        focusRequester = primaryFocus,
-                        sizeDp = metrics.centerButtonDp,
-                        iconSizeDp = metrics.circleIconDp,
+                        enabled = true,
+                        iconSizeDp = metrics.transportIconDp,
                         captionSizeSp = metrics.captionSizeSp,
+                        emphasis = true,
+                        focusRequester = primaryFocus,
                     )
                     Row(
                         modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.Bottom,
                     ) {
-                        LiveControlSeparator()
-                        LiveControlCircleIcon(
+                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
+                        LiveControlUtility(
                             icon = Icons.Rounded.SkipNext,
                             caption = "القناة التالية",
                             onClick = onNext,
-                            sizeDp = metrics.secondaryButtonDp,
-                            iconSizeDp = metrics.circleIconDp,
+                            enabled = true,
+                            iconSizeDp = metrics.transportIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator()
+                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
                         LiveControlUtility(
                             icon = Icons.Rounded.History,
-                            caption = "آخر قناة",
+                            caption = "اخر قناة",
                             onClick = onLastChannel,
                             enabled = lastChannelEnabled,
                             iconSizeDp = metrics.utilityIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator()
+                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
                         LiveControlUtility(
                             icon = Icons.Rounded.MoreHoriz,
                             caption = "المزيد",
@@ -2000,28 +2014,30 @@ private fun LivePlayerControls(
                         horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
                         verticalAlignment = Alignment.Bottom,
                     ) {
-                        LiveControlCircleIcon(
+                        LiveControlUtility(
                             icon = Icons.Rounded.SkipPrevious,
                             caption = "القناة السابقة",
                             onClick = onPrevious,
-                            sizeDp = metrics.secondaryButtonDp,
-                            iconSizeDp = metrics.circleIconDp,
+                            enabled = true,
+                            iconSizeDp = metrics.transportIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlPlayPause(
-                            isPlaying = isPlaying,
+                        LiveControlUtility(
+                            icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
                             onClick = onPlayPause,
-                            focusRequester = primaryFocus,
-                            sizeDp = metrics.centerButtonDp,
-                            iconSizeDp = metrics.circleIconDp,
+                            enabled = true,
+                            iconSizeDp = metrics.transportIconDp,
                             captionSizeSp = metrics.captionSizeSp,
+                            emphasis = true,
+                            focusRequester = primaryFocus,
                         )
-                        LiveControlCircleIcon(
+                        LiveControlUtility(
                             icon = Icons.Rounded.SkipNext,
                             caption = "القناة التالية",
                             onClick = onNext,
-                            sizeDp = metrics.secondaryButtonDp,
-                            iconSizeDp = metrics.circleIconDp,
+                            enabled = true,
+                            iconSizeDp = metrics.transportIconDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
                     }
@@ -2057,7 +2073,7 @@ private fun LivePlayerControls(
                         )
                         LiveControlUtility(
                             icon = Icons.Rounded.History,
-                            caption = "آخر قناة",
+                            caption = "اخر قناة",
                             onClick = onLastChannel,
                             enabled = lastChannelEnabled,
                             iconSizeDp = metrics.utilityIconDp,
@@ -2081,114 +2097,13 @@ private fun LivePlayerControls(
 }
 
 @Composable
-private fun LiveControlSeparator() {
+private fun LiveControlSeparator(heightDp: Int) {
     Box(
         modifier = Modifier
             .width(1.dp)
-            .height(34.dp)
+            .height(heightDp.dp)
             .background(Color.White.copy(alpha = .08f)),
     )
-}
-
-@Composable
-private fun LiveControlPlayPause(
-    isPlaying: Boolean,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester,
-    sizeDp: Int,
-    iconSizeDp: Int,
-    captionSizeSp: Int,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val caption = if (isPlaying) "إيقاف مؤقت" else "تشغيل"
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(sizeDp.dp)
-                .clip(CircleShape)
-                .background(colors.gold)
-                .goldFocusEdge(CircleShape, visible = showFocused)
-                .focusRequester(focusRequester)
-                .onFocusChanged { focused = it.isFocused }
-                .clickable(role = Role.Button, onClick = onClick)
-                .semantics(mergeDescendants = true) { contentDescription = caption },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = Color(0xFF16130A),
-                modifier = Modifier.size(iconSizeDp.dp),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = caption,
-            color = colors.gold,
-            fontSize = captionSizeSp.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun LiveControlCircleIcon(
-    icon: ImageVector,
-    caption: String,
-    onClick: () -> Unit,
-    sizeDp: Int,
-    iconSizeDp: Int,
-    captionSizeSp: Int,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(sizeDp.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = .58f))
-                .border(
-                    width = if (showFocused) 2.dp else 1.dp,
-                    color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .30f),
-                    shape = CircleShape,
-                )
-                .onFocusChanged { focused = it.isFocused }
-                .clickable(role = Role.Button, onClick = onClick)
-                .semantics(mergeDescendants = true) { contentDescription = caption },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (showFocused) colors.goldBright else Color.White,
-                modifier = Modifier.size(iconSizeDp.dp),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = caption,
-            color = if (showFocused) colors.goldBright else colors.text,
-            fontSize = captionSizeSp.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }
 
 @Composable
@@ -2201,6 +2116,7 @@ private fun LiveControlUtility(
     captionSizeSp: Int,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
+    emphasis: Boolean = false,
     focusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
@@ -2211,7 +2127,7 @@ private fun LiveControlUtility(
     val tint = when {
         !enabled -> colors.textMuted.copy(alpha = .45f)
         showFocused -> colors.goldBright
-        selected -> colors.gold
+        emphasis || selected -> colors.gold
         else -> colors.text
     }
     Column(
@@ -2246,7 +2162,7 @@ private fun LiveControlUtility(
             text = caption,
             color = tint,
             fontSize = captionSizeSp.sp,
-            fontWeight = if (selected || showFocused) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (selected || emphasis || showFocused) FontWeight.Bold else FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -2313,6 +2229,7 @@ private fun LiveMorePanel(
                     false
                 }
             }
+            .heightIn(max = metrics.morePanelMaxHeightDp.dp)
             .padding(horizontal = 12.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2330,70 +2247,75 @@ private fun LiveMorePanel(
                 overflow = TextOverflow.Ellipsis,
             )
             LiveMoreHeaderAction(
-                icon = if (view == PlayerLiveMorePanelView.MENU) Icons.Rounded.Close else Icons.Rounded.ChevronLeft,
                 caption = if (view == PlayerLiveMorePanelView.MENU) "اغلاق" else "رجوع",
                 onClick = if (view == PlayerLiveMorePanelView.MENU) onClose else onBackToMenu,
             )
         }
         Spacer(Modifier.height(8.dp))
-        when (view) {
-            PlayerLiveMorePanelView.MENU -> {
-                LiveMoreRow(
-                    text = if (isMuted) "تشغيل الصوت" else "كتم الصوت",
-                    icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
-                    onClick = onToggleMute,
-                    focusRequester = muteFocus,
-                )
-                Spacer(Modifier.height(6.dp))
-                LiveMoreRow(
-                    text = "إعادة التحميل",
-                    icon = Icons.Rounded.Refresh,
-                    onClick = onReload,
-                    focusRequester = reloadFocus,
-                )
-                if (canOfferPlayerLiveSourcePicker(sourceCount)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            when (view) {
+                PlayerLiveMorePanelView.MENU -> {
+                    LiveMoreRow(
+                        text = if (isMuted) "تشغيل الصوت" else "كتم الصوت",
+                        icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
+                        onClick = onToggleMute,
+                        focusRequester = muteFocus,
+                    )
                     Spacer(Modifier.height(6.dp))
                     LiveMoreRow(
-                        text = "اختيار المصدر",
-                        icon = Icons.Rounded.SettingsInputAntenna,
-                        value = "المصدر ${candidateIndex + 1}",
-                        showChevron = true,
-                        onClick = onOpenSource,
-                        focusRequester = sourceFocus,
+                        text = "اعادة التحميل",
+                        icon = Icons.Rounded.Refresh,
+                        onClick = onReload,
+                        focusRequester = reloadFocus,
                     )
-                }
-                Spacer(Modifier.height(6.dp))
-                LiveMoreRow(
-                    text = "حجم الصورة",
-                    icon = Icons.Rounded.AspectRatio,
-                    value = resizeLabel(resizeModeIndex),
-                    showChevron = true,
-                    onClick = onOpenResize,
-                    focusRequester = resizeFocus,
-                )
-            }
-            PlayerLiveMorePanelView.SOURCE -> {
-                repeat(sourceCount) { index ->
-                    if (index > 0) Spacer(Modifier.height(6.dp))
+                    if (canOfferPlayerLiveSourcePicker(sourceCount)) {
+                        Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = "اختيار المصدر",
+                            icon = Icons.Rounded.SettingsInputAntenna,
+                            value = "المصدر ${candidateIndex + 1}",
+                            showChevron = true,
+                            onClick = onOpenSource,
+                            focusRequester = sourceFocus,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
                     LiveMoreRow(
-                        text = "المصدر ${index + 1}",
-                        icon = Icons.Rounded.SettingsInputAntenna,
-                        selected = index == candidateIndex,
-                        onClick = { onSelectSource(index) },
-                        focusRequester = if (index == candidateIndex) selectedOptionFocus else null,
-                    )
-                }
-            }
-            PlayerLiveMorePanelView.RESIZE -> {
-                listOf("ملائم", "تكبير", "ملء الشاشة").forEachIndexed { index, label ->
-                    if (index > 0) Spacer(Modifier.height(6.dp))
-                    LiveMoreRow(
-                        text = label,
+                        text = "حجم الصورة",
                         icon = Icons.Rounded.AspectRatio,
-                        selected = index == resizeModeIndex,
-                        onClick = { onSelectResize(index) },
-                        focusRequester = if (index == resizeModeIndex) selectedOptionFocus else null,
+                        value = livePlayerResizeLabel(resizeModeIndex),
+                        showChevron = true,
+                        onClick = onOpenResize,
+                        focusRequester = resizeFocus,
                     )
+                }
+                PlayerLiveMorePanelView.SOURCE -> {
+                    repeat(sourceCount) { index ->
+                        if (index > 0) Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = "المصدر ${index + 1}",
+                            icon = Icons.Rounded.SettingsInputAntenna,
+                            selected = index == candidateIndex,
+                            onClick = { onSelectSource(index) },
+                            focusRequester = if (index == candidateIndex) selectedOptionFocus else null,
+                        )
+                    }
+                }
+                PlayerLiveMorePanelView.RESIZE -> {
+                    LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
+                        if (index > 0) Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = label,
+                            icon = Icons.Rounded.AspectRatio,
+                            selected = index == resizeModeIndex,
+                            onClick = { onSelectResize(index) },
+                            focusRequester = if (index == resizeModeIndex) selectedOptionFocus else null,
+                        )
+                    }
                 }
             }
         }
@@ -2402,7 +2324,6 @@ private fun LiveMorePanel(
 
 @Composable
 private fun LiveMoreHeaderAction(
-    icon: ImageVector,
     caption: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2422,12 +2343,6 @@ private fun LiveMoreHeaderAction(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (showFocused) Color(0xFF14120A) else colors.text,
-            modifier = Modifier.size(18.dp),
-        )
         Text(
             text = caption,
             color = if (showFocused) Color(0xFF14120A) else colors.text,
@@ -2474,12 +2389,6 @@ private fun LiveMoreRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (showFocused) Color(0xFF14120A) else colors.goldBright,
-            modifier = Modifier.size(19.dp),
-        )
         Text(
             text = text,
             color = foreground,
@@ -2488,6 +2397,12 @@ private fun LiveMoreRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (showFocused) Color(0xFF14120A) else colors.goldBright,
+            modifier = Modifier.size(19.dp),
         )
         value?.let {
             Text(
@@ -2763,6 +2678,7 @@ private fun UnlockPrompt(
 
 @Composable
 private fun PlayerErrorPanel(
+    title: String?,
     message: String,
     canChooseChannel: Boolean,
     canChooseServer: Boolean,
@@ -2773,7 +2689,9 @@ private fun PlayerErrorPanel(
     retryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val livePresentation = title != null
     val layoutDirection = LocalLayoutDirection.current
     val channelFocusRequester = remember { FocusRequester() }
     val serverFocusRequester = remember { FocusRequester() }
@@ -2866,12 +2784,47 @@ private fun PlayerErrorPanel(
                 .focusGroup()
                 .clip(RoundedCornerShape(20.dp))
                 .background(Color.Black.copy(alpha = .96f))
-                .border(1.dp, LocalHulkColors.current.gold.copy(alpha = .34f), RoundedCornerShape(20.dp))
+                .border(1.dp, colors.gold.copy(alpha = if (livePresentation) .55f else .34f), RoundedCornerShape(20.dp))
                 .padding(if (adaptiveUi.isTelevision) 24.dp else 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            ErrorNotice(message)
-            Spacer(Modifier.height(15.dp))
+            if (livePresentation) {
+                Icon(
+                    imageVector = Icons.Outlined.ErrorOutline,
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size(if (adaptiveUi.isTelevision) 38.dp else 32.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = title.orEmpty(),
+                    color = colors.text,
+                    fontSize = if (adaptiveUi.isTelevision) 26.sp else 21.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    text = message,
+                    color = colors.text,
+                    fontSize = if (adaptiveUi.isTelevision) 15.sp else 13.sp,
+                    lineHeight = if (adaptiveUi.isTelevision) 24.sp else 21.sp,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(14.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = .12f)),
+                )
+                Spacer(Modifier.height(14.dp))
+            } else {
+                ErrorNotice(message)
+                Spacer(Modifier.height(15.dp))
+            }
             LazyRow(
                 modifier = Modifier.fillMaxWidth().focusGroup(),
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -2884,29 +2837,35 @@ private fun PlayerErrorPanel(
                             "اعادة المحاولة",
                             onRetry,
                             modifier = actionModifier(PlayerErrorModalAction.RETRY, retryFocusRequester),
-                            primary = focusedAction == PlayerErrorModalAction.RETRY,
-                            accent = focusedAction != PlayerErrorModalAction.RETRY,
+                            primary = livePresentation || focusedAction == PlayerErrorModalAction.RETRY,
+                            accent = !livePresentation && focusedAction != PlayerErrorModalAction.RETRY,
                             compact = true,
+                            trailingIcon = Icons.Rounded.Refresh.takeIf { livePresentation },
                         )
                         PlayerErrorModalAction.CHOOSE_CHANNEL -> FocusButton(
                             "اختيار قناة",
                             onChooseChannel,
                             modifier = actionModifier(PlayerErrorModalAction.CHOOSE_CHANNEL, channelFocusRequester),
-                            primary = focusedAction == PlayerErrorModalAction.CHOOSE_CHANNEL,
+                            primary = !livePresentation && focusedAction == PlayerErrorModalAction.CHOOSE_CHANNEL,
+                            outlined = livePresentation,
                             compact = true,
+                            trailingIcon = if (livePresentation) Icons.AutoMirrored.Rounded.List else null,
                         )
                         PlayerErrorModalAction.CHOOSE_SOURCE -> FocusButton(
                             "اختيار مصدر",
                             onChooseServer,
                             modifier = actionModifier(PlayerErrorModalAction.CHOOSE_SOURCE, serverFocusRequester),
-                            primary = focusedAction == PlayerErrorModalAction.CHOOSE_SOURCE,
+                            primary = !livePresentation && focusedAction == PlayerErrorModalAction.CHOOSE_SOURCE,
+                            outlined = livePresentation,
                             compact = true,
+                            trailingIcon = Icons.Rounded.Layers.takeIf { livePresentation },
                         )
                         PlayerErrorModalAction.BACK -> FocusButton(
                             "رجوع",
                             onBack,
                             modifier = actionModifier(PlayerErrorModalAction.BACK, backFocusRequester),
-                            primary = focusedAction == PlayerErrorModalAction.BACK,
+                            primary = !livePresentation && focusedAction == PlayerErrorModalAction.BACK,
+                            outlined = livePresentation,
                             compact = true,
                         )
                     }
