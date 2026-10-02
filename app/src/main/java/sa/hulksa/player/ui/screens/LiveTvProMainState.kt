@@ -13,7 +13,7 @@ import sa.hulksa.player.model.ContentType
 /**
  * Decorates only the Live catalog presented by MainShellScreen.
  *
- * The canonical repository catalog stays untouched. A synthetic "استكمال اخر مشاهدة" category is
+ * The canonical repository catalog stays untouched. A synthetic "اخر مشاهدة" category is
  * injected for the main Live page. While that category is selected, recent channels temporarily
  * replace their canonical copies instead of being appended as duplicate provider identities.
  */
@@ -26,7 +26,7 @@ internal fun liveTvProDecorateMainState(
 
     val recentCategory = Category(
         id = LIVE_TV_PRO_MAIN_RECENT_CATEGORY,
-        name = "استكمال اخر مشاهدة",
+        name = "اخر مشاهدة",
         type = ContentType.LIVE,
     )
     val categories = (listOf(recentCategory) + liveCatalog.categories)

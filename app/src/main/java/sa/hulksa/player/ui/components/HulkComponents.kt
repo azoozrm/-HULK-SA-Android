@@ -33,6 +33,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,6 +78,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
@@ -265,8 +269,11 @@ fun FocusButton(
     scaleOnFocus: Boolean = true,
     accent: Boolean = false,
     leadingIcon: ImageVector? = null,
+    trailingIcon: ImageVector? = null,
+    trailingIconTint: Color? = null,
     textMaxLines: Int = 1,
     textSizeSp: Int? = null,
+    textLineHeightSp: Int? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -328,35 +335,46 @@ fun FocusButton(
                 vertical = if (compact) 9.dp else 12.dp,
             ),
     ) {
-        val icon = leadingIcon
-        if (icon == null) {
+        if (leadingIcon == null && trailingIcon == null) {
             Text(
                 text = text,
                 color = textColor,
                 fontSize = (textSizeSp ?: if (compact) 13 else 15).sp,
+                lineHeight = textLineHeightSp?.sp ?: TextUnit.Unspecified,
                 fontWeight = FontWeight.Bold,
                 maxLines = textMaxLines,
             )
         } else {
+            val resolvedIconSize = if (compact) 17.dp else 19.dp
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = textColor,
-                    modifier = Modifier.size(if (compact) 17.dp else 19.dp),
-                )
+                leadingIcon?.let { icon ->
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = textColor,
+                        modifier = Modifier.size(resolvedIconSize),
+                    )
+                }
                 Text(
                     text = text,
                     color = textColor,
                     fontSize = (textSizeSp ?: if (compact) 13 else 15).sp,
-                    lineHeight = if (compact) 15.sp else 18.sp,
+                    lineHeight = textLineHeightSp?.sp ?: if (compact) 15.sp else 18.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = textMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
+                trailingIcon?.let { icon ->
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = trailingIconTint ?: textColor,
+                        modifier = Modifier.size(resolvedIconSize),
+                    )
+                }
             }
         }
     }
@@ -1009,8 +1027,13 @@ fun ChannelListItem(
             Text(item.name, color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("● بث مباشر", color = if (active) colors.goldBright else colors.textMuted, fontSize = 10.sp)
         }
-        if (isFavorite) {
-            Text("★", color = colors.goldBright, fontSize = 16.sp)
+        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                contentDescription = null,
+                tint = if (isFavorite) colors.gold else colors.textMuted,
+                modifier = Modifier.size(17.dp),
+            )
         }
         Text("▶", color = if (active) colors.goldBright else colors.textMuted, fontSize = 14.sp)
     }
