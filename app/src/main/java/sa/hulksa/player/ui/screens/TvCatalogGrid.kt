@@ -44,13 +44,46 @@ internal data class TvCatalogMetrics(
     val horizontalSpacingDp: Float,
     val verticalSpacingDp: Float,
     val horizontalContentPaddingDp: Float,
+    val endContentPaddingDp: Float,
     val bottomContentPaddingDp: Float,
     val focusViewportInsetDp: Float,
 )
 
+/**
+ * Movie-only minimum cell width for the owner-observed wide TV five-column composition.
+ *
+ * Wider cells intentionally yield fewer, shorter cards on wide windows while narrower windows
+ * fall back toward the existing adaptive cell so five columns are never forced on phones,
+ * tablets, split windows or small TVs.
+ */
+internal fun movieCatalogMinCellWidthDp(screenWidthDp: Int): Float {
+    val width = screenWidthDp.coerceAtLeast(1)
+    return when {
+        width >= 1500 -> 205f
+        width >= 1100 -> 190f
+        width >= 900 -> 170f
+        width >= 720 -> 150f
+        width >= 480 -> 132f
+        else -> 120f
+    }
+}
+
+/**
+ * One column policy shared by the actual LazyVerticalGrid layout and the D-pad column arithmetic.
+ */
+internal fun movieCatalogColumnCount(
+    availableWidthDp: Float,
+    spacingDp: Float,
+    minCellWidthDp: Float,
+): Int {
+    if (availableWidthDp <= 0f || minCellWidthDp <= 0f || spacingDp < 0f) return 1
+    return (((availableWidthDp + spacingDp) / (minCellWidthDp + spacingDp)).toInt()).coerceAtLeast(1)
+}
+
 internal fun tvCatalogMetrics(
     screenWidthDp: Int,
     screenHeightDp: Int,
+    movieCards: Boolean = false,
 ): TvCatalogMetrics {
     val width = screenWidthDp.coerceAtLeast(1)
     val height = screenHeightDp.coerceAtLeast(1)
@@ -65,7 +98,11 @@ internal fun tvCatalogMetrics(
     }
 
     return TvCatalogMetrics(
-        minCellWidthDp = (132f * densityScale).coerceIn(124f, 146f),
+        minCellWidthDp = if (movieCards) {
+            movieCatalogMinCellWidthDp(width)
+        } else {
+            (132f * densityScale).coerceIn(124f, 146f)
+        },
         horizontalSpacingDp = (14f * densityScale).coerceIn(12f, 16f),
         verticalSpacingDp = (15f * densityScale).coerceIn(13f, 17f),
         horizontalContentPaddingDp = when {
@@ -73,6 +110,9 @@ internal fun tvCatalogMetrics(
             large -> 12f
             else -> 10f
         },
+        // Movie-only: the physical LEFT end (RTL) uses the real TV safe inset so the focused
+        // card border is not cropped by overscan. Other catalogs keep the historical 6dp.
+        endContentPaddingDp = if (movieCards) policy.horizontalSafeInsetDp else 6f,
         bottomContentPaddingDp = maxOf(44f, policy.verticalSafeInsetDp + 30f),
         focusViewportInsetDp = when {
             compact -> 9f
@@ -147,17 +187,19 @@ internal fun TvCatalogGrid(
     require(contentKeys.size == content.size)
 
     val adaptiveUi = LocalAdaptiveUi.current
-    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+    val movieCards = destination == MainDestination.MOVIES
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, movieCards) {
         tvCatalogMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
             screenHeightDp = adaptiveUi.screenHeightDp,
+            movieCards = movieCards,
         )
     }
     val minCellWidth = metrics.minCellWidthDp.dp
     val horizontalSpacing = metrics.horizontalSpacingDp.dp
     val verticalSpacing = metrics.verticalSpacingDp.dp
     val horizontalContentPadding = metrics.horizontalContentPaddingDp.dp
-    val focusSafeEndPadding = 6.dp
+    val focusSafeEndPadding = metrics.endContentPaddingDp.dp
     val bottomContentPadding = metrics.bottomContentPaddingDp.dp
     val focusViewportInset = metrics.focusViewportInsetDp.dp
 
@@ -237,14 +279,22 @@ internal fun TvCatalogGrid(
         val availableGridWidth = (
             maxWidth - horizontalContentPadding - focusSafeEndPadding
         ).coerceAtLeast(minCellWidth)
-        val columnCount = (((availableGridWidth + horizontalSpacing).value) /
-            (minCellWidth + horizontalSpacing).value)
-            .toInt()
-            .coerceAtLeast(1)
+        val columnCount = if (movieCards) {
+            movieCatalogColumnCount(
+                availableWidthDp = availableGridWidth.value,
+                spacingDp = horizontalSpacing.value,
+                minCellWidthDp = minCellWidth.value,
+            )
+        } else {
+            (((availableGridWidth + horizontalSpacing).value) /
+                (minCellWidth + horizontalSpacing).value)
+                .toInt()
+                .coerceAtLeast(1)
+        }
 
         LazyVerticalGrid(
             state = gridState,
-            columns = GridCells.Adaptive(minCellWidth),
+            columns = if (movieCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth),
             horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
             verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             contentPadding = PaddingValues(

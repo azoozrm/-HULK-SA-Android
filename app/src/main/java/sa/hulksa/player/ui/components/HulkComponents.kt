@@ -443,6 +443,7 @@ fun HulkTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     leadingIcon: ImageVector? = null,
+    leadingIconTint: Color? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -479,7 +480,7 @@ fun HulkTextField(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = colors.textMuted,
+                        tint = leadingIconTint ?: colors.textMuted,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -773,10 +774,12 @@ fun PosterCard(
 ) = CompactPosterCard(item, isFavorite, onClick, modifier, onLongClick)
 
 /**
- * Owner-approved Movies catalog card: complete boxed card with the title/metadata footer inside
- * the card frame, gold focus edge, star rating and clock duration drawn as real icons on the
- * physical left of their values. Opt-in for the Movies destination only; other catalogs keep
- * their existing card presentation.
+ * Owner-approved Movies catalog card: square artwork area with natural crop plus one fixed footer.
+ *
+ * Every card reserves exactly two title lines (a one-line title leaves the second line blank) and
+ * an identical metadata row even when values are missing, so loading/cached metadata arrival and
+ * missing values never change neighboring card geometry. Warm-gold star/clock/heart icons sit on
+ * the physical left of their ivory values. Opt-in for the Movies destination only.
  */
 @Composable
 fun MoviesCatalogBoxedCard(
@@ -877,7 +880,7 @@ fun MoviesCatalogBoxedCard(
                 onLongClick = onLongClick,
             ),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
             if (!item.posterUrl.isNullOrBlank() && !artworkFailed) {
                 AsyncImage(
                     model = item.posterUrl,
@@ -896,8 +899,8 @@ fun MoviesCatalogBoxedCard(
                     .background(
                         Brush.verticalGradient(
                             0f to Color.Transparent,
-                            .72f to Color.Transparent,
-                            1f to Color(0xFF10110C),
+                            .78f to Color.Transparent,
+                            1f to Color(0xFF12130E),
                         ),
                     ),
             )
@@ -915,7 +918,7 @@ fun MoviesCatalogBoxedCard(
                     Icon(
                         imageVector = Icons.Rounded.Favorite,
                         contentDescription = null,
-                        tint = colors.goldBright,
+                        tint = colors.gold,
                         modifier = Modifier.size(13.dp),
                     )
                 }
@@ -930,66 +933,66 @@ fun MoviesCatalogBoxedCard(
         ) {
             Text(
                 text = item.name,
-                color = Color.White,
+                color = colors.text,
                 fontWeight = FontWeight.Bold,
                 fontSize = if (adaptiveUi.isTelevision) 12.sp else 11.sp,
                 lineHeight = if (adaptiveUi.isTelevision) 15.sp else 14.sp,
                 maxLines = 2,
-                minLines = 1,
+                minLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
             )
-            if (rating != null || duration != null) {
-                Spacer(Modifier.height(5.dp))
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        rating?.let { value ->
-                            Icon(
-                                imageVector = Icons.Rounded.Star,
-                                contentDescription = null,
-                                tint = colors.goldBright,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Spacer(Modifier.width(3.dp))
-                            Text(
-                                text = value,
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                            )
-                        }
-                        if (rating != null && duration != null) {
-                            Spacer(Modifier.width(7.dp))
-                            Box(
-                                Modifier
-                                    .width(1.dp)
-                                    .height(11.dp)
-                                    .background(Color.White.copy(alpha = .18f)),
-                            )
-                            Spacer(Modifier.width(7.dp))
-                        }
-                        duration?.let { value ->
-                            Icon(
-                                imageVector = Icons.Rounded.Schedule,
-                                contentDescription = null,
-                                tint = Color(0xFFE0D7B8),
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Spacer(Modifier.width(3.dp))
-                            Text(
-                                text = value,
-                                color = Color(0xFFE0D7B8),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                            )
-                        }
+            Spacer(Modifier.height(5.dp))
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    if (rating != null) {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = null,
+                            tint = colors.gold,
+                            modifier = Modifier.size(12.dp),
+                        )
+                        Spacer(Modifier.width(3.dp))
                     }
+                    Text(
+                        text = rating.orEmpty(),
+                        color = if (rating != null) colors.text else Color.Transparent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        minLines = 1,
+                    )
+                    if (rating != null && duration != null) {
+                        Spacer(Modifier.width(7.dp))
+                        Box(
+                            Modifier
+                                .width(1.dp)
+                                .height(11.dp)
+                                .background(Color.White.copy(alpha = .18f)),
+                        )
+                        Spacer(Modifier.width(7.dp))
+                    }
+                    if (duration != null) {
+                        Icon(
+                            imageVector = Icons.Rounded.Schedule,
+                            contentDescription = null,
+                            tint = colors.gold,
+                            modifier = Modifier.size(12.dp),
+                        )
+                        Spacer(Modifier.width(3.dp))
+                    }
+                    Text(
+                        text = duration.orEmpty(),
+                        color = if (duration != null) colors.text else Color.Transparent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        minLines = 1,
+                    )
                 }
             }
         }

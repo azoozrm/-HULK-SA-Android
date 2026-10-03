@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -179,8 +178,12 @@ fun MovieDetailsProScreen(
         val cached = metadataStore.cached(metadataOwner, ContentType.MOVIE, item.id)
         DetailsProMovieTechnicalMetadata(cached.quality, cached.durationMs)
     }
-    val progress = historyEntry?.detailsProWatchProgress()
+    val progress = movieResumeProgress(
+        positionMs = historyEntry?.positionMs ?: 0L,
+        durationMs = historyEntry?.durationMs ?: 0L,
+    )
     val resumePosition = historyEntry?.positionMs?.takeIf { progress != null }
+    val movieHeroHeightDp = movieCompactHeroHeightDp(adaptiveUi.screenHeightDp)
     val backdrop = details?.backdropUrl ?: item.backdropUrl ?: item.posterUrl
 
     val backRequester = remember(item.id) { FocusRequester() }
@@ -211,7 +214,7 @@ fun MovieDetailsProScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(metrics.heroHeightDp.dp)
+                    .height(movieHeroHeightDp.dp)
                     .background(colors.background),
             ) {
                 if (!backdrop.isNullOrBlank()) {
@@ -271,12 +274,12 @@ fun MovieDetailsProScreen(
                 ) {
                     Text(
                         text = item.name,
-                        color = Color.White,
+                        color = colors.text,
                         fontSize = metrics.titleSizeSp.sp,
                         lineHeight = (metrics.titleSizeSp + 5).sp,
                         fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center,
-                        maxLines = if (metrics.compactHeight) 1 else 2,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.fillMaxWidth(.94f),
                     )
@@ -294,10 +297,12 @@ fun MovieDetailsProScreen(
                     )
                     if (progress != null && historyEntry != null) {
                         Spacer(Modifier.height(10.dp))
-                        DetailsProProgress(
+                        MovieInlineResumeStrip(
+                            positionMs = historyEntry.positionMs,
+                            durationMs = historyEntry.durationMs,
                             progress = progress,
-                            label = "اكمل المشاهدة من ${detailsProFormatTime(historyEntry.positionMs)}",
-                            modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .42f else .74f),
+                            isTv = false,
+                            modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .78f else 1f),
                         )
                     }
                     Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 13.dp))
@@ -327,7 +332,7 @@ fun MovieDetailsProScreen(
                             primary = false,
                             outlined = true,
                             trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                            trailingIconTint = if (isFavorite) colors.goldBright else null,
+                            trailingIconTint = colors.gold,
                             scaleOnFocus = false,
                             onFocused = { heroReturnRequester = favoriteRequester },
                             textMaxLines = 1,
@@ -345,7 +350,8 @@ fun MovieDetailsProScreen(
                             primary = false,
                             outlined = true,
                             enabled = download?.status != OfflineStatus.COMPLETED,
-                            trailingIcon = Icons.Rounded.Download,
+                            trailingIcon = movieDownloadActionIcon(download),
+                            trailingIconTint = colors.gold,
                             scaleOnFocus = false,
                             onFocused = { heroReturnRequester = downloadRequester },
                             textMaxLines = 1,
@@ -360,19 +366,29 @@ fun MovieDetailsProScreen(
                     }
                     if (download != null && download.status != OfflineStatus.COMPLETED) {
                         Spacer(Modifier.height(9.dp))
-                        Box(
+                        Row(
                             modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .78f else 1f),
-                            contentAlignment = Alignment.Center,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Spacer(Modifier.weight(1f))
+                            Spacer(Modifier.weight(1f))
                             FocusButton(
                                 text = "الغاء التحميل",
                                 onClick = onCancelDownload,
                                 primary = false,
                                 outlined = true,
                                 compact = true,
+                                scaleOnFocus = false,
+                                textMaxLines = 1,
                                 modifier = Modifier
-                                    .widthIn(max = 190.dp)
-                                    .focusRequester(cancelDownloadRequester),
+                                    .weight(1f)
+                                    .heightIn(min = movieActionMinHeightDp(metrics).dp)
+                                    .focusRequester(cancelDownloadRequester)
+                                    .focusProperties {
+                                        up = downloadRequester
+                                        down = tabRequesters.getValue(MovieDetailsTab.STORY)
+                                    },
                             )
                         }
                     }
@@ -453,7 +469,7 @@ fun MovieDetailsProScreen(
             }
             MovieDetailsTab.RELATED -> item(key = "movie_related") {
                 if (relatedItems.isEmpty()) {
-                    MovieDetailsEmptyTabMessage("لا توجد اعمال مشابهة متاحة", isTv)
+                    MovieDetailsEmptyTabMessage("لا توجد افلام مشابهة متاحة", isTv)
                 } else {
                     DetailsProRelatedRow(
                         title = "",
@@ -469,18 +485,6 @@ fun MovieDetailsProScreen(
                         onOpen = onOpenRelated,
                     )
                 }
-            }
-        }
-
-        if (download != null && download.status != OfflineStatus.COMPLETED) {
-            item(key = "movie_download_progress") {
-                DetailsProDownloadProgress(
-                    download = download,
-                    modifier = Modifier.padding(
-                        horizontal = metrics.horizontalPaddingDp.dp,
-                        vertical = 8.dp,
-                    ),
-                )
             }
         }
     }

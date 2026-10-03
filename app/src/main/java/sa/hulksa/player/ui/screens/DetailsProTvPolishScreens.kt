@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -231,8 +230,11 @@ private fun MovieDetailsProTvPolished(
         val cached = movieMetadataStore.cached(movieMetadataOwner, ContentType.MOVIE, item.id)
         DetailsTvMovieTechnical(cached.quality, cached.durationMs)
     }
-    val progress = historyEntry?.detailsTvWatchProgress()
-    val movieResumeHeroExtraDp = if (progress != null && historyEntry != null) 34 else 0
+    val progress = movieResumeProgress(
+        positionMs = historyEntry?.positionMs ?: 0L,
+        durationMs = historyEntry?.durationMs ?: 0L,
+    )
+    val movieHeroHeightDp = movieCompactHeroHeightDp(adaptive.screenHeightDp)
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
@@ -258,7 +260,7 @@ private fun MovieDetailsProTvPolished(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height((metrics.heroHeightDp + movieResumeHeroExtraDp).dp)
+                    .height(movieHeroHeightDp.dp)
                     .background(Color(0xFF080906)),
             ) {
                 if (!backdrop.isNullOrBlank()) {
@@ -340,13 +342,15 @@ private fun MovieDetailsProTvPolished(
                     )
                     if (progress != null && historyEntry != null) {
                         Spacer(Modifier.height(10.dp))
-                        DetailsTvProgress(
+                        MovieInlineResumeStrip(
+                            positionMs = historyEntry.positionMs,
+                            durationMs = historyEntry.durationMs,
                             progress = progress,
-                            label = "اكمل المشاهدة من ${detailsTvFormatTime(historyEntry.positionMs)}",
-                            modifier = Modifier.fillMaxWidth(.34f),
+                            isTv = true,
+                            modifier = Modifier.fillMaxWidth(.72f),
                         )
                     }
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(13.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(.72f),
                         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -381,7 +385,7 @@ private fun MovieDetailsProTvPolished(
                             outlined = true,
                             compact = true,
                             trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                            trailingIconTint = if (isFavorite) colors.goldBright else null,
+                            trailingIconTint = colors.gold,
                             scaleOnFocus = false,
                             onFocused = { heroReturnRequester = favoriteRequester },
                             modifier = Modifier
@@ -402,7 +406,8 @@ private fun MovieDetailsProTvPolished(
                             outlined = true,
                             compact = true,
                             enabled = downloadFocusable,
-                            trailingIcon = Icons.Rounded.Download,
+                            trailingIcon = movieDownloadActionIcon(download),
+                            trailingIconTint = colors.gold,
                             scaleOnFocus = false,
                             onFocused = { heroReturnRequester = downloadRequester },
                             modifier = Modifier
@@ -419,22 +424,32 @@ private fun MovieDetailsProTvPolished(
                     }
                     if (download != null && download.status != OfflineStatus.COMPLETED) {
                         Spacer(Modifier.height(9.dp))
-                        FocusButton(
-                            text = "الغاء التحميل",
-                            onClick = onCancelDownload,
-                            primary = false,
-                            outlined = true,
-                            compact = true,
-                            modifier = Modifier
-                                .widthIn(max = 190.dp)
-                                .focusRequester(cancelRequester)
-                                .focusProperties {
-                                    up = downloadRequester
-                                    left = FocusRequester.Cancel
-                                    right = FocusRequester.Cancel
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                },
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(.72f),
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Spacer(Modifier.weight(1f))
+                            Spacer(Modifier.weight(1f))
+                            FocusButton(
+                                text = "الغاء التحميل",
+                                onClick = onCancelDownload,
+                                primary = false,
+                                outlined = true,
+                                compact = true,
+                                scaleOnFocus = false,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 46.dp)
+                                    .focusRequester(cancelRequester)
+                                    .focusProperties {
+                                        up = downloadRequester
+                                        left = FocusRequester.Cancel
+                                        right = FocusRequester.Cancel
+                                        down = tabRequesters.getValue(MovieDetailsTab.STORY)
+                                    },
+                            )
+                        }
                     }
                 }
 
@@ -509,7 +524,7 @@ private fun MovieDetailsProTvPolished(
             }
             MovieDetailsTab.RELATED -> item(key = "movie_tv_polished_related_tab") {
                 if (relatedItems.isEmpty()) {
-                    MovieDetailsEmptyTabMessage("لا توجد اعمال مشابهة متاحة", isTv = true)
+                    MovieDetailsEmptyTabMessage("لا توجد افلام مشابهة متاحة", isTv = true)
                 } else {
                     DetailsTvRelatedMovies(
                         title = "",
@@ -524,15 +539,6 @@ private fun MovieDetailsProTvPolished(
                         onOpen = onOpenRelated,
                     )
                 }
-            }
-        }
-
-        if (download != null && download.status != OfflineStatus.COMPLETED) {
-            item(key = "movie_tv_polished_download") {
-                DetailsTvDownloadProgress(
-                    download = download,
-                    modifier = Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 8.dp),
-                )
             }
         }
     }
@@ -1760,29 +1766,6 @@ private fun DetailsTvProgress(progress: Float, label: String, modifier: Modifier
     }
 }
 
-@Composable
-private fun DetailsTvDownloadProgress(download: OfflineDownload, modifier: Modifier = Modifier) {
-    val colors = LocalHulkColors.current
-    val percent = (download.progress * 100).toInt().coerceIn(0, 100)
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(colors.surface.copy(alpha = .75f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(detailsTvDownloadState(download), color = colors.textMuted, fontSize = 9.sp)
-            Spacer(Modifier.weight(1f))
-            Text("$percent%", color = colors.goldBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(5.dp))
-        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = .14f))) {
-            Box(Modifier.fillMaxWidth(download.progress.coerceIn(0f, 1f)).fillMaxHeight().background(colors.goldBright))
-        }
-    }
-}
-
 private fun detailsTvHasInformation(details: ContentDetails?): Boolean =
     !details?.releaseDate.isNullOrBlank() || !details?.director.isNullOrBlank() || !details?.cast.isNullOrBlank()
 
@@ -1873,18 +1856,6 @@ private fun detailsTvEpisodeDownloadLabel(download: OfflineDownload?): String = 
     -> "▶ استئناف"
     OfflineStatus.FAILED -> "↻ اعادة"
     null -> "↓ تحميل"
-}
-
-private fun detailsTvDownloadState(download: OfflineDownload): String = when (download.status) {
-    OfflineStatus.COMPLETED -> "تم التحميل"
-    OfflineStatus.QUEUED -> "في قائمة الانتظار"
-    OfflineStatus.CHECKING -> "جاري فحص الحجم"
-    OfflineStatus.DOWNLOADING -> "جاري التحميل"
-    OfflineStatus.PAUSED -> "متوقف مؤقتا"
-    OfflineStatus.WAITING_SCHEDULE -> "مجدول للتحميل"
-    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
-    OfflineStatus.WAITING_STORAGE -> "بانتظار مساحة"
-    OfflineStatus.FAILED -> "تعذر التحميل"
 }
 
 private fun detailsTvFormatTime(ms: Long): String {
