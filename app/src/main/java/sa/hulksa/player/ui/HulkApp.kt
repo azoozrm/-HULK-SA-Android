@@ -449,6 +449,7 @@ fun HulkApp(
                                 liveTvProEnabled = state.operations.features.liveTvProEnabled,
                                 liveCatalog = state.catalogs[ContentType.LIVE],
                                 isFavorite = viewModel::isFavorite,
+                                favoriteKeys = state.favorites,
                                 onSelectLiveChannel = viewModel::switchLiveChannel,
                                 onToggleFavorite = viewModel::toggleFavorite,
                                 onBack = viewModel::back,

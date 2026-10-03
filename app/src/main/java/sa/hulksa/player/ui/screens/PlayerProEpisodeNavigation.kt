@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,7 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -170,6 +171,7 @@ fun PlayerProScreen(
     liveTvProEnabled: Boolean,
     liveCatalog: Catalog?,
     isFavorite: (ContentItem) -> Boolean,
+    favoriteKeys: Set<String>,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onBack: () -> Unit,
@@ -278,6 +280,18 @@ fun PlayerProScreen(
         liveZapInteractionTick += 1
     }
 
+    /**
+     * Shared last-channel action for the hardware Last Channel key and the Live HUD button.
+     * Returns false when the profile-scoped history has no available, non-current target.
+     */
+    fun playLastChannel(): Boolean {
+        val channel = lastChannel ?: return false
+        cancelPendingLiveZap()
+        showLiveZapIndicator(channel)
+        onSelectLiveChannel(channel)
+        return true
+    }
+
     fun liveNavigationSequence(): List<ContentItem> = playerProLiveNavigationSequence(
         channels = liveChannels,
         currentStreamId = request.streamId,
@@ -369,11 +383,7 @@ fun PlayerProScreen(
                         }
 
                         ANDROID_KEYCODE_LAST_CHANNEL -> {
-                            val channel = lastChannel ?: return@onPreviewKeyEvent false
-                            cancelPendingLiveZap()
-                            showLiveZapIndicator(channel)
-                            onSelectLiveChannel(channel)
-                            return@onPreviewKeyEvent true
+                            return@onPreviewKeyEvent playLastChannel()
                         }
 
                         AndroidKeyEvent.KEYCODE_DPAD_LEFT,
@@ -433,8 +443,20 @@ fun PlayerProScreen(
             request = request,
             liveCatalog = liveCatalog,
             isFavorite = isFavorite,
+            favoriteKeys = favoriteKeys,
             onSelectLiveChannel = ::queuePlayerRequestedLiveChannel,
             onToggleFavorite = onToggleFavorite,
+            onLastChannel = if (
+                playerProLiveLastChannelActionEnabled(
+                    isLive = request.isLive,
+                    liveTvProEnabled = liveTvProEnabled,
+                    hasLastChannel = lastChannel != null,
+                )
+            ) {
+                { playLastChannel() }
+            } else {
+                null
+            },
             onBack = onBack,
             onProgress = onProgress,
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
@@ -476,8 +498,17 @@ private fun LiveZapIndicator(
     val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         playerTvPremiumOverlayMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
     }
-    val shape = RoundedCornerShape(if (isTv) 26.dp else 22.dp)
     val logoShape = RoundedCornerShape(if (isTv) 18.dp else 15.dp)
+    val textFade = if (isTv) {
+        // Localized dark fade under the text, strongest next to the gold accent.
+        Brush.horizontalGradient(
+            listOf(Color.Transparent, Color.Black.copy(alpha = .78f)),
+        )
+    } else {
+        Brush.horizontalGradient(
+            listOf(Color.Transparent, Color.Black.copy(alpha = .72f), Color.Transparent),
+        )
+    }
 
     Row(
         modifier = modifier
@@ -485,43 +516,60 @@ private fun LiveZapIndicator(
                 min = if (isTv) metrics.zapMinWidthDp.dp else 300.dp,
                 max = if (isTv) metrics.zapMaxWidthDp.dp else 370.dp,
             )
-            .shadow(if (isTv) 20.dp else 14.dp, shape, clip = false)
-            .clip(shape)
-            .background(Color(0xF2141612))
-            .border(1.dp, colors.gold.copy(alpha = .72f), shape)
-            .padding(
-                horizontal = if (isTv) metrics.zapHorizontalPaddingDp.dp else 16.dp,
-                vertical = if (isTv) metrics.zapVerticalPaddingDp.dp else 14.dp,
-            ),
+            .padding(vertical = if (isTv) metrics.zapVerticalPaddingDp.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 18.dp else 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
     ) {
         Box(
             modifier = Modifier
                 .size(if (isTv) metrics.zapLogoSizeDp.dp else 70.dp)
                 .clip(logoShape)
-                .background(Color.White.copy(alpha = .96f))
-                .padding(if (isTv) 7.dp else 6.dp),
+                .background(Color(0xFFF7F5EF))
+                .border(1.dp, colors.gold.copy(alpha = .55f), logoShape)
+                .padding(5.dp),
             contentAlignment = Alignment.Center,
         ) {
             ChannelLogo(channel, Modifier.fillMaxSize())
         }
 
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(if (isTv) (metrics.zapLogoSizeDp * .62f).dp else 46.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.gold),
+        )
+
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .weight(1f)
+                .background(textFade)
+                .padding(
+                    start = if (isTv) 6.dp else 8.dp,
+                    end = if (isTv) metrics.zapHorizontalPaddingDp.dp else 10.dp,
+                    top = 4.dp,
+                    bottom = 4.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "● LIVE",
-                    color = Color(0xFFFF4E55),
+                    text = "تبديل القناة",
+                    color = colors.goldBright,
                     fontSize = if (isTv) 13.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(if (isTv) 8.dp else 7.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF4E55)),
+                )
+                Spacer(Modifier.width(5.dp))
                 Text(
-                    text = "تبديل القناة",
-                    color = colors.goldBright,
+                    text = "مباشر",
+                    color = Color.White,
                     fontSize = if (isTv) 13.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -541,13 +589,5 @@ private fun LiveZapIndicator(
                 maxLines = 1,
             )
         }
-
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .height(if (isTv) (metrics.zapLogoSizeDp * .66f).dp else 50.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(colors.goldBright),
-        )
     }
 }

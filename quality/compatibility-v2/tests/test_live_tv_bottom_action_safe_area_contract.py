@@ -60,7 +60,7 @@ class LiveTvBottomActionSafeAreaContractTest(unittest.TestCase):
             re.compile(
                 r'FocusButton\(\s*"تشغيل القناة".*?'
                 r'left = favoriteRequester; right = channelRequester.*?'
-                r'FocusButton\(\s*if \(isFavorite\).*?'
+                r'FocusButton\(\s*"المفضلة".*?'
                 r'left = channelRequester; right = playRequester',
                 re.DOTALL,
             ),

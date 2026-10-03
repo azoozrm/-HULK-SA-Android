@@ -2506,12 +2506,12 @@ private fun LiveCatalogScreen(
                     showCategoryManager = true
                 },
                 manageCategoriesRequester = manageCategoriesRequester,
+                searchIcon = Icons.Rounded.Search,
             )
             if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(10.dp))
             ReorderableLiveCategoryBar(
                 categories = catalog?.categories.orEmpty(),
-                items = catalog?.items.orEmpty(),
                 selectedId = state.selectedCategoryId,
                 onSelect = selectCategoryAndEnterContent,
                 isTv = isTv,
@@ -2540,10 +2540,10 @@ private fun LiveCatalogScreen(
                 Box(Modifier.weight(0.4f).fillMaxHeight().padding(bottom = 12.dp)) {
                     Column(
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xA30D0E0B)).padding(9.dp),
+                            .background(Color(0x6611120D))
+                            .border(1.dp, colors.gold.copy(alpha = .18f), RoundedCornerShape(18.dp))
+                            .padding(8.dp),
                     ) {
-                        Text("القنوات", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp))
                         LazyColumn(
                             state = listState,
                             modifier = Modifier
@@ -2667,13 +2667,24 @@ private fun LiveStage(
             modifier = Modifier.fillMaxWidth().weight(1f)
                 .padding(end = TV_PAGE_GUTTER)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Brush.radialGradient(listOf(colors.gold.copy(alpha = .12f), Color(0xFF090A08)))),
+                .background(Color(0xFF0B0C09))
+                .border(1.dp, colors.gold.copy(alpha = .28f), RoundedCornerShape(20.dp)),
+            contentAlignment = Alignment.Center,
         ) {
-            if (item == null) Text("اختر قناة", color = colors.textMuted, modifier = Modifier.align(Alignment.Center))
-            else {
-                ChannelLogo(item, Modifier.align(Alignment.Center).size(104.dp))
-                Box(Modifier.align(Alignment.TopStart).padding(17.dp).clip(CircleShape).background(Color(0xFFD3262E)).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                    Text("LIVE", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            if (item == null) {
+                Text("اختر قناة", color = colors.textMuted, modifier = Modifier.align(Alignment.Center))
+            } else {
+                var artworkFailed by remember(item.id, item.posterUrl) { mutableStateOf(false) }
+                if (!item.posterUrl.isNullOrBlank() && !artworkFailed) {
+                    AsyncImage(
+                        model = item.posterUrl,
+                        contentDescription = item.name,
+                        modifier = Modifier.fillMaxSize().padding(14.dp),
+                        contentScale = ContentScale.Fit,
+                        onError = { artworkFailed = true },
+                    )
+                } else {
+                    ChannelLogo(item, Modifier.size(132.dp))
                 }
             }
         }
@@ -2718,10 +2729,10 @@ private fun LiveStage(
                             trailingIcon = Icons.Rounded.PlayArrow,
                         )
                         FocusButton(
-                            if (isFavorite) "إزالة من المفضلة" else "المفضلة", onToggleFavorite,
+                            "المفضلة", onToggleFavorite,
                             modifier = Modifier.weight(1f).height(50.dp).focusRequester(favoriteRequester).focusProperties {
                                 left = channelRequester; right = playRequester
-                            }, primary = false, compact = true,
+                            }, primary = false, outlined = true, compact = true,
                             trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
                             trailingIconTint = if (isFavorite) colors.gold else null,
                         )
@@ -4708,6 +4719,7 @@ private fun CatalogHeader(
     onMoveToCategories: (() -> Boolean)? = null,
     onManageCategories: (() -> Unit)? = null,
     manageCategoriesRequester: FocusRequester? = null,
+    searchIcon: ImageVector? = null,
 ) {
     val colors = LocalHulkColors.current
     Column(Modifier.fillMaxWidth()) {
@@ -4739,14 +4751,26 @@ private fun CatalogHeader(
             }
             if (isTv && onManageCategories != null) {
                 Spacer(Modifier.width(11.dp - TV_PAGE_GUTTER))
-                HulkTextField(query, onSearch, "ابحث في $title…", Modifier.weight(1f).widthIn(max = 630.dp))
+                HulkTextField(
+                    query,
+                    onSearch,
+                    "ابحث في $title…",
+                    Modifier.weight(1f).widthIn(max = 630.dp),
+                    leadingIcon = searchIcon,
+                )
                 Spacer(Modifier.width(11.dp))
                 ManageCategoriesButton(onManageCategories, manageCategoriesRequester)
                 Spacer(Modifier.width(11.dp))
                 RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh)
                 Spacer(Modifier.width(TV_PAGE_GUTTER))
             } else {
-                HulkTextField(query, onSearch, "ابحث في $title…", Modifier.weight(1f).widthIn(max = 630.dp))
+                HulkTextField(
+                    query,
+                    onSearch,
+                    "ابحث في $title…",
+                    Modifier.weight(1f).widthIn(max = 630.dp),
+                    leadingIcon = searchIcon,
+                )
                 RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh)
             }
         }
@@ -4984,7 +5008,6 @@ private fun ReorderableCatalogCategoryBar(
         items(ordered, key = Category::id) { category ->
             LiveCategoryChip(
                 category = category,
-                representative = null,
                 selected = selectedId == category.id,
                 moving = moving == category.id,
                 onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
@@ -5054,7 +5077,6 @@ private fun rememberLiveCategoryStripMetrics(): LiveCategoryStripMetrics {
 @Composable
 private fun ReorderableLiveCategoryBar(
     categories: List<Category>,
-    items: List<ContentItem>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
     isTv: Boolean,
@@ -5085,11 +5107,6 @@ private fun ReorderableLiveCategoryBar(
     }
     val ordered = remember(allOrdered, hiddenCategoryIds) {
         allOrdered.filterNot { it.id in hiddenCategoryIds }
-    }
-    val artworkByCategory = remember(items) {
-        items.filter { !it.posterUrl.isNullOrBlank() }
-            .groupBy(ContentItem::categoryId)
-            .mapValues { (_, channels) -> channels.first() }
     }
     val itemMetrics = rememberLiveCategoryStripMetrics()
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID) }
@@ -5238,7 +5255,6 @@ private fun ReorderableLiveCategoryBar(
             } else {
                 LiveCategoryChip(
                     category = category,
-                    representative = artworkByCategory[category.id],
                     selected = selectedId == category.id,
                     moving = moving == category.id,
                     onClick = {
@@ -5253,6 +5269,7 @@ private fun ReorderableLiveCategoryBar(
                             categoryFocusRequesters.getValue(category.id), focusRestoreController,
                         ),
                     metrics = itemMetrics,
+                    framedBrandBadge = true,
                 )
             }
         }
@@ -5262,7 +5279,6 @@ private fun ReorderableLiveCategoryBar(
 @Composable
 private fun LiveCategoryChip(
     category: Category,
-    representative: ContentItem?,
     selected: Boolean,
     moving: Boolean,
     onClick: () -> Unit,
@@ -5271,6 +5287,7 @@ private fun LiveCategoryChip(
     onMoveRight: () -> Unit,
     modifier: Modifier = Modifier,
     metrics: LiveCategoryStripMetrics = LiveCategoryStripMetrics.Default,
+    framedBrandBadge: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -5358,19 +5375,20 @@ private fun LiveCategoryChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(metrics.iconGap, Alignment.CenterHorizontally),
     ) {
-        if (representative != null) {
-            ChannelLogo(representative, Modifier.size(metrics.iconSize))
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(metrics.iconSize)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF10110D))
-                    .border(1.dp, colors.line.copy(alpha = .35f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                BrandLogo(Modifier.fillMaxSize().padding(2.dp))
-            }
+        val badgeShape = RoundedCornerShape(if (framedBrandBadge) 7.dp else 10.dp)
+        Box(
+            modifier = Modifier
+                .size(metrics.iconSize)
+                .clip(badgeShape)
+                .background(Color(0xFF10110D))
+                .border(
+                    1.dp,
+                    if (framedBrandBadge) colors.gold.copy(alpha = .70f) else colors.line.copy(alpha = .35f),
+                    badgeShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            BrandLogo(Modifier.fillMaxSize().padding(if (framedBrandBadge) 3.dp else 2.dp))
         }
         Text(
             text = if (moving) "↔ ${category.name}" else category.name,
