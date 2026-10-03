@@ -67,6 +67,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -79,6 +80,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -789,6 +791,8 @@ fun MoviesCatalogBoxedCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
+    artworkHeightDp: Dp? = null,
+    onFooterHeightMeasured: ((Int) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -880,7 +884,20 @@ fun MoviesCatalogBoxedCard(
                 onLongClick = onLongClick,
             ),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    // Accepted normal geometry is the square artwork. The override is the
+                    // constraint-aware compact fallback for unusually short usable windows
+                    // and is never passed by the accepted TV/phone catalog paths.
+                    if (artworkHeightDp != null) {
+                        Modifier.height(artworkHeightDp)
+                    } else {
+                        Modifier.aspectRatio(1f)
+                    },
+                ),
+        ) {
             if (!item.posterUrl.isNullOrBlank() && !artworkFailed) {
                 AsyncImage(
                     model = item.posterUrl,
@@ -928,6 +945,7 @@ fun MoviesCatalogBoxedCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF12130E))
+                .onSizeChanged { onFooterHeightMeasured?.invoke(it.height) }
                 .padding(horizontal = 8.dp, vertical = 7.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -1200,6 +1218,215 @@ fun HistoryCard(
                         .fillMaxHeight()
                         .clip(CircleShape)
                         .background(colors.goldBright),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Movie-only Recent time text. Elapsed always comes from the authoritative saved position; the
+ * total is appended only for a real positive stored duration so an unknown total never invents
+ * data. Numeric groups stay LTR through [formatHistoryTime].
+ */
+internal fun movieRecentTimeText(positionMs: Long, durationMs: Long): String {
+    val elapsed = formatHistoryTime(positionMs)
+    return if (durationMs > 0L) {
+        "$elapsed / ${formatHistoryTime(durationMs)}"
+    } else {
+        elapsed
+    }
+}
+
+/**
+ * Movie-only Recent played fraction. Invalid totals yield an empty (muted) track instead of a
+ * fabricated minimum; legitimate fractions are clamped and a tiny value stays tiny.
+ */
+internal fun movieRecentPlayedFraction(positionMs: Long, durationMs: Long): Float {
+    if (durationMs <= 0L) return 0f
+    return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+}
+
+/**
+ * Movie-only Recent card. Reuses the approved catalog card chrome (square artwork, common
+ * two-line title area and identical footer paddings) and replaces the catalog metadata row with
+ * the authoritative saved time and a thin informational progress track. The warm-gold clock sits
+ * physically LEFT of the LTR numeric group; the gold played segment starts at the physical RIGHT
+ * (RTL layout start), matching [sa.hulksa.player.ui.screens.MovieInlineResumeStrip]. No rating,
+ * seek thumb, fake minimum fill or extra playback/delete control. Long-press removal keeps the
+ * exact [HistoryCard] semantics including the pre-removal focus move.
+ */
+@Composable
+fun MoviesHistoryCard(
+    entry: HistoryEntry,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onFocused: (() -> Unit)? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val layoutDirection = LocalLayoutDirection.current
+    val viewModel = remember(context) {
+        context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
+    }
+    val canDismiss = !entry.isLive
+    var focused by remember(entry.key) { mutableStateOf(false) }
+    var artworkFailed by remember(entry.posterUrl) { mutableStateOf(false) }
+    var remoteLongPressHandled by remember(entry.key) { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val scale = if (adaptiveUi.isTelevision) {
+        1f
+    } else {
+        animateFloatAsState(if (showFocused) 1.035f else 1f, label = "movieHistoryScale").value
+    }
+    val focusTransform = if (adaptiveUi.isTelevision) {
+        Modifier
+    } else {
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+        }
+    }
+    val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 12.dp else 10.dp)
+    val title = historyPrimaryTitle(entry)
+    val timeText = movieRecentTimeText(entry.positionMs, entry.durationMs)
+    val playedFraction = movieRecentPlayedFraction(entry.positionMs, entry.durationMs)
+    val dismissFromContinueWatching: (Boolean) -> Unit = { moveFocusFirst ->
+        if (canDismiss && viewModel != null) {
+            if (moveFocusFirst) {
+                val forward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Left else FocusDirection.Right
+                val backward = if (layoutDirection == LayoutDirection.Rtl) FocusDirection.Right else FocusDirection.Left
+                val movedToNeighbor = focusManager.moveFocus(forward) || focusManager.moveFocus(backward)
+                if (!movedToNeighbor) {
+                    focusManager.moveFocus(FocusDirection.Up)
+                }
+            }
+            viewModel.removeHistoryEntry(entry.key)
+        }
+    }
+    Column(
+        modifier = modifier
+            .then(focusTransform)
+            .clip(shape)
+            .background(Color(0xFF10110C))
+            .goldFocusEdge(shape = shape, visible = showFocused && adaptiveUi.isTelevision)
+            .border(
+                width = if (showFocused) 2.dp else 1.dp,
+                color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .10f),
+                shape = shape,
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .onPreviewKeyEvent { event ->
+                if (!canDismiss || !event.nativeKeyEvent.isRemoteSelectKey()) {
+                    false
+                } else if (event.type == KeyEventType.KeyDown) {
+                    if (
+                        (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
+                        !remoteLongPressHandled
+                    ) {
+                        remoteLongPressHandled = true
+                        dismissFromContinueWatching(true)
+                    }
+                    true
+                } else if (event.type == KeyEventType.KeyUp) {
+                    if (!remoteLongPressHandled) onClick()
+                    remoteLongPressHandled = false
+                    true
+                } else {
+                    false
+                }
+            }
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onClick,
+                onLongClick = if (canDismiss) ({ dismissFromContinueWatching(false) }) else null,
+            ),
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+            if (!entry.posterUrl.isNullOrBlank() && !artworkFailed) {
+                AsyncImage(
+                    model = entry.posterUrl,
+                    contentDescription = title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    onError = { artworkFailed = true },
+                )
+            } else {
+                HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.POSTER)
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            .78f to Color.Transparent,
+                            1f to Color(0xFF12130E),
+                        ),
+                    ),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF12130E))
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = title,
+                color = colors.text,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 11.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 15.sp else 14.sp,
+                maxLines = 2,
+                minLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(5.dp))
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = colors.gold,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = timeText,
+                        color = colors.text,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        minLines = 1,
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(if (adaptiveUi.isTelevision) 4.dp else 3.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.White.copy(alpha = .16f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(playedFraction)
+                        .fillMaxHeight()
+                        .background(colors.gold),
                 )
             }
         }

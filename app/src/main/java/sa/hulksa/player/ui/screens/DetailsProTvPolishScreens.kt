@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -39,9 +40,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +57,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -67,8 +71,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.model.ContentDetails
@@ -246,6 +252,98 @@ private fun MovieDetailsProTvPolished(
     var selectedTab by rememberSaveable(item.id) { mutableStateOf(MovieDetailsTab.STORY) }
     var heroReturnRequester by remember(item.id) { mutableStateOf(playRequester) }
     val downloadFocusable = download?.status != OfflineStatus.COMPLETED
+    val pageListState = rememberLazyListState()
+    val pageScrollScope = rememberCoroutineScope()
+    var pageScrollJob by remember(item.id) { mutableStateOf<Job?>(null) }
+    var tabRevealTarget by remember(item.id) { mutableStateOf<MovieDetailsTab?>(null) }
+    var tabRevealRequestId by remember(item.id) { mutableIntStateOf(0) }
+    val selectTab: (MovieDetailsTab) -> Unit = { tab ->
+        selectedTab = tab
+        if (tab == MovieDetailsTab.INFORMATION || tab == MovieDetailsTab.RELATED) {
+            tabRevealTarget = tab
+            tabRevealRequestId += 1
+        }
+    }
+    // One parent reveal owner: after an explicit selection has been laid out, scroll the parent
+    // page so the tab row and the complete selected section are visible when they fit. Obsolete
+    // rapid selections cancel the previous animation; metadata refresh never re-triggers it.
+    LaunchedEffect(tabRevealRequestId) {
+        val target = tabRevealTarget ?: return@LaunchedEffect
+        if (target != selectedTab) return@LaunchedEffect
+        withFrameNanos { }
+        val layout = pageListState.layoutInfo
+        val sectionKey = movieDetailsSectionItemKey(target, tvPolished = true)
+        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+        if (
+            movieDetailsSectionNeedsReveal(
+                sectionPresent = section != null,
+                sectionTop = section?.offset ?: 0,
+                sectionBottom = section?.let { it.offset + it.size } ?: 0,
+                viewportStart = layout.viewportStartOffset,
+                viewportEnd = layout.viewportEndOffset,
+            )
+        ) {
+            // One cancellable scroll owner for both the selection reveal and the read scroll, so
+            // a manual D-pad step always takes precedence over an in-flight reveal animation.
+            pageScrollJob?.cancel()
+            pageScrollJob = pageScrollScope.launch {
+                pageListState.animateScrollToItem(
+                    movieDetailsTabsItemIndex(hasError = errorMessage != null),
+                )
+            }
+        }
+    }
+    // Usable D-pad reading path for overflowing Story/Information panels: the selected tab keeps
+    // focus and steps the parent page, so long content stays reachable without field-by-field
+    // focus stops or a second vertical scroller. Related keeps its existing card route.
+    val handleSelectedTabScrollKey: (KeyEvent) -> Boolean = { event ->
+        if (event.type != KeyEventType.KeyDown) {
+            false
+        } else {
+            val layout = pageListState.layoutInfo
+            val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(1)
+            val step = (viewportHeight * 3 / 4).coerceAtLeast(1)
+            when (event.key) {
+                Key.DirectionDown -> {
+                    if (selectedTab == MovieDetailsTab.RELATED) {
+                        false
+                    } else {
+                        val sectionKey = movieDetailsSectionItemKey(selectedTab, tvPolished = true)
+                        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+                        if (
+                            movieDetailsPanelNeedsMoreScroll(
+                                sectionPresent = section != null,
+                                sectionBottom = section?.let { it.offset + it.size } ?: 0,
+                                viewportEnd = layout.viewportEndOffset,
+                            )
+                        ) {
+                            pageScrollJob?.cancel()
+                            pageScrollJob = pageScrollScope.launch {
+                                pageListState.scrollBy(step.toFloat())
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                Key.DirectionUp -> {
+                    val atPageTop = pageListState.firstVisibleItemIndex == 0 &&
+                        pageListState.firstVisibleItemScrollOffset == 0
+                    if (atPageTop) {
+                        false
+                    } else {
+                        pageScrollJob?.cancel()
+                        pageScrollJob = pageScrollScope.launch {
+                            pageListState.scrollBy(-step.toFloat())
+                        }
+                        true
+                    }
+                }
+                else -> false
+            }
+        }
+    }
 
     LaunchedEffect(item.id) {
         delay(DETAILS_TV_POLISH_FOCUS_DELAY_MS)
@@ -253,6 +351,7 @@ private fun MovieDetailsProTvPolished(
     }
 
     LazyColumn(
+        state = pageListState,
         modifier = Modifier.fillMaxSize().background(colors.background),
         contentPadding = PaddingValues(bottom = 28.dp),
     ) {
@@ -484,12 +583,13 @@ private fun MovieDetailsProTvPolished(
                 )
                 MovieDetailsTabRow(
                     selected = selectedTab,
-                    onSelect = { selectedTab = it },
+                    onSelect = selectTab,
                     requesters = tabRequesters,
                     upTarget = heroReturnRequester,
                     downTargets = mapOf(MovieDetailsTab.RELATED to relatedRequesters.firstOrNull()),
                     isTv = true,
                     modifier = Modifier.padding(vertical = 5.dp),
+                    onSelectedTabScrollKey = handleSelectedTabScrollKey,
                 )
                 Box(
                     Modifier

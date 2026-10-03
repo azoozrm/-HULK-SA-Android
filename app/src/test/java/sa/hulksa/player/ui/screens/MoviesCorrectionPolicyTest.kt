@@ -5,6 +5,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,6 +14,9 @@ import org.junit.Test
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
+import sa.hulksa.player.ui.components.movieRecentPlayedFraction
+import sa.hulksa.player.ui.components.movieRecentTimeText
+import sa.hulksa.player.ui.theme.HulkColors
 
 class MoviesCorrectionPolicyTest {
 
@@ -161,5 +165,127 @@ class MoviesCorrectionPolicyTest {
             assertFalse(label.contains('إ'))
             assertFalse(label.contains('آ'))
         }
+    }
+
+    @Test
+    fun focusedCardRevealKeepsTheWholeCardInsideTheUsableWindow() {
+        assertEquals(
+            0,
+            focusedCardScrollCorrection(itemTop = 110, itemBottom = 410, usableStart = 100, usableEnd = 500, marginPx = 10),
+        )
+        assertEquals(
+            60,
+            focusedCardScrollCorrection(itemTop = 250, itemBottom = 550, usableStart = 100, usableEnd = 500, marginPx = 10),
+        )
+        assertEquals(
+            -60,
+            focusedCardScrollCorrection(itemTop = 50, itemBottom = 350, usableStart = 100, usableEnd = 500, marginPx = 10),
+        )
+        assertEquals(
+            -50,
+            focusedCardScrollCorrection(itemTop = 50, itemBottom = 440, usableStart = 100, usableEnd = 500, marginPx = 10),
+        )
+        assertEquals(
+            0,
+            focusedCardScrollCorrection(itemTop = 100, itemBottom = 500, usableStart = 100, usableEnd = 500, marginPx = 10),
+        )
+    }
+
+    @Test
+    fun movieCompactArtworkOnlyCapsWhenTheAcceptedCardCannotFit() {
+        assertNull(
+            movieCompactArtworkHeightPx(
+                cellWidthPx = 400,
+                footerHeightPx = 120,
+                usableHeightPx = 600,
+                minArtworkHeightPx = 96,
+            ),
+        )
+        assertEquals(
+            360,
+            movieCompactArtworkHeightPx(
+                cellWidthPx = 400,
+                footerHeightPx = 120,
+                usableHeightPx = 480,
+                minArtworkHeightPx = 96,
+            ),
+        )
+        assertEquals(
+            96,
+            movieCompactArtworkHeightPx(
+                cellWidthPx = 400,
+                footerHeightPx = 120,
+                usableHeightPx = 180,
+                minArtworkHeightPx = 96,
+            ),
+        )
+        assertNull(
+            movieCompactArtworkHeightPx(
+                cellWidthPx = 0,
+                footerHeightPx = 120,
+                usableHeightPx = 480,
+                minArtworkHeightPx = 96,
+            ),
+        )
+    }
+
+    @Test
+    fun movieDetailsRevealUsesKeyedSectionAndParentListIndex() {
+        assertEquals(1, movieDetailsTabsItemIndex(hasError = false))
+        assertEquals(2, movieDetailsTabsItemIndex(hasError = true))
+        assertEquals(
+            "movie_tv_polished_information",
+            movieDetailsSectionItemKey(MovieDetailsTab.INFORMATION, tvPolished = true),
+        )
+        assertEquals(
+            "movie_tv_polished_related_tab",
+            movieDetailsSectionItemKey(MovieDetailsTab.RELATED, tvPolished = true),
+        )
+        assertEquals("movie_information", movieDetailsSectionItemKey(MovieDetailsTab.INFORMATION, tvPolished = false))
+        assertEquals("movie_related", movieDetailsSectionItemKey(MovieDetailsTab.RELATED, tvPolished = false))
+        assertEquals("movie_story", movieDetailsSectionItemKey(MovieDetailsTab.STORY, tvPolished = false))
+    }
+
+    @Test
+    fun movieDetailsRevealOnlyFiresWhenTheSelectedSectionIsNotComplete() {
+        assertTrue(movieDetailsSectionNeedsReveal(sectionPresent = false, 0, 0, 0, 200))
+        assertFalse(movieDetailsSectionNeedsReveal(sectionPresent = true, 10, 180, 0, 200))
+        assertTrue(movieDetailsSectionNeedsReveal(sectionPresent = true, 10, 260, 0, 200))
+        assertTrue(movieDetailsSectionNeedsReveal(sectionPresent = true, -40, 100, 0, 200))
+    }
+
+    @Test
+    fun movieDetailsReadScrollStopsWhenTheSelectedSectionEndIsVisible() {
+        assertTrue(movieDetailsPanelNeedsMoreScroll(sectionPresent = false, sectionBottom = 0, viewportEnd = 200))
+        assertTrue(movieDetailsPanelNeedsMoreScroll(sectionPresent = true, sectionBottom = 260, viewportEnd = 200))
+        assertFalse(movieDetailsPanelNeedsMoreScroll(sectionPresent = true, sectionBottom = 200, viewportEnd = 200))
+    }
+
+    @Test
+    fun movieRecentTimeAndProgressStayTruthful() {
+        assertEquals(
+            "03:52 / 1:43:22",
+            movieRecentTimeText(positionMs = 232_000L, durationMs = 6_202_000L),
+        )
+        assertEquals(
+            "00:02 / 1:34:26",
+            movieRecentTimeText(positionMs = 2_000L, durationMs = 5_666_000L),
+        )
+        assertEquals("00:02", movieRecentTimeText(positionMs = 2_000L, durationMs = 0L))
+        assertEquals("00:00", movieRecentTimeText(positionMs = -5L, durationMs = 0L))
+        assertEquals(0f, movieRecentPlayedFraction(positionMs = 5_000L, durationMs = 0L), 0.0001f)
+        assertEquals(1f, movieRecentPlayedFraction(positionMs = 5_000L, durationMs = 1_000L), 0.0001f)
+        assertEquals(
+            0.00035f,
+            movieRecentPlayedFraction(positionMs = 2_000L, durationMs = 5_666_000L),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun movieDetailsTabIvorySupersedesGoldWithoutChangingGlobalTokens() {
+        val colors = HulkColors()
+        assertEquals(Color(0xFFFFF9EB), colors.text)
+        assertEquals(Color(0xFFE6C352), colors.gold)
     }
 }

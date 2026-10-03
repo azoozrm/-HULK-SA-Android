@@ -38,6 +38,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -89,6 +91,7 @@ internal fun MovieDetailsTabRow(
     downTargets: Map<MovieDetailsTab, FocusRequester?>,
     isTv: Boolean,
     modifier: Modifier = Modifier,
+    onSelectedTabScrollKey: ((KeyEvent) -> Boolean)? = null,
 ) {
     val colors = LocalHulkColors.current
     Row(
@@ -116,15 +119,24 @@ internal fun MovieDetailsTabRow(
                         } ?: Modifier,
                     )
                     .onFocusChanged { focused = it.isFocused }
+                    .then(
+                        // Only the selected tab can drive the parent page read-scroll. Moving
+                        // focus across tabs alone neither activates nor scrolls anything.
+                        if (isSelected && onSelectedTabScrollKey != null) {
+                            Modifier.onPreviewKeyEvent(onSelectedTabScrollKey)
+                        } else {
+                            Modifier
+                        },
+                    )
                     .clickable(role = Role.Tab, onClick = { onSelect(tab) })
                     .padding(horizontal = if (isTv) 20.dp else 13.dp, vertical = if (isTv) 11.dp else 9.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
                     text = tab.label,
-                    // All three tab labels stay warm gold, selected or not. Selection is shown
-                    // by the heavier weight and the underline below.
-                    color = colors.gold,
+                    // Round 3 owner override: all three tab labels are ivory, selected or not.
+                    // Selection is shown by the heavier weight and the ivory underline below.
+                    color = colors.text,
                     fontSize = if (isTv) 16.sp else 13.sp,
                     fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
                     maxLines = 1,
@@ -134,7 +146,7 @@ internal fun MovieDetailsTabRow(
                     Modifier
                         .width(if (isTv) 58.dp else 44.dp)
                         .height(2.dp)
-                        .background(if (isSelected) colors.gold else Color.Transparent),
+                        .background(if (isSelected) colors.text else Color.Transparent),
                 )
             }
         }
@@ -391,6 +403,42 @@ internal fun movieResumeProgress(positionMs: Long, durationMs: Long): Float? {
     if (positionMs <= 0L || durationMs <= 0L) return null
     return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f).takeIf { it < .95f }
 }
+
+/**
+ * Index of the Movie Details tab row inside the parent page list (hero, optional error, tabs).
+ */
+internal fun movieDetailsTabsItemIndex(hasError: Boolean): Int = if (hasError) 2 else 1
+
+/**
+ * Stable keyed-layout identity of the selected Movie Details section item.
+ */
+internal fun movieDetailsSectionItemKey(tab: MovieDetailsTab, tvPolished: Boolean): String = when (tab) {
+    MovieDetailsTab.STORY -> if (tvPolished) "movie_tv_polished_story" else "movie_story"
+    MovieDetailsTab.INFORMATION -> if (tvPolished) "movie_tv_polished_information" else "movie_information"
+    MovieDetailsTab.RELATED -> if (tvPolished) "movie_tv_polished_related_tab" else "movie_related"
+}
+
+/**
+ * True when the selected Movie Details section is not completely inside the page viewport and the
+ * parent list should reveal it. A not-yet-composed section counts as needing reveal.
+ */
+internal fun movieDetailsSectionNeedsReveal(
+    sectionPresent: Boolean,
+    sectionTop: Int,
+    sectionBottom: Int,
+    viewportStart: Int,
+    viewportEnd: Int,
+): Boolean = !sectionPresent || sectionTop < viewportStart || sectionBottom > viewportEnd
+
+/**
+ * True when the selected Movie Details reading panel still extends below the viewport and the tab
+ * row should keep scrolling the parent page on DOWN.
+ */
+internal fun movieDetailsPanelNeedsMoreScroll(
+    sectionPresent: Boolean,
+    sectionBottom: Int,
+    viewportEnd: Int,
+): Boolean = !sectionPresent || sectionBottom > viewportEnd
 
 internal fun movieFormatPosition(ms: Long): String {
     val totalSeconds = ms.coerceAtLeast(0L) / 1_000L

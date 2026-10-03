@@ -127,6 +127,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -184,6 +185,7 @@ import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.UniversalPosterCard
 import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
+import sa.hulksa.player.ui.components.MoviesHistoryCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.goldFocusEdge
@@ -2320,22 +2322,40 @@ private fun PosterCatalogScreen(
             if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
             } else if (showingContinue && continueWatching.isNotEmpty()) {
-                HistoryGrid(
-                    entries = continueWatching,
-                    isTv = isTv,
-                    destination = destination,
-                    navigationMemory = navigationMemory,
-                    onOpen = onOpenHistory,
-                    focusFirstItemRequestId = categoryContentFocusRequest
-                        ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
-                        ?.requestId
-                        ?: 0L,
-                    focusContentRequestId = categoryContentFocusRequest
-                        ?.takeIf { categoryContentFocusReady }
-                        ?.requestId
-                        ?: 0L,
-                    onMoveToCategories = categoryFocusRestoreController::requestFromSource,
-                )
+                if (destination == MainDestination.MOVIES) {
+                    MoviesHistoryGrid(
+                        entries = continueWatching,
+                        isTv = isTv,
+                        navigationMemory = navigationMemory,
+                        onOpen = onOpenHistory,
+                        focusFirstItemRequestId = categoryContentFocusRequest
+                            ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
+                            ?.requestId
+                            ?: 0L,
+                        focusContentRequestId = categoryContentFocusRequest
+                            ?.takeIf { categoryContentFocusReady }
+                            ?.requestId
+                            ?: 0L,
+                        onMoveToCategories = categoryFocusRestoreController::requestFromSource,
+                    )
+                } else {
+                    HistoryGrid(
+                        entries = continueWatching,
+                        isTv = isTv,
+                        destination = destination,
+                        navigationMemory = navigationMemory,
+                        onOpen = onOpenHistory,
+                        focusFirstItemRequestId = categoryContentFocusRequest
+                            ?.takeIf { categoryContentFocusReady && it.focusFirstItem }
+                            ?.requestId
+                            ?: 0L,
+                        focusContentRequestId = categoryContentFocusRequest
+                            ?.takeIf { categoryContentFocusReady }
+                            ?.requestId
+                            ?: 0L,
+                        onMoveToCategories = categoryFocusRestoreController::requestFromSource,
+                    )
+                }
             } else if (showingContinue) {
                 EmptyState("لا توجد مشاهدة غير مكتملة في $title")
             } else if (catalog == null && type in state.loadingTypes) {
@@ -4456,6 +4476,151 @@ private fun HistoryGrid(
                     ),
                 onFocused = { navigationMemory.save(destination, entry.key, index) },
             )
+        }
+    }
+}
+
+private class MovieHistoryFocusRevealState {
+    var job: Job? = null
+}
+
+/**
+ * Movie-only Recent grid. Uses the adopted Movie catalog slot policy (the same shared column
+ * calculation and TV safe physical-left end padding, or the mobile adaptive slot) together with
+ * [MoviesHistoryCard] so Recent matches normal catalog card geometry. History keys/order, resume
+ * callbacks, focus restoration and long-press removal semantics are preserved.
+ */
+@Composable
+private fun MoviesHistoryGrid(
+    entries: List<HistoryEntry>,
+    isTv: Boolean,
+    navigationMemory: NavigationMemoryStore,
+    onOpen: (HistoryEntry) -> Unit,
+    focusFirstItemRequestId: Long = 0L,
+    focusContentRequestId: Long = 0L,
+    onMoveToCategories: (() -> Boolean)? = null,
+) {
+    val adaptiveUi = LocalAdaptiveUi.current
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+        tvCatalogMetrics(
+            screenWidthDp = adaptiveUi.screenWidthDp,
+            screenHeightDp = adaptiveUi.screenHeightDp,
+            movieCards = true,
+        )
+    }
+    val remembered = navigationMemory.position(MainDestination.MOVIES)
+    val targetIndex = if (focusFirstItemRequestId != 0L) {
+        0
+    } else {
+        remembered.itemIndex.coerceIn(0, entries.lastIndex.coerceAtLeast(0))
+    }
+    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = targetIndex)
+    LaunchedEffect(gridState, entries) {
+        snapshotFlow { gridState.firstVisibleItemIndex }.collect { index ->
+            entries.getOrNull(index)?.let { navigationMemory.save(MainDestination.MOVIES, it.key, index) }
+        }
+    }
+    val targetRequester = remember { FocusRequester() }
+    LaunchedEffect(entries, remembered.itemKey, focusFirstItemRequestId, focusContentRequestId) {
+        val shouldRestore = focusContentRequestId != 0L || remembered.itemKey.isNotBlank()
+        if (shouldRestore && entries.isNotEmpty()) {
+            gridState.scrollToItem(targetIndex)
+            snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
+                .first { it }
+            withFrameNanos { }
+            runCatching { targetRequester.requestFocus() }
+        }
+    }
+    val focusRevealScope = rememberCoroutineScope()
+    val focusRevealState = remember { MovieHistoryFocusRevealState() }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val focusInsetPx = with(density) { metrics.focusViewportInsetDp.dp.roundToPx() }
+        val safeBottomInsetPx = with(density) { metrics.focusSafeBottomInsetDp.dp.roundToPx() }
+        val horizontalSpacing = metrics.horizontalSpacingDp.dp
+        val verticalSpacing = metrics.verticalSpacingDp.dp
+        val horizontalContentPadding = metrics.horizontalContentPaddingDp.dp
+        val focusSafeEndPadding = metrics.endContentPaddingDp.dp
+        val bottomContentPadding = metrics.bottomContentPaddingDp.dp
+        val columnCount = if (isTv) {
+            val availableGridWidth = (
+                maxWidth - horizontalContentPadding - focusSafeEndPadding
+            ).coerceAtLeast(metrics.minCellWidthDp.dp)
+            movieCatalogColumnCount(
+                availableWidthDp = availableGridWidth.value,
+                spacingDp = horizontalSpacing.value,
+                minCellWidthDp = metrics.minCellWidthDp,
+            )
+        } else {
+            0
+        }
+        LazyVerticalGrid(
+            state = gridState,
+            columns = if (isTv) GridCells.Fixed(columnCount) else GridCells.Adaptive(105.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isTv) horizontalSpacing else 9.dp),
+            verticalArrangement = Arrangement.spacedBy(if (isTv) verticalSpacing else 10.dp),
+            contentPadding = if (isTv) {
+                PaddingValues(
+                    start = horizontalContentPadding,
+                    top = horizontalContentPadding,
+                    end = focusSafeEndPadding,
+                    bottom = bottomContentPadding,
+                )
+            } else {
+                PaddingValues(5.dp, 5.dp, 5.dp, 28.dp)
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
+                val restore = if (focusFirstItemRequestId != 0L) {
+                    index == 0
+                } else {
+                    remembered.itemKey == entry.key || (remembered.itemKey.isBlank() && index == targetIndex)
+                }
+                MoviesHistoryCard(
+                    entry,
+                    { onOpen(entry) },
+                    Modifier
+                        .fillMaxWidth()
+                        .restoreFocus(restore, targetRequester)
+                        .then(
+                            if (isTv && onMoveToCategories != null) {
+                                Modifier.onPreviewKeyEvent { event ->
+                                    val row = gridState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.index == index }
+                                        ?.row
+                                    event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.DirectionUp &&
+                                        row == 0 &&
+                                        onMoveToCategories()
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    onFocused = {
+                        navigationMemory.save(MainDestination.MOVIES, entry.key, index)
+                        if (isTv) {
+                            // Same settled full-card reveal as the Movie catalog: Recent uses the
+                            // accepted card geometry, so its footer/border must stay inside the
+                            // usable viewport after DOWN/UP and restoration too.
+                            focusRevealState.job?.cancel()
+                            focusRevealState.job = focusRevealScope.launch {
+                                repeat(2) {
+                                    withFrameNanos { }
+                                    revealFocusedGridItem(
+                                        gridState = gridState,
+                                        index = index,
+                                        focusInsetPx = focusInsetPx,
+                                        safeBottomInsetPx = safeBottomInsetPx,
+                                        extraMarginPx = focusInsetPx,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
+            }
         }
     }
 }
