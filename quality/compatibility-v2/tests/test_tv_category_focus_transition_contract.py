@@ -226,7 +226,10 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
             self.assertIn("val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester", block)
             self.assertIn("allowInitialEntry = initialAllFocusPending", block)
             self.assertIn("selectedFocusTarget()", block)
-        self.assertIn("RoundAction(Icons.Rounded.Refresh, \"تحديث\", onRefresh)", header)
+        self.assertIn(
+            "RoundAction(Icons.Rounded.Refresh, \"تحديث\", onRefresh, iconTint = toolbarIconTint)",
+            header,
+        )
         self.assertNotIn("canFocus = false", header)
         self.assertNotIn("onSelectCategory(null)", shell)
 

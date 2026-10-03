@@ -183,6 +183,7 @@ import sa.hulksa.player.ui.components.TvRailSurface
 import sa.hulksa.player.ui.components.ChannelLogo
 import sa.hulksa.player.ui.components.ChannelListItem
 import sa.hulksa.player.ui.components.UniversalPosterCard
+import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.goldFocusEdge
@@ -2151,6 +2152,25 @@ private fun PosterCatalogScreen(
     initialAllFocusPending: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
+    val context = LocalContext.current
+    val movieCategoryManagement = destination == MainDestination.MOVIES
+    var hiddenCategoryIds by remember(movieCategoryManagement) {
+        mutableStateOf(if (movieCategoryManagement) context.movieHiddenCategoryIds() else emptySet())
+    }
+    var showCategoryManager by remember { mutableStateOf(false) }
+    var restoreManagerEntryFocus by remember { mutableStateOf(false) }
+    val manageCategoriesRequester = remember { FocusRequester() }
+    val toggleCategoryVisibility: (String) -> Unit = { categoryId ->
+        if (movieCategoryManagement) {
+            val updated = if (categoryId in hiddenCategoryIds) {
+                hiddenCategoryIds - categoryId
+            } else {
+                hiddenCategoryIds + categoryId
+            }
+            hiddenCategoryIds = updated
+            context.saveMovieHiddenCategoryIds(updated)
+        }
+    }
     val catalog = state.catalogs[type]
     val modelInput = CatalogScreenModelInput(
         catalog = catalog,
@@ -2213,6 +2233,19 @@ private fun PosterCatalogScreen(
             categoryContentFocusRequest = null
         }
     }
+    LaunchedEffect(movieCategoryManagement, hiddenCategoryIds, state.selectedCategoryId, catalog) {
+        if (movieCategoryManagement && isHiddenServerCategorySelection(state.selectedCategoryId, hiddenCategoryIds)) {
+            navigationMemory.save(destination, itemKey = "", itemIndex = 0)
+            onSelectCategory(null)
+        }
+    }
+    LaunchedEffect(showCategoryManager) {
+        if (!showCategoryManager && restoreManagerEntryFocus) {
+            withFrameNanos { }
+            runCatching { manageCategoriesRequester.requestFocus() }
+            restoreManagerEntryFocus = false
+        }
+    }
     val adaptiveUi = LocalAdaptiveUi.current
     val tvSafeInsets = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
         tvPageSafeInsets(
@@ -2254,6 +2287,18 @@ private fun PosterCatalogScreen(
                 onRefresh = onRefresh,
                 isTv = isTv,
                 onMoveToCategories = categoryFocusRestoreController::requestFromSource,
+                countUnit = if (type == ContentType.MOVIE) "فيلم" else "عنصر",
+                onManageCategories = if (movieCategoryManagement) {
+                    {
+                        restoreManagerEntryFocus = true
+                        showCategoryManager = true
+                    }
+                } else {
+                    null
+                },
+                manageCategoriesRequester = manageCategoriesRequester.takeIf { movieCategoryManagement },
+                searchIcon = Icons.Rounded.Search.takeIf { movieCategoryManagement },
+                toolbarIconTint = colors.gold.takeIf { movieCategoryManagement },
             )
             if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
             Spacer(Modifier.height(11.dp))
@@ -2266,6 +2311,7 @@ private fun PosterCatalogScreen(
                 focusRestoreController = categoryFocusRestoreController,
                 initialAllFocusRequester = initialAllFocusRequester,
                 initialAllFocusPending = initialAllFocusPending,
+                hiddenCategoryIds = hiddenCategoryIds,
             )
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
@@ -2319,6 +2365,17 @@ private fun PosterCatalogScreen(
                     preparedContentKeyIndex = model.contentKeyIndex,
                 )
             }
+        }
+        if (movieCategoryManagement && showCategoryManager) {
+            CategoryManagerDialog(
+                categories = catalog?.categories.orEmpty(),
+                hiddenIds = hiddenCategoryIds,
+                onToggle = toggleCategoryVisibility,
+                onDismiss = { showCategoryManager = false },
+                title = "ادارة الفئات",
+                scopeText = "اخفاء الفئة يخفيها من شريط الافلام فقط",
+                emptyText = "لا توجد فئات",
+            )
         }
     }
 }
@@ -2616,12 +2673,15 @@ private fun LiveCatalogScreen(
         }
     }
     if (showCategoryManager) {
-        LiveCategoryManagerDialog(
+        CategoryManagerDialog(
             categories = catalog?.categories.orEmpty()
                 .filter { it.id != LIVE_TV_PRO_MAIN_RECENT_CATEGORY },
             hiddenIds = hiddenCategoryIds,
             onToggle = toggleCategoryVisibility,
             onDismiss = { showCategoryManager = false },
+            title = "ادارة الفئات",
+            scopeText = "اخفاء الفئة يخفيها من شريط البث المباشر فقط.",
+            emptyText = "لا توجد فئات.",
         )
     }
 }
@@ -4286,29 +4346,41 @@ private fun ContentGrid(
         itemsIndexed(content, key = { index, _ -> contentKeys[index] }) { index, item ->
             val key = contentKeys[index]
             val restore = remembered.itemKey == key || index == targetIndex
-            UniversalPosterCard(
-                item = item,
-                isFavorite = isFavorite(item),
-                onClick = { onOpen(item) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(
-                        if (index == 0 && firstItemFocusRequester != null) {
-                            Modifier.focusRequester(firstItemFocusRequester)
-                        } else {
-                            Modifier.restoreFocus(restore, targetRequester)
-                        },
-                    )
-                    .then(
-                        if (index == 0 && firstItemUpRequester != null) {
-                            Modifier.focusProperties { up = firstItemUpRequester }
-                        } else {
-                            Modifier
-                        },
-                    ),
-                onLongClick = { onToggleFavorite(item) },
-                onFocused = { navigationMemory.save(destination, key, index) },
-            )
+            val cardModifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (index == 0 && firstItemFocusRequester != null) {
+                        Modifier.focusRequester(firstItemFocusRequester)
+                    } else {
+                        Modifier.restoreFocus(restore, targetRequester)
+                    },
+                )
+                .then(
+                    if (index == 0 && firstItemUpRequester != null) {
+                        Modifier.focusProperties { up = firstItemUpRequester }
+                    } else {
+                        Modifier
+                    },
+                )
+            if (destination == MainDestination.MOVIES) {
+                MoviesCatalogBoxedCard(
+                    item = item,
+                    isFavorite = isFavorite(item),
+                    onClick = { onOpen(item) },
+                    modifier = cardModifier,
+                    onLongClick = { onToggleFavorite(item) },
+                    onFocused = { navigationMemory.save(destination, key, index) },
+                )
+            } else {
+                UniversalPosterCard(
+                    item = item,
+                    isFavorite = isFavorite(item),
+                    onClick = { onOpen(item) },
+                    modifier = cardModifier,
+                    onLongClick = { onToggleFavorite(item) },
+                    onFocused = { navigationMemory.save(destination, key, index) },
+                )
+            }
         }
     }
 }
@@ -4720,6 +4792,8 @@ private fun CatalogHeader(
     onManageCategories: (() -> Unit)? = null,
     manageCategoriesRequester: FocusRequester? = null,
     searchIcon: ImageVector? = null,
+    countUnit: String = "عنصر",
+    toolbarIconTint: Color? = null,
 ) {
     val colors = LocalHulkColors.current
     Column(Modifier.fillMaxWidth()) {
@@ -4747,7 +4821,7 @@ private fun CatalogHeader(
         ) {
             Column(Modifier.width(if (isTv) 185.dp else 105.dp)) {
                 Text(title, color = colors.text, fontSize = if (isTv) 27.sp else MOBILE_SECTION_TITLE_SIZE, fontWeight = FontWeight.Bold)
-                Text("$resultCount عنصر", color = colors.textMuted, fontSize = if (isTv) 10.sp else MOBILE_SECTION_COUNT_SIZE)
+                Text("$resultCount $countUnit", color = colors.textMuted, fontSize = if (isTv) 10.sp else MOBILE_SECTION_COUNT_SIZE)
             }
             if (isTv && onManageCategories != null) {
                 Spacer(Modifier.width(11.dp - TV_PAGE_GUTTER))
@@ -4757,11 +4831,16 @@ private fun CatalogHeader(
                     "ابحث في $title…",
                     Modifier.weight(1f).widthIn(max = 630.dp),
                     leadingIcon = searchIcon,
+                    leadingIconTint = toolbarIconTint,
                 )
                 Spacer(Modifier.width(11.dp))
-                ManageCategoriesButton(onManageCategories, manageCategoriesRequester)
+                ManageCategoriesButton(
+                    onClick = onManageCategories,
+                    requester = manageCategoriesRequester,
+                    iconTint = toolbarIconTint,
+                )
                 Spacer(Modifier.width(11.dp))
-                RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh)
+                RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh, iconTint = toolbarIconTint)
                 Spacer(Modifier.width(TV_PAGE_GUTTER))
             } else {
                 HulkTextField(
@@ -4770,8 +4849,9 @@ private fun CatalogHeader(
                     "ابحث في $title…",
                     Modifier.weight(1f).widthIn(max = 630.dp),
                     leadingIcon = searchIcon,
+                    leadingIconTint = toolbarIconTint,
                 )
-                RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh)
+                RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh, iconTint = toolbarIconTint)
             }
         }
         if (!isTv && onManageCategories != null) {
@@ -4780,6 +4860,7 @@ private fun CatalogHeader(
                 onClick = onManageCategories,
                 requester = manageCategoriesRequester,
                 modifier = Modifier.align(Alignment.Start),
+                iconTint = toolbarIconTint,
             )
         }
     }
@@ -4790,6 +4871,7 @@ private fun ManageCategoriesButton(
     onClick: () -> Unit,
     requester: FocusRequester?,
     modifier: Modifier = Modifier,
+    iconTint: Color? = null,
 ) {
     FocusButton(
         text = "ادارة الفئات",
@@ -4798,6 +4880,7 @@ private fun ManageCategoriesButton(
         primary = false,
         compact = true,
         trailingIcon = Icons.Rounded.Tune,
+        trailingIconTint = iconTint,
     )
 }
 
@@ -4853,7 +4936,10 @@ private fun ReorderableCatalogCategoryBar(
     focusRestoreController: CategoryFocusRestoreController,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
+    hiddenCategoryIds: Set<String> = emptySet(),
 ) {
+    val approvedMovieChips = type == ContentType.MOVIE
+    val movieStripMetrics = rememberLiveCategoryStripMetrics()
     val context = LocalContext.current
     val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
     var ids by remember(categories, type) {
@@ -4871,9 +4957,12 @@ private fun ReorderableCatalogCategoryBar(
         stableCategoryIds.associateWith { FocusRequester() }
     }
     var categoryBarHasFocus by remember(type) { mutableStateOf(false) }
-    val ordered = remember(categories, ids) {
+    val allOrdered = remember(categories, ids) {
         val byId = categories.associateBy { it.id }
         (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
+    }
+    val ordered = remember(allOrdered, hiddenCategoryIds) {
+        allOrdered.filterNot { it.id in hiddenCategoryIds }
     }
     val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
     val baseContentPadding = if (isTv) 8.dp else 24.dp
@@ -4966,60 +5055,124 @@ private fun ReorderableCatalogCategoryBar(
         ),
     ) {
         item {
-            FocusButton(
-                "الكل",
-                { onSelect(null) },
-                primary = selectedId == null,
-                compact = true,
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, null, selectedId, categoryBarHasFocus,
-                        allFocusRequester, focusRestoreController,
-                        allowInitialEntry = initialAllFocusPending,
-                    ),
-            )
+            if (approvedMovieChips) {
+                MovieCategoryChip(
+                    label = "الكل",
+                    selected = selectedId == null,
+                    metrics = movieStripMetrics,
+                    onClick = { onSelect(null) },
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, null, selectedId, categoryBarHasFocus,
+                            allFocusRequester, focusRestoreController,
+                            allowInitialEntry = initialAllFocusPending,
+                        ),
+                )
+            } else {
+                FocusButton(
+                    "الكل",
+                    { onSelect(null) },
+                    primary = selectedId == null,
+                    compact = true,
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, null, selectedId, categoryBarHasFocus,
+                            allFocusRequester, focusRestoreController,
+                            allowInitialEntry = initialAllFocusPending,
+                        ),
+                )
+            }
         }
         item {
-            FocusButton(
-                "★ المفضلة",
-                { onSelect(FAVORITES_CATEGORY_ID) },
-                primary = selectedId == FAVORITES_CATEGORY_ID,
-                compact = true,
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                        favoritesFocusRequester, focusRestoreController,
-                    ),
-            )
+            if (approvedMovieChips) {
+                MovieCategoryChip(
+                    label = "المفضلة",
+                    selected = selectedId == FAVORITES_CATEGORY_ID,
+                    metrics = movieStripMetrics,
+                    simpleIcon = Icons.Rounded.Star,
+                    onClick = { onSelect(FAVORITES_CATEGORY_ID) },
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                            favoritesFocusRequester, focusRestoreController,
+                        ),
+                )
+            } else {
+                FocusButton(
+                    text = "★ المفضلة",
+                    onClick = { onSelect(FAVORITES_CATEGORY_ID) },
+                    primary = selectedId == FAVORITES_CATEGORY_ID,
+                    compact = true,
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                            favoritesFocusRequester, focusRestoreController,
+                        ),
+                )
+            }
         }
         item {
-            FocusButton(
-                "▶ استكمال اخر مشاهدة",
-                { onSelect(CONTINUE_CATEGORY_ID) },
-                primary = selectedId == CONTINUE_CATEGORY_ID,
-                compact = true,
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                        continueFocusRequester, focusRestoreController,
-                    ),
-            )
+            if (approvedMovieChips) {
+                MovieCategoryChip(
+                    label = "اخر مشاهدة",
+                    selected = selectedId == CONTINUE_CATEGORY_ID,
+                    metrics = movieStripMetrics,
+                    simpleIcon = Icons.Outlined.Schedule,
+                    onClick = { onSelect(CONTINUE_CATEGORY_ID) },
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                            continueFocusRequester, focusRestoreController,
+                        ),
+                )
+            } else {
+                FocusButton(
+                    text = "▶ استكمال اخر مشاهدة",
+                    onClick = { onSelect(CONTINUE_CATEGORY_ID) },
+                    primary = selectedId == CONTINUE_CATEGORY_ID,
+                    compact = true,
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                            continueFocusRequester, focusRestoreController,
+                        ),
+                )
+            }
         }
         items(ordered, key = Category::id) { category ->
-            LiveCategoryChip(
-                category = category,
-                selected = selectedId == category.id,
-                moving = moving == category.id,
-                onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
-                onLongClick = { moving = category.id },
-                onMoveLeft = { move(category.id, 1) },
-                onMoveRight = { move(category.id, -1) },
-                modifier = Modifier
-                    .categoryChipFocus(
-                        isTv, category.id, selectedId, categoryBarHasFocus,
-                        categoryFocusRequesters.getValue(category.id), focusRestoreController,
-                    ),
-            )
+            if (approvedMovieChips) {
+                MovieCategoryChip(
+                    label = category.name,
+                    selected = selectedId == category.id,
+                    metrics = movieStripMetrics,
+                    framedBrandBadge = true,
+                    moving = moving == category.id,
+                    onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
+                    onLongClick = { moving = category.id },
+                    onMoveLeft = { move(category.id, 1) },
+                    onMoveRight = { move(category.id, -1) },
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, category.id, selectedId, categoryBarHasFocus,
+                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                        ),
+                )
+            } else {
+                LiveCategoryChip(
+                    category = category,
+                    selected = selectedId == category.id,
+                    moving = moving == category.id,
+                    onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
+                    onLongClick = { moving = category.id },
+                    onMoveLeft = { move(category.id, 1) },
+                    onMoveRight = { move(category.id, -1) },
+                    modifier = Modifier
+                        .categoryChipFocus(
+                            isTv, category.id, selectedId, categoryBarHasFocus,
+                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                        ),
+                )
+            }
         }
     }
 }
@@ -5276,6 +5429,156 @@ private fun ReorderableLiveCategoryBar(
     }
 }
 
+/**
+ * Movie-only category chip.
+ *
+ * Every open/selected category type gets the warm yellow-gold fill with black label and simple
+ * icons; every unselected category stays dark with warm-gold simple icons. Selection comes from
+ * the authoritative selectedId (never from focus), so the fill persists while focus moves and the
+ * previous category returns to its dark state on a new selection. The framed original HS badge
+ * keeps a dark inset inside a selected server chip so the gold logo remains legible.
+ */
+@Composable
+private fun MovieCategoryChip(
+    label: String,
+    selected: Boolean,
+    metrics: LiveCategoryStripMetrics,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    simpleIcon: ImageVector? = null,
+    framedBrandBadge: Boolean = false,
+    moving: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+    onMoveLeft: (() -> Unit)? = null,
+    onMoveRight: (() -> Unit)? = null,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    var remoteLongPressHandled by remember { mutableStateOf(false) }
+    var selectPressed by remember { mutableStateOf(false) }
+    var dragAccumulator by remember { mutableFloatStateOf(0f) }
+    val reorderable = onLongClick != null
+    LaunchedEffect(selectPressed) {
+        if (selectPressed && reorderable) {
+            delay(650L)
+            if (selectPressed && !remoteLongPressHandled) {
+                remoteLongPressHandled = true
+                onLongClick?.invoke()
+            }
+        }
+    }
+    val shape = RoundedCornerShape(metrics.cornerRadius)
+    Row(
+        modifier = modifier
+            .then(metrics.compactHeightModifier)
+            .clip(shape)
+            .background(
+                when {
+                    selected -> colors.gold
+                    moving -> colors.gold.copy(alpha = .30f)
+                    else -> Color(0xFF111108)
+                },
+            )
+            .goldFocusEdge(shape = shape, visible = focused)
+            .border(
+                width = if (focused || moving) 2.dp else 1.dp,
+                color = when {
+                    focused || moving -> colors.goldBright
+                    selected -> Color.Transparent
+                    else -> colors.gold.copy(alpha = .55f)
+                },
+                shape = shape,
+            )
+            .pointerInput(label, moving) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = onLongClick?.let { longPress -> { longPress() } },
+                )
+            }
+            .pointerInput(label, moving) {
+                if (moving && onMoveLeft != null && onMoveRight != null) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragAccumulator = 0f },
+                        onDragCancel = { dragAccumulator = 0f },
+                        onDragEnd = {
+                            when {
+                                dragAccumulator >= 48f -> onMoveRight?.invoke()
+                                dragAccumulator <= -48f -> onMoveLeft?.invoke()
+                            }
+                            dragAccumulator = 0f
+                        },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        dragAccumulator += dragAmount
+                    }
+                }
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                val selectKey = event.key == Key.Enter || event.key == Key.DirectionCenter
+                when {
+                    selectKey && event.type == KeyEventType.KeyDown && reorderable -> {
+                        selectPressed = true
+                        true
+                    }
+                    selectKey && event.type == KeyEventType.KeyUp && reorderable -> {
+                        selectPressed = false
+                        if (!remoteLongPressHandled) onClick()
+                        remoteLongPressHandled = false
+                        true
+                    }
+                    moving && event.type == KeyEventType.KeyUp && event.key == Key.DirectionLeft -> {
+                        onMoveLeft?.invoke(); true
+                    }
+                    moving && event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight -> {
+                        onMoveRight?.invoke(); true
+                    }
+                    moving && event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) -> true
+                    else -> false
+                }
+            }
+            .clickable(onClick = onClick, role = Role.Button)
+            .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(metrics.iconGap, Alignment.CenterHorizontally),
+    ) {
+        if (framedBrandBadge) {
+            val badgeShape = RoundedCornerShape(7.dp)
+            Box(
+                modifier = Modifier
+                    .size(metrics.iconSize)
+                    .clip(badgeShape)
+                    .background(Color(0xFF10110D))
+                    .border(1.dp, colors.gold.copy(alpha = .70f), badgeShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                BrandLogo(Modifier.fillMaxSize().padding(3.dp))
+            }
+        }
+        Text(
+            text = if (moving) "↔ $label" else label,
+            color = if (selected) Color(0xFF030402) else colors.text,
+            fontSize = metrics.textSizeSp.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        if (simpleIcon != null) {
+            Box(
+                modifier = Modifier.size(metrics.iconSize),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = simpleIcon,
+                    contentDescription = null,
+                    tint = if (selected) Color(0xFF030402) else colors.gold,
+                    modifier = Modifier.size(metrics.iconSize - 4.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun LiveCategoryChip(
     category: Category,
@@ -5401,11 +5704,14 @@ private fun LiveCategoryChip(
 }
 
 @Composable
-private fun LiveCategoryManagerDialog(
+private fun CategoryManagerDialog(
     categories: List<Category>,
     hiddenIds: Set<String>,
     onToggle: (String) -> Unit,
     onDismiss: () -> Unit,
+    title: String,
+    scopeText: String,
+    emptyText: String,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -5441,16 +5747,16 @@ private fun LiveCategoryManagerDialog(
                     .border(1.dp, colors.line, shape)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
-                Text("ادارة الفئات", color = colors.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = colors.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "اخفاء الفئة يخفيها من شريط البث المباشر فقط.",
+                    scopeText,
                     color = colors.textMuted,
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(10.dp))
                 if (categories.isEmpty()) {
-                    Text("لا توجد فئات.", color = colors.textMuted, fontSize = 12.sp)
+                    Text(emptyText, color = colors.textMuted, fontSize = 12.sp)
                 } else {
                     LazyColumn(
                         modifier = Modifier.weight(1f, fill = false),
@@ -5578,6 +5884,7 @@ private fun RoundAction(
     description: String,
     onClick: () -> Unit,
     loading: Boolean = false,
+    iconTint: Color? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -5604,7 +5911,12 @@ private fun RoundAction(
             if (loading) {
                 LoadingRing(Modifier.size(20.dp))
             } else {
-                Icon(icon, description, tint = if (focused) Color.Black else colors.text, modifier = Modifier.size(21.dp))
+                Icon(
+                    icon,
+                    description,
+                    tint = if (focused) Color.Black else (iconTint ?: colors.text),
+                    modifier = Modifier.size(21.dp),
+                )
             }
         }
     }
@@ -5648,6 +5960,18 @@ internal fun categoryMatches(
     CONTINUE_CATEGORY_ID -> false
     else -> item.categoryId == selectedId
 }
+
+/**
+ * True when the authoritative selection points at a server category that the Movie-only manager
+ * has just hidden. All/Favorites/Recent remain available, so the caller falls back to "الكل".
+ */
+internal fun isHiddenServerCategorySelection(
+    selectedId: String?,
+    hiddenIds: Set<String>,
+): Boolean = selectedId != null &&
+    selectedId != FAVORITES_CATEGORY_ID &&
+    selectedId != CONTINUE_CATEGORY_ID &&
+    selectedId in hiddenIds
 
 private data class DestinationEntry(val destination: MainDestination, val icon: ImageVector, val label: String)
 
