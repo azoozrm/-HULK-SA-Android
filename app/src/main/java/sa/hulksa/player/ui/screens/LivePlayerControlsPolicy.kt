@@ -112,32 +112,46 @@ internal fun livePlayerResizeLabel(index: Int): String = when (index) {
     else -> "ملائم"
 }
 
-/**
- * Deterministic strip-height reservation used before the strip reports its measured height.
- *
- * The value mirrors the compact strip composition (top/bottom safe padding, the shared transport
- * container, the caption gap and one caption line) so panel space is never allocated on top of the
- * strip even on the first frame.
- */
-internal fun livePlayerReservedStripHeightDp(
-    transportContainerDp: Int,
-    captionSizeSp: Int,
-    outerTopPaddingDp: Float,
-    outerBottomPaddingDp: Float,
-): Float = outerTopPaddingDp + outerBottomPaddingDp + transportContainerDp + 4f + captionSizeSp * 1.6f
-
 internal const val PLAYER_ERROR_ACTION_GAP_DP = 9
+internal const val LIVE_PLAYER_ERROR_MAX_COLUMNS = 4
 
 /**
- * Live error action grid: up to four actions per centered row on television/wide windows, two per
- * row on compact windows so every button keeps readable captions and equal size.
+ * Measured Live error action sizing.
+ *
+ * The caller measures the visible captions with the actual typography, font scale, icon allowance
+ * and accepted compact FocusButton padding, then this policy picks the largest equal-width column
+ * count whose row fits the real card content width. The common height grows only as much as the
+ * measured content requires, so scaled captions are never clipped.
  */
-internal fun playerErrorActionColumns(
-    television: Boolean,
-    screenWidthDp: Int,
-): Int = if (television || screenWidthDp >= 600) 4 else 2
+internal data class LiveErrorActionSizing(
+    val columns: Int,
+    val actionWidthDp: Int,
+    val actionHeightDp: Int,
+    val rows: List<List<Int>>,
+)
 
-internal fun playerErrorActionHeightDp(television: Boolean): Int = if (television) 44 else 40
+internal fun liveErrorActionSizing(
+    availableWidthDp: Int,
+    actionCount: Int,
+    maxColumns: Int,
+    requiredActionWidthDp: Int,
+    requiredActionHeightDp: Int,
+    gapDp: Int = PLAYER_ERROR_ACTION_GAP_DP,
+): LiveErrorActionSizing {
+    if (actionCount <= 0 || requiredActionWidthDp <= 0 || requiredActionHeightDp <= 0) {
+        return LiveErrorActionSizing(columns = 0, actionWidthDp = 0, actionHeightDp = 0, rows = emptyList())
+    }
+    var columns = maxColumns.coerceIn(1, actionCount)
+    while (columns > 1 && columns * requiredActionWidthDp + (columns - 1) * gapDp > availableWidthDp) {
+        columns--
+    }
+    return LiveErrorActionSizing(
+        columns = columns,
+        actionWidthDp = requiredActionWidthDp,
+        actionHeightDp = requiredActionHeightDp,
+        rows = playerErrorActionRows(actionCount, columns),
+    )
+}
 
 /** Equal-width Live error actions per row; the last row may hold fewer actions and stays centered. */
 internal fun playerErrorActionRows(actionCount: Int, columns: Int): List<List<Int>> {

@@ -107,41 +107,77 @@ class LiveControlsLayoutPolicyTest {
     }
 
     @Test
-    fun reservedStripHeightGrowsWithTheCompactStripGeometry() {
-        val compact = livePlayerControlsMetrics(411, 891, remoteLayout = false)
-        val large = livePlayerControlsMetrics(1920, 1080, remoteLayout = true)
-        val compactLayout = liveControlsLayoutMetrics(411, 891, remoteLayout = false)
-        val largeLayout = liveControlsLayoutMetrics(1920, 1080, remoteLayout = true)
-
-        val compactReserved = livePlayerReservedStripHeightDp(
-            transportContainerDp = compact.transportContainerDp,
-            captionSizeSp = compact.captionSizeSp,
-            outerTopPaddingDp = compactLayout.outerTopPaddingDp,
-            outerBottomPaddingDp = compactLayout.outerBottomPaddingDp,
+    fun liveErrorActionsChooseMeasuredColumnsAndFitTheContentWidth() {
+        // 960x540 TV card content width (~739dp) with normal text: four equal actions fit.
+        val wideTv = liveErrorActionSizing(
+            availableWidthDp = 739,
+            actionCount = 4,
+            maxColumns = LIVE_PLAYER_ERROR_MAX_COLUMNS,
+            requiredActionWidthDp = 150,
+            requiredActionHeightDp = 38,
         )
-        val largeReserved = livePlayerReservedStripHeightDp(
-            transportContainerDp = large.transportContainerDp,
-            captionSizeSp = large.captionSizeSp,
-            outerTopPaddingDp = largeLayout.outerTopPaddingDp,
-            outerBottomPaddingDp = largeLayout.outerBottomPaddingDp,
-        )
+        assertEquals(4, wideTv.columns)
+        assertEquals(listOf(listOf(0, 1, 2, 3)), wideTv.rows)
+        assertTrue(4 * 150 + 3 * PLAYER_ERROR_ACTION_GAP_DP <= 739)
 
-        assertTrue(compactReserved > compact.transportContainerDp.toFloat())
-        assertTrue(largeReserved > large.transportContainerDp.toFloat())
-        assertTrue(largeReserved > compactReserved)
+        // 600x320dp touch card content width (~516dp) with fontScale-2 text: two equal columns.
+        val compactScaled = liveErrorActionSizing(
+            availableWidthDp = 516,
+            actionCount = 4,
+            maxColumns = LIVE_PLAYER_ERROR_MAX_COLUMNS,
+            requiredActionWidthDp = 240,
+            requiredActionHeightDp = 48,
+        )
+        assertEquals(2, compactScaled.columns)
+        assertEquals(listOf(listOf(0, 1), listOf(2, 3)), compactScaled.rows)
+        assertEquals(48, compactScaled.actionHeightDp)
+        assertTrue(2 * 240 + PLAYER_ERROR_ACTION_GAP_DP <= 516)
+
+        // 411dp portrait card content width (~342dp) with fontScale-2 text: one column.
+        val narrowScaled = liveErrorActionSizing(
+            availableWidthDp = 342,
+            actionCount = 4,
+            maxColumns = LIVE_PLAYER_ERROR_MAX_COLUMNS,
+            requiredActionWidthDp = 240,
+            requiredActionHeightDp = 48,
+        )
+        assertEquals(1, narrowScaled.columns)
+        assertEquals(listOf(listOf(0), listOf(1), listOf(2), listOf(3)), narrowScaled.rows)
     }
 
     @Test
-    fun liveErrorActionsUseOneWideRowAndACenteredCompactGrid() {
-        assertEquals(4, playerErrorActionColumns(television = true, screenWidthDp = 960))
-        assertEquals(4, playerErrorActionColumns(television = false, screenWidthDp = 800))
-        assertEquals(2, playerErrorActionColumns(television = false, screenWidthDp = 411))
-        assertTrue(playerErrorActionHeightDp(television = true) >= playerErrorActionHeightDp(television = false))
+    fun liveErrorActionHeightGrowsWithScaledTextInsteadOfClippingIt() {
+        val normal = liveErrorActionSizing(739, 4, LIVE_PLAYER_ERROR_MAX_COLUMNS, 150, 36)
+        val scaled = liveErrorActionSizing(739, 4, LIVE_PLAYER_ERROR_MAX_COLUMNS, 240, 48)
+        val extraScaled = liveErrorActionSizing(739, 4, LIVE_PLAYER_ERROR_MAX_COLUMNS, 260, 56)
 
+        assertTrue(scaled.actionHeightDp > normal.actionHeightDp)
+        assertTrue(extraScaled.actionHeightDp > scaled.actionHeightDp)
+        assertTrue(scaled.actionHeightDp >= 48)
+        assertTrue(scaled.actionWidthDp >= 240)
+    }
+
+    @Test
+    fun liveErrorActionsHandleHiddenActionsAndDegenerateInputs() {
         assertEquals(listOf(listOf(0, 1, 2, 3)), playerErrorActionRows(actionCount = 4, columns = 4))
         assertEquals(listOf(listOf(0, 1, 2, 3), listOf(4)), playerErrorActionRows(actionCount = 5, columns = 4))
         assertEquals(listOf(listOf(0, 1), listOf(2)), playerErrorActionRows(actionCount = 3, columns = 2))
         assertTrue(playerErrorActionRows(actionCount = 0, columns = 4).isEmpty())
+
+        val three = liveErrorActionSizing(516, 3, LIVE_PLAYER_ERROR_MAX_COLUMNS, 200, 44)
+        assertEquals(2, three.columns)
+        assertEquals(listOf(listOf(0, 1), listOf(2)), three.rows)
+
+        val two = liveErrorActionSizing(739, 2, LIVE_PLAYER_ERROR_MAX_COLUMNS, 150, 38)
+        assertEquals(2, two.columns)
+        assertEquals(listOf(listOf(0, 1)), two.rows)
+
+        val empty = liveErrorActionSizing(739, 0, LIVE_PLAYER_ERROR_MAX_COLUMNS, 150, 38)
+        assertEquals(0, empty.columns)
+        assertTrue(empty.rows.isEmpty())
+
+        val unmeasured = liveErrorActionSizing(739, 4, LIVE_PLAYER_ERROR_MAX_COLUMNS, 0, 0)
+        assertTrue(unmeasured.rows.isEmpty())
     }
 
     @Test

@@ -72,6 +72,7 @@ import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -101,7 +102,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -109,6 +109,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -130,6 +131,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.first
@@ -341,7 +343,6 @@ fun PlayerScreen(
     var liveMorePanel by remember(request) { mutableStateOf<PlayerLiveMorePanelView?>(null) }
     var liveMoreMenuFocusRow by remember(request) { mutableStateOf(PlayerLiveMoreRow.MUTE) }
     var moreFocusRestoreTick by remember(request) { mutableIntStateOf(0) }
-    var liveControlsStripHeightPx by remember(request) { mutableIntStateOf(0) }
     var isPlaying by remember(request) { mutableStateOf(false) }
     var isMuted by remember(request) { mutableStateOf(false) }
     var videoHeight by remember(request) { mutableIntStateOf(0) }
@@ -1394,26 +1395,19 @@ fun PlayerScreen(
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
-                BoxWithConstraints(
+                // The strip is the unweighted child, so Column measures it first at its complete
+                // required height. The More panel is weight(1f, fill = false) and can only use the
+                // genuine remainder, in the same measure pass: no estimate, no floor and no
+                // feedback from a compressed strip measurement.
+                Column(
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                    contentAlignment = Alignment.BottomCenter,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    val density = LocalDensity.current
-                    val measuredStripDp = with(density) { liveControlsStripHeightPx.toDp() }
-                    val fallbackStripDp = livePlayerReservedStripHeightDp(
-                        transportContainerDp = liveControlMetrics.transportContainerDp,
-                        captionSizeSp = liveControlMetrics.captionSizeSp,
-                        outerTopPaddingDp = liveControlsLayout.outerTopPaddingDp,
-                        outerBottomPaddingDp = liveControlsLayout.outerBottomPaddingDp,
-                    ).dp
-                    val reservedStripDp = if (measuredStripDp > 0.dp) measuredStripDp else fallbackStripDp
-                    val liveMorePanelMaxHeight = (maxHeight - reservedStripDp - 18.dp).coerceAtLeast(160.dp)
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
                     liveMorePanel?.let { panelView ->
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                            contentAlignment = Alignment.BottomEnd,
+                        ) {
                             LiveMorePanel(
                                 view = panelView,
                                 isMuted = isMuted,
@@ -1450,7 +1444,7 @@ fun PlayerScreen(
                                     closeLiveMorePanelForSelection()
                                 },
                                 metrics = liveControlMetrics,
-                                maxHeight = liveMorePanelMaxHeight,
+                                maxHeight = null,
                                 modifier = Modifier.padding(
                                     end = liveControlsLayout.outerHorizontalPaddingDp.dp,
                                     bottom = 10.dp,
@@ -1481,11 +1475,7 @@ fun PlayerScreen(
                         moreTriggerFocus = moreTriggerFocus,
                         layoutMetrics = liveControlsLayout,
                         metrics = liveControlMetrics,
-                        onMeasuredHeightPx = { measured ->
-                            if (measured != liveControlsStripHeightPx) liveControlsStripHeightPx = measured
-                        },
                     )
-                    }
                 }
             } else {
                 ModernVodControls(
@@ -1720,7 +1710,7 @@ fun PlayerScreen(
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 val liveErrorSourcePanelMaxHeight =
-                    (maxHeight - liveControlsLayout.outerBottomPaddingDp.dp - 16.dp).coerceAtLeast(160.dp)
+                    (maxHeight - liveControlsLayout.outerBottomPaddingDp.dp - 16.dp).coerceAtLeast(0.dp)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1962,13 +1952,11 @@ private fun LivePlayerControls(
     layoutMetrics: LiveControlsLayoutMetrics,
     metrics: LivePlayerControlsMetrics,
     modifier: Modifier = Modifier,
-    onMeasuredHeightPx: (Int) -> Unit = {},
 ) {
     val colors = LocalHulkColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .onSizeChanged { onMeasuredHeightPx(it.height) }
             .background(
                 Brush.verticalGradient(
                     listOf(
@@ -2260,8 +2248,8 @@ private fun LiveMorePanel(
     onSelectSource: (Int) -> Unit,
     onSelectResize: (Int) -> Unit,
     metrics: LivePlayerControlsMetrics,
-    maxHeight: Dp,
     modifier: Modifier = Modifier,
+    maxHeight: Dp? = null,
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(16.dp)
@@ -2304,7 +2292,7 @@ private fun LiveMorePanel(
                     false
                 }
             }
-            .heightIn(max = maxHeight)
+            .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight) else Modifier)
             .padding(horizontal = 12.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2751,6 +2739,15 @@ private fun UnlockPrompt(
     }
 }
 
+private fun PlayerErrorModalAction.liveCaption(): String = when (this) {
+    PlayerErrorModalAction.RETRY -> "اعادة المحاولة"
+    PlayerErrorModalAction.CHOOSE_CHANNEL -> "اختيار قناة"
+    PlayerErrorModalAction.CHOOSE_SOURCE -> "اختيار مصدر"
+    PlayerErrorModalAction.BACK -> "رجوع"
+}
+
+private fun PlayerErrorModalAction.liveHasIcon(): Boolean = this != PlayerErrorModalAction.BACK
+
 @Composable
 private fun PlayerErrorPanel(
     title: String?,
@@ -2786,11 +2783,6 @@ private fun PlayerErrorPanel(
     var placedActions by remember { mutableStateOf(emptySet<PlayerErrorModalAction>()) }
     var focusAcquired by remember { mutableStateOf(false) }
     val attemptedActions = remember { mutableSetOf<PlayerErrorModalAction>() }
-    val errorActionColumns = if (livePresentation) {
-        playerErrorActionColumns(adaptiveUi.isTelevision, adaptiveUi.screenWidthDp)
-    } else {
-        actions.size.coerceAtLeast(1)
-    }
 
     // Deterministic initial focus: an action only becomes eligible after it signals layout
     // placement, so the request never depends on a single frame guess. The preferred RETRY action
@@ -2815,10 +2807,14 @@ private fun PlayerErrorPanel(
         }
     }
 
-    fun actionModifier(action: PlayerErrorModalAction, requester: FocusRequester): Modifier {
+    fun actionModifier(
+        action: PlayerErrorModalAction,
+        requester: FocusRequester,
+        columns: Int,
+    ): Modifier {
         val index = actions.indexOf(action)
         val neighbors = if (layoutDirection == LayoutDirection.Rtl) {
-            playerErrorActionNeighbors(index, actions.size, errorActionColumns)
+            playerErrorActionNeighbors(index, actions.size, columns)
         } else {
             PlayerErrorActionNeighbors(
                 left = (index - 1).takeIf { it >= 0 },
@@ -2849,7 +2845,7 @@ private fun PlayerErrorPanel(
     fun ErrorActionButton(action: PlayerErrorModalAction, buttonModifier: Modifier) {
         when (action) {
             PlayerErrorModalAction.RETRY -> FocusButton(
-                "اعادة المحاولة",
+                action.liveCaption(),
                 onRetry,
                 modifier = buttonModifier,
                 primary = livePresentation || focusedAction == PlayerErrorModalAction.RETRY,
@@ -2858,7 +2854,7 @@ private fun PlayerErrorPanel(
                 trailingIcon = Icons.Rounded.Refresh.takeIf { livePresentation },
             )
             PlayerErrorModalAction.CHOOSE_CHANNEL -> FocusButton(
-                "اختيار قناة",
+                action.liveCaption(),
                 onChooseChannel,
                 modifier = buttonModifier,
                 primary = !livePresentation && focusedAction == PlayerErrorModalAction.CHOOSE_CHANNEL,
@@ -2867,7 +2863,7 @@ private fun PlayerErrorPanel(
                 trailingIcon = if (livePresentation) Icons.AutoMirrored.Rounded.List else null,
             )
             PlayerErrorModalAction.CHOOSE_SOURCE -> FocusButton(
-                "اختيار مصدر",
+                action.liveCaption(),
                 onChooseServer,
                 modifier = buttonModifier,
                 primary = !livePresentation && focusedAction == PlayerErrorModalAction.CHOOSE_SOURCE,
@@ -2876,7 +2872,7 @@ private fun PlayerErrorPanel(
                 trailingIcon = Icons.Rounded.Layers.takeIf { livePresentation },
             )
             PlayerErrorModalAction.BACK -> FocusButton(
-                "رجوع",
+                action.liveCaption(),
                 onBack,
                 modifier = buttonModifier,
                 primary = !livePresentation && focusedAction == PlayerErrorModalAction.BACK,
@@ -2955,20 +2951,51 @@ private fun PlayerErrorPanel(
                 Spacer(Modifier.height(15.dp))
             }
             if (livePresentation) {
-                val actionGap = PLAYER_ERROR_ACTION_GAP_DP.dp
-                val actionHeight = playerErrorActionHeightDp(adaptiveUi.isTelevision).dp
-                val actionRows = playerErrorActionRows(actions.size, errorActionColumns)
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val rowMaxWidth = if (errorActionColumns >= 4) 760.dp else 420.dp
-                    val rowWidth = minOf(maxWidth, rowMaxWidth)
-                    val actionWidth = ((rowWidth - actionGap * (errorActionColumns - 1)) / errorActionColumns)
-                        .coerceAtLeast(96.dp)
+                    val density = LocalDensity.current
+                    val textMeasurer = rememberTextMeasurer()
+                    val captionStyle = LocalTextStyle.current.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    // The accepted compact FocusButton geometry: 12dp/9dp padding and a 17dp icon
+                    // with a 6dp gap. Measuring the real captions at the current font scale keeps
+                    // the common size large enough for scaled text and no larger than necessary.
+                    val actionContent = remember(
+                        actions,
+                        maxWidth,
+                        density.fontScale,
+                        density.density,
+                        captionStyle,
+                    ) {
+                        val horizontalPadding = 24.dp
+                        val verticalPadding = 18.dp
+                        val iconAllowance = 23.dp
+                        actions.map { action ->
+                            val layout = textMeasurer.measure(action.liveCaption(), captionStyle)
+                            val textWidth = with(density) { layout.size.width.toDp() }
+                            val textHeight = with(density) { layout.size.height.toDp() }
+                            val width = textWidth +
+                                (if (action.liveHasIcon()) iconAllowance else 0.dp) +
+                                horizontalPadding
+                            val height = maxOf(textHeight, 17.dp) + verticalPadding
+                            width to height
+                        }
+                    }
+                    val sizing = liveErrorActionSizing(
+                        availableWidthDp = maxWidth.value.roundToInt(),
+                        actionCount = actions.size,
+                        maxColumns = LIVE_PLAYER_ERROR_MAX_COLUMNS,
+                        requiredActionWidthDp = actionContent.maxOfOrNull { it.first.value.roundToInt() } ?: 0,
+                        requiredActionHeightDp = actionContent.maxOfOrNull { it.second.value.roundToInt() } ?: 0,
+                    )
+                    val actionGap = PLAYER_ERROR_ACTION_GAP_DP.dp
                     Column(
                         modifier = Modifier.fillMaxWidth().focusGroup(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(actionGap),
                     ) {
-                        actionRows.forEach { rowIndices ->
+                        sizing.rows.forEach { rowIndices ->
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(actionGap),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -2977,9 +3004,9 @@ private fun PlayerErrorPanel(
                                     val action = actions[index]
                                     ErrorActionButton(
                                         action = action,
-                                        buttonModifier = actionModifier(action, requesters[index])
-                                            .width(actionWidth)
-                                            .height(actionHeight),
+                                        buttonModifier = actionModifier(action, requesters[index], sizing.columns)
+                                            .width(sizing.actionWidthDp.dp)
+                                            .height(sizing.actionHeightDp.dp),
                                     )
                                 }
                             }
@@ -2997,7 +3024,7 @@ private fun PlayerErrorPanel(
                         val action = actions[index]
                         ErrorActionButton(
                             action = action,
-                            buttonModifier = actionModifier(action, requesters[index]),
+                            buttonModifier = actionModifier(action, requesters[index], actions.size),
                         )
                     }
                 }
