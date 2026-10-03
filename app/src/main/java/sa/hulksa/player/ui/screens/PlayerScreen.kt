@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -50,6 +51,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -83,6 +86,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -101,6 +105,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -112,6 +117,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -133,8 +139,9 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import sa.hulksa.player.data.SettingsProStore
 import sa.hulksa.player.data.AuthenticatedSessionOwner
 import sa.hulksa.player.data.HomeHeroMetadataStore
@@ -1395,88 +1402,105 @@ fun PlayerScreen(
 
         if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
-                // The strip is the unweighted child, so Column measures it first at its complete
-                // required height. The More panel is weight(1f, fill = false) and can only use the
-                // genuine remainder, in the same measure pass: no estimate, no floor and no
-                // feedback from a compressed strip measurement.
-                Column(
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                val liveDensity = LocalDensity.current
+                val minimumMorePanelHeight = remember(
+                    liveControlMetrics.captionSizeSp,
+                    liveDensity.fontScale,
                 ) {
-                    liveMorePanel?.let { panelView ->
-                        Box(
-                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                            contentAlignment = Alignment.BottomEnd,
-                        ) {
-                            LiveMorePanel(
-                                view = panelView,
-                                isMuted = isMuted,
-                                sourceCount = request.candidates.size,
-                                candidateIndex = candidateIndex,
-                                resizeModeIndex = resizeModeIndex,
-                                menuFocusRow = liveMoreMenuFocusRow,
-                                onClose = ::closeLiveMorePanelToTrigger,
-                                onBackToMenu = ::handleLiveMoreBack,
-                                onToggleMute = {
-                                    val muted = !isMuted
-                                    isMuted = muted
-                                    player.volume = if (muted) 0f else 1f
-                                },
-                                onReload = {
-                                    closeLiveMorePanelForSelection()
-                                    retryManually(candidateIndex)
-                                },
-                                onOpenSource = {
-                                    liveMoreMenuFocusRow = PlayerLiveMoreRow.SOURCE
-                                    liveMorePanel = PlayerLiveMorePanelView.SOURCE
-                                },
-                                onOpenResize = {
-                                    liveMoreMenuFocusRow = PlayerLiveMoreRow.RESIZE
-                                    liveMorePanel = PlayerLiveMorePanelView.RESIZE
-                                },
-                                onSelectSource = { index ->
-                                    closeLiveMorePanelForSelection()
-                                    suspendedFinalError = null
-                                    retryManually(index)
-                                },
-                                onSelectResize = { index ->
-                                    resizeModeIndex = index
-                                    closeLiveMorePanelForSelection()
-                                },
-                                metrics = liveControlMetrics,
-                                maxHeight = null,
-                                modifier = Modifier.padding(
-                                    end = liveControlsLayout.outerHorizontalPaddingDp.dp,
-                                    bottom = 10.dp,
-                                ),
-                            )
-                        }
-                    }
-                    LivePlayerControls(
-                        isPlaying = isPlaying,
-                        favorite = liveFavoriteControl.favorite,
-                        favoriteEnabled = liveFavoriteControl.enabled,
-                        lastChannelEnabled = onLastChannel != null,
-                        moreOpen = liveMorePanel != null,
-                        onMore = ::openLiveMorePanel,
-                        onLastChannel = { onLastChannel?.invoke() },
-                        onPrevious = { switchRelative(-1) },
-                        onNext = { switchRelative(1) },
-                        onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                        onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
-                        onChannels = {
-                            controlsVisible = false
-                            activePanel = null
-                            liveMorePanel = null
-                            browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
-                            browserVisible = true
-                        },
-                        primaryFocus = primaryFocus,
-                        moreTriggerFocus = moreTriggerFocus,
-                        layoutMetrics = liveControlsLayout,
-                        metrics = liveControlMetrics,
-                    )
+                    livePlayerMorePanelMinimumHeightDp(
+                        captionSizeSp = liveControlMetrics.captionSizeSp,
+                        fontScale = liveDensity.fontScale,
+                    ).dp
                 }
+                // The overlay measures the real strip first, then either the accepted above-strip
+                // arrangement or a bounded full-height fallback when the complete strip plus a
+                // usable panel body cannot coexist. The strip is never overlapped or compressed.
+                LiveBottomOverlay(
+                    showPanel = liveMorePanel != null,
+                    gap = 10.dp,
+                    minimumPanelHeight = minimumMorePanelHeight,
+                    panelModifier = Modifier.padding(
+                        end = liveControlsLayout.outerHorizontalPaddingDp.dp,
+                    ),
+                    fallbackPanelModifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(
+                            end = liveControlsLayout.outerHorizontalPaddingDp.dp,
+                            bottom = liveControlsLayout.outerBottomPaddingDp.dp,
+                        ),
+                    strip = {
+                        LivePlayerControls(
+                            isPlaying = isPlaying,
+                            favorite = liveFavoriteControl.favorite,
+                            favoriteEnabled = liveFavoriteControl.enabled,
+                            lastChannelEnabled = onLastChannel != null,
+                            moreOpen = liveMorePanel != null,
+                            onMore = ::openLiveMorePanel,
+                            onLastChannel = { onLastChannel?.invoke() },
+                            onPrevious = { switchRelative(-1) },
+                            onNext = { switchRelative(1) },
+                            onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
+                            onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
+                            onChannels = {
+                                controlsVisible = false
+                                activePanel = null
+                                liveMorePanel = null
+                                browserOrigin = LiveChannelBrowserOrigin.NORMAL_LIVE
+                                browserVisible = true
+                            },
+                            primaryFocus = primaryFocus,
+                            moreTriggerFocus = moreTriggerFocus,
+                            layoutMetrics = liveControlsLayout,
+                            metrics = liveControlMetrics,
+                        )
+                    },
+                    panel = { panelMaxHeight, panelModifier ->
+                        liveMorePanel?.let { panelView ->
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
+                                LiveMorePanel(
+                                    view = panelView,
+                                    isMuted = isMuted,
+                                    sourceCount = request.candidates.size,
+                                    candidateIndex = candidateIndex,
+                                    resizeModeIndex = resizeModeIndex,
+                                    menuFocusRow = liveMoreMenuFocusRow,
+                                    onClose = ::closeLiveMorePanelToTrigger,
+                                    onBackToMenu = ::handleLiveMoreBack,
+                                    onToggleMute = {
+                                        val muted = !isMuted
+                                        isMuted = muted
+                                        player.volume = if (muted) 0f else 1f
+                                    },
+                                    onReload = {
+                                        closeLiveMorePanelForSelection()
+                                        retryManually(candidateIndex)
+                                    },
+                                    onOpenSource = {
+                                        liveMoreMenuFocusRow = PlayerLiveMoreRow.SOURCE
+                                        liveMorePanel = PlayerLiveMorePanelView.SOURCE
+                                    },
+                                    onOpenResize = {
+                                        liveMoreMenuFocusRow = PlayerLiveMoreRow.RESIZE
+                                        liveMorePanel = PlayerLiveMorePanelView.RESIZE
+                                    },
+                                    onSelectSource = { index ->
+                                        closeLiveMorePanelForSelection()
+                                        suspendedFinalError = null
+                                        retryManually(index)
+                                    },
+                                    onSelectResize = { index ->
+                                        resizeModeIndex = index
+                                        closeLiveMorePanelForSelection()
+                                    },
+                                    metrics = liveControlMetrics,
+                                    maxHeight = panelMaxHeight,
+                                    modifier = panelModifier,
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                )
             } else {
                 ModernVodControls(
                     isPlaying = isPlaying,
@@ -1932,6 +1956,82 @@ internal fun liveControlsLayoutMetrics(
 // Compact Live control footprint used only to size focus-edge room for the row's scaled focus ring.
 private const val LIVE_CONTROL_FOCUS_REFERENCE_WIDTH_DP = 150f
 private const val LIVE_CONTROL_FOCUS_REFERENCE_HEIGHT_DP = 40f
+
+private enum class LiveBottomOverlaySlot { STRIP, PANEL, FALLBACK }
+
+/**
+ * Same-pass Live bottom overlay.
+ *
+ * The real strip is measured first at its complete height. If the genuine remainder can still hold
+ * the panel's minimum usable height, the accepted arrangement places the panel above the strip.
+ * Otherwise the bounded fallback places the panel over the full safe height and omits the strip
+ * (it returns when the panel closes); the strip is never overlapped or compressed in either mode.
+ */
+@Composable
+private fun LiveBottomOverlay(
+    showPanel: Boolean,
+    gap: Dp,
+    minimumPanelHeight: Dp,
+    strip: @Composable () -> Unit,
+    panel: @Composable (maxHeight: Dp, modifier: Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+    panelModifier: Modifier = Modifier,
+    fallbackPanelModifier: Modifier = Modifier,
+) {
+    SubcomposeLayout(modifier = modifier) { constraints ->
+        val gapPx = gap.roundToPx()
+        val minimumPanelPx = minimumPanelHeight.roundToPx()
+        val stripPlaceable = subcompose(LiveBottomOverlaySlot.STRIP) { strip() }
+            .firstOrNull()
+            ?.measure(constraints)
+        val boundedHeight = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
+        if (stripPlaceable == null) {
+            return@SubcomposeLayout layout(0, 0) { }
+        }
+        if (!showPanel) {
+            return@SubcomposeLayout layout(constraints.maxWidth, stripPlaceable.height) {
+                stripPlaceable.place(0, 0)
+            }
+        }
+        val remainderPx = (boundedHeight - stripPlaceable.height - gapPx).coerceAtLeast(0)
+        when (liveBottomOverlayMode(remainderPx, minimumPanelPx)) {
+            LiveBottomOverlayMode.NORMAL -> {
+                val panelPlaceable = subcompose(LiveBottomOverlaySlot.PANEL) {
+                    panel(remainderPx.toDp(), panelModifier)
+                }.firstOrNull()?.measure(
+                    Constraints(maxWidth = constraints.maxWidth, maxHeight = remainderPx),
+                )
+                if (panelPlaceable == null) {
+                    layout(constraints.maxWidth, stripPlaceable.height) {
+                        stripPlaceable.place(0, 0)
+                    }
+                } else {
+                    layout(
+                        constraints.maxWidth,
+                        panelPlaceable.height + gapPx + stripPlaceable.height,
+                    ) {
+                        panelPlaceable.place(0, 0)
+                        stripPlaceable.place(0, panelPlaceable.height + gapPx)
+                    }
+                }
+            }
+            LiveBottomOverlayMode.FALLBACK -> {
+                val panelPlaceable = subcompose(LiveBottomOverlaySlot.FALLBACK) {
+                    panel(boundedHeight.toDp(), fallbackPanelModifier)
+                }.firstOrNull()?.measure(
+                    Constraints(maxWidth = constraints.maxWidth, maxHeight = boundedHeight),
+                )
+                if (panelPlaceable == null) {
+                    layout(constraints.maxWidth, 0) { }
+                } else {
+                    layout(constraints.maxWidth, panelPlaceable.height) {
+                        panelPlaceable.place(0, 0)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun LivePlayerControls(
@@ -2783,6 +2883,10 @@ private fun PlayerErrorPanel(
     var placedActions by remember { mutableStateOf(emptySet<PlayerErrorModalAction>()) }
     var focusAcquired by remember { mutableStateOf(false) }
     val attemptedActions = remember { mutableSetOf<PlayerErrorModalAction>() }
+    val bringIntoViewScope = rememberCoroutineScope()
+    val actionBringIntoView = remember(actions) {
+        actions.associateWith { BringIntoViewRequester() }
+    }
 
     // Deterministic initial focus: an action only becomes eligible after it signals layout
     // placement, so the request never depends on a single frame guess. The preferred RETRY action
@@ -2825,6 +2929,7 @@ private fun PlayerErrorPanel(
         }
         return Modifier
             .focusRequester(requester)
+            .bringIntoViewRequester(actionBringIntoView.getValue(action))
             .focusProperties {
                 left = neighbors.left?.let { requesters.getOrNull(it) } ?: FocusRequester.Cancel
                 right = neighbors.right?.let { requesters.getOrNull(it) } ?: FocusRequester.Cancel
@@ -2835,6 +2940,11 @@ private fun PlayerErrorPanel(
             .onFocusChanged { state ->
                 if (state.isFocused) {
                     focusedAction = action
+                    if (livePresentation) {
+                        bringIntoViewScope.launch {
+                            runCatching { actionBringIntoView.getValue(action).bringIntoView() }
+                        }
+                    }
                 } else if (focusedAction == action) {
                     focusedAction = null
                 }
@@ -2882,7 +2992,7 @@ private fun PlayerErrorPanel(
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = .70f))
@@ -2900,16 +3010,24 @@ private fun PlayerErrorPanel(
                     -> false
                 }
             },
+        contentAlignment = Alignment.Center,
     ) {
+        // The Live card is a bounded scroll container so the complete content (warning, title,
+        // wrapped body, divider and every action row) stays reachable at any window height. VOD
+        // keeps its previous non-scrolling composition.
+        val cardMaxHeight = (maxHeight - 24.dp).coerceAtLeast(0.dp)
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth(if (adaptiveUi.isTelevision) .82f else .92f)
                 .widthIn(max = if (adaptiveUi.isTelevision) 920.dp else 620.dp)
-                .focusGroup()
+                .then(if (livePresentation) Modifier.safeDrawingPadding() else Modifier)
+                .then(if (livePresentation) Modifier.heightIn(max = cardMaxHeight) else Modifier)
                 .clip(RoundedCornerShape(20.dp))
                 .background(Color.Black.copy(alpha = .96f))
                 .border(1.dp, colors.gold.copy(alpha = if (livePresentation) .55f else .34f), RoundedCornerShape(20.dp))
+                .then(if (livePresentation) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+                .focusGroup()
                 .padding(if (adaptiveUi.isTelevision) 24.dp else 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

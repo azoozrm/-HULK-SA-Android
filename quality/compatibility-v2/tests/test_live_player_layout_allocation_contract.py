@@ -20,11 +20,11 @@ class LivePlayerLayoutAllocationContractTest(unittest.TestCase):
     def read(path: Path) -> str:
         return path.read_text(encoding="utf-8")
 
-    def test_more_panel_uses_the_strip_first_weighted_allocation(self) -> None:
+    def test_more_panel_reserves_the_strip_before_allocating_space(self) -> None:
         player = self.read(PLAYER_SCREEN)
-        # The panel container is the weighted child, so the unweighted strip is measured first at
-        # its complete required height and the panel only receives the genuine remainder.
-        self.assertIn("Modifier.fillMaxWidth().weight(1f, fill = false)", player)
+        # The overlay subcomposes and measures the real strip before it allocates any panel space.
+        self.assertIn("subcompose(LiveBottomOverlaySlot.STRIP)", player)
+        self.assertIn("subcompose(LiveBottomOverlaySlot.PANEL)", player)
         # No estimated strip state, feedback measurement or panel floor remains.
         self.assertNotIn("liveControlsStripHeightPx", player)
         self.assertNotIn("onMeasuredHeightPx", player)

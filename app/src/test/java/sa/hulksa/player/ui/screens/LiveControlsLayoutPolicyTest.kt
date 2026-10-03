@@ -181,6 +181,45 @@ class LiveControlsLayoutPolicyTest {
     }
 
     @Test
+    fun morePanelFallbackTriggersOnlyWhenTheStripLeavesTooLittleHeight() {
+        // 600x320dp touch at fontScale 2: the complete strip leaves roughly 72dp.
+        val minimumForScaledCompact = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 11, fontScale = 2f)
+        assertTrue(minimumForScaledCompact > 72)
+        assertTrue(minimumForScaledCompact < 320)
+
+        val normalTv = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 13, fontScale = 1f)
+        assertTrue(normalTv < minimumForScaledCompact)
+
+        assertEquals(
+            LiveBottomOverlayMode.FALLBACK,
+            liveBottomOverlayMode(remainingHeightPx = 72, minimumPanelHeightPx = minimumForScaledCompact),
+        )
+        assertEquals(
+            LiveBottomOverlayMode.NORMAL,
+            liveBottomOverlayMode(
+                remainingHeightPx = minimumForScaledCompact,
+                minimumPanelHeightPx = minimumForScaledCompact,
+            ),
+        )
+        assertEquals(
+            LiveBottomOverlayMode.NORMAL,
+            liveBottomOverlayMode(remainingHeightPx = 600, minimumPanelHeightPx = minimumForScaledCompact),
+        )
+    }
+
+    @Test
+    fun morePanelMinimumHeightGrowsWithFontScaleAndStaysBounded() {
+        val base = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 11, fontScale = 1f)
+        val medium = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 11, fontScale = 1.3f)
+        val scaled = livePlayerMorePanelMinimumHeightDp(captionSizeSp = 11, fontScale = 2f)
+
+        assertTrue(medium > base)
+        assertTrue(scaled > medium)
+        assertTrue(base > 60)
+        assertTrue(scaled < 320)
+    }
+
+    @Test
     fun liveErrorActionNeighborsFollowTheRtlGrid() {
         val singleRow = playerErrorActionNeighbors(index = 1, count = 4, columns = 4)
         assertEquals(2, singleRow.left)

@@ -116,6 +116,39 @@ internal const val PLAYER_ERROR_ACTION_GAP_DP = 9
 internal const val LIVE_PLAYER_ERROR_MAX_COLUMNS = 4
 
 /**
+ * Bottom-overlay allocation mode for the Live More panel.
+ *
+ * NORMAL keeps the accepted above-strip arrangement; FALLBACK is used when the complete strip plus
+ * the panel's minimum usable height cannot coexist, so the panel becomes the bounded full-height
+ * surface and the strip is not placed (it returns when the panel closes).
+ */
+internal enum class LiveBottomOverlayMode { NORMAL, FALLBACK }
+
+internal fun liveBottomOverlayMode(
+    remainingHeightPx: Int,
+    minimumPanelHeightPx: Int,
+): LiveBottomOverlayMode =
+    if (remainingHeightPx >= minimumPanelHeightPx) LiveBottomOverlayMode.NORMAL else LiveBottomOverlayMode.FALLBACK
+
+/**
+ * Minimum usable More-panel height for the current typography scale: shell padding, the header row
+ * (title and text-only close action), the header/body gap and one full body row.
+ *
+ * This is only the NORMAL-vs-FALLBACK threshold; it is never used to render or reserve a height.
+ */
+internal fun livePlayerMorePanelMinimumHeightDp(
+    captionSizeSp: Int,
+    fontScale: Float,
+): Int {
+    val scale = fontScale.coerceAtLeast(1f)
+    val headerText = (captionSizeSp * 1.6f * scale).roundToInt()
+    val headerAction = ((captionSizeSp - 1).coerceAtLeast(11) * 1.6f * scale).roundToInt() + 12
+    val bodyRow = (14 * 1.6f * scale).roundToInt() + 24
+    val chrome = 24 + maxOf(headerText, headerAction) + 8
+    return chrome + bodyRow
+}
+
+/**
  * Measured Live error action sizing.
  *
  * The caller measures the visible captions with the actual typography, font scale, icon allowance
