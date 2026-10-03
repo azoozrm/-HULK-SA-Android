@@ -36,6 +36,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -769,6 +771,230 @@ fun PosterCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
 ) = CompactPosterCard(item, isFavorite, onClick, modifier, onLongClick)
+
+/**
+ * Owner-approved Movies catalog card: complete boxed card with the title/metadata footer inside
+ * the card frame, gold focus edge, star rating and clock duration drawn as real icons on the
+ * physical left of their values. Opt-in for the Movies destination only; other catalogs keep
+ * their existing card presentation.
+ */
+@Composable
+fun MoviesCatalogBoxedCard(
+    item: ContentItem,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val context = LocalContext.current
+    val metadataStore = remember(context) { HomeHeroMetadataStore.get(context) }
+    val metadataOwner = metadataStore.currentOwner()
+    val viewModel = remember(context) {
+        context.findViewModelStoreOwner()?.let { owner -> ViewModelProvider(owner)[HulkViewModel::class.java] }
+    }
+    var verifiedMovieMetadata by remember(item.id, metadataOwner) {
+        val cached = metadataStore.cached(metadataOwner, item)
+        mutableStateOf(
+            VerifiedMovieCardMetadata(
+                quality = cached.quality,
+                durationMs = cached.durationMs,
+            ),
+        )
+    }
+    LaunchedEffect(item.id, metadataOwner, viewModel) {
+        if (viewModel != null) {
+            viewModel.prefetchMovieCardMetadata(item) { quality, durationMs ->
+                verifiedMovieMetadata = VerifiedMovieCardMetadata(
+                    quality = quality,
+                    durationMs = durationMs,
+                )
+            }
+        }
+    }
+
+    var focused by remember { mutableStateOf(false) }
+    var artworkFailed by remember(item.posterUrl) { mutableStateOf(false) }
+    var remoteLongPressHandled by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val scale = if (adaptiveUi.isTelevision) {
+        1f
+    } else {
+        animateFloatAsState(if (showFocused) 1.035f else 1f, label = "movieBoxedScale").value
+    }
+    val focusTransform = if (adaptiveUi.isTelevision) {
+        Modifier
+    } else {
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            shadowElevation = if (showFocused) 14.dp.toPx() else 0f
+        }
+    }
+    val shape = RoundedCornerShape(if (adaptiveUi.isTelevision) 12.dp else 10.dp)
+    val rating = compactMovieRating(item.rating)
+    val duration = compactMovieDuration(verifiedMovieMetadata.durationMs)
+    Column(
+        modifier = modifier
+            .then(focusTransform)
+            .clip(shape)
+            .background(Color(0xFF10110C))
+            .goldFocusEdge(shape = shape, visible = showFocused && adaptiveUi.isTelevision)
+            .border(
+                width = if (showFocused) 2.dp else 1.dp,
+                color = if (showFocused) colors.goldBright else Color.White.copy(alpha = .10f),
+                shape = shape,
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .onPreviewKeyEvent { event ->
+                if (onLongClick == null || !event.nativeKeyEvent.isRemoteSelectKey()) {
+                    false
+                } else if (event.type == KeyEventType.KeyDown) {
+                    if (
+                        (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) &&
+                        !remoteLongPressHandled
+                    ) {
+                        remoteLongPressHandled = true
+                        onLongClick()
+                    }
+                    true
+                } else if (event.type == KeyEventType.KeyUp) {
+                    if (!remoteLongPressHandled) onClick()
+                    remoteLongPressHandled = false
+                    true
+                } else {
+                    false
+                }
+            }
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
+            if (!item.posterUrl.isNullOrBlank() && !artworkFailed) {
+                AsyncImage(
+                    model = item.posterUrl,
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    placeholder = painterResource(R.drawable.ic_launcher_foreground),
+                    onError = { artworkFailed = true },
+                )
+            } else {
+                HulkFallbackArtwork(Modifier.fillMaxSize(), HulkArtworkSurface.POSTER)
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            .72f to Color.Transparent,
+                            1f to Color(0xFF10110C),
+                        ),
+                    ),
+            )
+            if (isFavorite) {
+                Box(
+                    modifier = Modifier
+                        .align(AbsoluteAlignment.TopRight)
+                        .padding(7.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = .78f))
+                        .border(1.dp, Color.White.copy(alpha = .16f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = colors.goldBright,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF12130E))
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = item.name,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (adaptiveUi.isTelevision) 12.sp else 11.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 15.sp else 14.sp,
+                maxLines = 2,
+                minLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            if (rating != null || duration != null) {
+                Spacer(Modifier.height(5.dp))
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        rating?.let { value ->
+                            Icon(
+                                imageVector = Icons.Rounded.Star,
+                                contentDescription = null,
+                                tint = colors.goldBright,
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = value,
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                        }
+                        if (rating != null && duration != null) {
+                            Spacer(Modifier.width(7.dp))
+                            Box(
+                                Modifier
+                                    .width(1.dp)
+                                    .height(11.dp)
+                                    .background(Color.White.copy(alpha = .18f)),
+                            )
+                            Spacer(Modifier.width(7.dp))
+                        }
+                        duration?.let { value ->
+                            Icon(
+                                imageVector = Icons.Rounded.Schedule,
+                                contentDescription = null,
+                                tint = Color(0xFFE0D7B8),
+                                modifier = Modifier.size(12.dp),
+                            )
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = value,
+                                color = Color(0xFFE0D7B8),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun HistoryCard(

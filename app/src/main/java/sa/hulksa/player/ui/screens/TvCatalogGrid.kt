@@ -36,6 +36,7 @@ import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.CompactPosterCard
+import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesPosterCard
 
 internal data class TvCatalogMetrics(
@@ -342,6 +343,15 @@ internal fun TvCatalogGrid(
 
                 if (destination == MainDestination.SERIES) {
                     SeriesPosterCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = onFocusedCard,
+                    )
+                } else if (destination == MainDestination.MOVIES) {
+                    MoviesCatalogBoxedCard(
                         item = item,
                         isFavorite = isFavorite(item),
                         onClick = { onOpen(item) },

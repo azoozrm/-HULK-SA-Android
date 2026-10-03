@@ -88,17 +88,21 @@ class MobileLiveUxQualificationTest(unittest.TestCase):
         self.assertIn("onSelectLiveChannel = ::queuePlayerRequestedLiveChannel", pro)
         self.assertIn("queueLiveRelative(relativeDelta)", pro)
 
-    def test_mobile_back_closes_browser_and_picture_size_before_playback_exit(self) -> None:
+    def test_mobile_back_closes_child_panels_before_playback_exit(self) -> None:
         player = self.read(PLAYER_SCREEN)
         browser_before_panel = re.compile(
             r"fun handleBackAction\(\) \{\s*when \{\s*"
             r"browserVisible -> browserVisible = false\s*"
             r"finalError != null -> saveAndBack\(\)\s*"
+            r"(?:(?!else -> saveAndBack\(\)).)*?"
             r"activePanel != null -> activePanel = null",
             re.DOTALL,
         )
         self.assertRegex(player, browser_before_panel)
-        self.assertIn("onResize = { activePanel = PlayerPanel.RESIZE }", player)
+        # The approved VOD picture-size control lives in the More panel child view and must be
+        # closable through the panel back path before playback exits.
+        self.assertIn("onOpenPictureSize = {", player)
+        self.assertIn("vodMorePanel != null -> handleVodMoreBack()", player)
         self.assertIn("browserVisible || activePanel != null -> null", player)
 
 

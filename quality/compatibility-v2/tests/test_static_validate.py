@@ -91,26 +91,24 @@ class StaticValidationTest(unittest.TestCase):
         valid_player = """
 val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
 AndroidKeyEvent.KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-    seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
+    seekBy(-SEEK_STEP_MS); true
 } else false
 AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-    seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS); true
+    seekBy(SEEK_STEP_MS); true
 } else false
-AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-    previewMs = if (tvRemoteInput) {
-        (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
-    } else {
-        (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+AndroidKeyEvent.KEYCODE_DPAD_LEFT -> when (event.type) {
+    KeyEventType.KeyDown -> {
+        onPreview((base - SEEK_STEP_MS).coerceIn(0L, durationMs))
+        true
     }
-    true
+    else -> false
 }
-AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-    previewMs = if (tvRemoteInput) {
-        (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
-    } else {
-        (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> when (event.type) {
+    KeyEventType.KeyDown -> {
+        onPreview((base + SEEK_STEP_MS).coerceIn(0L, durationMs))
+        true
     }
-    true
+    else -> false
 }
 """
         (root / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt").write_text(
@@ -182,54 +180,71 @@ AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
             )
             self.assertEqual("FAIL", result.status)
 
-    def test_dynamic_rtl_player_seek_contract_passes(self) -> None:
+    def test_physical_direction_player_seek_contract_passes(self) -> None:
         text = """
 val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
 KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
-    seekBy(if (tvRemoteInput) seekStepMs else -seekStepMs); true
+    seekBy(-seekStepMs); true
 } else false
 KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
-    seekBy(if (tvRemoteInput) -seekStepMs else seekStepMs); true
+    seekBy(seekStepMs); true
 } else false
-KEYCODE_DPAD_LEFT -> {
-    previewMs = if (tvRemoteInput) {
-        (previewMs + seekStepMs).coerceAtMost(durationMs)
-    } else {
-        (previewMs - seekStepMs).coerceAtLeast(0L)
+KEYCODE_DPAD_LEFT -> when (event.type) {
+    KeyEventType.KeyDown -> {
+        onPreview((base - seekStepMs).coerceIn(0L, durationMs))
+        true
     }
-    true
+    else -> false
 }
-KEYCODE_DPAD_RIGHT -> {
-    previewMs = if (tvRemoteInput) {
-        (previewMs - seekStepMs).coerceAtLeast(0L)
-    } else {
-        (previewMs + seekStepMs).coerceAtMost(durationMs)
+KEYCODE_DPAD_RIGHT -> when (event.type) {
+    KeyEventType.KeyDown -> {
+        onPreview((base + seekStepMs).coerceIn(0L, durationMs))
+        true
     }
-    true
+    else -> false
 }
 """
         self.assertTrue(MODULE.player_surface_seek_contract(text))
         self.assertTrue(MODULE.player_seekbar_contract(text))
 
-    def test_legacy_ltr_player_seek_contract_fails(self) -> None:
+    def test_rtl_inverted_player_seek_contract_fails(self) -> None:
         text = """
 val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
-KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) { seekBy(-SEEK_STEP_MS); true }
-KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) { seekBy(SEEK_STEP_MS); true }
+KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) {
+    seekBy(if (tvRemoteInput) SEEK_STEP_MS else -SEEK_STEP_MS); true
+} else false
+KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) {
+    seekBy(if (tvRemoteInput) -SEEK_STEP_MS else SEEK_STEP_MS); true
+} else false
 """
         self.assertFalse(MODULE.player_surface_seek_contract(text))
 
-    def test_unscoped_rtl_player_seek_contract_fails(self) -> None:
+    def test_reversed_player_seek_contract_fails(self) -> None:
         text = """
 KEYCODE_DPAD_LEFT -> if (!request.isLive && surfaceFocused) { seekBy(SEEK_STEP_MS); true }
 KEYCODE_DPAD_RIGHT -> if (!request.isLive && surfaceFocused) { seekBy(-SEEK_STEP_MS); true }
 """
         self.assertFalse(MODULE.player_surface_seek_contract(text))
 
-    def test_legacy_ltr_seekbar_contract_fails(self) -> None:
+    def test_rtl_inverted_seekbar_contract_fails(self) -> None:
         text = """
-KEYCODE_DPAD_LEFT -> { previewMs = (previewMs - SEEK_STEP_MS).coerceAtLeast(0L); true }
-KEYCODE_DPAD_RIGHT -> { previewMs = (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs); true }
+val tvRemoteInput = adaptiveUi.isTelevision || adaptiveUi.inputMode == HulkInputMode.REMOTE
+KEYCODE_DPAD_LEFT -> {
+    previewMs = if (tvRemoteInput) {
+        (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+    } else {
+        (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+    }
+    true
+}
+KEYCODE_DPAD_RIGHT -> {
+    previewMs = if (tvRemoteInput) {
+        (previewMs - SEEK_STEP_MS).coerceAtLeast(0L)
+    } else {
+        (previewMs + SEEK_STEP_MS).coerceAtMost(durationMs)
+    }
+    true
+}
 """
         self.assertFalse(MODULE.player_seekbar_contract(text))
 

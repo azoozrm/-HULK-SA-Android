@@ -102,44 +102,52 @@ def _read(path: Path) -> str:
 
 
 def player_surface_seek_contract(text: str) -> bool:
-    remote_gate = re.search(
-        r"val\s+tvRemoteInput\s*=\s*adaptiveUi\.isTelevision\s*\|\|\s*"
-        r"adaptiveUi\.inputMode\s*==\s*HulkInputMode\.REMOTE",
-        text,
-    )
+    """Owner-approved physical direction: Left rewinds, Right forwards for every input mode.
+
+    The approved Movies/VOD design keeps the conventional media axis (past left, future right)
+    and explicitly removes the previous RTL D-pad inversion. A residual `if (tvRemoteInput)`
+    seek branch would double-reverse the signed delta and fails this check.
+    """
     left = re.search(
         r"KEYCODE_DPAD_LEFT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{"
         r"(?:(?!KEYCODE_DPAD_RIGHT).)*?"
-        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*(?:SEEK_STEP_MS|seekStepMs)\s*else\s*-(?:SEEK_STEP_MS|seekStepMs)\s*\)",
+        r"seekBy\(\s*-\s*(?:SEEK_STEP_MS|seekStepMs)\s*\)",
         text,
         re.DOTALL,
     )
     right = re.search(
         r"KEYCODE_DPAD_RIGHT\s*->\s*if\s*\([^)]*surfaceFocused[^)]*\)\s*\{"
         r"(?:(?!KEYCODE_MEDIA_REWIND).)*?"
-        r"seekBy\(\s*if\s*\(\s*tvRemoteInput\s*\)\s*-(?:SEEK_STEP_MS|seekStepMs)\s*else\s*(?:SEEK_STEP_MS|seekStepMs)\s*\)",
+        r"seekBy\(\s*\+?\s*(?:SEEK_STEP_MS|seekStepMs)\s*\)",
         text,
         re.DOTALL,
     )
-    return remote_gate is not None and left is not None and right is not None
+    reversed_branch = re.search(r"if\s*\(\s*tvRemoteInput\s*\)\s*\{", text)
+    return left is not None and right is not None and reversed_branch is None
 
 
 def player_seekbar_contract(text: str) -> bool:
+    """Owner-approved seek-bar direction: Left decreases the preview target, Right increases it.
+
+    The target is clamped to the real duration and the previous RTL preview inversion must not
+    remain anywhere in the player source.
+    """
     left = re.search(
-        r"KEYCODE_DPAD_LEFT\s*->\s*\{\s*previewMs\s*=\s*if\s*\(\s*tvRemoteInput\s*\)\s*\{"
-        r"\s*\(previewMs\s*\+\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtMost\(durationMs\)"
-        r"\s*\}\s*else\s*\{\s*\(previewMs\s*-\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtLeast\(0L\)",
+        r"KEYCODE_DPAD_LEFT\s*->(?:(?!KEYCODE_DPAD_RIGHT).)*?"
+        r"(?:onPreview|previewMs\s*=)[^;\n]*?-\s*(?:SEEK_STEP_MS|seekStepMs)"
+        r"[^;\n]*?coerceIn\(\s*0L\s*,\s*durationMs\s*\)",
         text,
         re.DOTALL,
     )
     right = re.search(
-        r"KEYCODE_DPAD_RIGHT\s*->\s*\{\s*previewMs\s*=\s*if\s*\(\s*tvRemoteInput\s*\)\s*\{"
-        r"\s*\(previewMs\s*-\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtLeast\(0L\)"
-        r"\s*\}\s*else\s*\{\s*\(previewMs\s*\+\s*(?:SEEK_STEP_MS|seekStepMs)\)\.coerceAtMost\(durationMs\)",
+        r"KEYCODE_DPAD_RIGHT\s*->(?:(?!KEYCODE_DPAD_CENTER).)*?"
+        r"(?:onPreview|previewMs\s*=)[^;\n]*?\+\s*(?:SEEK_STEP_MS|seekStepMs)"
+        r"[^;\n]*?coerceIn\(\s*0L\s*,\s*durationMs\s*\)",
         text,
         re.DOTALL,
     )
-    return left is not None and right is not None
+    reversed_branch = re.search(r"if\s*\(\s*tvRemoteInput\s*\)\s*\{", text)
+    return left is not None and right is not None and reversed_branch is None
 
 
 def player_focus_race_findings(text: str) -> list[str]:
@@ -423,15 +431,15 @@ def validate_repo(repo_root: Path, expected_logo_sha256: str = DEFAULT_LOGO_SHA2
         add(
             "player-surface-dpad-seek-direction",
             player_surface_seek_contract(player_text),
-            "TV/remote player surface maps RTL D-pad Left to forward and Right to rewind while preserving non-TV mapping",
-            "TV/remote player surface RTL D-pad seek contract is reversed or unverified",
+            "Player surface maps D-pad Left to rewind and Right to forward for touch and TV/remote inputs",
+            "Player surface D-pad seek contract is reversed, RTL-inverted or unverified",
             [str(player_file)],
         )
         add(
             "player-seekbar-dpad-direction",
             player_seekbar_contract(player_text),
-            "TV/remote seek bar maps RTL D-pad Left to forward and Right to rewind while preserving non-TV mapping",
-            "TV/remote seek bar RTL D-pad direction is reversed or unverified",
+            "Seek bar maps D-pad Left to decrease and Right to increase the clamped preview target",
+            "Seek bar D-pad direction is reversed, RTL-inverted or unverified",
             [str(player_file)],
         )
         focus_races = player_focus_race_findings(player_text)

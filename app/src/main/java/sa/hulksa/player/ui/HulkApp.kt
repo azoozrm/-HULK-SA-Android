@@ -444,12 +444,21 @@ fun HulkApp(
                                 episodes = if (playback.streamKind == "series") state.episodes else emptyList(),
                                 currentStreamId = playback.streamId,
                             )
+                            val vodFavoriteItem = if (playback.isLive) {
+                                null
+                            } else if (playback.streamKind == "series") {
+                                val seriesId = playback.parentContentId ?: playback.streamId
+                                state.catalogs[ContentType.SERIES]?.items?.firstOrNull { it.id == seriesId }
+                            } else {
+                                state.catalogs[ContentType.MOVIE]?.items?.firstOrNull { it.id == playback.streamId }
+                            }
                             PlayerProScreen(
                                 request = playback,
                                 liveTvProEnabled = state.operations.features.liveTvProEnabled,
                                 liveCatalog = state.catalogs[ContentType.LIVE],
                                 isFavorite = viewModel::isFavorite,
                                 favoriteKeys = state.favorites,
+                                vodItem = vodFavoriteItem,
                                 onSelectLiveChannel = viewModel::switchLiveChannel,
                                 onToggleFavorite = viewModel::toggleFavorite,
                                 onBack = viewModel::back,
