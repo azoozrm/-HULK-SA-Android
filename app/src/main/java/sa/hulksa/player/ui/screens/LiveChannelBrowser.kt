@@ -2,7 +2,6 @@ package sa.hulksa.player.ui.screens
 
 import android.content.Context
 import android.view.KeyEvent as AndroidKeyEvent
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +10,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -146,6 +146,7 @@ internal fun LiveChannelBrowser(
     currentStreamId: Int,
     origin: LiveChannelBrowserOrigin,
     isFavorite: (ContentItem) -> Boolean,
+    favoriteKeys: Set<String>,
     onToggleFavorite: (ContentItem) -> Unit,
     onSelectChannel: (ContentItem) -> Unit,
     onClose: () -> Unit,
@@ -218,8 +219,12 @@ internal fun LiveChannelBrowser(
         recentChannelIds.mapNotNull(byId::get)
     }
 
-    var favoriteIds by remember(catalog) {
-        mutableStateOf(catalog?.items.orEmpty().filter(isFavorite).map(ContentItem::id).toSet())
+    // Authoritative membership: derive from the observed favorites snapshot and the owning
+    // predicate. There is deliberately no local optimistic flip here, so a rejected rapid toggle
+    // can never paint a heart or a category membership that the library did not accept. The
+    // snapshot is delivered by the player boundary exactly as the HUD receives it.
+    val favoriteIds = remember(catalog, favoriteKeys) {
+        catalog?.items.orEmpty().filter(isFavorite).map(ContentItem::id).toSet()
     }
     val launchContext = remember(currentStreamId, liveProfileScope) {
         context.liveTvProLaunchContext()
@@ -886,18 +891,110 @@ internal fun LiveChannelBrowser(
                             favorite = favorite,
                             onReturnToCategory = ::returnFocusToSelectedCategory,
                             onClick = { onSelectChannel(channel) },
-                            onLongClick = {
-                                favoriteIds = if (favorite) favoriteIds - channel.id else favoriteIds + channel.id
-                                onToggleFavorite(channel)
-                                Toast.makeText(
-                                    context,
-                                    if (favorite) "تمت ازالة القناة من المفضلة" else "تمت اضافة القناة الى المفضلة",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            },
+                            onLongClick = { onToggleFavorite(channel) },
                             rowModifier = baseModifier,
                         )
                     }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun InstructionToken(text: String) {
+        Text(
+            text = text,
+            color = colors.textMuted,
+            fontSize = hintFontSize,
+            lineHeight = hintLineHeight,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+        )
+    }
+
+    @Composable
+    fun InstructionDivider() {
+        Box(
+            Modifier
+                .width(1.dp)
+                .height(12.dp)
+                .background(Color.White.copy(alpha = .18f)),
+        )
+    }
+
+    @Composable
+    fun SelectInstructionGroup() {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            InstructionToken("اختيار القناة")
+            InstructionToken(":")
+            InstructionToken("OK")
+        }
+    }
+
+    @Composable
+    fun FavoriteInstructionGroup() {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            InstructionToken("اضافة او ازالة من المفضلة")
+            InstructionToken(":")
+            InstructionToken("مطولا")
+            InstructionToken("OK")
+        }
+    }
+
+    @Composable
+    fun CloseInstructionGroup() {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            InstructionToken("رجوع")
+            InstructionToken(":")
+            InstructionToken("اغلاق")
+        }
+    }
+
+    @Composable
+    fun BrowserInstructions() {
+        if (!tvLayout) {
+            Text(
+                text = "اضغط مطولا على القناة لاضافتها او ازالتها من المفضلة",
+                color = colors.textMuted,
+                fontSize = hintFontSize,
+                lineHeight = hintLineHeight,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+            return
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+            if (maxWidth >= 640.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CloseInstructionGroup()
+                    Box(Modifier.padding(horizontal = 9.dp)) { InstructionDivider() }
+                    FavoriteInstructionGroup()
+                    Box(Modifier.padding(horizontal = 9.dp)) { InstructionDivider() }
+                    SelectInstructionGroup()
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    SelectInstructionGroup()
+                    FavoriteInstructionGroup()
+                    CloseInstructionGroup()
                 }
             }
         }
@@ -940,6 +1037,7 @@ internal fun LiveChannelBrowser(
                             .background(Color.White.copy(alpha = .12f)),
                     )
                     ChannelPane(Modifier.fillMaxWidth().weight(1f))
+                    BrowserInstructions()
                 }
             } else {
                 Column(
@@ -971,15 +1069,8 @@ internal fun LiveChannelBrowser(
                                 .fillMaxHeight(),
                         )
                     }
-                    if (tvLayout) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "رجوع: إغلاق    |    OK: اختيار",
-                            color = colors.textMuted,
-                            fontSize = 10.sp,
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                        )
-                    }
+                    Spacer(Modifier.height(6.dp))
+                    BrowserInstructions()
                 }
             }
         }

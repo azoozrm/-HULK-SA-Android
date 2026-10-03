@@ -98,16 +98,78 @@ internal data class LivePlayerControlsMetrics(
     val captionSizeSp: Int,
     val itemSpacingDp: Int,
     val morePanelWidthDp: Int,
-    val morePanelMaxHeightDp: Int,
 )
 
-/** Live-local aspect labels requested by the owner text system (VOD labels stay unchanged). */
-internal val LIVE_PLAYER_RESIZE_LABELS = listOf("ملايم", "تكبير", "كامل الشاشة")
+/**
+ * Live-local aspect labels. The owner text rule removes hamzas/madda from ALEF only, so the
+ * originally approved `ملائم` and `ملء الشاشة` (hamza on ء is preserved) remain the Live labels.
+ */
+internal val LIVE_PLAYER_RESIZE_LABELS = listOf("ملائم", "تكبير", "ملء الشاشة")
 
 internal fun livePlayerResizeLabel(index: Int): String = when (index) {
     1 -> "تكبير"
-    2 -> "كامل الشاشة"
-    else -> "ملايم"
+    2 -> "ملء الشاشة"
+    else -> "ملائم"
+}
+
+/**
+ * Deterministic strip-height reservation used before the strip reports its measured height.
+ *
+ * The value mirrors the compact strip composition (top/bottom safe padding, the shared transport
+ * container, the caption gap and one caption line) so panel space is never allocated on top of the
+ * strip even on the first frame.
+ */
+internal fun livePlayerReservedStripHeightDp(
+    transportContainerDp: Int,
+    captionSizeSp: Int,
+    outerTopPaddingDp: Float,
+    outerBottomPaddingDp: Float,
+): Float = outerTopPaddingDp + outerBottomPaddingDp + transportContainerDp + 4f + captionSizeSp * 1.6f
+
+internal const val PLAYER_ERROR_ACTION_GAP_DP = 9
+
+/**
+ * Live error action grid: up to four actions per centered row on television/wide windows, two per
+ * row on compact windows so every button keeps readable captions and equal size.
+ */
+internal fun playerErrorActionColumns(
+    television: Boolean,
+    screenWidthDp: Int,
+): Int = if (television || screenWidthDp >= 600) 4 else 2
+
+internal fun playerErrorActionHeightDp(television: Boolean): Int = if (television) 44 else 40
+
+/** Equal-width Live error actions per row; the last row may hold fewer actions and stays centered. */
+internal fun playerErrorActionRows(actionCount: Int, columns: Int): List<List<Int>> {
+    if (actionCount <= 0 || columns <= 0) return emptyList()
+    return (0 until actionCount).chunked(columns)
+}
+
+internal data class PlayerErrorActionNeighbors(
+    val left: Int?,
+    val right: Int?,
+    val up: Int?,
+    val down: Int?,
+)
+
+/**
+ * Deterministic directional neighbors for a gridded RTL action row.
+ *
+ * Children are laid out right-to-left, so the physically LEFT neighbor of an action is the next
+ * list index and the physically RIGHT neighbor is the previous index; up/down move one row.
+ */
+internal fun playerErrorActionNeighbors(
+    index: Int,
+    count: Int,
+    columns: Int,
+): PlayerErrorActionNeighbors {
+    if (index !in 0 until count || columns <= 0) return PlayerErrorActionNeighbors(null, null, null, null)
+    val row = index / columns
+    val left = (index + 1).takeIf { it < count && it / columns == row }
+    val right = (index - 1).takeIf { it >= 0 && it / columns == row }
+    val up = (index - columns).takeIf { it >= 0 }
+    val down = (index + columns).takeIf { it < count }
+    return PlayerErrorActionNeighbors(left = left, right = right, up = up, down = down)
 }
 
 /**
@@ -140,7 +202,6 @@ internal fun livePlayerControlsMetrics(
     } else {
         (width * .86f).roundToInt().coerceIn(280, 430)
     }
-    val panelMaxHeight = (height * .58f).roundToInt().coerceIn(240, 520)
 
     return LivePlayerControlsMetrics(
         approvedSingleRow = approvedSingleRow,
@@ -150,6 +211,5 @@ internal fun livePlayerControlsMetrics(
         captionSizeSp = captionSize,
         itemSpacingDp = spacing,
         morePanelWidthDp = panelWidth,
-        morePanelMaxHeightDp = panelMaxHeight,
     )
 }

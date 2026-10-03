@@ -2,6 +2,7 @@ package sa.hulksa.player.ui.screens
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
@@ -82,28 +83,89 @@ class LiveControlsLayoutPolicyTest {
             assertEquals(metrics.utilityIconDp + 22, metrics.transportContainerDp)
             assertTrue(metrics.transportIconDp in 20..30)
             assertTrue(metrics.morePanelWidthDp in 300..430)
-            assertTrue(metrics.morePanelMaxHeightDp in 240..520)
         }
     }
 
     @Test
-    fun compactTouchWindowsUseTheTwoRowControlsAndBoundedPanelHeight() {
+    fun compactTouchWindowsUseTheTwoRowControls() {
         val compact = livePlayerControlsMetrics(411, 891, remoteLayout = false)
         val wideTouch = livePlayerControlsMetrics(800, 360, remoteLayout = false)
 
         assertFalse(compact.approvedSingleRow)
         assertTrue(wideTouch.approvedSingleRow)
         assertTrue(compact.morePanelWidthDp <= 430)
-        assertTrue(compact.morePanelMaxHeightDp < 891)
         assertEquals(compact.utilityIconDp, compact.transportIconDp)
     }
 
     @Test
-    fun livePlayerResizeLabelsUseTheLiveLocalSpellings() {
-        assertEquals(listOf("ملايم", "تكبير", "كامل الشاشة"), LIVE_PLAYER_RESIZE_LABELS)
-        assertEquals("ملايم", livePlayerResizeLabel(0))
+    fun livePlayerResizeLabelsKeepTheAlefOnlyCorrection() {
+        assertEquals(listOf("ملائم", "تكبير", "ملء الشاشة"), LIVE_PLAYER_RESIZE_LABELS)
+        assertEquals("ملائم", livePlayerResizeLabel(0))
         assertEquals("تكبير", livePlayerResizeLabel(1))
-        assertEquals("كامل الشاشة", livePlayerResizeLabel(2))
-        assertEquals("ملايم", livePlayerResizeLabel(99))
+        assertEquals("ملء الشاشة", livePlayerResizeLabel(2))
+        assertEquals("ملائم", livePlayerResizeLabel(99))
+    }
+
+    @Test
+    fun reservedStripHeightGrowsWithTheCompactStripGeometry() {
+        val compact = livePlayerControlsMetrics(411, 891, remoteLayout = false)
+        val large = livePlayerControlsMetrics(1920, 1080, remoteLayout = true)
+        val compactLayout = liveControlsLayoutMetrics(411, 891, remoteLayout = false)
+        val largeLayout = liveControlsLayoutMetrics(1920, 1080, remoteLayout = true)
+
+        val compactReserved = livePlayerReservedStripHeightDp(
+            transportContainerDp = compact.transportContainerDp,
+            captionSizeSp = compact.captionSizeSp,
+            outerTopPaddingDp = compactLayout.outerTopPaddingDp,
+            outerBottomPaddingDp = compactLayout.outerBottomPaddingDp,
+        )
+        val largeReserved = livePlayerReservedStripHeightDp(
+            transportContainerDp = large.transportContainerDp,
+            captionSizeSp = large.captionSizeSp,
+            outerTopPaddingDp = largeLayout.outerTopPaddingDp,
+            outerBottomPaddingDp = largeLayout.outerBottomPaddingDp,
+        )
+
+        assertTrue(compactReserved > compact.transportContainerDp.toFloat())
+        assertTrue(largeReserved > large.transportContainerDp.toFloat())
+        assertTrue(largeReserved > compactReserved)
+    }
+
+    @Test
+    fun liveErrorActionsUseOneWideRowAndACenteredCompactGrid() {
+        assertEquals(4, playerErrorActionColumns(television = true, screenWidthDp = 960))
+        assertEquals(4, playerErrorActionColumns(television = false, screenWidthDp = 800))
+        assertEquals(2, playerErrorActionColumns(television = false, screenWidthDp = 411))
+        assertTrue(playerErrorActionHeightDp(television = true) >= playerErrorActionHeightDp(television = false))
+
+        assertEquals(listOf(listOf(0, 1, 2, 3)), playerErrorActionRows(actionCount = 4, columns = 4))
+        assertEquals(listOf(listOf(0, 1, 2, 3), listOf(4)), playerErrorActionRows(actionCount = 5, columns = 4))
+        assertEquals(listOf(listOf(0, 1), listOf(2)), playerErrorActionRows(actionCount = 3, columns = 2))
+        assertTrue(playerErrorActionRows(actionCount = 0, columns = 4).isEmpty())
+    }
+
+    @Test
+    fun liveErrorActionNeighborsFollowTheRtlGrid() {
+        val singleRow = playerErrorActionNeighbors(index = 1, count = 4, columns = 4)
+        assertEquals(2, singleRow.left)
+        assertEquals(0, singleRow.right)
+        assertNull(singleRow.up)
+        assertNull(singleRow.down)
+
+        val grid = playerErrorActionNeighbors(index = 1, count = 4, columns = 2)
+        assertEquals(3, grid.down)
+        assertNull(grid.up)
+        assertEquals(0, grid.right)
+        assertNull(grid.left)
+
+        val secondRow = playerErrorActionNeighbors(index = 3, count = 4, columns = 2)
+        assertEquals(1, secondRow.up)
+        assertEquals(2, secondRow.right)
+        assertNull(secondRow.down)
+        assertNull(secondRow.left)
+
+        val invalid = playerErrorActionNeighbors(index = 9, count = 4, columns = 2)
+        assertNull(invalid.left)
+        assertNull(invalid.down)
     }
 }

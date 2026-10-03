@@ -7,6 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HULK_APP = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/HulkApp.kt"
 PLAYER_PRO = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerProEpisodeNavigation.kt"
 PLAYER_SCREEN = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/PlayerScreen.kt"
+LIVE_BROWSER = REPO_ROOT / "app/src/main/java/sa/hulksa/player/ui/screens/LiveChannelBrowser.kt"
 
 
 class LivePlayerFavoriteBindingContractTest(unittest.TestCase):
@@ -38,8 +39,22 @@ class LivePlayerFavoriteBindingContractTest(unittest.TestCase):
         self.assertIn("remember(liveFavoriteChannel, favoriteKeys)", player)
         self.assertIn("livePlayerFavoriteControl(", player)
 
+    def test_live_browser_derives_membership_from_the_observed_snapshot(self) -> None:
+        browser = self.read(LIVE_BROWSER)
+        self.assertIn("favoriteKeys: Set<String>,", browser)
+        self.assertIn("val favoriteIds = remember(catalog, favoriteKeys)", browser)
+        self.assertIn("filter(isFavorite)", browser)
+        # No optimistic shadow toggle and no duplicate browser toast.
+        self.assertNotIn("favoriteIds = if (favorite)", browser)
+        self.assertNotIn("Toast.makeText", browser)
+
+    def test_player_favorite_feedback_only_fires_on_accepted_membership_change(self) -> None:
+        player = self.read(PLAYER_SCREEN)
+        self.assertIn("val isNowFavorite = isFavorite(channel)", player)
+        self.assertIn("if (isNowFavorite != wasFavorite)", player)
+
     def test_no_second_favorite_shadow_store_or_polling_is_introduced(self) -> None:
-        for path in (HULK_APP, PLAYER_PRO, PLAYER_SCREEN):
+        for path in (HULK_APP, PLAYER_PRO, PLAYER_SCREEN, LIVE_BROWSER):
             text = self.read(path)
             self.assertNotIn("favoriteOverrides", text)
 
