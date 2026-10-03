@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -565,6 +566,132 @@ internal fun MovieInlineResumeStrip(
                     .background(colors.gold),
             )
         }
+    }
+}
+
+/**
+ * Validated Movie offline failure: the Movies catalog refresh failed while the device has no
+ * usable validated network. Connectivity classification is authoritative; localized error strings
+ * are never parsed and non-network server errors keep the existing error presentation.
+ */
+internal fun moviesOfflineFailureVisible(
+    isMovies: Boolean,
+    hasErrorMessage: Boolean,
+    networkUsable: Boolean,
+): Boolean = isMovies && hasErrorMessage && !networkUsable
+
+/**
+ * In-content offline empty state: the validated offline failure with no cached content to keep and
+ * no active search (a search with no matches stays a truthful "no results" state).
+ */
+internal fun moviesOfflineEmptyVisible(
+    isMovies: Boolean,
+    hasErrorMessage: Boolean,
+    networkUsable: Boolean,
+    hasCachedContent: Boolean,
+    searchActive: Boolean,
+): Boolean = moviesOfflineFailureVisible(isMovies, hasErrorMessage, networkUsable) &&
+    !hasCachedContent &&
+    !searchActive
+
+/**
+ * Compact nonblocking Movies catalog offline notice. Replaces the pink error banner for a failed
+ * refresh while cached content remains visible; the single action reuses the existing refresh
+ * owner.
+ */
+@Composable
+internal fun MoviesOfflineNotice(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0xFF11120D))
+            .border(1.dp, colors.gold.copy(alpha = .35f), shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "لا يوجد اتصال بالانترنت",
+                color = colors.text,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            Text(
+                text = "تعذر تحديث المحتوى ، حاول مرة اخرى",
+                color = colors.textMuted,
+                fontSize = 11.sp,
+                maxLines = 1,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.WifiOff,
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(22.dp),
+        )
+        FocusButton(
+            text = "اعادة المحاولة",
+            onClick = onRetry,
+            primary = false,
+            outlined = true,
+            compact = true,
+            trailingIcon = Icons.Rounded.Refresh,
+            trailingIconTint = colors.gold,
+            scaleOnFocus = false,
+            textMaxLines = 1,
+        )
+    }
+}
+
+/** Consistent in-content Movie offline empty state with the same retry owner as the notice. */
+@Composable
+internal fun MoviesOfflineEmptyState(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    Column(
+        modifier = modifier.fillMaxWidth().padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.WifiOff,
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(36.dp),
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = "لا يوجد اتصال بالانترنت",
+            color = colors.text,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
+            color = colors.textMuted,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(14.dp))
+        FocusButton(
+            text = "اعادة المحاولة",
+            onClick = onRetry,
+            compact = true,
+            trailingIcon = Icons.Rounded.Refresh,
+            scaleOnFocus = false,
+            textMaxLines = 1,
+        )
     }
 }
 

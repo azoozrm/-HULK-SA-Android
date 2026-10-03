@@ -91,6 +91,7 @@ import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -199,7 +200,7 @@ import java.util.Locale
 
 private const val CONTROLS_TIMEOUT_MS = 5_000L
 private const val NEXT_EPISODE_SECONDS = 8
-private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالإنترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
+private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالانترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 
 internal enum class PlayerLifecyclePlaybackAction { NONE, STOP, PREPARE }
 
@@ -231,6 +232,48 @@ internal fun shouldAdvancePlayerAutoplayCountdown(
     countdown: Int,
 ): Boolean = appForeground && countdown >= 0
 
+/**
+ * Mutually exclusive Movie offline surface derived only from the existing authoritative player
+ * state: a Movie VOD source that is not local-only, whose failure came from connectivity loss.
+ */
+internal fun movieOfflineCardVisible(
+    isMovie: Boolean,
+    localPlayback: Boolean,
+    offlineFailure: Boolean,
+    offlineMessageActive: Boolean,
+): Boolean = isMovie && !localPlayback && offlineFailure && offlineMessageActive
+
+/**
+ * Playback intent carried across a connectivity restore. A movie the user paused manually stays
+ * paused, a pending Resume decision never auto-plays, and a movie that was playing resumes.
+ */
+internal fun movieOfflineRestoredPlayWhenReady(
+    wasPlayingBeforeOffline: Boolean,
+    resumePromptPending: Boolean,
+): Boolean = wasPlayingBeforeOffline && !resumePromptPending
+
+internal data class MovieOfflineCardCopy(
+    val title: String,
+    val body: String,
+    val context: String,
+)
+
+/** Exact owner copy for the single Movie offline card; resumePending selects the state. */
+internal fun movieOfflineCardCopy(resumePending: Boolean, formattedSavedTime: String): MovieOfflineCardCopy =
+    if (resumePending) {
+        MovieOfflineCardCopy(
+            title = "لا يوجد اتصال بالانترنت",
+            body = "اتصل بالانترنت لاكمال المشاهدة",
+            context = "توقفت عند $formattedSavedTime",
+        )
+    } else {
+        MovieOfflineCardCopy(
+            title = "انقطع اتصال الانترنت",
+            body = "سيعود التشغيل تلقائيا عند عودة الاتصال",
+            context = "مكان توقفك محفوظ",
+        )
+    }
+
 private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, RESIZE, QUALITY, SERVERS }
 
 private data class PlayerTrackOption(
@@ -257,7 +300,7 @@ private data class SuspendedPlayerError(
     val failureClass: RecoveryFailureClass?,
 )
 
-private fun hasUsableNetwork(context: Context): Boolean {
+internal fun hasUsableNetwork(context: Context): Boolean {
     val manager = context.applicationContext
         .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         ?: return false
@@ -367,7 +410,16 @@ fun PlayerScreen(
     var finalFailureClass by remember(request) { mutableStateOf<RecoveryFailureClass?>(null) }
     var suspendedFinalError by remember(request) { mutableStateOf<SuspendedPlayerError?>(null) }
     var offlineFailure by remember(request) { mutableStateOf(false) }
+    var offlineWasPlaying by remember(request) { mutableStateOf(false) }
+    var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
+    val isMovieVod = !request.isLive && request.streamKind.equals("movie", ignoreCase = true)
+    val movieOfflineActive = movieOfflineCardVisible(
+        isMovie = isMovieVod,
+        localPlayback = localPlayback,
+        offlineFailure = offlineFailure,
+        offlineMessageActive = finalError == PLAYER_OFFLINE_MESSAGE,
+    )
     var buffering by remember(request) { mutableStateOf(true) }
     var controlsVisible by remember(request) { mutableStateOf(!request.isLive) }
     var browserVisible by remember(request) { mutableStateOf(false) }
@@ -429,6 +481,8 @@ fun PlayerScreen(
     val nextEpisodePlayFocus = remember { FocusRequester() }
     val nextEpisodeCancelFocus = remember { FocusRequester() }
     val errorRetryFocus = remember { FocusRequester() }
+    val offlineRetryFocus = remember { FocusRequester() }
+    val offlineBackFocus = remember { FocusRequester() }
     val currentChannel = remember(liveCatalog, request.streamId) {
         liveCatalog?.items?.firstOrNull { it.id == request.streamId }
     }
@@ -969,6 +1023,7 @@ fun PlayerScreen(
                     finalFailureClass = null
                     buffering = false
                     controlsVisible = true
+                    offlineWasPlaying = player.playWhenReady || player.isPlaying
                     offlineFailure = true
                     finalError = PLAYER_OFFLINE_MESSAGE
                 },
@@ -1098,7 +1153,10 @@ fun PlayerScreen(
         }
         if (seekTarget > 0L) player.seekTo(seekTarget)
         player.prepare()
-        player.playWhenReady = !resumePromptVisible
+        // A connectivity restore replays the intent captured when the network dropped, so a
+        // manually paused movie stays paused and a pending Resume decision never auto-plays.
+        player.playWhenReady = restoredPlayWhenReady ?: !resumePromptVisible
+        restoredPlayWhenReady = null
         pendingSeekMs = 0L
         manualSeekTargetMs = null
     }
@@ -1123,6 +1181,7 @@ fun PlayerScreen(
                 maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
             playerSession.onNetworkUnavailable()
+            offlineWasPlaying = player.playWhenReady || player.isPlaying
             player.pause()
             suspendedFinalError = null
             finalFailureClass = null
@@ -1142,6 +1201,10 @@ fun PlayerScreen(
             delay(700L)
             if (!hasUsableNetwork(context)) return@LaunchedEffect
             pendingSeekMs = resumePositionMs
+            restoredPlayWhenReady = movieOfflineRestoredPlayWhenReady(
+                wasPlayingBeforeOffline = offlineWasPlaying,
+                resumePromptPending = resumePromptVisible,
+            )
             playerSession.onNetworkRestored(player)
         }
     }
@@ -1272,6 +1335,7 @@ fun PlayerScreen(
         vodMorePanel,
         browserVisible,
         finalError,
+        offlineFailure,
         resumePromptVisible,
         unlockVisible,
         controlsLocked,
@@ -1280,6 +1344,7 @@ fun PlayerScreen(
         request.historyKey,
     ) {
         val target = when {
+            movieOfflineActive -> offlineRetryFocus
             finalError != null -> null
             browserVisible || activePanel != null -> null
             vodMorePanel != null -> null
@@ -1755,7 +1820,7 @@ fun PlayerScreen(
             )
         }
 
-        if (resumePromptVisible) {
+        if (resumePromptVisible && !movieOfflineActive) {
             ResumePrompt(
                 title = playerDisplayTitle,
                 positionMs = request.resumePositionMs,
@@ -1812,7 +1877,25 @@ fun PlayerScreen(
             )
         }
 
-        if (finalError != null) {
+        if (movieOfflineActive) {
+            MoviePlayerOfflineCard(
+                resumePending = resumePromptVisible,
+                savedPositionMs = request.resumePositionMs,
+                onRetry = {
+                    // One offline surface while still disconnected: only a validated connection
+                    // re-enters the existing recovery path, otherwise the card simply remains.
+                    if (hasUsableNetwork(context)) {
+                        networkAvailable = true
+                    }
+                },
+                onBack = ::saveAndBack,
+                retryFocusRequester = offlineRetryFocus,
+                backFocusRequester = offlineBackFocus,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
+        if (finalError != null && !movieOfflineActive) {
             PlayerErrorPanel(
                 title = if (request.isLive) "تعذر تشغيل القناة" else null,
                 message = finalError!!,
@@ -3819,6 +3902,145 @@ private fun ResumePrompt(
                     .heightIn(min = 46.dp),
             )
         }
+        }
+    }
+}
+
+/**
+ * The single Movie offline surface. Two mutually exclusive states share one composition: a movie
+ * that was interrupted while playing, and a saved-position Resume decision that is still pending.
+ * The pending ResumePrompt is not composed while this card is up, so its choice and saved position
+ * survive untouched.
+ */
+@Composable
+private fun MoviePlayerOfflineCard(
+    resumePending: Boolean,
+    savedPositionMs: Long,
+    onRetry: () -> Unit,
+    onBack: () -> Unit,
+    retryFocusRequester: FocusRequester,
+    backFocusRequester: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    val copy = movieOfflineCardCopy(
+        resumePending = resumePending,
+        formattedSavedTime = formatTime(savedPositionMs),
+    )
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        val cardMaxHeight = (maxHeight - 24.dp).coerceAtLeast(0.dp)
+        Column(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth(.78f)
+                .heightIn(max = cardMaxHeight)
+                .focusGroup()
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xF2141510))
+                .border(1.dp, colors.gold.copy(alpha = .60f), RoundedCornerShape(22.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.WifiOff,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(if (adaptiveUi.isTelevision) 46.dp else 38.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = copy.title,
+                color = colors.text,
+                fontSize = if (adaptiveUi.isTelevision) 24.sp else 20.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = copy.body,
+                color = colors.text,
+                fontSize = if (adaptiveUi.isTelevision) 15.sp else 13.sp,
+                lineHeight = if (adaptiveUi.isTelevision) 23.sp else 20.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = copy.context,
+                    color = colors.textMuted,
+                    fontSize = if (adaptiveUi.isTelevision) 14.sp else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                if (resumePending) {
+                    // The clock is the last child, so in RTL it renders physically LEFT of the
+                    // saved-time wording, matching the owner reference.
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = colors.gold,
+                        modifier = Modifier.size(if (adaptiveUi.isTelevision) 16.dp else 14.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = .12f)),
+            )
+            Spacer(Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusButton(
+                    text = "اعادة المحاولة",
+                    onClick = onRetry,
+                    trailingIcon = Icons.Rounded.Refresh,
+                    compact = true,
+                    scaleOnFocus = false,
+                    textMaxLines = 1,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 46.dp)
+                        .focusRequester(retryFocusRequester)
+                        .focusProperties {
+                            left = backFocusRequester
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        },
+                )
+                FocusButton(
+                    text = "رجوع",
+                    onClick = onBack,
+                    primary = false,
+                    outlined = true,
+                    compact = true,
+                    scaleOnFocus = false,
+                    textMaxLines = 1,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 46.dp)
+                        .focusRequester(backFocusRequester)
+                        .focusProperties {
+                            left = FocusRequester.Cancel
+                            right = retryFocusRequester
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        },
+                )
+            }
         }
     }
 }

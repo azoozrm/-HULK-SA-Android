@@ -1,5 +1,6 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -45,7 +47,7 @@ import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesPosterCard
 
 // Legibility floor for the Movie-only compact fallback on unusually short usable windows.
-private const val MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP = 96
+internal const val MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP = 96
 
 internal data class TvCatalogMetrics(
     val minCellWidthDp: Float,
@@ -300,6 +302,7 @@ internal fun TvCatalogGrid(
     val focusViewportInsetPx = with(density) { focusViewportInset.roundToPx() }
     val focusSafeBottomInsetPx = with(density) { focusSafeBottomInset.roundToPx() }
     val focusMoveState = remember(contentKeys, destination) { TvCatalogFocusMoveState() }
+    var focusedIndex by remember(contentKeys) { mutableIntStateOf(-1) }
     DisposableEffect(focusMoveState) {
         onDispose {
             focusMoveState.job?.cancel()
@@ -329,30 +332,52 @@ internal fun TvCatalogGrid(
         }
     }
 
+    /**
+     * Smallest smooth movement that reveals an adjacent target. A partially visible target is
+     * corrected by exactly its clipped amount; a fully offscreen adjacent row is revealed with
+     * bounded single-row steps. This replaces the old instant scrollToItem jump and keeps every
+     * movement inside the one cancellable focus transaction owned by the key handler.
+     */
+    suspend fun revealIndexSmoothly(index: Int) {
+        val layoutInfo = gridState.layoutInfo
+        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+        if (targetInfo != null) {
+            val correction = focusedCardScrollCorrection(
+                itemTop = targetInfo.offset.y,
+                itemBottom = targetInfo.offset.y + targetInfo.size.height,
+                usableStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
+                usableEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx - focusViewportInsetPx,
+                marginPx = if (movieCards) focusViewportInsetPx else 0,
+            )
+            if (correction != 0) {
+                gridState.animateScrollBy(correction.toFloat())
+            }
+            return
+        }
+        repeat(2) {
+            val visible = gridState.layoutInfo.visibleItemsInfo
+            if (visible.any { it.index == index }) return@repeat
+            val rowHeight = visible.firstOrNull()?.size?.height ?: return@repeat
+            val step = rowHeight + with(density) { verticalSpacing.roundToPx() }
+            val firstVisible = visible.minOfOrNull { it.index } ?: return@repeat
+            val lastVisible = visible.maxOfOrNull { it.index } ?: return@repeat
+            when {
+                index > lastVisible -> gridState.animateScrollBy(step.toFloat())
+                index < firstVisible -> gridState.animateScrollBy(-step.toFloat())
+                else -> return@repeat
+            }
+        }
+    }
+
     suspend fun focusIndex(
         index: Int,
         columnCount: Int,
         ensureFullyVisible: Boolean,
     ) {
         val requester = focusRequesters.getOrNull(index) ?: return
-        val visible = gridState.layoutInfo.visibleItemsInfo
-        if (visible.none { it.index == index }) {
-            val firstVisible = visible.minOfOrNull { it.index } ?: index
-            val lastVisible = visible.maxOfOrNull { it.index } ?: index
-            val visibleRowCount = if (lastVisible >= firstVisible) {
-                ((lastVisible - firstVisible) / columnCount) + 1
-            } else {
-                1
-            }
-            val anchor = when {
-                index < firstVisible -> index
-                index > lastVisible -> (index - (visibleRowCount - 1) * columnCount).coerceAtLeast(0)
-                else -> firstVisible
-            }
-            gridState.scrollToItem(anchor)
-            snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == index } }
-                .first { it }
-        }
+        // One authoritative transaction: reveal the target with the smallest smooth movement,
+        // then acquire focus only after the target is actually attached and laid out.
+        revealIndexSmoothly(index)
         if (ensureFullyVisible) {
             ensureIndexFullyVisible(index)
         }
@@ -405,6 +430,16 @@ internal fun TvCatalogGrid(
             )
         } else {
             null
+        }
+        // Header growth/shrink changes the real viewport; re-evaluate the focused card's bounds
+        // from actual layout without resetting identity or jumping to the first item. Focused
+        // index is read via rememberUpdatedState so focus moves do not duplicate the reveal.
+        val latestFocusedIndex by rememberUpdatedState(focusedIndex)
+        LaunchedEffect(usableGridHeightPx) {
+            val index = latestFocusedIndex
+            if (index >= 0) {
+                settleFocusedIndexVisibility(index)
+            }
         }
 
         LazyVerticalGrid(
@@ -482,6 +517,8 @@ internal fun TvCatalogGrid(
 
                         focusMoveState.job?.cancel()
                         focusMoveState.job = null
+                        // An obsolete settled reveal must not fight the new movement.
+                        focusMoveState.revealJob?.cancel()
                         val focusedDirectly = if (focusPath == TvCatalogFocusPath.DIRECT) {
                             runCatching { requester.requestFocus() }.getOrDefault(false)
                         } else {
@@ -503,6 +540,7 @@ internal fun TvCatalogGrid(
                     }
                 val onFocusedCard = {
                     focusMoveState.complete(index)
+                    focusedIndex = index
                     navigationMemory.save(destination, key, index)
                     if (movieCards) {
                         focusMoveState.revealJob?.cancel()

@@ -1262,6 +1262,8 @@ fun MoviesHistoryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: (() -> Unit)? = null,
+    artworkHeightDp: Dp? = null,
+    onFooterHeightMeasured: ((Int) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -1348,7 +1350,19 @@ fun MoviesHistoryCard(
                 onLongClick = if (canDismiss) ({ dismissFromContinueWatching(false) }) else null,
             ),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    // Accepted normal geometry is the square artwork; the override is the
+                    // constraint-aware compact fallback for short usable windows only.
+                    if (artworkHeightDp != null) {
+                        Modifier.height(artworkHeightDp)
+                    } else {
+                        Modifier.aspectRatio(1f)
+                    },
+                ),
+        ) {
             if (!entry.posterUrl.isNullOrBlank() && !artworkFailed) {
                 AsyncImage(
                     model = entry.posterUrl,
@@ -1376,6 +1390,7 @@ fun MoviesHistoryCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF12130E))
+                .onSizeChanged { onFooterHeightMeasured?.invoke(it.height) }
                 .padding(horizontal = 8.dp, vertical = 7.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

@@ -100,6 +100,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -2189,6 +2190,19 @@ private fun PosterCatalogScreen(
     val continueWatching = model?.continueWatching.orEmpty()
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
+    val catalogErrorMessage = state.errorMessage
+    val moviesOfflineFailure = moviesOfflineFailureVisible(
+        isMovies = movieCategoryManagement,
+        hasErrorMessage = catalogErrorMessage != null,
+        networkUsable = hasUsableNetwork(context),
+    )
+    val moviesOfflineEmpty = moviesOfflineEmptyVisible(
+        isMovies = movieCategoryManagement,
+        hasErrorMessage = catalogErrorMessage != null,
+        networkUsable = hasUsableNetwork(context),
+        hasCachedContent = resultCount > 0,
+        searchActive = state.searchQuery.isNotBlank(),
+    ) && type !in state.loadingTypes
     var nextCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
     var categoryContentFocusRequest by remember(destination) { mutableStateOf<CategoryContentFocusRequest?>(null) }
     var armedCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
@@ -2302,7 +2316,13 @@ private fun PosterCatalogScreen(
                 searchIcon = Icons.Rounded.Search.takeIf { movieCategoryManagement },
                 toolbarIconTint = colors.gold.takeIf { movieCategoryManagement },
             )
-            if (state.errorMessage != null) { Spacer(Modifier.height(10.dp)); ErrorNotice(state.errorMessage) }
+            if (moviesOfflineFailure && resultCount > 0) {
+                Spacer(Modifier.height(10.dp))
+                MoviesOfflineNotice(onRetry = onRefresh)
+            } else if (catalogErrorMessage != null) {
+                Spacer(Modifier.height(10.dp))
+                ErrorNotice(catalogErrorMessage)
+            }
             Spacer(Modifier.height(11.dp))
             ReorderableCatalogCategoryBar(
                 type = type,
@@ -2319,7 +2339,9 @@ private fun PosterCatalogScreen(
             Spacer(Modifier.height(9.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (model == null) {
+            if (model == null && moviesOfflineEmpty) {
+                MoviesOfflineEmptyState(onRetry = onRefresh, modifier = Modifier.align(Alignment.Center))
+            } else if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
             } else if (showingContinue && continueWatching.isNotEmpty()) {
                 if (destination == MainDestination.MOVIES) {
@@ -2357,11 +2379,19 @@ private fun PosterCatalogScreen(
                     )
                 }
             } else if (showingContinue) {
-                EmptyState("لا توجد مشاهدة غير مكتملة في $title")
+                if (moviesOfflineEmpty) {
+                    MoviesOfflineEmptyState(onRetry = onRefresh, modifier = Modifier.align(Alignment.Center))
+                } else {
+                    EmptyState("لا توجد مشاهدة غير مكتملة في $title")
+                }
             } else if (catalog == null && type in state.loadingTypes) {
                 LoadingRing(label = "جاري تحميل $title…", modifier = Modifier.align(Alignment.Center))
             } else if (visible.isEmpty()) {
-                EmptyState("لا توجد نتائج مطابقة")
+                if (moviesOfflineEmpty) {
+                    MoviesOfflineEmptyState(onRetry = onRefresh, modifier = Modifier.align(Alignment.Center))
+                } else {
+                    EmptyState("لا توجد نتائج مطابقة")
+                }
             } else if (isTv) {
                 TvCatalogGrid(
                     content = visible,
@@ -4533,6 +4563,7 @@ private fun MoviesHistoryGrid(
     }
     val focusRevealScope = rememberCoroutineScope()
     val focusRevealState = remember { MovieHistoryFocusRevealState() }
+    var focusedEntryIndex by remember(entries) { mutableStateOf(-1) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val focusInsetPx = with(density) { metrics.focusViewportInsetDp.dp.roundToPx() }
@@ -4553,6 +4584,48 @@ private fun MoviesHistoryGrid(
             )
         } else {
             0
+        }
+        // Recent cards now share the catalog's measured footer/artwork contract so the complete
+        // footer, progress and focus edge stay inside the real remaining viewport when the header
+        // grows or shrinks.
+        val cellWidth = if (isTv) {
+            ((maxWidth - horizontalContentPadding - focusSafeEndPadding -
+                horizontalSpacing * (columnCount - 1)) / columnCount).coerceAtLeast(1.dp)
+        } else {
+            0.dp
+        }
+        val usableGridHeightPx = with(density) {
+            (maxHeight - horizontalContentPadding - safeBottomInsetPx.toDp()).coerceAtLeast(1.dp).roundToPx()
+        }
+        var movieFooterHeightPx by remember(entries) { mutableStateOf(0) }
+        val compactArtworkHeightPx = if (isTv && movieFooterHeightPx > 0 && cellWidth > 0.dp) {
+            movieCompactArtworkHeightPx(
+                cellWidthPx = with(density) { cellWidth.roundToPx() },
+                footerHeightPx = movieFooterHeightPx,
+                usableHeightPx = usableGridHeightPx,
+                minArtworkHeightPx = with(density) { MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP.dp.roundToPx() },
+            )
+        } else {
+            null
+        }
+        // Re-evaluate the focused card's real bounds when the available viewport changes (header
+        // notice appears/clears) without resetting identity or moving to the first item. The
+        // focused index is read via rememberUpdatedState so focus moves do not duplicate the work.
+        val latestFocusedEntryIndex by rememberUpdatedState(focusedEntryIndex)
+        LaunchedEffect(maxHeight) {
+            val index = latestFocusedEntryIndex
+            if (isTv && index >= 0) {
+                repeat(2) {
+                    withFrameNanos { }
+                    revealFocusedGridItem(
+                        gridState = gridState,
+                        index = index,
+                        focusInsetPx = focusInsetPx,
+                        safeBottomInsetPx = safeBottomInsetPx,
+                        extraMarginPx = focusInsetPx,
+                    )
+                }
+            }
         }
         LazyVerticalGrid(
             state = gridState,
@@ -4599,6 +4672,7 @@ private fun MoviesHistoryGrid(
                             },
                         ),
                     onFocused = {
+                        focusedEntryIndex = index
                         navigationMemory.save(MainDestination.MOVIES, entry.key, index)
                         if (isTv) {
                             // Same settled full-card reveal as the Movie catalog: Recent uses the
@@ -4619,6 +4693,10 @@ private fun MoviesHistoryGrid(
                             }
                         }
                     },
+                    artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
+                        with(density) { heightPx.toDp() }
+                    },
+                    onFooterHeightMeasured = { movieFooterHeightPx = it },
                 )
             }
         }
