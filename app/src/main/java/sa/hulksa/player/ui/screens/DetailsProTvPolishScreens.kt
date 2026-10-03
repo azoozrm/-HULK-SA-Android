@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,11 +27,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -244,14 +239,12 @@ private fun MovieDetailsProTvPolished(
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
-    val cancelRequester = remember(item.id) { FocusRequester() }
     val backRequester = remember(item.id) { FocusRequester() }
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(relatedKeys) { List(relatedItems.size) { FocusRequester() } }
     val tabRequesters = remember(item.id) { MovieDetailsTab.entries.associateWith { FocusRequester() } }
     var selectedTab by rememberSaveable(item.id) { mutableStateOf(MovieDetailsTab.STORY) }
     var heroReturnRequester by remember(item.id) { mutableStateOf(playRequester) }
-    val downloadFocusable = download?.status != OfflineStatus.COMPLETED
     val pageListState = rememberLazyListState()
     val pageScrollScope = rememberCoroutineScope()
     var pageScrollJob by remember(item.id) { mutableStateOf<Job?>(null) }
@@ -342,6 +335,32 @@ private fun MovieDetailsProTvPolished(
                 }
                 else -> false
             }
+        }
+    }
+
+    var showDownloadPanel by remember(item.id) { mutableStateOf(false) }
+    var restoreDownloadFocus by remember(item.id) { mutableStateOf(false) }
+    val closeDownloadPanel: () -> Unit = {
+        showDownloadPanel = false
+        restoreDownloadFocus = true
+    }
+    // Stale panel content (job removed or completed) dismisses without leaving an orphan window.
+    LaunchedEffect(download?.downloadId, download?.status, item.id) {
+        if (showDownloadPanel && (download == null || download.status == OfflineStatus.COMPLETED)) {
+            showDownloadPanel = false
+            restoreDownloadFocus = true
+        }
+    }
+    // Panel dismissal/actions return focus to the same permanent download control; if the control
+    // became disabled (completed), fall back to the adjacent favorite action instead of losing it.
+    LaunchedEffect(showDownloadPanel) {
+        if (!showDownloadPanel && restoreDownloadFocus) {
+            withFrameNanos { }
+            val restored = runCatching { downloadRequester.requestFocus() }.getOrDefault(false)
+            if (!restored) {
+                runCatching { favoriteRequester.requestFocus() }
+            }
+            restoreDownloadFocus = false
         }
     }
 
@@ -450,106 +469,29 @@ private fun MovieDetailsProTvPolished(
                         )
                     }
                     Spacer(Modifier.height(13.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(.72f),
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        FocusButton(
-                            text = if (progress != null && historyEntry != null) {
-                                "اكمل المشاهدة"
-                            } else {
-                                "ابدا المشاهدة"
-                            },
-                            onClick = onPlay,
-                            trailingIcon = Icons.Rounded.PlayArrow,
-                            compact = true,
-                            scaleOnFocus = false,
-                            onFocused = { heroReturnRequester = playRequester },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp)
-                                .focusRequester(playRequester)
-                                .focusProperties {
-                                    up = backRequester
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                    left = favoriteRequester
-                                    right = FocusRequester.Cancel
-                                },
-                        )
-                        FocusButton(
-                            text = "المفضلة",
-                            onClick = onToggleFavorite,
-                            primary = false,
-                            outlined = true,
-                            compact = true,
-                            trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                            trailingIconTint = colors.gold,
-                            scaleOnFocus = false,
-                            onFocused = { heroReturnRequester = favoriteRequester },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp)
-                                .focusRequester(favoriteRequester)
-                                .focusProperties {
-                                    up = backRequester
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                    right = playRequester
-                                    left = downloadRequester
-                                },
-                        )
-                        FocusButton(
-                            text = movieDownloadActionLabel(download),
-                            onClick = onDownload,
-                            primary = false,
-                            outlined = true,
-                            compact = true,
-                            enabled = downloadFocusable,
-                            trailingIcon = movieDownloadActionIcon(download),
-                            trailingIconTint = colors.gold,
-                            scaleOnFocus = false,
-                            onFocused = { heroReturnRequester = downloadRequester },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp)
-                                .focusRequester(downloadRequester)
-                                .focusProperties {
-                                    up = backRequester
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                    right = favoriteRequester
-                                    left = if (download != null) cancelRequester else FocusRequester.Cancel
-                                },
-                        )
-                    }
-                    if (download != null && download.status != OfflineStatus.COMPLETED) {
-                        Spacer(Modifier.height(9.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(.72f),
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Spacer(Modifier.weight(1f))
-                            Spacer(Modifier.weight(1f))
-                            FocusButton(
-                                text = "الغاء التحميل",
-                                onClick = onCancelDownload,
-                                primary = false,
-                                outlined = true,
-                                compact = true,
-                                scaleOnFocus = false,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 46.dp)
-                                    .focusRequester(cancelRequester)
-                                    .focusProperties {
-                                        up = downloadRequester
-                                        left = FocusRequester.Cancel
-                                        right = FocusRequester.Cancel
-                                        down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                    },
-                            )
-                        }
-                    }
+                    MovieDetailsActionsBar(
+                        isTv = true,
+                        compactHeight = false,
+                        rowFraction = .72f,
+                        minimumActionHeightDp = 46,
+                        resumePositionMs = if (progress != null && historyEntry != null) {
+                            historyEntry.positionMs
+                        } else {
+                            null
+                        },
+                        isFavorite = isFavorite,
+                        download = download,
+                        playRequester = playRequester,
+                        favoriteRequester = favoriteRequester,
+                        downloadRequester = downloadRequester,
+                        upRequester = backRequester,
+                        tabsDownRequester = tabRequesters.getValue(MovieDetailsTab.STORY),
+                        onActionFocused = { heroReturnRequester = it },
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavorite,
+                        onDownload = onDownload,
+                        onOpenDownloadPanel = { showDownloadPanel = true },
+                    )
                 }
 
                 if (isLoading) {
@@ -641,6 +583,22 @@ private fun MovieDetailsProTvPolished(
                 }
             }
         }
+    }
+
+    if (showDownloadPanel && download != null && download.status != OfflineStatus.COMPLETED) {
+        MovieDownloadPanelDialog(
+            download = download,
+            isTv = true,
+            onPauseResumeRetry = {
+                onDownload()
+                closeDownloadPanel()
+            },
+            onCancel = {
+                onCancelDownload()
+                closeDownloadPanel()
+            },
+            onDismiss = closeDownloadPanel,
+        )
     }
 }
 

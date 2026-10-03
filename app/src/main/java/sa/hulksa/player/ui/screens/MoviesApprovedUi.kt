@@ -1,34 +1,54 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,21 +57,36 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import sa.hulksa.player.model.ContentDetails
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
+import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
+import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
+import java.util.Locale
 
 /**
  * Truthful app-authored download action label for the approved movie actions. State glyphs are
@@ -530,6 +565,772 @@ internal fun MovieInlineResumeStrip(
                     .background(colors.gold),
             )
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Round 4: truthful per-state download presentation, one permanent control and on-demand panel.
+// ---------------------------------------------------------------------------------------------
+
+/** Truthful permanent-control caption per observed job state (null = no job). */
+internal fun movieDownloadStatusCaption(status: OfflineStatus?): String = when (status) {
+    null -> "تحميل الفلم"
+    OfflineStatus.QUEUED -> "في انتظار التحميل"
+    OfflineStatus.CHECKING -> "جاري تجهيز التحميل"
+    OfflineStatus.DOWNLOADING -> "جاري التحميل"
+    OfflineStatus.PAUSED -> "استئناف التحميل"
+    OfflineStatus.WAITING_SCHEDULE -> "في انتظار الموعد"
+    OfflineStatus.WAITING_NETWORK -> "في انتظار الشبكة"
+    OfflineStatus.WAITING_STORAGE -> "في انتظار المساحة"
+    OfflineStatus.FAILED -> "اعادة التحميل"
+    OfflineStatus.COMPLETED -> "تم التحميل"
+}
+
+/** Stable download glyph for the single control; completed keeps the gold check. */
+internal fun movieDownloadControlIcon(download: OfflineDownload?): ImageVector =
+    if (download?.status == OfflineStatus.COMPLETED) Icons.Rounded.Check else Icons.Rounded.Download
+
+/** Known-total percentage only; unknown totals never fabricate a 0%. */
+internal fun movieDownloadPercentLabel(download: OfflineDownload?): String? {
+    if (download == null || download.totalBytes <= 0L) return null
+    val percent = (download.bytesDownloaded.toDouble() / download.totalBytes.toDouble() * 100.0)
+        .toInt()
+        .coerceIn(0, 100)
+    return "$percent%"
+}
+
+/** Live speed is shown only while actively downloading. */
+internal fun movieDownloadShowsSpeed(status: OfflineStatus?): Boolean =
+    status == OfflineStatus.DOWNLOADING
+
+internal fun movieDownloadSpeedLabel(bytesPerSecond: Long): String? {
+    if (bytesPerSecond <= 0L) return null
+    val megabytes = bytesPerSecond / (1024.0 * 1024.0)
+    return if (megabytes >= 1.0) {
+        String.format(Locale.US, "%.1f MB/s", megabytes)
+    } else {
+        String.format(Locale.US, "%.0f KB/s", bytesPerSecond / 1024.0)
+    }
+}
+
+internal fun movieDownloadSizeLabel(bytes: Long): String {
+    val safe = bytes.coerceAtLeast(0L)
+    val gigabytes = safe / (1024.0 * 1024.0 * 1024.0)
+    return if (gigabytes >= 1.0) {
+        String.format(Locale.US, "%.1f GB", gigabytes)
+    } else {
+        String.format(Locale.US, "%.0f MB", safe / (1024.0 * 1024.0))
+    }
+}
+
+/** Downloaded / total when the total is known; otherwise only the known downloaded size. */
+internal fun movieDownloadSizePairLabel(download: OfflineDownload?): String? {
+    if (download == null) return null
+    return if (download.totalBytes > 0L) {
+        "${movieDownloadSizeLabel(download.bytesDownloaded)} / ${movieDownloadSizeLabel(download.totalBytes)}"
+    } else {
+        movieDownloadSizeLabel(download.bytesDownloaded)
+    }
+}
+
+internal fun movieDownloadEtaLabel(etaSeconds: Long): String? {
+    if (etaSeconds <= 0L) return null
+    val minutes = ((etaSeconds + 59L) / 60L).coerceAtLeast(1L)
+    val hours = minutes / 60L
+    val remainder = minutes % 60L
+    return when {
+        hours <= 0L -> "متبقي $minutes د"
+        remainder == 0L -> "متبقي $hours س"
+        else -> "متبقي $hours س $remainder د"
+    }
+}
+
+internal enum class MovieDownloadPanelActionKind { PAUSE, RESUME, RETRY, CANCEL }
+
+/** Only actions the existing status-sensitive dispatchers actually support. */
+internal fun movieDownloadPanelActionKinds(status: OfflineStatus): List<MovieDownloadPanelActionKind> =
+    when (status) {
+        OfflineStatus.QUEUED,
+        OfflineStatus.CHECKING,
+        OfflineStatus.DOWNLOADING,
+        -> listOf(MovieDownloadPanelActionKind.PAUSE, MovieDownloadPanelActionKind.CANCEL)
+        OfflineStatus.PAUSED,
+        OfflineStatus.WAITING_SCHEDULE,
+        OfflineStatus.WAITING_NETWORK,
+        OfflineStatus.WAITING_STORAGE,
+        -> listOf(MovieDownloadPanelActionKind.RESUME, MovieDownloadPanelActionKind.CANCEL)
+        OfflineStatus.FAILED ->
+            listOf(MovieDownloadPanelActionKind.RETRY, MovieDownloadPanelActionKind.CANCEL)
+        OfflineStatus.COMPLETED -> emptyList()
+    }
+
+internal fun movieDownloadPanelActionLabel(kind: MovieDownloadPanelActionKind): String = when (kind) {
+    MovieDownloadPanelActionKind.PAUSE -> "ايقاف التحميل"
+    MovieDownloadPanelActionKind.RESUME -> "استئناف التحميل"
+    MovieDownloadPanelActionKind.RETRY -> "اعادة التحميل"
+    MovieDownloadPanelActionKind.CANCEL -> "الغاء التحميل"
+}
+
+internal fun movieDownloadPanelActionIcon(kind: MovieDownloadPanelActionKind): ImageVector = when (kind) {
+    MovieDownloadPanelActionKind.PAUSE -> Icons.Rounded.Pause
+    MovieDownloadPanelActionKind.RESUME -> Icons.Rounded.PlayArrow
+    MovieDownloadPanelActionKind.RETRY -> Icons.Rounded.Refresh
+    MovieDownloadPanelActionKind.CANCEL -> Icons.Rounded.Close
+}
+
+internal enum class MovieActionLayout { SINGLE_ROW, WATCH_THEN_PAIR, STACKED }
+
+internal fun movieActionRequiredWidthPx(
+    captionWidthPx: Int,
+    iconSizePx: Int,
+    horizontalPaddingPx: Int,
+    gapPx: Int,
+): Int = captionWidthPx.coerceAtLeast(0) +
+    iconSizePx.coerceAtLeast(0) +
+    gapPx.coerceAtLeast(0) +
+    2 * horizontalPaddingPx.coerceAtLeast(0)
+
+/**
+ * Measured action allocation: three equal columns when every full caption fits, otherwise a
+ * full-width Watch with an equal secondary pair, otherwise full-width stacked controls.
+ */
+internal fun movieActionLayoutMode(
+    availableWidthPx: Int,
+    requiredWidthsPx: List<Int>,
+    gapPx: Int,
+): MovieActionLayout {
+    if (availableWidthPx <= 0 || requiredWidthsPx.size < 3) return MovieActionLayout.STACKED
+    val gap = gapPx.coerceAtLeast(0)
+    val maxRequired = requiredWidthsPx.maxOrNull() ?: return MovieActionLayout.STACKED
+    if (maxRequired <= 0) return MovieActionLayout.STACKED
+    val favorite = requiredWidthsPx[1]
+    val download = requiredWidthsPx[2]
+    return when {
+        3 * maxRequired + 2 * gap <= availableWidthPx -> MovieActionLayout.SINGLE_ROW
+        2 * maxOf(favorite, download) + gap <= availableWidthPx -> MovieActionLayout.WATCH_THEN_PAIR
+        else -> MovieActionLayout.STACKED
+    }
+}
+
+private val MovieActionCaptionStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold)
+private val MovieActionIconSize = 17.dp
+private val MovieActionHorizontalPadding = 12.dp
+private val MovieActionIconGap = 6.dp
+private val MovieActionRowGap = 9.dp
+private val MovieActionCaptionBuffer = 6.dp
+
+/**
+ * Responsive Movie Details action bar. Every caption is measured at the current font scale so the
+ * complete wording is always allocated: three centered equal columns on wide/TV layouts, a
+ * full-width Watch with an equal secondary pair on narrow widths, and full-width stacked
+ * controls when even the pair cannot fit. The single download control reserves a stable telemetry
+ * area so state changes never reflow the hero.
+ */
+@Composable
+internal fun MovieDetailsActionsBar(
+    isTv: Boolean,
+    compactHeight: Boolean,
+    rowFraction: Float,
+    minimumActionHeightDp: Int,
+    resumePositionMs: Long?,
+    isFavorite: Boolean,
+    download: OfflineDownload?,
+    playRequester: FocusRequester,
+    favoriteRequester: FocusRequester,
+    downloadRequester: FocusRequester,
+    upRequester: FocusRequester?,
+    tabsDownRequester: FocusRequester,
+    onActionFocused: (FocusRequester) -> Unit,
+    onPlay: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onDownload: () -> Unit,
+    onOpenDownloadPanel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val watchCaption = if (resumePositionMs != null) "اكمل المشاهدة" else "ابدا المشاهدة"
+    val downloadCaption = movieDownloadStatusCaption(download?.status)
+    val iconPx = with(density) { MovieActionIconSize.roundToPx() }
+    val horizontalPaddingPx = with(density) { MovieActionHorizontalPadding.roundToPx() }
+    val iconGapPx = with(density) { MovieActionIconGap.roundToPx() }
+    val bufferPx = with(density) { MovieActionCaptionBuffer.roundToPx() }
+    // The download caption changes with the job state; measuring the longest status keeps the
+    // chosen arrangement stable across state changes at a fixed width/font scale.
+    val reservedDownloadCaptionWidthPx = remember(textMeasurer) {
+        OfflineStatus.entries.maxOf { status ->
+            textMeasurer.measure(
+                text = AnnotatedString(movieDownloadStatusCaption(status)),
+                style = MovieActionCaptionStyle,
+                maxLines = 1,
+            ).size.width
+        }
+    }
+    val downloadRequiredWidthPx = movieActionRequiredWidthPx(
+        captionWidthPx = reservedDownloadCaptionWidthPx,
+        iconSizePx = iconPx,
+        horizontalPaddingPx = horizontalPaddingPx,
+        gapPx = iconGapPx,
+    ) + bufferPx
+
+    BoxWithConstraints(modifier.fillMaxWidth(rowFraction)) {
+        val availableWidthPx = with(density) { maxWidth.roundToPx() }
+        val requiredWidths = listOf(
+            movieActionRequiredWidthPx(
+                captionWidthPx = textMeasurer.measure(
+                    text = AnnotatedString(watchCaption),
+                    style = MovieActionCaptionStyle,
+                    maxLines = 1,
+                ).size.width,
+                iconSizePx = iconPx,
+                horizontalPaddingPx = horizontalPaddingPx,
+                gapPx = iconGapPx,
+            ) + bufferPx,
+            movieActionRequiredWidthPx(
+                captionWidthPx = textMeasurer.measure(
+                    text = AnnotatedString("المفضلة"),
+                    style = MovieActionCaptionStyle,
+                    maxLines = 1,
+                ).size.width,
+                iconSizePx = iconPx,
+                horizontalPaddingPx = horizontalPaddingPx,
+                gapPx = iconGapPx,
+            ) + bufferPx,
+            downloadRequiredWidthPx,
+        )
+        val layoutMode = movieActionLayoutMode(
+            availableWidthPx = availableWidthPx,
+            requiredWidthsPx = requiredWidths,
+            gapPx = with(density) { MovieActionRowGap.roundToPx() },
+        )
+        val focusWiring: (Int) -> Modifier = { position ->
+            Modifier.focusProperties {
+                down = tabsDownRequester
+                if (isTv) {
+                    up = upRequester ?: FocusRequester.Cancel
+                    if (layoutMode == MovieActionLayout.SINGLE_ROW) {
+                        when (position) {
+                            0 -> {
+                                left = favoriteRequester
+                                right = FocusRequester.Cancel
+                            }
+                            1 -> {
+                                left = downloadRequester
+                                right = playRequester
+                            }
+                            else -> {
+                                left = FocusRequester.Cancel
+                                right = favoriteRequester
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val watchAction: @Composable (Modifier) -> Unit = { actionModifier ->
+            FocusButton(
+                text = watchCaption,
+                onClick = onPlay,
+                trailingIcon = Icons.Rounded.PlayArrow,
+                compact = true,
+                scaleOnFocus = false,
+                textMaxLines = 1,
+                onFocused = { onActionFocused(playRequester) },
+                modifier = actionModifier
+                    .focusRequester(playRequester)
+                    .then(focusWiring(0)),
+            )
+        }
+        val favoriteAction: @Composable (Modifier) -> Unit = { actionModifier ->
+            FocusButton(
+                text = "المفضلة",
+                onClick = onToggleFavorite,
+                primary = false,
+                outlined = true,
+                compact = true,
+                trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                trailingIconTint = colors.gold,
+                scaleOnFocus = false,
+                textMaxLines = 1,
+                onFocused = { onActionFocused(favoriteRequester) },
+                modifier = actionModifier
+                    .focusRequester(favoriteRequester)
+                    .then(focusWiring(1)),
+            )
+        }
+        val downloadAction: @Composable (Modifier) -> Unit = { actionModifier ->
+            MovieDownloadActionControl(
+                download = download,
+                compactTelemetry = compactHeight,
+                onClick = if (download == null) onDownload else onOpenDownloadPanel,
+                onFocused = { onActionFocused(downloadRequester) },
+                modifier = actionModifier
+                    .focusRequester(downloadRequester)
+                    .then(focusWiring(2)),
+            )
+        }
+        when (layoutMode) {
+            MovieActionLayout.SINGLE_ROW -> Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(MovieActionRowGap),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                watchAction(Modifier.weight(1f).fillMaxHeight())
+                favoriteAction(Modifier.weight(1f).fillMaxHeight())
+                downloadAction(Modifier.weight(1f).fillMaxHeight())
+            }
+            MovieActionLayout.WATCH_THEN_PAIR -> Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(MovieActionRowGap),
+            ) {
+                watchAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(MovieActionRowGap),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    favoriteAction(Modifier.weight(1f).fillMaxHeight())
+                    downloadAction(Modifier.weight(1f).fillMaxHeight())
+                }
+            }
+            MovieActionLayout.STACKED -> Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(MovieActionRowGap),
+            ) {
+                watchAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
+                favoriteAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
+                downloadAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
+            }
+        }
+    }
+}
+
+/**
+ * The single permanent Movie download control. Shows the truthful state caption, the gold status
+ * glyph, reserved compact telemetry and a thin progress indicator. A normal click starts a new
+ * download or opens the management panel for an existing job; it never mutates the job itself.
+ */
+@Composable
+private fun MovieDownloadActionControl(
+    download: OfflineDownload?,
+    compactTelemetry: Boolean,
+    onClick: () -> Unit,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val enabled = download?.status != OfflineStatus.COMPLETED
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(12.dp)
+    val caption = movieDownloadStatusCaption(download?.status)
+    val percent = movieDownloadPercentLabel(download)
+    val speed = if (download != null && movieDownloadShowsSpeed(download.status)) {
+        movieDownloadSpeedLabel(download.bytesPerSecond)
+    } else {
+        null
+    }
+    val telemetry = when {
+        download == null -> ""
+        percent != null -> listOfNotNull(percent, speed).joinToString("   ")
+        download.bytesDownloaded > 0L -> movieDownloadSizeLabel(download.bytesDownloaded)
+        else -> ""
+    }
+    val active = download?.status in setOf(
+        OfflineStatus.QUEUED,
+        OfflineStatus.CHECKING,
+        OfflineStatus.DOWNLOADING,
+    )
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(shape)
+            .background(
+                when {
+                    !enabled -> colors.surfaceRaised.copy(alpha = .5f)
+                    showFocused -> Color(0xFF2A281B)
+                    else -> Color(0xFF151711)
+                },
+            )
+            .border(
+                width = if (showFocused) 2.dp else 1.dp,
+                color = when {
+                    showFocused -> colors.goldBright
+                    enabled -> colors.gold.copy(alpha = .42f)
+                    else -> Color.White.copy(alpha = .10f)
+                },
+                shape = shape,
+            )
+            .semantics(mergeDescendants = true) { contentDescription = caption }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MovieActionIconGap),
+            ) {
+                Text(
+                    text = caption,
+                    color = colors.text,
+                    fontSize = 13.sp,
+                    lineHeight = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                // The icon is the last child, so in RTL it renders physically LEFT of the wording.
+                Icon(
+                    imageVector = movieDownloadControlIcon(download),
+                    contentDescription = null,
+                    tint = colors.gold,
+                    modifier = Modifier.size(MovieActionIconSize),
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            // Reserved telemetry line: an empty-space line keeps the control height stable across
+            // every state, including the no-job state, so starting a download cannot reflow.
+            MovieNumericText(
+                text = telemetry.ifEmpty { " " },
+                color = colors.textMuted,
+                fontSizeSp = if (compactTelemetry) 9 else 10,
+            )
+            Spacer(Modifier.height(3.dp))
+            MovieDownloadProgressTrack(
+                progress = if (download != null && download.totalBytes > 0L) download.progress else null,
+                indeterminate = download != null && download.totalBytes <= 0L && active,
+                // The no-job state reserves the same track space but draws no remainder line.
+                showRemainder = download != null,
+                height = if (adaptiveUi.isTelevision) 4.dp else 3.dp,
+                modifier = Modifier.fillMaxWidth(.86f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MovieNumericText(
+    text: String,
+    color: Color,
+    fontSizeSp: Int,
+    fontWeight: FontWeight = FontWeight.Bold,
+) {
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = fontSizeSp.sp,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            minLines = 1,
+        )
+    }
+}
+
+/**
+ * Thin informational track. Known progress fills from the physical right; unknown active totals
+ * use a looping indeterminate sliver instead of a fabricated value; inactive unknown totals show
+ * only the muted remainder.
+ */
+@Composable
+private fun MovieDownloadProgressTrack(
+    progress: Float?,
+    indeterminate: Boolean,
+    height: Dp,
+    modifier: Modifier = Modifier,
+    showRemainder: Boolean = true,
+) {
+    val colors = LocalHulkColors.current
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
+            modifier = modifier
+                .height(height)
+                .clip(RoundedCornerShape(50))
+                .background(
+                    if (showRemainder || progress != null || indeterminate) {
+                        Color.White.copy(alpha = .18f)
+                    } else {
+                        Color.Transparent
+                    },
+                ),
+        ) {
+            when {
+                progress != null -> Box(
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .height(height)
+                        .background(colors.gold),
+                )
+                indeterminate -> IndeterminateDownloadSliver(height)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IndeterminateDownloadSliver(height: Dp) {
+    val colors = LocalHulkColors.current
+    val transition = rememberInfiniteTransition(label = "movieDownloadSliver")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "movieDownloadSliverPhase",
+    )
+    BoxWithConstraints(Modifier.fillMaxWidth().height(height)) {
+        val widthPx = constraints.maxWidth.toFloat()
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxWidth(.32f)
+                .height(height)
+                .graphicsLayer { translationX = -phase * widthPx * .68f }
+                .background(colors.gold),
+        )
+    }
+}
+
+/**
+ * Bounded on-demand host for [MovieDownloadPanel]. Uses the established app dialog pattern: Back
+ * and outside tap dismiss through Dialog, content stays inside safe bounds, and on TV the compact
+ * panel anchors to the physical top-left next to the action area; phones get a centered modal.
+ */
+@Composable
+internal fun MovieDownloadPanelDialog(
+    download: OfflineDownload,
+    isTv: Boolean,
+    onPauseResumeRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            // Under the app's RTL direction TopEnd is the physical top-left, matching the
+            // reference anchor next to the (physically left) download action.
+            contentAlignment = if (isTv) Alignment.TopEnd else Alignment.Center,
+        ) {
+            val panelWidth = if (isTv) {
+                (maxWidth * .40f).coerceIn(320.dp, 430.dp)
+            } else {
+                (maxWidth * .92f).coerceIn(280.dp, 520.dp)
+            }
+            val panelHeight = (maxHeight * if (isTv) .78f else .84f).coerceAtLeast(180.dp)
+            MovieDownloadPanel(
+                download = download,
+                isTv = isTv,
+                onPauseResumeRetry = onPauseResumeRetry,
+                onCancel = onCancel,
+                onClose = onDismiss,
+                modifier = Modifier
+                    .width(panelWidth)
+                    .heightIn(max = panelHeight),
+            )
+        }
+    }
+}
+
+/**
+ * Compact on-demand download management panel. It only dispatches the existing status-sensitive
+ * callbacks; opening it performs no mutation. The caller owns dismissal/Back and focus return.
+ */
+@Composable
+internal fun MovieDownloadPanel(
+    download: OfflineDownload,
+    isTv: Boolean,
+    onPauseResumeRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val shape = RoundedCornerShape(14.dp)
+    var closeFocused by remember { mutableStateOf(false) }
+    val closeRequester = remember(download.downloadId) { FocusRequester() }
+    val actionKinds = movieDownloadPanelActionKinds(download.status)
+    val actionRequesters = remember(download.downloadId, actionKinds) {
+        actionKinds.map { FocusRequester() }
+    }
+    val firstActionRequester = actionRequesters.firstOrNull()
+    LaunchedEffect(download.downloadId, actionKinds) {
+        withFrameNanos { }
+        firstActionRequester?.let { runCatching { it.requestFocus() } }
+    }
+    val percent = movieDownloadPercentLabel(download)
+    val speed = if (movieDownloadShowsSpeed(download.status)) {
+        movieDownloadSpeedLabel(download.bytesPerSecond)
+    } else {
+        null
+    }
+    val eta = if (movieDownloadShowsSpeed(download.status)) {
+        movieDownloadEtaLabel(download.etaSeconds)
+    } else {
+        null
+    }
+    val sizePair = movieDownloadSizePairLabel(download)
+    val indeterminate = download.totalBytes <= 0L && movieDownloadShowsSpeed(download.status)
+    val progress = if (download.totalBytes > 0L) download.progress else null
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(Color(0xF711120D))
+            .border(1.dp, colors.gold.copy(alpha = .45f), shape)
+            .padding(14.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "التحميل",
+                color = colors.text,
+                fontSize = if (isTv) 15.sp else 14.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "اغلاق",
+                color = colors.gold,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                modifier = Modifier
+                    .focusRequester(closeRequester)
+                    .focusProperties {
+                        up = FocusRequester.Cancel
+                        down = firstActionRequester ?: FocusRequester.Cancel
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    }
+                    .onFocusChanged { closeFocused = it.isFocused }
+                    .goldFocusEdge(RoundedCornerShape(8.dp), visible = closeFocused)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(role = Role.Button, onClick = onClose)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(9.dp))
+        // Telemetry keeps stable LTR numeric ordering (percent left, speed right) inside the RTL
+        // panel, matching the reference panel content without reversing digits or units.
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    MovieNumericText(
+                        text = percent ?: movieDownloadSizeLabel(download.bytesDownloaded),
+                        color = colors.text,
+                        fontSizeSp = if (percent != null) 20 else 13,
+                    )
+                    if (sizePair != null && percent != null) {
+                        Spacer(Modifier.height(3.dp))
+                        MovieNumericText(text = sizePair, color = colors.textMuted, fontSizeSp = 11)
+                    }
+                }
+                if (speed != null) {
+                    MovieNumericText(text = speed, color = colors.text, fontSizeSp = 12)
+                }
+            }
+        }
+        if (eta != null) {
+            // Arabic wording stays in the ambient RTL order; only numeric telemetry is LTR-isolated.
+            Text(text = eta, color = colors.textMuted, fontSize = 10.sp, maxLines = 1)
+        }
+        Spacer(Modifier.height(9.dp))
+        MovieDownloadProgressTrack(
+            progress = progress,
+            indeterminate = indeterminate,
+            height = if (isTv) 4.dp else 3.dp,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (actionKinds.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                actionKinds.forEachIndexed { index, kind ->
+                    MovieDownloadPanelAction(
+                        kind = kind,
+                        requester = actionRequesters[index],
+                        upRequester = closeRequester,
+                        leftRequester = actionRequesters.getOrNull(index + 1),
+                        rightRequester = actionRequesters.getOrNull(index - 1),
+                        onClick = when (kind) {
+                            MovieDownloadPanelActionKind.CANCEL -> onCancel
+                            else -> onPauseResumeRetry
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MovieDownloadPanelAction(
+    kind: MovieDownloadPanelActionKind,
+    requester: FocusRequester,
+    upRequester: FocusRequester,
+    leftRequester: FocusRequester?,
+    rightRequester: FocusRequester?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(if (focused) Color(0xFF2A281B) else Color(0xFF151711))
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) colors.goldBright else colors.gold.copy(alpha = .42f),
+                shape = shape,
+            )
+            .focusRequester(requester)
+            .focusProperties {
+                up = upRequester
+                down = FocusRequester.Cancel
+                left = leftRequester ?: FocusRequester.Cancel
+                right = rightRequester ?: FocusRequester.Cancel
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = movieDownloadPanelActionLabel(kind),
+            color = colors.text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(6.dp))
+        // Icon last: physically LEFT of the wording in RTL.
+        Icon(
+            imageVector = movieDownloadPanelActionIcon(kind),
+            contentDescription = null,
+            tint = colors.gold,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 

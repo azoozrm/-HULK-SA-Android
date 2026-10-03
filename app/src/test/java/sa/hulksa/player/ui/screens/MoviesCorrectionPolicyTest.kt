@@ -2,8 +2,10 @@ package sa.hulksa.player.ui.screens
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
@@ -287,5 +289,171 @@ class MoviesCorrectionPolicyTest {
         val colors = HulkColors()
         assertEquals(Color(0xFFFFF9EB), colors.text)
         assertEquals(Color(0xFFE6C352), colors.gold)
+    }
+
+    @Test
+    fun movieDownloadStatusCaptionsAreTruthfulPerState() {
+        assertEquals("تحميل الفلم", movieDownloadStatusCaption(null))
+        assertEquals("في انتظار التحميل", movieDownloadStatusCaption(OfflineStatus.QUEUED))
+        assertEquals("جاري تجهيز التحميل", movieDownloadStatusCaption(OfflineStatus.CHECKING))
+        assertEquals("جاري التحميل", movieDownloadStatusCaption(OfflineStatus.DOWNLOADING))
+        assertEquals("استئناف التحميل", movieDownloadStatusCaption(OfflineStatus.PAUSED))
+        assertEquals("في انتظار الموعد", movieDownloadStatusCaption(OfflineStatus.WAITING_SCHEDULE))
+        assertEquals("في انتظار الشبكة", movieDownloadStatusCaption(OfflineStatus.WAITING_NETWORK))
+        assertEquals("في انتظار المساحة", movieDownloadStatusCaption(OfflineStatus.WAITING_STORAGE))
+        assertEquals("اعادة التحميل", movieDownloadStatusCaption(OfflineStatus.FAILED))
+        assertEquals("تم التحميل", movieDownloadStatusCaption(OfflineStatus.COMPLETED))
+
+        val captions = OfflineStatus.entries.map { movieDownloadStatusCaption(it) } + listOf("تحميل الفلم")
+        captions.forEach { caption ->
+            assertFalse(caption.contains('أ'))
+            assertFalse(caption.contains('إ'))
+            assertFalse(caption.contains('آ'))
+        }
+        assertTrue(captions.contains("استئناف التحميل"))
+    }
+
+    @Test
+    fun movieDownloadTelemetryNeverFabricatesUnknownTotals() {
+        val known = download(OfflineStatus.DOWNLOADING).copy(bytesDownloaded = 42L, totalBytes = 100L)
+        assertEquals("42%", movieDownloadPercentLabel(known))
+        assertNull(
+            movieDownloadPercentLabel(
+                download(OfflineStatus.DOWNLOADING).copy(bytesDownloaded = 5L, totalBytes = -1L),
+            ),
+        )
+        assertNull(movieDownloadPercentLabel(null))
+        assertEquals(
+            "100%",
+            movieDownloadPercentLabel(
+                download(OfflineStatus.DOWNLOADING).copy(bytesDownloaded = 500L, totalBytes = 100L),
+            ),
+        )
+        assertEquals(
+            "99%",
+            movieDownloadPercentLabel(
+                download(OfflineStatus.DOWNLOADING).copy(bytesDownloaded = 999L, totalBytes = 1000L),
+            ),
+        )
+        assertEquals(Icons.Rounded.Download, movieDownloadControlIcon(known))
+        assertEquals(
+            Icons.Rounded.Check,
+            movieDownloadControlIcon(download(OfflineStatus.COMPLETED)),
+        )
+    }
+
+    @Test
+    fun movieDownloadSpeedIsShownOnlyWhileActiveAndNeverStale() {
+        assertTrue(movieDownloadShowsSpeed(OfflineStatus.DOWNLOADING))
+        listOf(
+            OfflineStatus.QUEUED,
+            OfflineStatus.CHECKING,
+            OfflineStatus.PAUSED,
+            OfflineStatus.WAITING_SCHEDULE,
+            OfflineStatus.WAITING_NETWORK,
+            OfflineStatus.WAITING_STORAGE,
+            OfflineStatus.FAILED,
+            OfflineStatus.COMPLETED,
+        ).forEach { assertFalse(movieDownloadShowsSpeed(it)) }
+        assertFalse(movieDownloadShowsSpeed(null))
+        assertNull(movieDownloadSpeedLabel(0L))
+        assertNull(movieDownloadSpeedLabel(-10L))
+        assertEquals("3.2 MB/s", movieDownloadSpeedLabel(3_355_443L))
+        assertEquals("20 KB/s", movieDownloadSpeedLabel(20_480L))
+    }
+
+    @Test
+    fun movieDownloadSizesAndEtaUseRealValuesOnly() {
+        assertEquals("1.7 GB", movieDownloadSizeLabel(1_800_000_000L))
+        assertEquals("120 MB", movieDownloadSizeLabel(125_829_120L))
+        val known = download(OfflineStatus.DOWNLOADING).copy(
+            bytesDownloaded = 44_040_192L,
+            totalBytes = 104_857_600L,
+        )
+        assertEquals("42 MB / 100 MB", movieDownloadSizePairLabel(known))
+        assertEquals(
+            "5 MB",
+            movieDownloadSizePairLabel(known.copy(bytesDownloaded = 5_242_880L, totalBytes = -1L)),
+        )
+        assertNull(movieDownloadSizePairLabel(null))
+        assertNull(movieDownloadEtaLabel(0L))
+        assertNull(movieDownloadEtaLabel(-5L))
+        assertEquals("متبقي 1 د", movieDownloadEtaLabel(30L))
+        assertEquals("متبقي 12 د", movieDownloadEtaLabel(720L))
+        assertEquals("متبقي 1 س", movieDownloadEtaLabel(3_600L))
+        assertEquals("متبقي 1 س 5 د", movieDownloadEtaLabel(3_900L))
+    }
+
+    @Test
+    fun movieDownloadPanelActionsMatchExistingDispatchers() {
+        listOf(
+            OfflineStatus.QUEUED,
+            OfflineStatus.CHECKING,
+            OfflineStatus.DOWNLOADING,
+        ).forEach {
+            assertEquals(
+                listOf(MovieDownloadPanelActionKind.PAUSE, MovieDownloadPanelActionKind.CANCEL),
+                movieDownloadPanelActionKinds(it),
+            )
+        }
+        listOf(
+            OfflineStatus.PAUSED,
+            OfflineStatus.WAITING_SCHEDULE,
+            OfflineStatus.WAITING_NETWORK,
+            OfflineStatus.WAITING_STORAGE,
+        ).forEach {
+            assertEquals(
+                listOf(MovieDownloadPanelActionKind.RESUME, MovieDownloadPanelActionKind.CANCEL),
+                movieDownloadPanelActionKinds(it),
+            )
+        }
+        assertEquals(
+            listOf(MovieDownloadPanelActionKind.RETRY, MovieDownloadPanelActionKind.CANCEL),
+            movieDownloadPanelActionKinds(OfflineStatus.FAILED),
+        )
+        assertTrue(movieDownloadPanelActionKinds(OfflineStatus.COMPLETED).isEmpty())
+
+        assertEquals("ايقاف التحميل", movieDownloadPanelActionLabel(MovieDownloadPanelActionKind.PAUSE))
+        assertEquals("استئناف التحميل", movieDownloadPanelActionLabel(MovieDownloadPanelActionKind.RESUME))
+        assertEquals("اعادة التحميل", movieDownloadPanelActionLabel(MovieDownloadPanelActionKind.RETRY))
+        assertEquals("الغاء التحميل", movieDownloadPanelActionLabel(MovieDownloadPanelActionKind.CANCEL))
+        assertEquals(Icons.Rounded.Pause, movieDownloadPanelActionIcon(MovieDownloadPanelActionKind.PAUSE))
+        assertEquals(Icons.Rounded.PlayArrow, movieDownloadPanelActionIcon(MovieDownloadPanelActionKind.RESUME))
+        assertEquals(Icons.Rounded.Refresh, movieDownloadPanelActionIcon(MovieDownloadPanelActionKind.RETRY))
+        assertEquals(Icons.Rounded.Close, movieDownloadPanelActionIcon(MovieDownloadPanelActionKind.CANCEL))
+    }
+
+    @Test
+    fun movieActionLayoutAllocatesFullCaptionsByMeasuredWidth() {
+        assertEquals(
+            147,
+            movieActionRequiredWidthPx(
+                captionWidthPx = 100,
+                iconSizePx = 17,
+                horizontalPaddingPx = 12,
+                gapPx = 6,
+            ),
+        )
+        val required = listOf(100, 100, 140)
+        assertEquals(
+            MovieActionLayout.SINGLE_ROW,
+            movieActionLayoutMode(availableWidthPx = 450, requiredWidthsPx = required, gapPx = 9),
+        )
+        assertEquals(
+            MovieActionLayout.SINGLE_ROW,
+            movieActionLayoutMode(availableWidthPx = 438, requiredWidthsPx = required, gapPx = 9),
+        )
+        assertEquals(
+            MovieActionLayout.WATCH_THEN_PAIR,
+            movieActionLayoutMode(availableWidthPx = 320, requiredWidthsPx = required, gapPx = 9),
+        )
+        assertEquals(
+            MovieActionLayout.STACKED,
+            movieActionLayoutMode(availableWidthPx = 250, requiredWidthsPx = required, gapPx = 9),
+        )
+        assertEquals(
+            MovieActionLayout.STACKED,
+            movieActionLayoutMode(availableWidthPx = 0, requiredWidthsPx = required, gapPx = 9),
+        )
     }
 }

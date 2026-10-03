@@ -5255,6 +5255,7 @@ private fun ReorderableCatalogCategoryBar(
                     selected = selectedId == FAVORITES_CATEGORY_ID,
                     metrics = movieStripMetrics,
                     simpleIcon = Icons.Rounded.Star,
+                    simpleIconGap = 6.dp,
                     onClick = { onSelect(FAVORITES_CATEGORY_ID) },
                     modifier = Modifier
                         .categoryChipFocus(
@@ -5283,6 +5284,7 @@ private fun ReorderableCatalogCategoryBar(
                     selected = selectedId == CONTINUE_CATEGORY_ID,
                     metrics = movieStripMetrics,
                     simpleIcon = Icons.Outlined.Schedule,
+                    simpleIconGap = 6.dp,
                     onClick = { onSelect(CONTINUE_CATEGORY_ID) },
                     modifier = Modifier
                         .categoryChipFocus(
@@ -5611,6 +5613,7 @@ private fun MovieCategoryChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     simpleIcon: ImageVector? = null,
+    simpleIconGap: Dp? = null,
     framedBrandBadge: Boolean = false,
     moving: Boolean = false,
     onLongClick: (() -> Unit)? = null,
@@ -5618,6 +5621,9 @@ private fun MovieCategoryChip(
     onMoveRight: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
+    // Movie-only narrow wording-to-glyph gap: the simple glyph fills its box so the row gap is the
+    // whole visual space. Server-badge chips and Live keep the shared 7dp metric untouched.
+    val rowGap = simpleIconGap ?: metrics.iconGap
     var focused by remember { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     var selectPressed by remember { mutableStateOf(false) }
@@ -5706,7 +5712,7 @@ private fun MovieCategoryChip(
             .clickable(onClick = onClick, role = Role.Button)
             .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(metrics.iconGap, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(rowGap, Alignment.CenterHorizontally),
     ) {
         if (framedBrandBadge) {
             val badgeShape = RoundedCornerShape(7.dp)
@@ -5729,8 +5735,10 @@ private fun MovieCategoryChip(
             maxLines = 1,
         )
         if (simpleIcon != null) {
+            // The Box matches the glyph so centering cannot add hidden icon-box spacing next to
+            // the wording; the glyph size itself is unchanged.
             Box(
-                modifier = Modifier.size(metrics.iconSize),
+                modifier = Modifier.size(metrics.iconSize - 4.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(

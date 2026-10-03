@@ -34,11 +34,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -195,7 +191,6 @@ fun MovieDetailsProScreen(
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
-    val cancelDownloadRequester = remember(item.id) { FocusRequester() }
     val tabRequesters = remember(item.id) { MovieDetailsTab.entries.associateWith { FocusRequester() } }
     var selectedTab by rememberSaveable(item.id) { mutableStateOf(MovieDetailsTab.STORY) }
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
@@ -291,6 +286,32 @@ fun MovieDetailsProScreen(
                 }
                 else -> false
             }
+        }
+    }
+
+    var showDownloadPanel by remember(item.id) { mutableStateOf(false) }
+    var restoreDownloadFocus by remember(item.id) { mutableStateOf(false) }
+    val closeDownloadPanel: () -> Unit = {
+        showDownloadPanel = false
+        restoreDownloadFocus = true
+    }
+    // Stale panel content (job removed or completed) dismisses without leaving an orphan window.
+    LaunchedEffect(download?.downloadId, download?.status, item.id) {
+        if (showDownloadPanel && (download == null || download.status == OfflineStatus.COMPLETED)) {
+            showDownloadPanel = false
+            restoreDownloadFocus = true
+        }
+    }
+    // Panel dismissal/actions return focus to the same permanent download control; if the control
+    // became disabled (completed), fall back to the adjacent favorite action instead of losing it.
+    LaunchedEffect(showDownloadPanel) {
+        if (!showDownloadPanel && restoreDownloadFocus) {
+            withFrameNanos { }
+            val restored = runCatching { downloadRequester.requestFocus() }.getOrDefault(false)
+            if (!restored) {
+                runCatching { favoriteRequester.requestFocus() }
+            }
+            restoreDownloadFocus = false
         }
     }
 
@@ -404,92 +425,25 @@ fun MovieDetailsProScreen(
                         )
                     }
                     Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 13.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .78f else 1f),
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        FocusButton(
-                            text = if (resumePosition != null) "اكمل المشاهدة" else "ابدا المشاهدة",
-                            onClick = onPlay,
-                            trailingIcon = Icons.Rounded.PlayArrow,
-                            scaleOnFocus = false,
-                            textMaxLines = 1,
-                            onFocused = { heroReturnRequester = playRequester },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = movieActionMinHeightDp(metrics).dp)
-                                .focusRequester(playRequester)
-                                .focusProperties {
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                },
-                        )
-                        FocusButton(
-                            text = "المفضلة",
-                            onClick = onToggleFavorite,
-                            primary = false,
-                            outlined = true,
-                            trailingIcon = if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                            trailingIconTint = colors.gold,
-                            scaleOnFocus = false,
-                            onFocused = { heroReturnRequester = favoriteRequester },
-                            textMaxLines = 1,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = movieActionMinHeightDp(metrics).dp)
-                                .focusRequester(favoriteRequester)
-                                .focusProperties {
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                },
-                        )
-                        FocusButton(
-                            text = movieDownloadActionLabel(download),
-                            onClick = onDownload,
-                            primary = false,
-                            outlined = true,
-                            enabled = download?.status != OfflineStatus.COMPLETED,
-                            trailingIcon = movieDownloadActionIcon(download),
-                            trailingIconTint = colors.gold,
-                            scaleOnFocus = false,
-                            onFocused = { heroReturnRequester = downloadRequester },
-                            textMaxLines = 1,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = movieActionMinHeightDp(metrics).dp)
-                                .focusRequester(downloadRequester)
-                                .focusProperties {
-                                    down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                },
-                        )
-                    }
-                    if (download != null && download.status != OfflineStatus.COMPLETED) {
-                        Spacer(Modifier.height(9.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .78f else 1f),
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Spacer(Modifier.weight(1f))
-                            Spacer(Modifier.weight(1f))
-                            FocusButton(
-                                text = "الغاء التحميل",
-                                onClick = onCancelDownload,
-                                primary = false,
-                                outlined = true,
-                                compact = true,
-                                scaleOnFocus = false,
-                                textMaxLines = 1,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = movieActionMinHeightDp(metrics).dp)
-                                    .focusRequester(cancelDownloadRequester)
-                                    .focusProperties {
-                                        up = downloadRequester
-                                        down = tabRequesters.getValue(MovieDetailsTab.STORY)
-                                    },
-                            )
-                        }
-                    }
+                    MovieDetailsActionsBar(
+                        isTv = isTv,
+                        compactHeight = metrics.compactHeight,
+                        rowFraction = if (metrics.wideLayout) .78f else 1f,
+                        minimumActionHeightDp = movieActionMinHeightDp(metrics),
+                        resumePositionMs = resumePosition,
+                        isFavorite = isFavorite,
+                        download = download,
+                        playRequester = playRequester,
+                        favoriteRequester = favoriteRequester,
+                        downloadRequester = downloadRequester,
+                        upRequester = null,
+                        tabsDownRequester = tabRequesters.getValue(MovieDetailsTab.STORY),
+                        onActionFocused = { heroReturnRequester = it },
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavorite,
+                        onDownload = onDownload,
+                        onOpenDownloadPanel = { showDownloadPanel = true },
+                    )
                 }
 
                 if (isLoading) {
@@ -586,6 +540,22 @@ fun MovieDetailsProScreen(
                 }
             }
         }
+    }
+
+    if (showDownloadPanel && download != null && download.status != OfflineStatus.COMPLETED) {
+        MovieDownloadPanelDialog(
+            download = download,
+            isTv = isTv,
+            onPauseResumeRetry = {
+                onDownload()
+                closeDownloadPanel()
+            },
+            onCancel = {
+                onCancelDownload()
+                closeDownloadPanel()
+            },
+            onDismiss = closeDownloadPanel,
+        )
     }
 }
 
