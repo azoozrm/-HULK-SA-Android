@@ -590,6 +590,16 @@ internal fun movieDownloadStatusCaption(status: OfflineStatus?): String = when (
 internal fun movieDownloadControlIcon(download: OfflineDownload?): ImageVector =
     if (download?.status == OfflineStatus.COMPLETED) Icons.Rounded.Check else Icons.Rounded.Download
 
+/**
+ * Permanent-control caption: the truthful state wording plus the real percentage inline when the
+ * total is known. Unknown totals never append a fabricated 0%.
+ */
+internal fun movieDownloadControlCaption(download: OfflineDownload?): String =
+    listOfNotNull(
+        movieDownloadStatusCaption(download?.status),
+        movieDownloadPercentLabel(download),
+    ).joinToString(" ")
+
 /** Known-total percentage only; unknown totals never fabricate a 0%. */
 internal fun movieDownloadPercentLabel(download: OfflineDownload?): String? {
     if (download == null || download.totalBytes <= 0L) return null
@@ -680,6 +690,14 @@ internal fun movieDownloadPanelActionIcon(kind: MovieDownloadPanelActionKind): I
 
 internal enum class MovieActionLayout { SINGLE_ROW, WATCH_THEN_PAIR, STACKED }
 
+/**
+ * Compact action height policy shared by both Movie Details implementations: TV and normal-height
+ * Details use 46dp, compact-height Details uses 42dp. Content taller than the floor (large font
+ * scales or longer captions) still grows the row naturally.
+ */
+internal fun movieActionHeightDp(isTv: Boolean, compactHeight: Boolean): Int =
+    if (!isTv && compactHeight) 42 else 46
+
 internal fun movieActionRequiredWidthPx(
     captionWidthPx: Int,
     iconSizePx: Int,
@@ -729,7 +747,6 @@ private val MovieActionCaptionBuffer = 6.dp
 @Composable
 internal fun MovieDetailsActionsBar(
     isTv: Boolean,
-    compactHeight: Boolean,
     rowFraction: Float,
     minimumActionHeightDp: Int,
     resumePositionMs: Long?,
@@ -756,15 +773,24 @@ internal fun MovieDetailsActionsBar(
     val horizontalPaddingPx = with(density) { MovieActionHorizontalPadding.roundToPx() }
     val iconGapPx = with(density) { MovieActionIconGap.roundToPx() }
     val bufferPx = with(density) { MovieActionCaptionBuffer.roundToPx() }
-    // The download caption changes with the job state; measuring the longest status keeps the
-    // chosen arrangement stable across state changes at a fixed width/font scale.
+    // The download caption changes with the job state and can carry an inline percentage.
+    // Measuring the longest status with a full "100%" suffix keeps the chosen arrangement stable
+    // across every state and guarantees the complete inline caption always fits.
     val reservedDownloadCaptionWidthPx = remember(textMeasurer) {
         OfflineStatus.entries.maxOf { status ->
-            textMeasurer.measure(
-                text = AnnotatedString(movieDownloadStatusCaption(status)),
-                style = MovieActionCaptionStyle,
-                maxLines = 1,
-            ).size.width
+            val stateLabel = movieDownloadStatusCaption(status)
+            maxOf(
+                textMeasurer.measure(
+                    text = AnnotatedString(stateLabel),
+                    style = MovieActionCaptionStyle,
+                    maxLines = 1,
+                ).size.width,
+                textMeasurer.measure(
+                    text = AnnotatedString("$stateLabel 100%"),
+                    style = MovieActionCaptionStyle,
+                    maxLines = 1,
+                ).size.width,
+            )
         }
     }
     val downloadRequiredWidthPx = movieActionRequiredWidthPx(
@@ -862,7 +888,6 @@ internal fun MovieDetailsActionsBar(
         val downloadAction: @Composable (Modifier) -> Unit = { actionModifier ->
             MovieDownloadActionControl(
                 download = download,
-                compactTelemetry = compactHeight,
                 onClick = if (download == null) onDownload else onOpenDownloadPanel,
                 onFocused = { onActionFocused(downloadRequester) },
                 modifier = actionModifier
@@ -870,51 +895,54 @@ internal fun MovieDetailsActionsBar(
                     .then(focusWiring(2)),
             )
         }
+        val actionMinHeight = Modifier.heightIn(min = minimumActionHeightDp.dp)
         when (layoutMode) {
             MovieActionLayout.SINGLE_ROW -> Row(
                 modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(MovieActionRowGap),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                watchAction(Modifier.weight(1f).fillMaxHeight())
-                favoriteAction(Modifier.weight(1f).fillMaxHeight())
-                downloadAction(Modifier.weight(1f).fillMaxHeight())
+                watchAction(Modifier.weight(1f).then(actionMinHeight).fillMaxHeight())
+                favoriteAction(Modifier.weight(1f).then(actionMinHeight).fillMaxHeight())
+                downloadAction(Modifier.weight(1f).then(actionMinHeight).fillMaxHeight())
             }
             MovieActionLayout.WATCH_THEN_PAIR -> Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(MovieActionRowGap),
             ) {
-                watchAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
+                watchAction(Modifier.fillMaxWidth().then(actionMinHeight))
                 Row(
                     modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                     horizontalArrangement = Arrangement.spacedBy(MovieActionRowGap),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    favoriteAction(Modifier.weight(1f).fillMaxHeight())
-                    downloadAction(Modifier.weight(1f).fillMaxHeight())
+                    favoriteAction(Modifier.weight(1f).then(actionMinHeight).fillMaxHeight())
+                    downloadAction(Modifier.weight(1f).then(actionMinHeight).fillMaxHeight())
                 }
             }
             MovieActionLayout.STACKED -> Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(MovieActionRowGap),
             ) {
-                watchAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
-                favoriteAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
-                downloadAction(Modifier.fillMaxWidth().heightIn(min = minimumActionHeightDp.dp))
+                watchAction(Modifier.fillMaxWidth().then(actionMinHeight))
+                favoriteAction(Modifier.fillMaxWidth().then(actionMinHeight))
+                downloadAction(Modifier.fillMaxWidth().then(actionMinHeight))
             }
         }
     }
 }
 
 /**
- * The single permanent Movie download control. Shows the truthful state caption, the gold status
- * glyph, reserved compact telemetry and a thin progress indicator. A normal click starts a new
- * download or opens the management panel for an existing job; it never mutates the job itself.
+ * The single permanent Movie download control. Shows the truthful state caption and the gold
+ * status glyph as one vertically centered row; while a known total exists the real percentage is
+ * inline with that caption. A thin progress indicator is overlaid on the button's bottom padding
+ * so it never adds layout height or moves the centered caption. Speed, byte counts and remaining
+ * time live only in the on-demand management dialog. A normal click starts a new download or
+ * opens that dialog for an existing job; opening never mutates the job.
  */
 @Composable
 private fun MovieDownloadActionControl(
     download: OfflineDownload?,
-    compactTelemetry: Boolean,
     onClick: () -> Unit,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
@@ -925,24 +953,14 @@ private fun MovieDownloadActionControl(
     val enabled = download?.status != OfflineStatus.COMPLETED
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val shape = RoundedCornerShape(12.dp)
-    val caption = movieDownloadStatusCaption(download?.status)
-    val percent = movieDownloadPercentLabel(download)
-    val speed = if (download != null && movieDownloadShowsSpeed(download.status)) {
-        movieDownloadSpeedLabel(download.bytesPerSecond)
-    } else {
-        null
-    }
-    val telemetry = when {
-        download == null -> ""
-        percent != null -> listOfNotNull(percent, speed).joinToString("   ")
-        download.bytesDownloaded > 0L -> movieDownloadSizeLabel(download.bytesDownloaded)
-        else -> ""
-    }
+    val caption = movieDownloadControlCaption(download)
     val active = download?.status in setOf(
         OfflineStatus.QUEUED,
         OfflineStatus.CHECKING,
         OfflineStatus.DOWNLOADING,
     )
+    val progress = if (download != null && download.totalBytes > 0L) download.progress else null
+    val indeterminate = download != null && download.totalBytes <= 0L && active
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -968,46 +986,38 @@ private fun MovieDownloadActionControl(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(MovieActionIconGap),
-            ) {
-                Text(
-                    text = caption,
-                    color = colors.text,
-                    fontSize = 13.sp,
-                    lineHeight = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-                // The icon is the last child, so in RTL it renders physically LEFT of the wording.
-                Icon(
-                    imageVector = movieDownloadControlIcon(download),
-                    contentDescription = null,
-                    tint = colors.gold,
-                    modifier = Modifier.size(MovieActionIconSize),
-                )
-            }
-            Spacer(Modifier.height(2.dp))
-            // Reserved telemetry line: an empty-space line keeps the control height stable across
-            // every state, including the no-job state, so starting a download cannot reflow.
-            MovieNumericText(
-                text = telemetry.ifEmpty { " " },
-                color = colors.textMuted,
-                fontSizeSp = if (compactTelemetry) 9 else 10,
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MovieActionIconGap),
+        ) {
+            Text(
+                text = caption,
+                color = colors.text,
+                fontSize = 13.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
             )
-            Spacer(Modifier.height(3.dp))
+            // The icon is the last child, so in RTL it renders physically LEFT of the wording.
+            Icon(
+                imageVector = movieDownloadControlIcon(download),
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(MovieActionIconSize),
+            )
+        }
+        if (progress != null || indeterminate) {
             MovieDownloadProgressTrack(
-                progress = if (download != null && download.totalBytes > 0L) download.progress else null,
-                indeterminate = download != null && download.totalBytes <= 0L && active,
-                // The no-job state reserves the same track space but draws no remainder line.
-                showRemainder = download != null,
-                height = if (adaptiveUi.isTelevision) 4.dp else 3.dp,
-                modifier = Modifier.fillMaxWidth(.86f),
+                progress = progress,
+                indeterminate = indeterminate,
+                height = 3.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, bottom = 5.dp)
+                    .fillMaxWidth(),
             )
         }
     }
@@ -1101,8 +1111,8 @@ private fun IndeterminateDownloadSliver(height: Dp) {
 
 /**
  * Bounded on-demand host for [MovieDownloadPanel]. Uses the established app dialog pattern: Back
- * and outside tap dismiss through Dialog, content stays inside safe bounds, and on TV the compact
- * panel anchors to the physical top-left next to the action area; phones get a centered modal.
+ * and outside tap dismiss through Dialog, content stays inside the safe bounds, and the compact
+ * panel is centered both horizontally and vertically on TV and mobile alike.
  */
 @Composable
 internal fun MovieDownloadPanelDialog(
@@ -1121,9 +1131,7 @@ internal fun MovieDownloadPanelDialog(
                 .fillMaxSize()
                 .safeDrawingPadding()
                 .padding(horizontal = 20.dp, vertical = 12.dp),
-            // Under the app's RTL direction TopEnd is the physical top-left, matching the
-            // reference anchor next to the (physically left) download action.
-            contentAlignment = if (isTv) Alignment.TopEnd else Alignment.Center,
+            contentAlignment = Alignment.Center,
         ) {
             val panelWidth = if (isTv) {
                 (maxWidth * .40f).coerceIn(320.dp, 430.dp)

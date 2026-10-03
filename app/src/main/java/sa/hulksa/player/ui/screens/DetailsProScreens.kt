@@ -427,9 +427,11 @@ fun MovieDetailsProScreen(
                     Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 13.dp))
                     MovieDetailsActionsBar(
                         isTv = isTv,
-                        compactHeight = metrics.compactHeight,
                         rowFraction = if (metrics.wideLayout) .78f else 1f,
-                        minimumActionHeightDp = movieActionMinHeightDp(metrics),
+                        minimumActionHeightDp = movieActionHeightDp(
+                            isTv = isTv,
+                            compactHeight = metrics.compactHeight,
+                        ),
                         resumePositionMs = resumePosition,
                         isFavorite = isFavorite,
                         download = download,
@@ -558,9 +560,6 @@ fun MovieDetailsProScreen(
         )
     }
 }
-
-private fun movieActionMinHeightDp(metrics: DetailsProMetrics): Int =
-    if (metrics.compactHeight) 42 else 46
 
 internal fun detailsProDurationLabel(durationMs: Long?): String? {
     val totalMinutes = durationMs?.takeIf { it > 0L }?.div(60_000L) ?: return null

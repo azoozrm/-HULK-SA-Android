@@ -471,9 +471,8 @@ private fun MovieDetailsProTvPolished(
                     Spacer(Modifier.height(13.dp))
                     MovieDetailsActionsBar(
                         isTv = true,
-                        compactHeight = false,
                         rowFraction = .72f,
-                        minimumActionHeightDp = 46,
+                        minimumActionHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
                         resumePositionMs = if (progress != null && historyEntry != null) {
                             historyEntry.positionMs
                         } else {

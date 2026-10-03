@@ -424,6 +424,31 @@ class MoviesCorrectionPolicyTest {
     }
 
     @Test
+    fun movieActionHeightFollowsTheCompactPolicy() {
+        assertEquals(46, movieActionHeightDp(isTv = true, compactHeight = true))
+        assertEquals(46, movieActionHeightDp(isTv = true, compactHeight = false))
+        assertEquals(42, movieActionHeightDp(isTv = false, compactHeight = true))
+        assertEquals(46, movieActionHeightDp(isTv = false, compactHeight = false))
+    }
+
+    @Test
+    fun movieDownloadControlCaptionShowsOnlyRealInlinePercentage() {
+        assertEquals("تحميل الفلم", movieDownloadControlCaption(null))
+        val downloading = download(OfflineStatus.DOWNLOADING).copy(bytesDownloaded = 42L, totalBytes = 100L)
+        assertEquals("جاري التحميل 42%", movieDownloadControlCaption(downloading))
+        assertEquals(
+            "جاري التحميل",
+            movieDownloadControlCaption(downloading.copy(totalBytes = -1L)),
+        )
+        assertEquals(
+            "استئناف التحميل 50%",
+            movieDownloadControlCaption(
+                downloading.copy(status = OfflineStatus.PAUSED, bytesDownloaded = 50L),
+            ),
+        )
+    }
+
+    @Test
     fun movieActionLayoutAllocatesFullCaptionsByMeasuredWidth() {
         assertEquals(
             147,
