@@ -1,5 +1,7 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -251,9 +254,21 @@ internal fun movieCompactArtworkHeightPx(
     return (usableHeightPx - footerHeightPx).coerceAtLeast(minArtworkHeightPx).takeIf { it < cellWidthPx }
 }
 
+/**
+ * No-op framework relocation spec for the Movies TV grid: the D-pad transaction below is the sole
+ * vertical scroll owner, so focus grants can never move the viewport on their own (the Downloads
+ * grid uses the same narrowly scoped override).
+ */
+internal fun moviesNoBringIntoViewSpec(): BringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(
+        offset: Float,
+        size: Float,
+        containerSize: Float,
+    ): Float = 0f
+}
+
 internal class TvCatalogFocusMoveState {
     var job: Job? = null
-    var revealJob: Job? = null
     private var pendingTargetIndex: Int? = null
 
     fun baseIndex(currentIndex: Int): Int = pendingTargetIndex ?: currentIndex
@@ -315,12 +330,14 @@ internal fun TvCatalogGrid(
     val focusViewportInsetPx = with(density) { focusViewportInset.roundToPx() }
     val focusSafeBottomInsetPx = with(density) { focusSafeBottomInset.roundToPx() }
     val focusMoveState = remember(contentKeys, destination) { TvCatalogFocusMoveState() }
+    // The Movies TV D-pad transaction is the sole vertical scroll owner: framework BringIntoView
+    // relocation must not move the viewport after focus (Downloads uses the same pattern).
+    val inheritedBringIntoViewSpec = LocalBringIntoViewSpec.current
+    val moviesBringIntoViewSpec = remember { moviesNoBringIntoViewSpec() }
+    val gridBringIntoViewSpec = if (movieCards) moviesBringIntoViewSpec else inheritedBringIntoViewSpec
     var focusedIndex by remember(contentKeys) { mutableIntStateOf(-1) }
     DisposableEffect(focusMoveState) {
-        onDispose {
-            focusMoveState.job?.cancel()
-            focusMoveState.revealJob?.cancel()
-        }
+        onDispose { focusMoveState.job?.cancel() }
     }
 
     /** Null when the item is not attached; otherwise the unified-usable-bounds correction. */
@@ -353,8 +370,9 @@ internal fun TvCatalogGrid(
         ensureFullyVisible: Boolean,
     ) {
         val requester = focusRequesters.getOrNull(index) ?: return
-        // Offscreen adjacent targets first get a bounded one-row reveal (nothing can be focused
-        // yet). Attached targets take focus immediately so the border never waits for a scroll.
+        // Offscreen targets first get a bounded one-row reveal (nothing can be focused yet); the
+        // attachment below comes from real layout, never from a timer. Once attached, apply the
+        // one measured correction and grant focus immediately without waiting for an animation.
         if (currentIndexCorrection(index) == null) {
             repeat(2) {
                 val visible = gridState.layoutInfo.visibleItemsInfo
@@ -370,8 +388,10 @@ internal fun TvCatalogGrid(
                 }
             }
         }
-        if (ensureFullyVisible && currentIndexCorrection(index)?.let { it != 0 } == true) {
-            ensureIndexFullyVisible(index)
+        if (ensureFullyVisible) {
+            currentIndexCorrection(index)?.let { correction ->
+                if (correction != 0) gridState.scrollBy(correction.toFloat())
+            }
         }
         runCatching { requester.requestFocus() }
     }
@@ -389,10 +409,6 @@ internal fun TvCatalogGrid(
                 .first { it }
             ensureIndexFullyVisible(targetIndex)
             runCatching { focusRequesters[targetIndex].requestFocus() }
-            // Entry/return restoration uses the same single early correction so a framework
-            // relocation cannot leave the restored card clipped.
-            withFrameNanos { }
-            ensureIndexFullyVisible(targetIndex)
         }
     }
 
@@ -442,6 +458,7 @@ internal fun TvCatalogGrid(
             }
         }
 
+        CompositionLocalProvider(LocalBringIntoViewSpec provides gridBringIntoViewSpec) {
         LazyVerticalGrid(
             state = gridState,
             columns = if (movieCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth),
@@ -506,7 +523,8 @@ internal fun TvCatalogGrid(
                             itemTop = targetInfo?.offset?.y,
                             itemBottom = targetInfo?.let { it.offset.y + it.size.height },
                             viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
-                            viewportEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx,
+                            viewportEnd = layoutInfo.viewportEndOffset -
+                                focusSafeBottomInsetPx - focusViewportInsetPx,
                             extraMargin = if (movieCards) focusViewportInsetPx else 0,
                         )
                         if (focusPath == TvCatalogFocusPath.INVALID) {
@@ -518,8 +536,6 @@ internal fun TvCatalogGrid(
 
                         focusMoveState.job?.cancel()
                         focusMoveState.job = null
-                        // Obsolete settled corrections and reveals must not fight the new move.
-                        focusMoveState.revealJob?.cancel()
                         val focusedDirectly = if (focusPath == TvCatalogFocusPath.DIRECT) {
                             runCatching { requester.requestFocus() }.getOrDefault(false)
                         } else {
@@ -543,20 +559,6 @@ internal fun TvCatalogGrid(
                     focusMoveState.complete(index)
                     focusedIndex = index
                     navigationMemory.save(destination, key, index)
-                    if (movieCards) {
-                        // One post-focus correction for every path (direct and assisted). The
-                        // framework may relocate the newly focused card first; wait for that real
-                        // scroll to settle, then apply exactly one correction with the unified
-                        // usable bounds so the two owners never move the viewport at once.
-                        focusMoveState.revealJob?.cancel()
-                        focusMoveState.revealJob = focusScope.launch {
-                            withFrameNanos { }
-                            if (gridState.isScrollInProgress) {
-                                snapshotFlow { gridState.isScrollInProgress }.first { !it }
-                            }
-                            ensureIndexFullyVisible(index)
-                        }
-                    }
                 }
 
                 if (destination == MainDestination.SERIES) {
@@ -592,6 +594,7 @@ internal fun TvCatalogGrid(
                     )
                 }
             }
+        }
         }
     }
 }

@@ -285,6 +285,85 @@ class MoviesCorrectionPolicyTest {
     }
 
     @Test
+    fun focusPathAndRevealUseIdenticalUsableBounds() {
+        // Same usable window for every scenario: start 100, end 400, Movie margin 20.
+        data class Scenario(val top: Int, val bottom: Int, val expectedDirect: Boolean)
+        val scenarios = listOf(
+            Scenario(240, 370, true),
+            Scenario(110, 380, true),
+            Scenario(260, 420, false),
+            Scenario(60, 200, false),
+            Scenario(395, 560, false),
+        )
+        scenarios.forEach { scenario ->
+            val path = tvCatalogFocusPath(
+                targetIndex = 4,
+                itemCount = 12,
+                itemTop = scenario.top,
+                itemBottom = scenario.bottom,
+                viewportStart = 100,
+                viewportEnd = 400,
+                extraMargin = 20,
+            )
+            val correction = focusedCardScrollCorrection(
+                itemTop = scenario.top,
+                itemBottom = scenario.bottom,
+                usableStart = 100,
+                usableEnd = 400,
+                marginPx = 20,
+            )
+            assertEquals(
+                "path and correction disagree for " + scenario,
+                if (scenario.expectedDirect) TvCatalogFocusPath.DIRECT else TvCatalogFocusPath.SCROLL_ASSISTED,
+                path,
+            )
+            assertEquals(
+                "direct decision must mean zero scroll for " + scenario,
+                scenario.expectedDirect,
+                correction == 0,
+            )
+        }
+    }
+
+    @Test
+    fun fullyVisibleHorizontalTargetNeedsNoVerticalScroll() {
+        // A card inside the usable bounds (with Movie margin) is DIRECT with a zero correction:
+        // a LEFT/RIGHT move can only transfer focus.
+        assertEquals(
+            TvCatalogFocusPath.DIRECT,
+            tvCatalogFocusPath(6, 12, 130, 260, 100, 400, extraMargin = 20),
+        )
+        assertEquals(
+            0,
+            focusedCardScrollCorrection(130, 260, 100, 400, 20),
+        )
+    }
+
+    @Test
+    fun newerFocusTargetsReplaceStalePendingTargets() {
+        val state = TvCatalogFocusMoveState()
+        assertEquals(3, state.baseIndex(3))
+        state.begin(7)
+        assertEquals(7, state.baseIndex(3))
+        assertEquals(7, state.pendingTargetIndex())
+        // A late completion for an older target must not clear the newer pending target.
+        state.complete(5)
+        assertEquals(7, state.pendingTargetIndex())
+        state.begin(11)
+        assertEquals(11, state.pendingTargetIndex())
+        state.complete(11)
+        assertNull(state.pendingTargetIndex())
+        assertEquals(9, state.baseIndex(9))
+    }
+
+    @Test
+    fun moviesRelocationSpecNeverScrollsOnFocus() {
+        val spec = moviesNoBringIntoViewSpec()
+        assertEquals(0f, spec.calculateScrollDistance(offset = 800f, size = 400f, containerSize = 700f), 0.001f)
+        assertEquals(0f, spec.calculateScrollDistance(offset = -50f, size = 120f, containerSize = 700f), 0.001f)
+    }
+
+    @Test
     fun movieDetailsTabIvorySupersedesGoldWithoutChangingGlobalTokens() {
         val colors = HulkColors()
         assertEquals(Color(0xFFFFF9EB), colors.text)
