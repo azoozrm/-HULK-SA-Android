@@ -24,6 +24,27 @@ class VodPlayerControlsPolicyTest {
     )
 
     @Test
+    fun compactStripStaysSingleRowOnlyWhenMeasuredCaptionsFit() {
+        assertFalse(vodCompactSingleRow(approvedSingleRow = false, availableWidthPx = 2_000, requiredWidthPx = 100))
+        assertTrue(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 2_000, requiredWidthPx = 100))
+        assertFalse(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 100, requiredWidthPx = 101))
+        assertTrue(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 100, requiredWidthPx = 100))
+        assertFalse(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 100, requiredWidthPx = 0))
+    }
+
+    @Test
+    fun moviePanelVerticalFocusCycleWrapsAndStaysClosed() {
+        // Node 0 is the header; nodes 1..5 are the five More rows.
+        assertEquals(1, vodPanelVerticalNeighbor(0, 6, 1))
+        assertEquals(5, vodPanelVerticalNeighbor(0, 6, -1))
+        assertEquals(0, vodPanelVerticalNeighbor(5, 6, 1))
+        assertEquals(0, vodPanelVerticalNeighbor(1, 6, -1))
+        assertEquals(4, vodPanelVerticalNeighbor(5, 6, -1))
+        assertEquals(3, vodPanelVerticalNeighbor(3, 6, 0))
+        assertEquals(0, vodPanelVerticalNeighbor(99, 0, 1))
+    }
+
+    @Test
     fun morePanelChildReturnsToMenuAndMenuCloses() {
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SPEED))
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.PICTURE_SIZE))

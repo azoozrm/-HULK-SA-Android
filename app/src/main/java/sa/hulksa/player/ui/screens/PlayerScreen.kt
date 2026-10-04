@@ -66,6 +66,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -73,8 +74,10 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FitScreen
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -524,6 +527,7 @@ fun PlayerScreen(
     val primaryFocus = remember { FocusRequester() }
     val moreTriggerFocus = remember { FocusRequester() }
     val seekBarFocus = remember { FocusRequester() }
+    val topBarBackFocus = remember { FocusRequester() }
     val resumeFocus = remember { FocusRequester() }
     val resumeRestartFocus = remember { FocusRequester() }
     val resumeBackFocus = remember { FocusRequester() }
@@ -1471,6 +1475,7 @@ fun PlayerScreen(
                 if (finalError != null || resumePromptVisible || movieModalActive) return@detectTapGestures
                 when {
                     liveMorePanel != null -> closeLiveMorePanelToTrigger()
+                    isMovieVod && vodMorePanel != null -> closeVodMorePanelToTrigger()
                     controlsLocked -> { unlockVisible = true; controlsVisible = true }
                     else -> controlsVisible = !controlsVisible
                 }
@@ -1671,6 +1676,8 @@ fun PlayerScreen(
                 speed = playbackSpeed,
                 channel = currentChannel.takeIf { request.isLive },
                 onBack = ::saveAndBack,
+                backFocusRequester = topBarBackFocus.takeIf { isMovieVod },
+                backDownFocus = seekBarFocus.takeIf { isMovieVod },
             )
         }
 
@@ -1800,31 +1807,62 @@ fun PlayerScreen(
                             bottom = liveControlsLayout.outerBottomPaddingDp.dp,
                         ),
                     strip = {
-                        VodControlStrip(
-                            isPlaying = isPlaying,
-                            positionMs = currentPositionMs,
-                            durationMs = durationMs,
-                            bufferedPercent = bufferedPercent,
-                            seekPreviewMs = vodEffectivePreviewMs,
-                            seekPreviewFrame = vodPreviewFrame,
-                            favorite = vodFavorite.favorite,
-                            favoriteEnabled = vodFavorite.enabled,
-                            moreOpen = vodMorePanel != null,
-                            onMore = ::openVodMorePanel,
-                            onRewind = { seekBy(-seekStepMs) },
-                            onForward = { seekBy(seekStepMs) },
-                            onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
-                            onFavorite = { vodItem?.let(onToggleFavorite) },
-                            onPreview = ::previewVodSeek,
-                            onCommit = ::commitVodSeek,
-                            onPreviewCancel = ::cancelVodSeekPreview,
-                            primaryFocus = primaryFocus,
-                            moreTriggerFocus = moreTriggerFocus,
-                            seekBarFocusRequester = seekBarFocus,
-                            remoteSeekActive = focusTimelineOnReveal,
-                            seekStepMs = seekStepMs,
-                            layoutMetrics = liveControlsLayout,
-                        )
+                        if (isMovieVod) {
+                            VodCompactControlStrip(
+                                isPlaying = isPlaying,
+                                positionMs = currentPositionMs,
+                                durationMs = durationMs,
+                                bufferedPercent = bufferedPercent,
+                                seekPreviewMs = vodEffectivePreviewMs,
+                                seekPreviewFrame = vodPreviewFrame,
+                                favorite = vodFavorite.favorite,
+                                favoriteEnabled = vodFavorite.enabled,
+                                moreOpen = vodMorePanel != null,
+                                inputMuted = vodMorePanel != null,
+                                onMore = ::openVodMorePanel,
+                                onRewind = { seekBy(-seekStepMs) },
+                                onForward = { seekBy(seekStepMs) },
+                                onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
+                                onFavorite = { vodItem?.let(onToggleFavorite) },
+                                onPreview = ::previewVodSeek,
+                                onCommit = ::commitVodSeek,
+                                onPreviewCancel = ::cancelVodSeekPreview,
+                                primaryFocus = primaryFocus,
+                                moreTriggerFocus = moreTriggerFocus,
+                                seekBarFocusRequester = seekBarFocus,
+                                remoteSeekActive = focusTimelineOnReveal,
+                                seekStepMs = seekStepMs,
+                                layoutMetrics = liveControlsLayout,
+                                metrics = liveControlMetrics,
+                                topBarBackFocus = topBarBackFocus,
+                            )
+                        } else {
+                            VodControlStrip(
+                                isPlaying = isPlaying,
+                                positionMs = currentPositionMs,
+                                durationMs = durationMs,
+                                bufferedPercent = bufferedPercent,
+                                seekPreviewMs = vodEffectivePreviewMs,
+                                seekPreviewFrame = vodPreviewFrame,
+                                favorite = vodFavorite.favorite,
+                                favoriteEnabled = vodFavorite.enabled,
+                                moreOpen = vodMorePanel != null,
+                                onMore = ::openVodMorePanel,
+                                onRewind = { seekBy(-seekStepMs) },
+                                onForward = { seekBy(seekStepMs) },
+                                onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
+                                onFavorite = { vodItem?.let(onToggleFavorite) },
+                                onPreview = ::previewVodSeek,
+                                onCommit = ::commitVodSeek,
+                                onPreviewCancel = ::cancelVodSeekPreview,
+                                primaryFocus = primaryFocus,
+                                moreTriggerFocus = moreTriggerFocus,
+                                seekBarFocusRequester = seekBarFocus,
+                                remoteSeekActive = focusTimelineOnReveal,
+                                seekStepMs = seekStepMs,
+                                layoutMetrics = liveControlsLayout,
+                            )
+                        }
                     },
                     panel = { panelMaxHeight, panelModifier ->
                         vodMorePanel?.let { panelView ->
@@ -1836,6 +1874,7 @@ fun PlayerScreen(
                                     menuFocusRow = vodMoreMenuFocusRow,
                                     focusTick = vodPanelFocusTick,
                                     panelWidthDp = liveControlMetrics.morePanelWidthDp,
+                                    movieStyle = isMovieVod,
                                     onBackToMenu = ::handleVodMoreBack,
                                     onOpenGoToTime = {
                                         vodMoreMenuFocusRow = VodMoreRow.GO_TO_TIME
@@ -2172,6 +2211,8 @@ private fun PlayerTopBar(
     speed: Float,
     channel: ContentItem?,
     onBack: () -> Unit,
+    backFocusRequester: FocusRequester? = null,
+    backDownFocus: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -2189,7 +2230,27 @@ private fun PlayerTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        FocusButton("رجوع", onBack, primary = false, outlined = true, compact = true)
+        FocusButton(
+            "رجوع",
+            onBack,
+            primary = false,
+            outlined = true,
+            compact = true,
+            modifier = Modifier
+                .then(if (backFocusRequester != null) Modifier.focusRequester(backFocusRequester) else Modifier)
+                .then(
+                    if (backDownFocus != null) {
+                        Modifier.focusProperties {
+                            down = backDownFocus
+                            up = FocusRequester.Cancel
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
+        )
         if (isLive && channel != null) {
             Box(
                 modifier = Modifier
@@ -2481,6 +2542,416 @@ private fun VodControlButton(
             fontWeight = if (emphasis || selected) FontWeight.Black else FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Owner-approved Movie player tools strip.
+ *
+ * Compact Live-inspired organization: a small glyph above a complete caption, fine separators and
+ * compact pale-gold focus hitboxes around the glyph. The five approved tools keep their physical
+ * left-to-right order. One row is used only when the measured complete captions fit; otherwise the
+ * same tools reflow into a bounded two-row arrangement. Captions are never ellipsized or shrunk.
+ *
+ * While the More panel owns input the strip stays visible but every tool and the timeline are
+ * input-muted, so no playback/seek action can fire underneath the open panel.
+ */
+@Composable
+private fun VodCompactControlStrip(
+    isPlaying: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    bufferedPercent: Int,
+    seekPreviewMs: Long?,
+    seekPreviewFrame: Bitmap?,
+    favorite: Boolean,
+    favoriteEnabled: Boolean,
+    moreOpen: Boolean,
+    inputMuted: Boolean,
+    onMore: () -> Unit,
+    onRewind: () -> Unit,
+    onForward: () -> Unit,
+    onPlayPause: () -> Unit,
+    onFavorite: () -> Unit,
+    onPreview: (Long) -> Unit,
+    onCommit: (Long) -> Unit,
+    onPreviewCancel: () -> Unit,
+    primaryFocus: FocusRequester,
+    moreTriggerFocus: FocusRequester,
+    seekBarFocusRequester: FocusRequester,
+    remoteSeekActive: Boolean,
+    seekStepMs: Long,
+    layoutMetrics: LiveControlsLayoutMetrics,
+    metrics: LivePlayerControlsMetrics,
+    topBarBackFocus: FocusRequester? = null,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    val stepSeconds = (seekStepMs / 1_000L).coerceAtLeast(1L)
+    val rewindFocus = remember { FocusRequester() }
+    val forwardFocus = remember { FocusRequester() }
+    val favoriteFocus = remember { FocusRequester() }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.Transparent,
+                        Color.Black.copy(alpha = .48f),
+                        Color.Black.copy(alpha = .84f),
+                    ),
+                ),
+            )
+            .navigationBarsPadding()
+            .padding(
+                start = layoutMetrics.outerHorizontalPaddingDp.dp,
+                end = layoutMetrics.outerHorizontalPaddingDp.dp,
+                top = layoutMetrics.outerTopPaddingDp.dp,
+                bottom = layoutMetrics.outerBottomPaddingDp.dp,
+            ),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val stripWidth = maxWidth
+            val density = LocalDensity.current
+            val textMeasurer = rememberTextMeasurer()
+            val baseTextStyle = LocalTextStyle.current
+            val captionStyle = remember(metrics.captionSizeSp, baseTextStyle) {
+                baseTextStyle.copy(fontSize = metrics.captionSizeSp.sp, fontWeight = FontWeight.Bold)
+            }
+            val requiredSingleRowWidthPx = remember(
+                metrics.utilityIconDp,
+                metrics.captionSizeSp,
+                isPlaying,
+                stepSeconds,
+                density.density,
+                density.fontScale,
+                textMeasurer,
+            ) {
+                val iconBoxPx = with(density) { (metrics.utilityIconDp + 22).dp.roundToPx() }
+                val separatorPx = with(density) { 1.dp.roundToPx() }
+                val breathingPx = with(density) { 10.dp.roundToPx() }
+                val captions = listOf(
+                    "المزيد",
+                    "رجوع $stepSeconds ث",
+                    if (isPlaying) "ايقاف مؤقت" else "تشغيل",
+                    "تقديم $stepSeconds ث",
+                    "المفضلة",
+                )
+                captions.sumOf { caption ->
+                    maxOf(iconBoxPx, textMeasurer.measure(caption, captionStyle).size.width)
+                } + 4 * (separatorPx + breathingPx)
+            }
+            val singleRow = vodCompactSingleRow(
+                approvedSingleRow = metrics.approvedSingleRow,
+                availableWidthPx = with(density) { stripWidth.roundToPx() },
+                requiredWidthPx = requiredSingleRowWidthPx,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xF00C0D0A))
+                    .border(1.dp, colors.gold.copy(alpha = .55f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 8.dp, vertical = 7.dp),
+            ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(formatTime(positionMs), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "-${formatTime((durationMs - positionMs).coerceAtLeast(0L))}",
+                            color = colors.textMuted,
+                            fontSize = 13.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    VodSeekBar(
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        buffered = bufferedPercent / 100f,
+                        previewMs = seekPreviewMs,
+                        onPreview = onPreview,
+                        onCommit = onCommit,
+                        onPreviewCancel = onPreviewCancel,
+                        focusRequester = seekBarFocusRequester,
+                        remoteActive = remoteSeekActive,
+                        seekStepMs = seekStepMs,
+                        inputEnabled = !inputMuted,
+                        upFocus = topBarBackFocus ?: FocusRequester.Cancel,
+                        downFocus = primaryFocus,
+                    )
+                    Spacer(Modifier.height(9.dp))
+                    if (singleRow) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            VodCompactControl(
+                                icon = Icons.Rounded.MoreHoriz,
+                                caption = "المزيد",
+                                onClick = onMore,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = metrics.utilityIconDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                selected = moreOpen,
+                                focusRequester = moreTriggerFocus,
+                                upFocus = seekBarFocusRequester,
+                                downFocus = FocusRequester.Cancel,
+                            )
+                            VodControlSeparator(heightDp = metrics.transportContainerDp)
+                            VodCompactControl(
+                                icon = Icons.Rounded.Replay,
+                                caption = "رجوع $stepSeconds ث",
+                                onClick = onRewind,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = metrics.transportIconDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                focusRequester = rewindFocus,
+                                upFocus = seekBarFocusRequester,
+                                downFocus = FocusRequester.Cancel,
+                            )
+                            VodControlSeparator(heightDp = metrics.transportContainerDp)
+                            VodCompactControl(
+                                icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
+                                onClick = onPlayPause,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = metrics.transportIconDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                focusRequester = primaryFocus,
+                                upFocus = seekBarFocusRequester,
+                                downFocus = FocusRequester.Cancel,
+                            )
+                            VodControlSeparator(heightDp = metrics.transportContainerDp)
+                            VodCompactControl(
+                                icon = Icons.AutoMirrored.Rounded.Redo,
+                                caption = "تقديم $stepSeconds ث",
+                                onClick = onForward,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = metrics.transportIconDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                focusRequester = forwardFocus,
+                                upFocus = seekBarFocusRequester,
+                                downFocus = FocusRequester.Cancel,
+                            )
+                            VodControlSeparator(heightDp = metrics.transportContainerDp)
+                            VodCompactControl(
+                                icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                                caption = "المفضلة",
+                                onClick = onFavorite,
+                                enabled = favoriteEnabled,
+                                inputMuted = inputMuted,
+                                iconSizeDp = metrics.utilityIconDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                selected = favorite,
+                                focusRequester = favoriteFocus,
+                                upFocus = seekBarFocusRequester,
+                                downFocus = FocusRequester.Cancel,
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
+                                VodCompactControl(
+                                    icon = Icons.Rounded.Replay,
+                                    caption = "رجوع $stepSeconds ث",
+                                    onClick = onRewind,
+                                    enabled = true,
+                                    inputMuted = inputMuted,
+                                    iconSizeDp = metrics.transportIconDp,
+                                    captionSizeSp = metrics.captionSizeSp,
+                                    modifier = Modifier.weight(1f),
+                                    focusRequester = rewindFocus,
+                                    upFocus = seekBarFocusRequester,
+                                    downFocus = moreTriggerFocus,
+                                )
+                                VodCompactControl(
+                                    icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
+                                    onClick = onPlayPause,
+                                    enabled = true,
+                                    inputMuted = inputMuted,
+                                    iconSizeDp = metrics.transportIconDp,
+                                    captionSizeSp = metrics.captionSizeSp,
+                                    modifier = Modifier.weight(1f),
+                                    focusRequester = primaryFocus,
+                                    upFocus = seekBarFocusRequester,
+                                    downFocus = favoriteFocus,
+                                )
+                                VodCompactControl(
+                                    icon = Icons.AutoMirrored.Rounded.Redo,
+                                    caption = "تقديم $stepSeconds ث",
+                                    onClick = onForward,
+                                    enabled = true,
+                                    inputMuted = inputMuted,
+                                    iconSizeDp = metrics.transportIconDp,
+                                    captionSizeSp = metrics.captionSizeSp,
+                                    modifier = Modifier.weight(1f),
+                                    focusRequester = forwardFocus,
+                                    upFocus = seekBarFocusRequester,
+                                    downFocus = favoriteFocus,
+                                )
+                            }
+                            Spacer(Modifier.height(metrics.itemSpacingDp.dp))
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(colors.gold.copy(alpha = .22f)),
+                            )
+                            Spacer(Modifier.height(metrics.itemSpacingDp.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
+                                VodCompactControl(
+                                    icon = Icons.Rounded.MoreHoriz,
+                                    caption = "المزيد",
+                                    onClick = onMore,
+                                    enabled = true,
+                                    inputMuted = inputMuted,
+                                    iconSizeDp = metrics.utilityIconDp,
+                                    captionSizeSp = metrics.captionSizeSp,
+                                    modifier = Modifier.weight(1f),
+                                    selected = moreOpen,
+                                    focusRequester = moreTriggerFocus,
+                                    upFocus = rewindFocus,
+                                    downFocus = FocusRequester.Cancel,
+                                )
+                                VodCompactControl(
+                                    icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                                    caption = "المفضلة",
+                                    onClick = onFavorite,
+                                    enabled = favoriteEnabled,
+                                    inputMuted = inputMuted,
+                                    iconSizeDp = metrics.utilityIconDp,
+                                    captionSizeSp = metrics.captionSizeSp,
+                                    modifier = Modifier.weight(1f),
+                                    selected = favorite,
+                                    focusRequester = favoriteFocus,
+                                    upFocus = forwardFocus,
+                                    downFocus = FocusRequester.Cancel,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            seekPreviewMs?.let { target ->
+                val cardWidth = if (maxWidth < 420.dp) 170.dp else 216.dp
+                val cardHeight = cardWidth * 9f / 16f
+                val fraction = vodPreviewCardFraction(target, durationMs)
+                val horizontalRoom = (maxWidth - cardWidth).coerceAtLeast(0.dp)
+                val cardX = (maxWidth * fraction - cardWidth / 2).coerceIn(0.dp, horizontalRoom)
+                VodSeekPreviewCard(
+                    frame = seekPreviewFrame,
+                    positionMs = target,
+                    cardWidth = cardWidth,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = cardX, y = -(cardHeight + 16.dp)),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VodControlSeparator(heightDp: Int) {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(heightDp.dp)
+            .background(LocalHulkColors.current.gold.copy(alpha = .25f)),
+    )
+}
+
+/**
+ * One compact Movie tool: small glyph above a complete caption with a compact pale-gold focus
+ * hitbox around the glyph only. Input muting keeps the normal ivory look but removes focus and
+ * click handling so an open More panel cannot be bypassed.
+ */
+@Composable
+private fun VodCompactControl(
+    icon: ImageVector,
+    caption: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    inputMuted: Boolean,
+    iconSizeDp: Int,
+    captionSizeSp: Int,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    focusRequester: FocusRequester? = null,
+    upFocus: FocusRequester? = null,
+    downFocus: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights && !inputMuted
+    val shape = RoundedCornerShape(14.dp)
+    val tint = when {
+        !enabled -> colors.textMuted.copy(alpha = .45f)
+        showFocused -> colors.goldBright
+        selected -> colors.gold
+        else -> colors.text
+    }
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size((iconSizeDp + 22).dp)
+                .clip(shape)
+                .background(if (showFocused) colors.gold.copy(alpha = .22f) else Color.Transparent)
+                .border(
+                    width = if (showFocused) 2.dp else 0.dp,
+                    color = if (showFocused) colors.goldBright else Color.Transparent,
+                    shape = shape,
+                )
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .onFocusChanged { focused = it.isFocused }
+                .focusProperties {
+                    canFocus = enabled && !inputMuted
+                    upFocus?.let { up = it }
+                    downFocus?.let { down = it }
+                }
+                .clickable(enabled = enabled && !inputMuted, role = Role.Button, onClick = onClick)
+                .semantics(mergeDescendants = true) { contentDescription = caption },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(iconSizeDp.dp),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = caption,
+            color = tint,
+            fontSize = captionSizeSp.sp,
+            fontWeight = if (selected || showFocused) FontWeight.Bold else FontWeight.Medium,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -3130,15 +3601,33 @@ private fun LiveMoreHeaderAction(
     caption: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    focusRequester: FocusRequester? = null,
+    upFocus: FocusRequester? = null,
+    downFocus: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
+    val foreground = if (showFocused) Color(0xFF14120A) else colors.text
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(if (showFocused) colors.gold else Color.Transparent)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(
+                if (upFocus != null || downFocus != null) {
+                    Modifier.focusProperties {
+                        up = upFocus ?: FocusRequester.Cancel
+                        down = downFocus ?: FocusRequester.Cancel
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = caption }
@@ -3148,11 +3637,19 @@ private fun LiveMoreHeaderAction(
     ) {
         Text(
             text = caption,
-            color = if (showFocused) Color(0xFF14120A) else colors.text,
+            color = foreground,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
+        icon?.let {
+            Icon(
+                imageVector = it,
+                contentDescription = null,
+                tint = foreground,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 
@@ -3252,6 +3749,9 @@ private fun VodSeekBar(
     focusRequester: FocusRequester,
     remoteActive: Boolean,
     seekStepMs: Long,
+    inputEnabled: Boolean = true,
+    upFocus: FocusRequester? = null,
+    downFocus: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -3269,35 +3769,42 @@ private fun VodSeekBar(
         Modifier
             .fillMaxWidth()
             .height(if (active) 20.dp else 16.dp)
-            .pointerInput(durationMs) {
-                detectTapGestures { offset ->
-                    if (durationMs > 0L && size.width > 0) {
-                        val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        onCommit((durationMs * fraction).toLong())
-                    }
-                }
-            }
-            .pointerInput(durationMs) {
-                detectHorizontalDragGestures(
-                    onDragStart = { },
-                    onDragCancel = {
-                        dragPreviewMs = null
-                        onPreviewCancel()
-                    },
-                    onDragEnd = {
-                        dragPreviewMs?.let(onCommit)
-                        dragPreviewMs = null
-                    },
-                ) { change, _ ->
-                    change.consume()
-                    if (durationMs > 0L && size.width > 0) {
-                        val fraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        val target = (durationMs * fraction).toLong()
-                        dragPreviewMs = target
-                        onPreview(target)
-                    }
-                }
-            }
+            .then(
+                if (inputEnabled) {
+                    Modifier
+                        .pointerInput(durationMs) {
+                            detectTapGestures { offset ->
+                                if (durationMs > 0L && size.width > 0) {
+                                    val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                    onCommit((durationMs * fraction).toLong())
+                                }
+                            }
+                        }
+                        .pointerInput(durationMs) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { },
+                                onDragCancel = {
+                                    dragPreviewMs = null
+                                    onPreviewCancel()
+                                },
+                                onDragEnd = {
+                                    dragPreviewMs?.let(onCommit)
+                                    dragPreviewMs = null
+                                },
+                            ) { change, _ ->
+                                change.consume()
+                                if (durationMs > 0L && size.width > 0) {
+                                    val fraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                    val target = (durationMs * fraction).toLong()
+                                    dragPreviewMs = target
+                                    onPreview(target)
+                                }
+                            }
+                        }
+                } else {
+                    Modifier
+                },
+            )
             .onFocusChanged { state ->
                 focused = state.isFocused
                 if (state.isFocused) {
@@ -3307,7 +3814,7 @@ private fun VodSeekBar(
                 }
             }
             .onPreviewKeyEvent { event ->
-                if (durationMs <= 0L) return@onPreviewKeyEvent false
+                if (!inputEnabled || durationMs <= 0L) return@onPreviewKeyEvent false
                 val base = previewMs ?: positionMs
                 when (event.nativeKeyEvent.keyCode) {
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT -> when (event.type) {
@@ -3345,7 +3852,17 @@ private fun VodSeekBar(
                 }
             }
             .focusRequester(focusRequester)
-            .focusable(),
+            .then(
+                if (upFocus != null || downFocus != null) {
+                    Modifier.focusProperties {
+                        upFocus?.let { up = it }
+                        downFocus?.let { down = it }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .focusable(inputEnabled),
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(
@@ -3401,6 +3918,7 @@ private fun VodMorePanel(
     onSelectPictureSize: (Int) -> Unit,
     onRestart: () -> Unit,
     onLock: () -> Unit,
+    movieStyle: Boolean = false,
     maxHeight: Dp? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -3412,6 +3930,27 @@ private fun VodMorePanel(
     val restartFocus = remember { FocusRequester() }
     val lockFocus = remember { FocusRequester() }
     val selectedOptionFocus = remember { FocusRequester() }
+    val headerFocus = remember { FocusRequester() }
+    val speedOptionFocus = remember { VOD_PLAYER_SPEED_OPTIONS.map { FocusRequester() } }
+    val pictureOptionFocus = remember { LIVE_PLAYER_RESIZE_LABELS.map { FocusRequester() } }
+
+    // Movie-style panel: node 0 is the header, nodes 1..N are the body rows in visual order. The
+    // vertical focus cycle is closed so boundary arrows cannot leak to the strip or the player.
+    val movieRowFocus = when (view) {
+        VodMorePanelView.MENU -> listOf(goToTimeFocus, speedFocus, pictureFocus, restartFocus, lockFocus)
+        VodMorePanelView.SPEED -> speedOptionFocus
+        VodMorePanelView.PICTURE_SIZE -> pictureOptionFocus
+    }
+    val movieNodes = listOf(headerFocus) + movieRowFocus
+    fun movieUp(nodeIndex: Int): FocusRequester =
+        movieNodes[vodPanelVerticalNeighbor(nodeIndex, movieNodes.size, -1)]
+    fun movieDown(nodeIndex: Int): FocusRequester =
+        movieNodes[vodPanelVerticalNeighbor(nodeIndex, movieNodes.size, 1)]
+    val selectedOptionIndex = when (view) {
+        VodMorePanelView.SPEED -> VOD_PLAYER_SPEED_OPTIONS.indexOfFirst { kotlin.math.abs(it - speed) < 0.001f }
+        VodMorePanelView.PICTURE_SIZE -> pictureSizeIndex
+        VodMorePanelView.MENU -> -1
+    }
 
     LaunchedEffect(view, menuFocusRow, focusTick) {
         val target = when (view) {
@@ -3424,7 +3963,11 @@ private fun VodMorePanel(
             }
             VodMorePanelView.SPEED,
             VodMorePanelView.PICTURE_SIZE,
-            -> selectedOptionFocus
+            -> if (movieStyle) {
+                movieRowFocus.getOrNull(selectedOptionIndex) ?: selectedOptionFocus
+            } else {
+                selectedOptionFocus
+            }
         }
         withFrameNanos { }
         runCatching { target.requestFocus() }
@@ -3457,14 +4000,25 @@ private fun VodMorePanel(
                     VodMorePanelView.SPEED -> "سرعة التشغيل"
                     VodMorePanelView.PICTURE_SIZE -> "حجم الصورة"
                 },
-                color = Color.White,
+                color = if (movieStyle) colors.text else Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            LiveMoreHeaderAction(caption = "رجوع", onClick = onBackToMenu)
+            if (movieStyle) {
+                LiveMoreHeaderAction(
+                    caption = if (view == VodMorePanelView.MENU) "اغلاق" else "رجوع",
+                    onClick = onBackToMenu,
+                    icon = if (view == VodMorePanelView.MENU) Icons.Rounded.Close else null,
+                    focusRequester = headerFocus,
+                    upFocus = movieUp(0),
+                    downFocus = movieDown(0),
+                )
+            } else {
+                LiveMoreHeaderAction(caption = "رجوع", onClick = onBackToMenu)
+            }
         }
         Spacer(Modifier.height(8.dp))
         Column(
@@ -3472,79 +4026,264 @@ private fun VodMorePanel(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
         ) {
-            when (view) {
-                VodMorePanelView.MENU -> {
-                    LiveMoreRow(
-                        text = "الانتقال الى وقت",
-                        icon = Icons.Rounded.Schedule,
-                        onClick = onOpenGoToTime,
-                        focusRequester = goToTimeFocus,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    LiveMoreRow(
-                        text = "السرعة",
-                        icon = Icons.Rounded.Speed,
-                        value = vodSpeedLabel(speed),
-                        showChevron = true,
-                        onClick = onOpenSpeed,
-                        focusRequester = speedFocus,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    LiveMoreRow(
-                        text = "حجم الصورة",
-                        icon = Icons.Rounded.CropFree,
-                        value = livePlayerResizeLabel(pictureSizeIndex),
-                        showChevron = true,
-                        onClick = onOpenPictureSize,
-                        focusRequester = pictureFocus,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    LiveMoreRow(
-                        text = "من البداية",
-                        icon = Icons.Rounded.Replay,
-                        onClick = onRestart,
-                        focusRequester = restartFocus,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    LiveMoreRow(
-                        text = "قفل التحكم",
-                        icon = Icons.Rounded.Lock,
-                        onClick = onLock,
-                        focusRequester = lockFocus,
-                    )
-                }
-                VodMorePanelView.SPEED -> {
-                    VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
-                        if (index > 0) Spacer(Modifier.height(6.dp))
-                        val selected = kotlin.math.abs(option - speed) < 0.001f
-                        LiveMoreRow(
-                            text = vodSpeedLabel(option),
+            if (movieStyle) {
+                when (view) {
+                    VodMorePanelView.MENU -> {
+                        VodMoreRow(
+                            text = "الانتقال الى وقت",
+                            icon = Icons.Rounded.Schedule,
+                            onClick = onOpenGoToTime,
+                            focusRequester = goToTimeFocus,
+                            upFocus = movieUp(1),
+                            downFocus = movieDown(1),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        VodMoreRow(
+                            text = "السرعة",
                             icon = Icons.Rounded.Speed,
-                            selected = selected,
-                            onClick = { onSelectSpeed(option) },
-                            focusRequester = if (selected) selectedOptionFocus else null,
+                            value = vodSpeedLabel(speed),
+                            showChevron = true,
+                            onClick = onOpenSpeed,
+                            focusRequester = speedFocus,
+                            upFocus = movieUp(2),
+                            downFocus = movieDown(2),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        VodMoreRow(
+                            text = "حجم الصورة",
+                            icon = vodPictureSizeGlyph(pictureSizeIndex),
+                            value = livePlayerResizeLabel(pictureSizeIndex),
+                            showChevron = true,
+                            onClick = onOpenPictureSize,
+                            focusRequester = pictureFocus,
+                            upFocus = movieUp(3),
+                            downFocus = movieDown(3),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        VodMoreRow(
+                            text = "من البداية",
+                            icon = Icons.Rounded.Replay,
+                            onClick = onRestart,
+                            focusRequester = restartFocus,
+                            upFocus = movieUp(4),
+                            downFocus = movieDown(4),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        VodMoreRow(
+                            text = "قفل التحكم",
+                            icon = Icons.Rounded.Lock,
+                            onClick = onLock,
+                            focusRequester = lockFocus,
+                            upFocus = movieUp(5),
+                            downFocus = movieDown(5),
                         )
                     }
+                    VodMorePanelView.SPEED -> {
+                        VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
+                            if (index > 0) Spacer(Modifier.height(6.dp))
+                            VodMoreRow(
+                                text = vodSpeedLabel(option),
+                                icon = Icons.Rounded.Speed,
+                                selected = kotlin.math.abs(option - speed) < 0.001f,
+                                reserveCheckSlot = true,
+                                onClick = { onSelectSpeed(option) },
+                                focusRequester = speedOptionFocus[index],
+                                upFocus = movieUp(index + 1),
+                                downFocus = movieDown(index + 1),
+                            )
+                        }
+                    }
+                    VodMorePanelView.PICTURE_SIZE -> {
+                        LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
+                            if (index > 0) Spacer(Modifier.height(6.dp))
+                            VodMoreRow(
+                                text = label,
+                                icon = vodPictureSizeGlyph(index),
+                                selected = index == pictureSizeIndex,
+                                reserveCheckSlot = true,
+                                onClick = { onSelectPictureSize(index) },
+                                focusRequester = pictureOptionFocus[index],
+                                upFocus = movieUp(index + 1),
+                                downFocus = movieDown(index + 1),
+                            )
+                        }
+                    }
                 }
-                VodMorePanelView.PICTURE_SIZE -> {
-                    LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
-                        if (index > 0) Spacer(Modifier.height(6.dp))
+            } else {
+                when (view) {
+                    VodMorePanelView.MENU -> {
                         LiveMoreRow(
-                            text = label,
-                            icon = when (index) {
-                                1 -> Icons.Rounded.ZoomIn
-                                2 -> Icons.Rounded.OpenInFull
-                                else -> Icons.Rounded.CropFree
-                            },
-                            selected = index == pictureSizeIndex,
-                            onClick = { onSelectPictureSize(index) },
-                            focusRequester = if (index == pictureSizeIndex) selectedOptionFocus else null,
+                            text = "الانتقال الى وقت",
+                            icon = Icons.Rounded.Schedule,
+                            onClick = onOpenGoToTime,
+                            focusRequester = goToTimeFocus,
                         )
+                        Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = "السرعة",
+                            icon = Icons.Rounded.Speed,
+                            value = vodSpeedLabel(speed),
+                            showChevron = true,
+                            onClick = onOpenSpeed,
+                            focusRequester = speedFocus,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = "حجم الصورة",
+                            icon = Icons.Rounded.CropFree,
+                            value = livePlayerResizeLabel(pictureSizeIndex),
+                            showChevron = true,
+                            onClick = onOpenPictureSize,
+                            focusRequester = pictureFocus,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = "من البداية",
+                            icon = Icons.Rounded.Replay,
+                            onClick = onRestart,
+                            focusRequester = restartFocus,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        LiveMoreRow(
+                            text = "قفل التحكم",
+                            icon = Icons.Rounded.Lock,
+                            onClick = onLock,
+                            focusRequester = lockFocus,
+                        )
+                    }
+                    VodMorePanelView.SPEED -> {
+                        VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
+                            if (index > 0) Spacer(Modifier.height(6.dp))
+                            val selected = kotlin.math.abs(option - speed) < 0.001f
+                            LiveMoreRow(
+                                text = vodSpeedLabel(option),
+                                icon = Icons.Rounded.Speed,
+                                selected = selected,
+                                onClick = { onSelectSpeed(option) },
+                                focusRequester = if (selected) selectedOptionFocus else null,
+                            )
+                        }
+                    }
+                    VodMorePanelView.PICTURE_SIZE -> {
+                        LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
+                            if (index > 0) Spacer(Modifier.height(6.dp))
+                            LiveMoreRow(
+                                text = label,
+                                icon = when (index) {
+                                    1 -> Icons.Rounded.ZoomIn
+                                    2 -> Icons.Rounded.OpenInFull
+                                    else -> Icons.Rounded.CropFree
+                                },
+                                selected = index == pictureSizeIndex,
+                                onClick = { onSelectPictureSize(index) },
+                                focusRequester = if (index == pictureSizeIndex) selectedOptionFocus else null,
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * Approved Movie More-row anatomy: glyph immediately beside the label on the physical right,
+ * complete label, flexible space and a reserved trailing value/check/chevron area on the physical
+ * left. The explicit up/down targets keep the panel's vertical focus cycle closed.
+ */
+@Composable
+private fun VodMoreRow(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    upFocus: FocusRequester,
+    downFocus: FocusRequester,
+    modifier: Modifier = Modifier,
+    value: String? = null,
+    selected: Boolean = false,
+    showChevron: Boolean = false,
+    reserveCheckSlot: Boolean = false,
+    focusRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(11.dp)
+    val foreground = if (showFocused) Color(0xFF14120A) else colors.text
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                when {
+                    showFocused -> colors.gold
+                    selected -> colors.gold.copy(alpha = .16f)
+                    else -> Color.Transparent
+                },
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                up = upFocus
+                down = downFocus
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = text }
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (showFocused) Color(0xFF14120A) else colors.text,
+            modifier = Modifier.size(19.dp),
+        )
+        Text(
+            text = text,
+            color = foreground,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.weight(1f))
+        value?.let {
+            Text(
+                text = it,
+                color = if (showFocused) Color(0xFF14120A) else colors.textMuted,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+        }
+        if (selected || reserveCheckSlot) {
+            Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                if (selected) {
+                    Icon(
+                        imageVector = Icons.Rounded.Check,
+                        contentDescription = null,
+                        tint = if (showFocused) Color(0xFF14120A) else colors.gold,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+        if (showChevron) {
+            Icon(
+                imageVector = Icons.Rounded.ChevronLeft,
+                contentDescription = null,
+                tint = if (showFocused) Color(0xFF14120A) else colors.textMuted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+private fun vodPictureSizeGlyph(index: Int): ImageVector = when (index) {
+    1 -> Icons.Rounded.ZoomIn
+    2 -> Icons.Rounded.CropFree
+    else -> Icons.Rounded.FitScreen
 }
 
 @Composable
@@ -3689,6 +4428,7 @@ private fun VodGoToTimeDialog(
                         .focusRequester(confirmFocus)
                         .focusProperties {
                             up = hoursFocus
+                            down = FocusRequester.Cancel
                             left = backFocus
                             right = FocusRequester.Cancel
                         },
@@ -3706,6 +4446,7 @@ private fun VodGoToTimeDialog(
                         .focusRequester(backFocus)
                         .focusProperties {
                             up = hoursFocus
+                            down = FocusRequester.Cancel
                             right = confirmFocus
                             left = FocusRequester.Cancel
                         },

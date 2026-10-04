@@ -66,6 +66,36 @@ internal fun vodFavoriteControl(
 }
 
 /**
+ * Movie-only compact strip reflow decision.
+ *
+ * The five approved tools stay on one physical row only when the current metrics allow a single
+ * row and the measured complete captions really fit the available width. Otherwise the caller
+ * reflows into the two-row arrangement; captions are never ellipsized or shrunk to force one row.
+ */
+internal fun vodCompactSingleRow(
+    approvedSingleRow: Boolean,
+    availableWidthPx: Int,
+    requiredWidthPx: Int,
+): Boolean = approvedSingleRow && requiredWidthPx in 1..availableWidthPx
+
+/**
+ * Closed vertical focus cycle for the Movie More panel.
+ *
+ * Node 0 is the panel header and nodes 1..count-1 are the body rows. UP/DOWN wrap around the
+ * closed cycle so boundary arrows stay inside the panel instead of leaking to the strip, the
+ * timeline or the player root.
+ */
+internal fun vodPanelVerticalNeighbor(
+    nodeIndex: Int,
+    nodeCount: Int,
+    delta: Int,
+): Int {
+    if (nodeCount <= 0) return 0
+    if (delta == 0) return nodeIndex.coerceIn(0, nodeCount - 1)
+    return ((nodeIndex + delta) % nodeCount + nodeCount) % nodeCount
+}
+
+/**
  * Signed seek target for the strip buttons and timeline. `null` means the operation is not
  * available (unknown duration); otherwise the target is clamped to the valid media range.
  */
