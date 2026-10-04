@@ -156,6 +156,7 @@ fun MovieDetailsProPolishedScreen(
     onToggleFavorite: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     if (!isTv) {
         MovieDetailsProScreen(
@@ -176,6 +177,7 @@ fun MovieDetailsProPolishedScreen(
             onToggleFavorite = onToggleFavorite,
             onToggleRelatedFavorite = onToggleRelatedFavorite,
             onOpenRelated = onOpenRelated,
+            onRetryDetails = onRetryDetails,
         )
         return
     }
@@ -197,6 +199,7 @@ fun MovieDetailsProPolishedScreen(
         onToggleFavorite = onToggleFavorite,
         onToggleRelatedFavorite = onToggleRelatedFavorite,
         onOpenRelated = onOpenRelated,
+        onRetryDetails = onRetryDetails,
     )
 }
 
@@ -219,6 +222,7 @@ private fun MovieDetailsProTvPolished(
     onToggleFavorite: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptive = LocalAdaptiveUi.current
@@ -236,6 +240,13 @@ private fun MovieDetailsProTvPolished(
         durationMs = historyEntry?.durationMs ?: 0L,
     )
     val movieHeroHeightDp = movieCompactHeroHeightDp(adaptive.screenHeightDp)
+    val detailsErrorRetryRequester = remember(item.id) { FocusRequester() }
+    var detailsErrorRetryFocused by remember(item.id) { mutableStateOf(false) }
+    val detailsOffline = errorMessage != null && !hasUsableNetwork(context)
+    val detailsErrorCopy = moviesDetailsErrorCopy(
+        offline = detailsOffline,
+        serverMessage = errorMessage,
+    )
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
@@ -284,6 +295,13 @@ private fun MovieDetailsProTvPolished(
                     movieDetailsTabsItemIndex(hasError = errorMessage != null),
                 )
             }
+        }
+    }
+    LaunchedEffect(errorMessage) {
+        if (errorMessage == null && detailsErrorRetryFocused) {
+            // Notice removal while its Retry is focused restores the selected tab.
+            withFrameNanos { }
+            runCatching { tabRequesters.getValue(selectedTab).requestFocus() }
         }
     }
     // Usable D-pad reading path for overflowing Story/Information panels: the selected tab keeps
@@ -484,7 +502,11 @@ private fun MovieDetailsProTvPolished(
                         favoriteRequester = favoriteRequester,
                         downloadRequester = downloadRequester,
                         upRequester = backRequester,
-                        tabsDownRequester = tabRequesters.getValue(MovieDetailsTab.STORY),
+                        tabsDownRequester = if (errorMessage != null) {
+                            detailsErrorRetryRequester
+                        } else {
+                            tabRequesters.getValue(MovieDetailsTab.STORY)
+                        },
                         onActionFocused = { heroReturnRequester = it },
                         onPlay = onPlay,
                         onToggleFavorite = onToggleFavorite,
@@ -507,9 +529,22 @@ private fun MovieDetailsProTvPolished(
 
         if (errorMessage != null) {
             item(key = "movie_tv_polished_error") {
-                ErrorNotice(
-                    errorMessage,
-                    Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 10.dp),
+                MoviesErrorNotice(
+                    title = detailsErrorCopy.title,
+                    body = detailsErrorCopy.body,
+                    onRetry = onRetryDetails,
+                    retryRequester = detailsErrorRetryRequester,
+                    onRetryFocusChanged = { detailsErrorRetryFocused = it },
+                    onRetryUp = {
+                        runCatching { heroReturnRequester.requestFocus() }.getOrDefault(false)
+                    },
+                    onRetryDown = {
+                        runCatching { tabRequesters.getValue(selectedTab).requestFocus() }.getOrDefault(false)
+                    },
+                    modifier = Modifier.padding(
+                        horizontal = metrics.horizontalPaddingDp.dp,
+                        vertical = 10.dp,
+                    ),
                 )
             }
         }
@@ -526,7 +561,7 @@ private fun MovieDetailsProTvPolished(
                     selected = selectedTab,
                     onSelect = selectTab,
                     requesters = tabRequesters,
-                    upTarget = heroReturnRequester,
+                    upTarget = if (errorMessage != null) detailsErrorRetryRequester else heroReturnRequester,
                     downTargets = mapOf(MovieDetailsTab.RELATED to relatedRequesters.firstOrNull()),
                     isTv = true,
                     modifier = Modifier.padding(vertical = 5.dp),

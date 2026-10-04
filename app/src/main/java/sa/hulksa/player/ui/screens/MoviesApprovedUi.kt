@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -60,8 +61,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
@@ -594,15 +599,54 @@ internal fun moviesOfflineEmptyVisible(
     !hasCachedContent &&
     !searchActive
 
+internal data class MoviesErrorCopy(val title: String, val body: String)
+
 /**
- * Compact nonblocking Movies catalog offline notice. Replaces the pink error banner for a failed
- * refresh while cached content remains visible; the single action reuses the existing refresh
- * owner.
+ * Catalog error copy: validated connectivity selects the offline wording, otherwise a truthful
+ * load failure keeps the real server message in the same visual component.
+ */
+internal fun moviesCatalogErrorCopy(offline: Boolean, serverMessage: String?): MoviesErrorCopy =
+    if (offline) {
+        MoviesErrorCopy(
+            title = "لا يوجد اتصال بالانترنت",
+            body = "تعذر تحديث المحتوى ، حاول مرة اخرى",
+        )
+    } else {
+        MoviesErrorCopy(
+            title = "تعذر تحديث المحتوى",
+            body = serverMessage?.trim()?.takeIf { it.isNotEmpty() } ?: "حاول مرة اخرى",
+        )
+    }
+
+/** Movie Details error copy with the same classification rules. */
+internal fun moviesDetailsErrorCopy(offline: Boolean, serverMessage: String?): MoviesErrorCopy =
+    if (offline) {
+        MoviesErrorCopy(
+            title = "لا يوجد اتصال بالانترنت",
+            body = "تعذر تحميل بيانات الفلم ، تحقق من الاتصال وحاول مرة اخرى",
+        )
+    } else {
+        MoviesErrorCopy(
+            title = "تعذر تحميل بيانات الفلم",
+            body = serverMessage?.trim()?.takeIf { it.isNotEmpty() } ?: "حاول مرة اخرى",
+        )
+    }
+
+/**
+ * One bounded Movies error surface for catalog and Details: accepted dark surface, warm-gold
+ * status/action icons and ivory wording. The status icon is grouped with its wording and the
+ * Retry action is compact and explicitly routable in the TV focus graph.
  */
 @Composable
-internal fun MoviesOfflineNotice(
+internal fun MoviesErrorNotice(
+    title: String,
+    body: String,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    retryRequester: FocusRequester? = null,
+    onRetryFocusChanged: ((Boolean) -> Unit)? = null,
+    onRetryUp: (() -> Boolean)? = null,
+    onRetryDown: (() -> Boolean)? = null,
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(12.dp)
@@ -612,31 +656,39 @@ internal fun MoviesOfflineNotice(
             .clip(shape)
             .background(Color(0xFF11120D))
             .border(1.dp, colors.gold.copy(alpha = .35f), shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = "لا يوجد اتصال بالانترنت",
-                color = colors.text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.wrapContentWidth()) {
+                Text(
+                    text = title,
+                    color = colors.text,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = body,
+                    color = colors.textMuted,
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    maxLines = 2,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Rounded.WifiOff,
+                contentDescription = null,
+                tint = colors.gold,
+                modifier = Modifier.size(20.dp),
             )
-            Text(
-                text = "تعذر تحديث المحتوى ، حاول مرة اخرى",
-                color = colors.textMuted,
-                fontSize = 11.sp,
-                maxLines = 1,
-            )
+            Spacer(Modifier.weight(1f))
         }
-        Icon(
-            imageVector = Icons.Rounded.WifiOff,
-            contentDescription = null,
-            tint = colors.gold,
-            modifier = Modifier.size(22.dp),
-        )
+        Spacer(Modifier.width(10.dp))
         FocusButton(
             text = "اعادة المحاولة",
             onClick = onRetry,
@@ -647,15 +699,36 @@ internal fun MoviesOfflineNotice(
             trailingIconTint = colors.gold,
             scaleOnFocus = false,
             textMaxLines = 1,
+            modifier = Modifier
+                .then(if (retryRequester != null) Modifier.focusRequester(retryRequester) else Modifier)
+                .onFocusChanged { onRetryFocusChanged?.invoke(it.isFocused) }
+                .then(
+                    if (onRetryUp != null || onRetryDown != null) {
+                        Modifier.onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (event.key) {
+                                Key.DirectionUp -> onRetryUp?.invoke() ?: false
+                                Key.DirectionDown -> onRetryDown?.invoke() ?: false
+                                Key.DirectionLeft, Key.DirectionRight -> true
+                                else -> false
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
         )
     }
 }
 
-/** Consistent in-content Movie offline empty state with the same retry owner as the notice. */
+/** Consistent in-content Movie empty state with the same classified wording and retry owner. */
 @Composable
 internal fun MoviesOfflineEmptyState(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String = "لا يوجد اتصال بالانترنت",
+    body: String = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
+    retryRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     Column(
@@ -670,7 +743,7 @@ internal fun MoviesOfflineEmptyState(
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "لا يوجد اتصال بالانترنت",
+            text = title,
             color = colors.text,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
@@ -678,10 +751,11 @@ internal fun MoviesOfflineEmptyState(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
+            text = body,
             color = colors.textMuted,
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
+            maxLines = 2,
         )
         Spacer(Modifier.height(14.dp))
         FocusButton(
@@ -691,6 +765,7 @@ internal fun MoviesOfflineEmptyState(
             trailingIcon = Icons.Rounded.Refresh,
             scaleOnFocus = false,
             textMaxLines = 1,
+            modifier = if (retryRequester != null) Modifier.focusRequester(retryRequester) else Modifier,
         )
     }
 }

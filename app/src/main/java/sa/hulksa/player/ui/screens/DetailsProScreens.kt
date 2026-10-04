@@ -168,6 +168,7 @@ fun MovieDetailsProScreen(
     onToggleFavorite: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -185,6 +186,13 @@ fun MovieDetailsProScreen(
     )
     val resumePosition = historyEntry?.positionMs?.takeIf { progress != null }
     val movieHeroHeightDp = movieCompactHeroHeightDp(adaptiveUi.screenHeightDp)
+    val detailsErrorRetryRequester = remember(item.id) { FocusRequester() }
+    var detailsErrorRetryFocused by remember(item.id) { mutableStateOf(false) }
+    val detailsOffline = errorMessage != null && !hasUsableNetwork(context)
+    val detailsErrorCopy = moviesDetailsErrorCopy(
+        offline = detailsOffline,
+        serverMessage = errorMessage,
+    )
     val backdrop = details?.backdropUrl ?: item.backdropUrl ?: item.posterUrl
 
     val backRequester = remember(item.id) { FocusRequester() }
@@ -235,6 +243,13 @@ fun MovieDetailsProScreen(
                     movieDetailsTabsItemIndex(hasError = errorMessage != null),
                 )
             }
+        }
+    }
+    LaunchedEffect(errorMessage) {
+        if (errorMessage == null && detailsErrorRetryFocused) {
+            // Notice removal while its Retry is focused restores the selected tab.
+            withFrameNanos { }
+            runCatching { tabRequesters.getValue(selectedTab).requestFocus() }
         }
     }
     // Usable D-pad reading path for overflowing Story/Information panels: the selected tab keeps
@@ -439,7 +454,11 @@ fun MovieDetailsProScreen(
                         favoriteRequester = favoriteRequester,
                         downloadRequester = downloadRequester,
                         upRequester = null,
-                        tabsDownRequester = tabRequesters.getValue(MovieDetailsTab.STORY),
+                        tabsDownRequester = if (errorMessage != null) {
+                            detailsErrorRetryRequester
+                        } else {
+                            tabRequesters.getValue(MovieDetailsTab.STORY)
+                        },
                         onActionFocused = { heroReturnRequester = it },
                         onPlay = onPlay,
                         onToggleFavorite = onToggleFavorite,
@@ -463,9 +482,19 @@ fun MovieDetailsProScreen(
 
         if (errorMessage != null) {
             item(key = "movie_error") {
-                ErrorNotice(
-                    errorMessage,
-                    Modifier.padding(
+                MoviesErrorNotice(
+                    title = detailsErrorCopy.title,
+                    body = detailsErrorCopy.body,
+                    onRetry = onRetryDetails,
+                    retryRequester = detailsErrorRetryRequester,
+                    onRetryFocusChanged = { detailsErrorRetryFocused = it },
+                    onRetryUp = {
+                        runCatching { heroReturnRequester.requestFocus() }.getOrDefault(false)
+                    },
+                    onRetryDown = {
+                        runCatching { tabRequesters.getValue(selectedTab).requestFocus() }.getOrDefault(false)
+                    },
+                    modifier = Modifier.padding(
                         horizontal = metrics.horizontalPaddingDp.dp,
                         vertical = 8.dp,
                     ),
@@ -485,7 +514,7 @@ fun MovieDetailsProScreen(
                     selected = selectedTab,
                     onSelect = selectTab,
                     requesters = tabRequesters,
-                    upTarget = heroReturnRequester,
+                    upTarget = if (errorMessage != null) detailsErrorRetryRequester else heroReturnRequester,
                     downTargets = mapOf(MovieDetailsTab.RELATED to relatedRequesters.firstOrNull()),
                     isTv = isTv,
                     modifier = Modifier.padding(vertical = 4.dp),

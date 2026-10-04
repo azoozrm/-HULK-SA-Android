@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -244,6 +245,19 @@ internal fun movieOfflineCardVisible(
 ): Boolean = isMovie && !localPlayback && offlineFailure && offlineMessageActive
 
 /**
+ * First-frame offline entry: a remote movie opened while the validated connectivity snapshot is
+ * already offline shows the offline card immediately, before any delayed network effect can let
+ * the Resume dialog, player chrome or an old error flash first.
+ */
+internal fun movieOfflineInitialVisible(
+    isMovie: Boolean,
+    localPlayback: Boolean,
+    networkAvailable: Boolean,
+    isPlaying: Boolean,
+    playbackReady: Boolean,
+): Boolean = isMovie && !localPlayback && !networkAvailable && !isPlaying && !playbackReady
+
+/**
  * Playback intent carried across a connectivity restore. A movie the user paused manually stays
  * paused, a pending Resume decision never auto-plays, and a movie that was playing resumes.
  */
@@ -414,12 +428,6 @@ fun PlayerScreen(
     var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
     val isMovieVod = !request.isLive && request.streamKind.equals("movie", ignoreCase = true)
-    val movieOfflineActive = movieOfflineCardVisible(
-        isMovie = isMovieVod,
-        localPlayback = localPlayback,
-        offlineFailure = offlineFailure,
-        offlineMessageActive = finalError == PLAYER_OFFLINE_MESSAGE,
-    )
     var buffering by remember(request) { mutableStateOf(true) }
     var controlsVisible by remember(request) { mutableStateOf(!request.isLive) }
     var browserVisible by remember(request) { mutableStateOf(false) }
@@ -477,6 +485,8 @@ fun PlayerScreen(
     val moreTriggerFocus = remember { FocusRequester() }
     val seekBarFocus = remember { FocusRequester() }
     val resumeFocus = remember { FocusRequester() }
+    val resumeRestartFocus = remember { FocusRequester() }
+    val resumeBackFocus = remember { FocusRequester() }
     val unlockFocus = remember { FocusRequester() }
     val nextEpisodePlayFocus = remember { FocusRequester() }
     val nextEpisodeCancelFocus = remember { FocusRequester() }
@@ -547,6 +557,22 @@ fun PlayerScreen(
     val player = remember(request, playerInstanceGeneration, audioOutputMode) {
         playerFactory.create(audioOutputMode)
     }
+    // The validated connectivity snapshot is authoritative from the first composition, so a
+    // remote movie opened offline renders the offline card immediately instead of flashing the
+    // Resume dialog, player chrome or an old error while the delayed network effect catches up.
+    val movieOfflineInitial = movieOfflineInitialVisible(
+        isMovie = isMovieVod,
+        localPlayback = localPlayback,
+        networkAvailable = networkAvailable,
+        isPlaying = isPlaying,
+        playbackReady = player.playbackState == Player.STATE_READY,
+    )
+    val movieOfflineActive = movieOfflineInitial || movieOfflineCardVisible(
+        isMovie = isMovieVod,
+        localPlayback = localPlayback,
+        offlineFailure = offlineFailure,
+        offlineMessageActive = finalError == PLAYER_OFFLINE_MESSAGE,
+    )
     val recoveryDispatchOwner = RecoveryDispatchOwner(
         generationId = playerSession.generation.id,
         playerInstanceId = playerInstanceGeneration,
@@ -1336,6 +1362,7 @@ fun PlayerScreen(
         browserVisible,
         finalError,
         offlineFailure,
+        movieOfflineActive,
         resumePromptVisible,
         unlockVisible,
         controlsLocked,
@@ -1585,7 +1612,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !browserVisible && activePanel == null && !controlsLocked) {
             PlayerTopBar(
                 title = playerDisplayTitle,
                 isLive = request.isLive,
@@ -1596,7 +1623,7 @@ fun PlayerScreen(
             )
         }
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
                 val liveDensity = LocalDensity.current
                 val minimumMorePanelHeight = remember(
@@ -1799,7 +1826,7 @@ fun PlayerScreen(
             }
         }
 
-        if (buffering && finalError == null && !resumePromptVisible) {
+        if (buffering && finalError == null && !resumePromptVisible && !movieOfflineActive) {
             LoadingRing(
                 label = if (request.isLive) "جاري تشغيل القناة…" else "جاري تجهيز المشاهدة…",
                 modifier = Modifier.align(Alignment.Center),
@@ -1845,6 +1872,8 @@ fun PlayerScreen(
                     onBack()
                 },
                 focusRequester = resumeFocus,
+                restartFocusRequester = resumeRestartFocus,
+                backFocusRequester = resumeBackFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -3787,6 +3816,8 @@ private fun ResumePrompt(
     onRestart: () -> Unit,
     onBack: () -> Unit,
     focusRequester: FocusRequester,
+    restartFocusRequester: FocusRequester,
+    backFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -3862,45 +3893,187 @@ private fun ResumePrompt(
             }
         }
         Spacer(Modifier.height(16.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FocusButton(
-                text = "اكمل المشاهدة",
-                onClick = onResume,
-                trailingIcon = Icons.Rounded.PlayArrow,
-                scaleOnFocus = false,
-                textMaxLines = 1,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 46.dp)
-                    .focusRequester(focusRequester),
+        // Captions are measured with the real compact typography so every label is allocated in
+        // full: the accepted TV row when all three fit, otherwise an arrangement that wraps or
+        // stacks the same three actions. The focus graph is closed in every arrangement.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val textMeasurer = rememberTextMeasurer()
+            val captionStyle = LocalTextStyle.current.copy(
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
             )
-            FocusButton(
-                text = "من البداية",
-                onClick = onRestart,
-                primary = false,
-                outlined = true,
-                trailingIcon = Icons.Rounded.Replay,
-                scaleOnFocus = false,
-                textMaxLines = 1,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 46.dp),
+            val actionGap = 9.dp
+            val actionRequiredWidths = remember(maxWidth, density.fontScale, density.density, captionStyle) {
+                val horizontalPaddingPx = with(density) { 12.dp.roundToPx() }
+                val iconPx = with(density) { 17.dp.roundToPx() }
+                val gapPx = with(density) { 6.dp.roundToPx() }
+                val bufferPx = with(density) { 6.dp.roundToPx() }
+                listOf("اكمل المشاهدة" to true, "من البداية" to true, "رجوع" to false).map { (caption, hasIcon) ->
+                    movieActionRequiredWidthPx(
+                        captionWidthPx = textMeasurer.measure(caption, captionStyle).size.width,
+                        iconSizePx = if (hasIcon) iconPx else 0,
+                        horizontalPaddingPx = horizontalPaddingPx,
+                        gapPx = gapPx,
+                    ) + bufferPx
+                }
+            }
+            val layoutMode = movieActionLayoutMode(
+                availableWidthPx = with(density) { maxWidth.roundToPx() },
+                requiredWidthsPx = actionRequiredWidths,
+                gapPx = with(density) { actionGap.roundToPx() },
             )
-            FocusButton(
-                text = "رجوع",
-                onClick = onBack,
-                primary = false,
-                outlined = true,
-                scaleOnFocus = false,
-                textMaxLines = 1,
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 46.dp),
-            )
+            val resumeAction: @Composable (Modifier, Modifier) -> Unit = { actionModifier, focusModifier ->
+                FocusButton(
+                    text = "اكمل المشاهدة",
+                    onClick = onResume,
+                    trailingIcon = Icons.Rounded.PlayArrow,
+                    scaleOnFocus = false,
+                    textMaxLines = 1,
+                    modifier = actionModifier
+                        .heightIn(min = 46.dp)
+                        .focusRequester(focusRequester)
+                        .then(focusModifier),
+                )
+            }
+            val restartAction: @Composable (Modifier, Modifier) -> Unit = { actionModifier, focusModifier ->
+                FocusButton(
+                    text = "من البداية",
+                    onClick = onRestart,
+                    primary = false,
+                    outlined = true,
+                    trailingIcon = Icons.Rounded.Replay,
+                    scaleOnFocus = false,
+                    textMaxLines = 1,
+                    modifier = actionModifier
+                        .heightIn(min = 46.dp)
+                        .focusRequester(restartFocusRequester)
+                        .then(focusModifier),
+                )
+            }
+            val backAction: @Composable (Modifier, Modifier) -> Unit = { actionModifier, focusModifier ->
+                FocusButton(
+                    text = "رجوع",
+                    onClick = onBack,
+                    primary = false,
+                    outlined = true,
+                    scaleOnFocus = false,
+                    textMaxLines = 1,
+                    modifier = actionModifier
+                        .heightIn(min = 46.dp)
+                        .focusRequester(backFocusRequester)
+                        .then(focusModifier),
+                )
+            }
+            when (layoutMode) {
+                MovieActionLayout.SINGLE_ROW -> Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(actionGap),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    resumeAction(
+                        Modifier.weight(1f),
+                        Modifier.focusProperties {
+                            left = restartFocusRequester
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        },
+                    )
+                    restartAction(
+                        Modifier.weight(1f),
+                        Modifier.focusProperties {
+                            left = backFocusRequester
+                            right = focusRequester
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        },
+                    )
+                    backAction(
+                        Modifier.weight(1f),
+                        Modifier.focusProperties {
+                            left = FocusRequester.Cancel
+                            right = restartFocusRequester
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        },
+                    )
+                }
+                MovieActionLayout.WATCH_THEN_PAIR -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(actionGap),
+                ) {
+                    resumeAction(
+                        Modifier.fillMaxWidth(),
+                        Modifier.focusProperties {
+                            up = FocusRequester.Cancel
+                            down = restartFocusRequester
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                        },
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(actionGap),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        restartAction(
+                            Modifier.weight(1f),
+                            Modifier.focusProperties {
+                                left = backFocusRequester
+                                right = FocusRequester.Cancel
+                                up = focusRequester
+                                down = FocusRequester.Cancel
+                            },
+                        )
+                        backAction(
+                            Modifier.weight(1f),
+                            Modifier.focusProperties {
+                                left = FocusRequester.Cancel
+                                right = restartFocusRequester
+                                up = focusRequester
+                                down = FocusRequester.Cancel
+                            },
+                        )
+                    }
+                }
+                MovieActionLayout.STACKED -> Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(actionGap),
+                ) {
+                    resumeAction(
+                        Modifier.fillMaxWidth(),
+                        Modifier.focusProperties {
+                            up = FocusRequester.Cancel
+                            down = restartFocusRequester
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                        },
+                    )
+                    restartAction(
+                        Modifier.fillMaxWidth(),
+                        Modifier.focusProperties {
+                            up = focusRequester
+                            down = backFocusRequester
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                        },
+                    )
+                    backAction(
+                        Modifier.fillMaxWidth(),
+                        Modifier.focusProperties {
+                            up = restartFocusRequester
+                            down = FocusRequester.Cancel
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                        },
+                    )
+                }
+            }
         }
         }
     }

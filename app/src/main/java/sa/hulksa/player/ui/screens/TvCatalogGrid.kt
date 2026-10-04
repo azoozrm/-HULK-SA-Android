@@ -149,6 +149,11 @@ internal enum class TvCatalogFocusPath {
     INVALID,
 }
 
+/**
+ * Direct vs assisted decision using the same usable-viewport math as the reveal, so a target that
+ * is already inside the final safe bounds takes focus without any scroll. [extraMargin] is the
+ * Movie focus margin; Series passes zero to keep its historical single-inset behavior.
+ */
 internal fun tvCatalogFocusPath(
     targetIndex: Int,
     itemCount: Int,
@@ -156,12 +161,20 @@ internal fun tvCatalogFocusPath(
     itemBottom: Int?,
     viewportStart: Int,
     viewportEnd: Int,
+    extraMargin: Int = 0,
 ): TvCatalogFocusPath {
     if (targetIndex !in 0 until itemCount) return TvCatalogFocusPath.INVALID
     if (itemTop == null || itemBottom == null || itemBottom <= itemTop) {
         return TvCatalogFocusPath.SCROLL_ASSISTED
     }
-    return if (itemTop >= viewportStart && itemBottom <= viewportEnd) {
+    val correction = focusedCardScrollCorrection(
+        itemTop = itemTop,
+        itemBottom = itemBottom,
+        usableStart = viewportStart,
+        usableEnd = viewportEnd,
+        marginPx = extraMargin.coerceAtLeast(0),
+    )
+    return if (correction == 0) {
         TvCatalogFocusPath.DIRECT
     } else {
         TvCatalogFocusPath.SCROLL_ASSISTED
@@ -310,6 +323,19 @@ internal fun TvCatalogGrid(
         }
     }
 
+    /** Null when the item is not attached; otherwise the unified-usable-bounds correction. */
+    fun currentIndexCorrection(index: Int): Int? {
+        val layoutInfo = gridState.layoutInfo
+        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+        return focusedCardScrollCorrection(
+            itemTop = targetInfo.offset.y,
+            itemBottom = targetInfo.offset.y + targetInfo.size.height,
+            usableStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
+            usableEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx - focusViewportInsetPx,
+            marginPx = if (movieCards) focusViewportInsetPx else 0,
+        )
+    }
+
     suspend fun ensureIndexFullyVisible(index: Int) {
         revealFocusedGridItem(
             gridState = gridState,
@@ -321,64 +347,30 @@ internal fun TvCatalogGrid(
         )
     }
 
-    // Movie-only settled reveal: after focus has actually moved, real layout frames decide the
-    // final focused rectangle so implicit focus relocation, restoration or a row transition can
-    // never leave the footer/border half-cropped. Bounded to two real frames (no sleep/polling)
-    // and cancelled for obsolete targets; Series keeps the pre-focus path unchanged.
-    suspend fun settleFocusedIndexVisibility(index: Int) {
-        repeat(2) {
-            withFrameNanos { }
-            ensureIndexFullyVisible(index)
-        }
-    }
-
-    /**
-     * Smallest smooth movement that reveals an adjacent target. A partially visible target is
-     * corrected by exactly its clipped amount; a fully offscreen adjacent row is revealed with
-     * bounded single-row steps. This replaces the old instant scrollToItem jump and keeps every
-     * movement inside the one cancellable focus transaction owned by the key handler.
-     */
-    suspend fun revealIndexSmoothly(index: Int) {
-        val layoutInfo = gridState.layoutInfo
-        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-        if (targetInfo != null) {
-            val correction = focusedCardScrollCorrection(
-                itemTop = targetInfo.offset.y,
-                itemBottom = targetInfo.offset.y + targetInfo.size.height,
-                usableStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
-                usableEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx - focusViewportInsetPx,
-                marginPx = if (movieCards) focusViewportInsetPx else 0,
-            )
-            if (correction != 0) {
-                gridState.animateScrollBy(correction.toFloat())
-            }
-            return
-        }
-        repeat(2) {
-            val visible = gridState.layoutInfo.visibleItemsInfo
-            if (visible.any { it.index == index }) return@repeat
-            val rowHeight = visible.firstOrNull()?.size?.height ?: return@repeat
-            val step = rowHeight + with(density) { verticalSpacing.roundToPx() }
-            val firstVisible = visible.minOfOrNull { it.index } ?: return@repeat
-            val lastVisible = visible.maxOfOrNull { it.index } ?: return@repeat
-            when {
-                index > lastVisible -> gridState.animateScrollBy(step.toFloat())
-                index < firstVisible -> gridState.animateScrollBy(-step.toFloat())
-                else -> return@repeat
-            }
-        }
-    }
-
     suspend fun focusIndex(
         index: Int,
         columnCount: Int,
         ensureFullyVisible: Boolean,
     ) {
         val requester = focusRequesters.getOrNull(index) ?: return
-        // One authoritative transaction: reveal the target with the smallest smooth movement,
-        // then acquire focus only after the target is actually attached and laid out.
-        revealIndexSmoothly(index)
-        if (ensureFullyVisible) {
+        // Offscreen adjacent targets first get a bounded one-row reveal (nothing can be focused
+        // yet). Attached targets take focus immediately so the border never waits for a scroll.
+        if (currentIndexCorrection(index) == null) {
+            repeat(2) {
+                val visible = gridState.layoutInfo.visibleItemsInfo
+                if (visible.any { it.index == index }) return@repeat
+                val rowHeight = visible.firstOrNull()?.size?.height ?: return@repeat
+                val step = rowHeight + with(density) { verticalSpacing.roundToPx() }
+                val firstVisible = visible.minOfOrNull { it.index } ?: return@repeat
+                val lastVisible = visible.maxOfOrNull { it.index } ?: return@repeat
+                when {
+                    index > lastVisible -> gridState.animateScrollBy(step.toFloat())
+                    index < firstVisible -> gridState.animateScrollBy(-step.toFloat())
+                    else -> return@repeat
+                }
+            }
+        }
+        if (ensureFullyVisible && currentIndexCorrection(index)?.let { it != 0 } == true) {
             ensureIndexFullyVisible(index)
         }
         runCatching { requester.requestFocus() }
@@ -386,14 +378,21 @@ internal fun TvCatalogGrid(
 
     LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard) {
         if (restoreFocusedCard && content.isNotEmpty() && targetKey != null) {
+            // One-time entry/return restoration only. After an ordinary focus change the saved
+            // memory updates and restarts this effect; the grid already owns that transaction, so
+            // restoring the same item again would scroll it a second time (the reported shake).
+            if (focusedIndex == targetIndex) {
+                return@LaunchedEffect
+            }
             gridState.scrollToItem(targetIndex)
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
                 .first { it }
             ensureIndexFullyVisible(targetIndex)
             runCatching { focusRequesters[targetIndex].requestFocus() }
-            if (movieCards) {
-                settleFocusedIndexVisibility(targetIndex)
-            }
+            // Entry/return restoration uses the same single early correction so a framework
+            // relocation cannot leave the restored card clipped.
+            withFrameNanos { }
+            ensureIndexFullyVisible(targetIndex)
         }
     }
 
@@ -432,13 +431,14 @@ internal fun TvCatalogGrid(
             null
         }
         // Header growth/shrink changes the real viewport; re-evaluate the focused card's bounds
-        // from actual layout without resetting identity or jumping to the first item. Focused
-        // index is read via rememberUpdatedState so focus moves do not duplicate the reveal.
+        // from actual layout without resetting identity or jumping to the first item. This is the
+        // only viewport-change movement owner; ordinary focus changes never run it.
         val latestFocusedIndex by rememberUpdatedState(focusedIndex)
         LaunchedEffect(usableGridHeightPx) {
             val index = latestFocusedIndex
             if (index >= 0) {
-                settleFocusedIndexVisibility(index)
+                withFrameNanos { }
+                ensureIndexFullyVisible(index)
             }
         }
 
@@ -506,7 +506,8 @@ internal fun TvCatalogGrid(
                             itemTop = targetInfo?.offset?.y,
                             itemBottom = targetInfo?.let { it.offset.y + it.size.height },
                             viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
-                            viewportEnd = layoutInfo.viewportEndOffset - focusViewportInsetPx,
+                            viewportEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx,
+                            extraMargin = if (movieCards) focusViewportInsetPx else 0,
                         )
                         if (focusPath == TvCatalogFocusPath.INVALID) {
                             return@onPreviewKeyEvent false
@@ -517,7 +518,7 @@ internal fun TvCatalogGrid(
 
                         focusMoveState.job?.cancel()
                         focusMoveState.job = null
-                        // An obsolete settled reveal must not fight the new movement.
+                        // Obsolete settled corrections and reveals must not fight the new move.
                         focusMoveState.revealJob?.cancel()
                         val focusedDirectly = if (focusPath == TvCatalogFocusPath.DIRECT) {
                             runCatching { requester.requestFocus() }.getOrDefault(false)
@@ -543,9 +544,17 @@ internal fun TvCatalogGrid(
                     focusedIndex = index
                     navigationMemory.save(destination, key, index)
                     if (movieCards) {
+                        // One post-focus correction for every path (direct and assisted). The
+                        // framework may relocate the newly focused card first; wait for that real
+                        // scroll to settle, then apply exactly one correction with the unified
+                        // usable bounds so the two owners never move the viewport at once.
                         focusMoveState.revealJob?.cancel()
                         focusMoveState.revealJob = focusScope.launch {
-                            settleFocusedIndexVisibility(index)
+                            withFrameNanos { }
+                            if (gridState.isScrollInProgress) {
+                                snapshotFlow { gridState.isScrollInProgress }.first { !it }
+                            }
+                            ensureIndexFullyVisible(index)
                         }
                     }
                 }

@@ -2191,22 +2191,35 @@ private fun PosterCatalogScreen(
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
     val catalogErrorMessage = state.errorMessage
-    val moviesOfflineFailure = moviesOfflineFailureVisible(
-        isMovies = movieCategoryManagement,
-        hasErrorMessage = catalogErrorMessage != null,
-        networkUsable = hasUsableNetwork(context),
+    val moviesNetworkUsable = hasUsableNetwork(context)
+    val moviesError = movieCategoryManagement && catalogErrorMessage != null
+    val moviesOfflineError = moviesError && !moviesNetworkUsable
+    val moviesErrorCopy = moviesCatalogErrorCopy(
+        offline = moviesOfflineError,
+        serverMessage = catalogErrorMessage,
     )
-    val moviesOfflineEmpty = moviesOfflineEmptyVisible(
-        isMovies = movieCategoryManagement,
-        hasErrorMessage = catalogErrorMessage != null,
-        networkUsable = hasUsableNetwork(context),
-        hasCachedContent = resultCount > 0,
-        searchActive = state.searchQuery.isNotBlank(),
-    ) && type !in state.loadingTypes
+    val moviesOfflineEmpty = moviesError &&
+        resultCount == 0 &&
+        state.searchQuery.isBlank() &&
+        type !in state.loadingTypes
+    val noticeRetryRequester = remember { FocusRequester() }
+    val refreshRequester = remember { FocusRequester() }
+    var noticeRetryFocused by remember { mutableStateOf(false) }
+    val noticeWasVisible = remember { mutableStateOf(false) }
     var nextCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
     var categoryContentFocusRequest by remember(destination) { mutableStateOf<CategoryContentFocusRequest?>(null) }
     var armedCategoryContentFocusRequestId by remember(destination) { mutableLongStateOf(0L) }
     val categoryFocusRestoreController = remember(destination) { CategoryFocusRestoreController() }
+    LaunchedEffect(moviesError, resultCount) {
+        val visible = moviesError && resultCount > 0
+        if (noticeWasVisible.value && !visible && noticeRetryFocused) {
+            // Removal while Retry is focused restores an attached meaningful neighbor.
+            withFrameNanos { }
+            val restored = runCatching { refreshRequester.requestFocus() }.getOrDefault(false)
+            if (!restored) categoryFocusRestoreController.requestFromSource()
+        }
+        noticeWasVisible.value = visible
+    }
     val selectCategoryAndEnterContent: (String?) -> Unit = { categoryId ->
         if (isTv) {
             nextCategoryContentFocusRequestId += 1L
@@ -2315,11 +2328,21 @@ private fun PosterCatalogScreen(
                 manageCategoriesRequester = manageCategoriesRequester.takeIf { movieCategoryManagement },
                 searchIcon = Icons.Rounded.Search.takeIf { movieCategoryManagement },
                 toolbarIconTint = colors.gold.takeIf { movieCategoryManagement },
+                refreshRequester = refreshRequester.takeIf { movieCategoryManagement },
+                downOverrideRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
             )
-            if (moviesOfflineFailure && resultCount > 0) {
+            if (moviesError && resultCount > 0) {
                 Spacer(Modifier.height(10.dp))
-                MoviesOfflineNotice(onRetry = onRefresh)
-            } else if (catalogErrorMessage != null) {
+                MoviesErrorNotice(
+                    title = moviesErrorCopy.title,
+                    body = moviesErrorCopy.body,
+                    onRetry = onRefresh,
+                    retryRequester = noticeRetryRequester,
+                    onRetryFocusChanged = { noticeRetryFocused = it },
+                    onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
+                    onRetryDown = { categoryFocusRestoreController.requestFromSource() },
+                )
+            } else if (catalogErrorMessage != null && !movieCategoryManagement) {
                 Spacer(Modifier.height(10.dp))
                 ErrorNotice(catalogErrorMessage)
             }
@@ -2334,13 +2357,19 @@ private fun PosterCatalogScreen(
                 initialAllFocusRequester = initialAllFocusRequester,
                 initialAllFocusPending = initialAllFocusPending,
                 hiddenCategoryIds = hiddenCategoryIds,
+                noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
             )
             CatalogInteractionHints(isTv)
             Spacer(Modifier.height(9.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (model == null && moviesOfflineEmpty) {
-                MoviesOfflineEmptyState(onRetry = onRefresh, modifier = Modifier.align(Alignment.Center))
+                MoviesOfflineEmptyState(
+                    onRetry = onRefresh,
+                    modifier = Modifier.align(Alignment.Center),
+                    title = moviesErrorCopy.title,
+                    body = moviesErrorCopy.body,
+                )
             } else if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
             } else if (showingContinue && continueWatching.isNotEmpty()) {
@@ -2380,7 +2409,12 @@ private fun PosterCatalogScreen(
                 }
             } else if (showingContinue) {
                 if (moviesOfflineEmpty) {
-                    MoviesOfflineEmptyState(onRetry = onRefresh, modifier = Modifier.align(Alignment.Center))
+                    MoviesOfflineEmptyState(
+                    onRetry = onRefresh,
+                    modifier = Modifier.align(Alignment.Center),
+                    title = moviesErrorCopy.title,
+                    body = moviesErrorCopy.body,
+                )
                 } else {
                     EmptyState("لا توجد مشاهدة غير مكتملة في $title")
                 }
@@ -2388,7 +2422,12 @@ private fun PosterCatalogScreen(
                 LoadingRing(label = "جاري تحميل $title…", modifier = Modifier.align(Alignment.Center))
             } else if (visible.isEmpty()) {
                 if (moviesOfflineEmpty) {
-                    MoviesOfflineEmptyState(onRetry = onRefresh, modifier = Modifier.align(Alignment.Center))
+                    MoviesOfflineEmptyState(
+                    onRetry = onRefresh,
+                    modifier = Modifier.align(Alignment.Center),
+                    title = moviesErrorCopy.title,
+                    body = moviesErrorCopy.body,
+                )
                 } else {
                     EmptyState("لا توجد نتائج مطابقة")
                 }
@@ -4615,16 +4654,14 @@ private fun MoviesHistoryGrid(
         LaunchedEffect(maxHeight) {
             val index = latestFocusedEntryIndex
             if (isTv && index >= 0) {
-                repeat(2) {
-                    withFrameNanos { }
-                    revealFocusedGridItem(
-                        gridState = gridState,
-                        index = index,
-                        focusInsetPx = focusInsetPx,
-                        safeBottomInsetPx = safeBottomInsetPx,
-                        extraMarginPx = focusInsetPx,
-                    )
-                }
+                withFrameNanos { }
+                revealFocusedGridItem(
+                    gridState = gridState,
+                    index = index,
+                    focusInsetPx = focusInsetPx,
+                    safeBottomInsetPx = safeBottomInsetPx,
+                    extraMarginPx = focusInsetPx,
+                )
             }
         }
         LazyVerticalGrid(
@@ -4675,21 +4712,18 @@ private fun MoviesHistoryGrid(
                         focusedEntryIndex = index
                         navigationMemory.save(MainDestination.MOVIES, entry.key, index)
                         if (isTv) {
-                            // Same settled full-card reveal as the Movie catalog: Recent uses the
-                            // accepted card geometry, so its footer/border must stay inside the
-                            // usable viewport after DOWN/UP and restoration too.
+                            // One bounded correction after focus settles, matching the catalog's
+                            // single-owner movement instead of competing settling passes.
                             focusRevealState.job?.cancel()
                             focusRevealState.job = focusRevealScope.launch {
-                                repeat(2) {
-                                    withFrameNanos { }
-                                    revealFocusedGridItem(
-                                        gridState = gridState,
-                                        index = index,
-                                        focusInsetPx = focusInsetPx,
-                                        safeBottomInsetPx = safeBottomInsetPx,
-                                        extraMarginPx = focusInsetPx,
-                                    )
-                                }
+                                withFrameNanos { }
+                                revealFocusedGridItem(
+                                    gridState = gridState,
+                                    index = index,
+                                    focusInsetPx = focusInsetPx,
+                                    safeBottomInsetPx = safeBottomInsetPx,
+                                    extraMarginPx = focusInsetPx,
+                                )
                             }
                         }
                     },
@@ -5037,6 +5071,8 @@ private fun CatalogHeader(
     searchIcon: ImageVector? = null,
     countUnit: String = "عنصر",
     toolbarIconTint: Color? = null,
+    refreshRequester: FocusRequester? = null,
+    downOverrideRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     Column(Modifier.fillMaxWidth()) {
@@ -5047,9 +5083,17 @@ private fun CatalogHeader(
                 .then(
                     if (isTv && onMoveToCategories != null) {
                         Modifier.onPreviewKeyEvent { event ->
-                            event.type == KeyEventType.KeyDown &&
-                                event.key == Key.DirectionDown &&
-                                onMoveToCategories()
+                            val downPressed = event.type == KeyEventType.KeyDown &&
+                                event.key == Key.DirectionDown
+                            if (!downPressed) {
+                                false
+                            } else {
+                                // A visible notice Retry is the first meaningful target below the
+                                // toolbar; otherwise keep the accepted category jump.
+                                downOverrideRequester?.let { requester ->
+                                    runCatching { requester.requestFocus() }.getOrDefault(false)
+                                } ?: onMoveToCategories()
+                            }
                         }
                     } else {
                         Modifier
@@ -5083,7 +5127,13 @@ private fun CatalogHeader(
                     iconTint = toolbarIconTint,
                 )
                 Spacer(Modifier.width(11.dp))
-                RoundAction(Icons.Rounded.Refresh, "تحديث", onRefresh, iconTint = toolbarIconTint)
+                RoundAction(
+                    Icons.Rounded.Refresh,
+                    "تحديث",
+                    onRefresh,
+                    iconTint = toolbarIconTint,
+                    requester = refreshRequester,
+                )
                 Spacer(Modifier.width(TV_PAGE_GUTTER))
             } else {
                 HulkTextField(
@@ -5180,6 +5230,7 @@ private fun ReorderableCatalogCategoryBar(
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
     hiddenCategoryIds: Set<String> = emptySet(),
+    noticeRetryRequester: FocusRequester? = null,
 ) {
     val approvedMovieChips = type == ContentType.MOVIE
     val movieStripMetrics = rememberLiveCategoryStripMetrics()
@@ -5288,6 +5339,19 @@ private fun ReorderableCatalogCategoryBar(
             }
             .focusGroup()
             .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .then(
+                // With a visible notice, UP from any category chip returns to its Retry; without
+                // one the accepted spatial route is untouched.
+                if (noticeRetryRequester != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        event.type == KeyEventType.KeyDown &&
+                            event.key == Key.DirectionUp &&
+                            runCatching { noticeRetryRequester.requestFocus() }.getOrDefault(false)
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(
@@ -6136,12 +6200,14 @@ private fun RoundAction(
     onClick: () -> Unit,
     loading: Boolean = false,
     iconTint: Color? = null,
+    requester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .size(homeHeaderActionTouchSizeDp().dp)
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,

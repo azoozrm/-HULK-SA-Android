@@ -337,6 +337,7 @@ fun HulkApp(
                                     )
                                 },
                                 onOpenRelated = viewModel::open,
+                                onRetryDetails = { viewModel.open(item) },
                             )
                         } else {
                             LaunchedEffect(state.screen) { viewModel.back() }
