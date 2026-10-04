@@ -2337,6 +2337,7 @@ private fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     onRetry = onRefresh,
+                    networkFailure = moviesOfflineError,
                     retryRequester = noticeRetryRequester,
                     onRetryFocusChanged = { noticeRetryFocused = it },
                     onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
@@ -2369,6 +2370,7 @@ private fun PosterCatalogScreen(
                     modifier = Modifier.align(Alignment.Center),
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
+                    networkFailure = moviesOfflineError,
                 )
             } else if (model == null) {
                 LoadingRing(label = "جاري تجهيز $title…", modifier = Modifier.align(Alignment.Center))
@@ -2414,6 +2416,7 @@ private fun PosterCatalogScreen(
                     modifier = Modifier.align(Alignment.Center),
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
+                    networkFailure = moviesOfflineError,
                 )
                 } else {
                     EmptyState("لا توجد مشاهدة غير مكتملة في $title")
@@ -2427,6 +2430,7 @@ private fun PosterCatalogScreen(
                     modifier = Modifier.align(Alignment.Center),
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
+                    networkFailure = moviesOfflineError,
                 )
                 } else {
                     EmptyState("لا توجد نتائج مطابقة")

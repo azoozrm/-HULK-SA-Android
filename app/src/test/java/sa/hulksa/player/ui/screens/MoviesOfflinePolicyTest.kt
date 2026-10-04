@@ -1,5 +1,8 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.rounded.WifiOff
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -92,6 +95,20 @@ class MoviesOfflinePolicyTest {
                 assertFalse(line.contains('آ'))
             }
         }
+    }
+
+    @Test
+    fun moviesErrorIconReflectsTheFailureClass() {
+        assertEquals(Icons.Rounded.WifiOff, moviesErrorIcon(networkFailure = true))
+        assertEquals(Icons.Outlined.ErrorOutline, moviesErrorIcon(networkFailure = false))
+    }
+
+    @Test
+    fun moviesErrorNoticeReflowsRetryOnlyOnNarrowWindows() {
+        assertTrue(moviesErrorNoticeStacks(availableWidthDp = 360f))
+        assertTrue(moviesErrorNoticeStacks(availableWidthDp = 399f))
+        assertFalse(moviesErrorNoticeStacks(availableWidthDp = 400f))
+        assertFalse(moviesErrorNoticeStacks(availableWidthDp = 830f))
     }
 
     @Test

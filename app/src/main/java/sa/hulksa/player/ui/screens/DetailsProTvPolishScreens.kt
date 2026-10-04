@@ -533,6 +533,7 @@ private fun MovieDetailsProTvPolished(
                     title = detailsErrorCopy.title,
                     body = detailsErrorCopy.body,
                     onRetry = onRetryDetails,
+                    networkFailure = detailsOffline,
                     retryRequester = detailsErrorRetryRequester,
                     onRetryFocusChanged = { detailsErrorRetryFocused = it },
                     onRetryUp = {

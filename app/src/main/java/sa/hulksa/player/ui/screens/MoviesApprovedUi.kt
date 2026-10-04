@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -633,9 +634,21 @@ internal fun moviesDetailsErrorCopy(offline: Boolean, serverMessage: String?): M
     }
 
 /**
+ * Adaptive Movies notice arrangement: below this width the Retry action reflows beneath the
+ * message so complete text and safe focus outlines are preserved on narrow windows.
+ */
+internal fun moviesErrorNoticeStacks(availableWidthDp: Float): Boolean =
+    availableWidthDp < 400f
+
+/** Truthful Movies error glyph: disconnected Wi-Fi only for a real network condition. */
+internal fun moviesErrorIcon(networkFailure: Boolean): ImageVector =
+    if (networkFailure) Icons.Rounded.WifiOff else Icons.Outlined.ErrorOutline
+
+/**
  * One bounded Movies error surface for catalog and Details: accepted dark surface, warm-gold
- * status/action icons and ivory wording. The status icon is grouped with its wording and the
- * Retry action is compact and explicitly routable in the TV focus graph.
+ * status icon immediately beside the message group and a compact ivory/muted explanation. The
+ * notice hugs its content so no large empty span separates the wording from the Retry action,
+ * which stays fully readable and explicitly routable in the TV focus graph.
  */
 @Composable
 internal fun MoviesErrorNotice(
@@ -643,6 +656,7 @@ internal fun MoviesErrorNotice(
     body: String,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    networkFailure: Boolean = true,
     retryRequester: FocusRequester? = null,
     onRetryFocusChanged: ((Boolean) -> Unit)? = null,
     onRetryUp: (() -> Boolean)? = null,
@@ -650,75 +664,127 @@ internal fun MoviesErrorNotice(
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(12.dp)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
+    BoxWithConstraints(modifier) {
+        val stacked = moviesErrorNoticeStacks(maxWidth.value)
+        val surface = Modifier
+            .then(if (stacked) Modifier.fillMaxWidth() else Modifier.wrapContentWidth(Alignment.Start))
             .clip(shape)
             .background(Color(0xFF11120D))
             .border(1.dp, colors.gold.copy(alpha = .35f), shape)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.wrapContentWidth()) {
-                Text(
-                    text = title,
-                    color = colors.text,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-                Text(
-                    text = body,
-                    color = colors.textMuted,
-                    fontSize = 10.sp,
-                    lineHeight = 13.sp,
-                    maxLines = 2,
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+        if (stacked) {
+            Column(surface, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MoviesErrorNoticeMessage(title = title, body = body, networkFailure = networkFailure)
+                MoviesErrorNoticeRetry(
+                    onRetry = onRetry,
+                    retryRequester = retryRequester,
+                    onRetryFocusChanged = onRetryFocusChanged,
+                    onRetryUp = onRetryUp,
+                    onRetryDown = onRetryDown,
+                    modifier = Modifier.align(Alignment.Start),
                 )
             }
-            Spacer(Modifier.width(8.dp))
+        } else {
+            Row(
+                surface,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MoviesErrorNoticeMessage(title = title, body = body, networkFailure = networkFailure)
+                MoviesErrorNoticeRetry(
+                    onRetry = onRetry,
+                    retryRequester = retryRequester,
+                    onRetryFocusChanged = onRetryFocusChanged,
+                    onRetryUp = onRetryUp,
+                    onRetryDown = onRetryDown,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Title and status icon share one row (icon immediately physically LEFT of the title in RTL) and
+ * the explanation sits beneath, so the explanation length can never separate the icon from the
+ * title.
+ */
+@Composable
+private fun MoviesErrorNoticeMessage(
+    title: String,
+    body: String,
+    networkFailure: Boolean,
+) {
+    val colors = LocalHulkColors.current
+    Column(Modifier.wrapContentWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = title,
+                color = colors.text,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
             Icon(
-                imageVector = Icons.Rounded.WifiOff,
+                imageVector = moviesErrorIcon(networkFailure),
                 contentDescription = null,
                 tint = colors.gold,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
-            Spacer(Modifier.weight(1f))
         }
-        Spacer(Modifier.width(10.dp))
-        FocusButton(
-            text = "اعادة المحاولة",
-            onClick = onRetry,
-            primary = false,
-            outlined = true,
-            compact = true,
-            trailingIcon = Icons.Rounded.Refresh,
-            trailingIconTint = colors.gold,
-            scaleOnFocus = false,
-            textMaxLines = 1,
-            modifier = Modifier
-                .then(if (retryRequester != null) Modifier.focusRequester(retryRequester) else Modifier)
-                .onFocusChanged { onRetryFocusChanged?.invoke(it.isFocused) }
-                .then(
-                    if (onRetryUp != null || onRetryDown != null) {
-                        Modifier.onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                            when (event.key) {
-                                Key.DirectionUp -> onRetryUp?.invoke() ?: false
-                                Key.DirectionDown -> onRetryDown?.invoke() ?: false
-                                Key.DirectionLeft, Key.DirectionRight -> true
-                                else -> false
-                            }
-                        }
-                    } else {
-                        Modifier
-                    },
-                ),
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = body,
+            color = colors.textMuted,
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+@Composable
+private fun MoviesErrorNoticeRetry(
+    onRetry: () -> Unit,
+    retryRequester: FocusRequester?,
+    onRetryFocusChanged: ((Boolean) -> Unit)?,
+    onRetryUp: (() -> Boolean)?,
+    onRetryDown: (() -> Boolean)?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalHulkColors.current
+    FocusButton(
+        text = "اعادة المحاولة",
+        onClick = onRetry,
+        primary = false,
+        outlined = true,
+        compact = true,
+        trailingIcon = Icons.Rounded.Refresh,
+        trailingIconTint = colors.gold,
+        scaleOnFocus = false,
+        textMaxLines = 1,
+        modifier = modifier
+            .then(if (retryRequester != null) Modifier.focusRequester(retryRequester) else Modifier)
+            .onFocusChanged { onRetryFocusChanged?.invoke(it.isFocused) }
+            .then(
+                if (onRetryUp != null || onRetryDown != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionUp -> onRetryUp?.invoke() ?: false
+                            Key.DirectionDown -> onRetryDown?.invoke() ?: false
+                            Key.DirectionLeft, Key.DirectionRight -> true
+                            else -> false
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            ),
+    )
 }
 
 /** Consistent in-content Movie empty state with the same classified wording and retry owner. */
@@ -728,6 +794,7 @@ internal fun MoviesOfflineEmptyState(
     modifier: Modifier = Modifier,
     title: String = "لا يوجد اتصال بالانترنت",
     body: String = "تعذر تحميل المحتوى ، تحقق من الاتصال وحاول مرة اخرى",
+    networkFailure: Boolean = true,
     retryRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
@@ -736,7 +803,7 @@ internal fun MoviesOfflineEmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            imageVector = Icons.Rounded.WifiOff,
+            imageVector = moviesErrorIcon(networkFailure),
             contentDescription = null,
             tint = colors.gold,
             modifier = Modifier.size(36.dp),

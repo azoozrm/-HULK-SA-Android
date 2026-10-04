@@ -486,6 +486,7 @@ fun MovieDetailsProScreen(
                     title = detailsErrorCopy.title,
                     body = detailsErrorCopy.body,
                     onRetry = onRetryDetails,
+                    networkFailure = detailsOffline,
                     retryRequester = detailsErrorRetryRequester,
                     onRetryFocusChanged = { detailsErrorRetryFocused = it },
                     onRetryUp = {

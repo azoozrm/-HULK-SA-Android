@@ -573,6 +573,10 @@ fun PlayerScreen(
         offlineFailure = offlineFailure,
         offlineMessageActive = finalError == PLAYER_OFFLINE_MESSAGE,
     )
+    // While the Resume decision is pending the dialog is the only presentation: the player
+    // timeline, bottom control strip and top-bar actions are not composed at all, so they are not
+    // invisible focus targets and cannot receive touch, D-pad, OK, seek or playback commands.
+    val resumeDecisionActive = resumePromptVisible && !movieOfflineActive
     val recoveryDispatchOwner = RecoveryDispatchOwner(
         generationId = playerSession.generation.id,
         playerInstanceId = playerInstanceGeneration,
@@ -893,6 +897,7 @@ fun PlayerScreen(
             liveMorePanel != null -> handleLiveMoreBack()
             resumePromptVisible -> {
                 resumePromptVisible = false
+                controlsVisible = false
                 player.pause()
                 onBack()
             }
@@ -1417,7 +1422,7 @@ fun PlayerScreen(
     val interactionModifier = Modifier
         .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
-                if (finalError != null) return@detectTapGestures
+                if (finalError != null || resumePromptVisible) return@detectTapGestures
                 when {
                     liveMorePanel != null -> closeLiveMorePanelToTrigger()
                     controlsLocked -> { unlockVisible = true; controlsVisible = true }
@@ -1612,7 +1617,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !resumeDecisionActive && !browserVisible && activePanel == null && !controlsLocked) {
             PlayerTopBar(
                 title = playerDisplayTitle,
                 isLive = request.isLive,
@@ -1623,7 +1628,7 @@ fun PlayerScreen(
             )
         }
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !resumeDecisionActive && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
                 val liveDensity = LocalDensity.current
                 val minimumMorePanelHeight = remember(
@@ -1868,6 +1873,7 @@ fun PlayerScreen(
                 },
                 onBack = {
                     resumePromptVisible = false
+                    controlsVisible = false
                     player.pause()
                     onBack()
                 },
