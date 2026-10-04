@@ -11,50 +11,6 @@ import org.junit.Test
 class MoviesOfflinePolicyTest {
 
     @Test
-    fun movieOfflineCardIsTheSingleMovieOnlySurface() {
-        assertTrue(
-            movieOfflineCardVisible(
-                isMovie = true,
-                localPlayback = false,
-                offlineFailure = true,
-                offlineMessageActive = true,
-            ),
-        )
-        assertFalse(
-            movieOfflineCardVisible(
-                isMovie = false,
-                localPlayback = false,
-                offlineFailure = true,
-                offlineMessageActive = true,
-            ),
-        )
-        assertFalse(
-            movieOfflineCardVisible(
-                isMovie = true,
-                localPlayback = true,
-                offlineFailure = true,
-                offlineMessageActive = true,
-            ),
-        )
-        assertFalse(
-            movieOfflineCardVisible(
-                isMovie = true,
-                localPlayback = false,
-                offlineFailure = false,
-                offlineMessageActive = true,
-            ),
-        )
-        assertFalse(
-            movieOfflineCardVisible(
-                isMovie = true,
-                localPlayback = false,
-                offlineFailure = true,
-                offlineMessageActive = false,
-            ),
-        )
-    }
-
-    @Test
     fun movieOfflineRestorePreservesPausedIntentAndPendingDecision() {
         assertTrue(
             movieOfflineRestoredPlayWhenReady(
@@ -104,11 +60,196 @@ class MoviesOfflinePolicyTest {
     }
 
     @Test
-    fun moviesErrorNoticeReflowsRetryOnlyOnNarrowWindows() {
-        assertTrue(moviesErrorNoticeStacks(availableWidthDp = 360f))
-        assertTrue(moviesErrorNoticeStacks(availableWidthDp = 399f))
-        assertFalse(moviesErrorNoticeStacks(availableWidthDp = 400f))
-        assertFalse(moviesErrorNoticeStacks(availableWidthDp = 830f))
+    fun moviesErrorNoticeUsesTheRowOnlyWhenTheMeasuredGroupFits() {
+        assertTrue(
+            moviesErrorNoticeFitsRow(
+                availableWidthPx = 700,
+                messageWidthPx = 380,
+                retryWidthPx = 150,
+                gapPx = 24,
+            ),
+        )
+        assertFalse(
+            moviesErrorNoticeFitsRow(
+                availableWidthPx = 500,
+                messageWidthPx = 380,
+                retryWidthPx = 150,
+                gapPx = 24,
+            ),
+        )
+        assertFalse(
+            moviesErrorNoticeFitsRow(
+                availableWidthPx = 0,
+                messageWidthPx = 380,
+                retryWidthPx = 150,
+                gapPx = 24,
+            ),
+        )
+    }
+
+    @Test
+    fun moviePlayerPresentationIsExclusiveForEveryCombination() {
+        // Remote movie, pending Resume, offline at entry, no final error yet.
+        assertEquals(
+            MoviePlayerPresentation.ERROR_CARD,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = false,
+                networkAvailable = false,
+                offlineFailure = false,
+                finalErrorPresent = false,
+                resumePromptPending = true,
+                offlineInitial = true,
+            ),
+        )
+        // Remote movie, pending Resume, offline, generic final error already present.
+        assertEquals(
+            MoviePlayerPresentation.ERROR_CARD,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = false,
+                networkAvailable = false,
+                offlineFailure = true,
+                finalErrorPresent = true,
+                resumePromptPending = true,
+                offlineInitial = false,
+            ),
+        )
+        // Connected pending Resume with a generic final failure.
+        assertEquals(
+            MoviePlayerPresentation.ERROR_CARD,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = false,
+                networkAvailable = true,
+                offlineFailure = false,
+                finalErrorPresent = true,
+                resumePromptPending = true,
+                offlineInitial = false,
+            ),
+        )
+        // Connected pending Resume only.
+        assertEquals(
+            MoviePlayerPresentation.RESUME,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = false,
+                networkAvailable = true,
+                offlineFailure = false,
+                finalErrorPresent = false,
+                resumePromptPending = true,
+                offlineInitial = false,
+            ),
+        )
+        // Normal player.
+        assertEquals(
+            MoviePlayerPresentation.PLAYER,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = false,
+                networkAvailable = true,
+                offlineFailure = false,
+                finalErrorPresent = false,
+                resumePromptPending = false,
+                offlineInitial = false,
+            ),
+        )
+        // Local downloaded movie never takes the offline classification; a real local media
+        // failure still uses the generic Movie error card.
+        assertEquals(
+            MoviePlayerPresentation.ERROR_CARD,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = true,
+                networkAvailable = false,
+                offlineFailure = true,
+                finalErrorPresent = true,
+                resumePromptPending = false,
+                offlineInitial = false,
+            ),
+        )
+        // A local downloaded movie with usable local media plays without the offline card.
+        assertEquals(
+            MoviePlayerPresentation.PLAYER,
+            moviePlayerPresentation(
+                isMovie = true,
+                localPlayback = true,
+                networkAvailable = false,
+                offlineFailure = false,
+                finalErrorPresent = false,
+                resumePromptPending = false,
+                offlineInitial = false,
+            ),
+        )
+        // Series keeps its own legacy route.
+        assertEquals(
+            MoviePlayerPresentation.RESUME,
+            moviePlayerPresentation(
+                isMovie = false,
+                localPlayback = false,
+                networkAvailable = true,
+                offlineFailure = false,
+                finalErrorPresent = false,
+                resumePromptPending = true,
+                offlineInitial = false,
+            ),
+        )
+        assertEquals(
+            MoviePlayerPresentation.PLAYER,
+            moviePlayerPresentation(
+                isMovie = false,
+                localPlayback = false,
+                networkAvailable = true,
+                offlineFailure = false,
+                finalErrorPresent = true,
+                resumePromptPending = false,
+                offlineInitial = false,
+            ),
+        )
+    }
+
+    @Test
+    fun moviePlayerErrorCopyIsOfflineOnlyForRealConnectivityLoss() {
+        val offlinePending = moviePlayerErrorCopy(
+            offline = true,
+            resumePending = true,
+            formattedSavedTime = "03:52",
+            failureMessage = null,
+        )
+        assertEquals("لا يوجد اتصال بالانترنت", offlinePending.title)
+        assertEquals("اتصل بالانترنت لاكمال المشاهدة", offlinePending.body)
+        assertEquals("توقفت عند 03:52", offlinePending.context)
+
+        val offlineInterrupted = moviePlayerErrorCopy(
+            offline = true,
+            resumePending = false,
+            formattedSavedTime = "03:52",
+            failureMessage = null,
+        )
+        assertEquals("انقطع اتصال الانترنت", offlineInterrupted.title)
+        assertEquals("سيعود التشغيل تلقائيا عند عودة الاتصال", offlineInterrupted.body)
+
+        val generic = moviePlayerErrorCopy(
+            offline = false,
+            resumePending = false,
+            formattedSavedTime = "03:52",
+            failureMessage = "تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره.",
+        )
+        assertEquals("تعذر تشغيل الفلم", generic.title)
+        assertEquals("تعذر تشغيل المحتوى. اعد المحاولة او اختر مصدرا اخر عند توفره.", generic.body)
+        assertFalse(generic.body.contains('أ'))
+        assertFalse(generic.body.contains('إ'))
+        assertFalse(generic.body.contains('آ'))
+
+        val genericFallback = moviePlayerErrorCopy(
+            offline = false,
+            resumePending = true,
+            formattedSavedTime = "03:52",
+            failureMessage = "  ",
+        )
+        assertEquals("تعذر تشغيل الفلم", genericFallback.title)
+        assertEquals("حدث خطا اثناء التشغيل. حاول مرة اخرى.", genericFallback.body)
+        assertEquals("توقفت عند 03:52", genericFallback.context)
     }
 
     @Test

@@ -233,16 +233,29 @@ internal fun shouldAdvancePlayerAutoplayCountdown(
     countdown: Int,
 ): Boolean = appForeground && countdown >= 0
 
+/** One authoritative Movie entry/player presentation. */
+internal enum class MoviePlayerPresentation { ERROR_CARD, RESUME, PLAYER }
+
 /**
- * Mutually exclusive Movie offline surface derived only from the existing authoritative player
- * state: a Movie VOD source that is not local-only, whose failure came from connectivity loss.
+ * Single presentation decision for a Movie request: a blocking failure or remote offline entry
+ * wins, otherwise an unresolved saved-position decision, otherwise normal player presentation.
+ * Connectivity is typed state; localized message equality is never used.
  */
-internal fun movieOfflineCardVisible(
+internal fun moviePlayerPresentation(
     isMovie: Boolean,
     localPlayback: Boolean,
+    networkAvailable: Boolean,
     offlineFailure: Boolean,
-    offlineMessageActive: Boolean,
-): Boolean = isMovie && !localPlayback && offlineFailure && offlineMessageActive
+    finalErrorPresent: Boolean,
+    resumePromptPending: Boolean,
+    offlineInitial: Boolean,
+): MoviePlayerPresentation = when {
+    isMovie && !localPlayback && (offlineInitial || (!networkAvailable && (offlineFailure || finalErrorPresent))) ->
+        MoviePlayerPresentation.ERROR_CARD
+    isMovie && finalErrorPresent -> MoviePlayerPresentation.ERROR_CARD
+    resumePromptPending -> MoviePlayerPresentation.RESUME
+    else -> MoviePlayerPresentation.PLAYER
+}
 
 /**
  * First-frame offline entry: a remote movie opened while the validated connectivity snapshot is
@@ -256,6 +269,33 @@ internal fun movieOfflineInitialVisible(
     isPlaying: Boolean,
     playbackReady: Boolean,
 ): Boolean = isMovie && !localPlayback && !networkAvailable && !isPlaying && !playbackReady
+
+/** Copy for the single Movie error card: offline wording only for real unusable connectivity. */
+internal fun moviePlayerErrorCopy(
+    offline: Boolean,
+    resumePending: Boolean,
+    formattedSavedTime: String,
+    failureMessage: String?,
+): MovieOfflineCardCopy = when {
+    offline && resumePending -> movieOfflineCardCopy(
+        resumePending = true,
+        formattedSavedTime = formattedSavedTime,
+    )
+    offline -> movieOfflineCardCopy(
+        resumePending = false,
+        formattedSavedTime = formattedSavedTime,
+    )
+    else -> MovieOfflineCardCopy(
+        title = "تعذر تشغيل الفلم",
+        body = failureMessage?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "حدث خطا اثناء التشغيل. حاول مرة اخرى.",
+        context = if (resumePending) {
+            "توقفت عند $formattedSavedTime"
+        } else {
+            "مكان توقفك محفوظ"
+        },
+    )
+}
 
 /**
  * Playback intent carried across a connectivity restore. A movie the user paused manually stays
@@ -567,16 +607,21 @@ fun PlayerScreen(
         isPlaying = isPlaying,
         playbackReady = player.playbackState == Player.STATE_READY,
     )
-    val movieOfflineActive = movieOfflineInitial || movieOfflineCardVisible(
+    // One authoritative presentation branch for rendering, focus, semantics and input. The
+    // Resume dialog and any Movie error card are therefore mutually exclusive by construction.
+    val moviePresentation = moviePlayerPresentation(
         isMovie = isMovieVod,
         localPlayback = localPlayback,
+        networkAvailable = networkAvailable,
         offlineFailure = offlineFailure,
-        offlineMessageActive = finalError == PLAYER_OFFLINE_MESSAGE,
+        finalErrorPresent = finalError != null,
+        resumePromptPending = resumePromptVisible,
+        offlineInitial = movieOfflineInitial,
     )
-    // While the Resume decision is pending the dialog is the only presentation: the player
-    // timeline, bottom control strip and top-bar actions are not composed at all, so they are not
-    // invisible focus targets and cannot receive touch, D-pad, OK, seek or playback commands.
-    val resumeDecisionActive = resumePromptVisible && !movieOfflineActive
+    val movieErrorActive = isMovieVod && moviePresentation == MoviePlayerPresentation.ERROR_CARD
+    val movieModalActive = isMovieVod && moviePresentation != MoviePlayerPresentation.PLAYER
+    // The card uses offline wording/icon only for genuinely unusable connectivity.
+    val movieErrorCardOffline = isMovieVod && !localPlayback && (movieOfflineInitial || !networkAvailable)
     val recoveryDispatchOwner = RecoveryDispatchOwner(
         generationId = playerSession.generation.id,
         playerInstanceId = playerInstanceGeneration,
@@ -1223,7 +1268,7 @@ fun PlayerScreen(
             return@LaunchedEffect
         }
 
-        if (offlineFailure && finalError == PLAYER_OFFLINE_MESSAGE) {
+        if (offlineFailure) {
             val resumePositionMs = if (request.isLive) {
                 0L
             } else {
@@ -1367,7 +1412,8 @@ fun PlayerScreen(
         browserVisible,
         finalError,
         offlineFailure,
-        movieOfflineActive,
+        movieModalActive,
+        movieErrorActive,
         resumePromptVisible,
         unlockVisible,
         controlsLocked,
@@ -1376,7 +1422,7 @@ fun PlayerScreen(
         request.historyKey,
     ) {
         val target = when {
-            movieOfflineActive -> offlineRetryFocus
+            movieErrorActive -> offlineRetryFocus
             finalError != null -> null
             browserVisible || activePanel != null -> null
             vodMorePanel != null -> null
@@ -1422,7 +1468,7 @@ fun PlayerScreen(
     val interactionModifier = Modifier
         .pointerInput(request, finalError) {
             detectTapGestures(onTap = {
-                if (finalError != null || resumePromptVisible) return@detectTapGestures
+                if (finalError != null || resumePromptVisible || movieModalActive) return@detectTapGestures
                 when {
                     liveMorePanel != null -> closeLiveMorePanelToTrigger()
                     controlsLocked -> { unlockVisible = true; controlsVisible = true }
@@ -1617,7 +1663,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !resumeDecisionActive && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked) {
             PlayerTopBar(
                 title = playerDisplayTitle,
                 isLive = request.isLive,
@@ -1628,7 +1674,7 @@ fun PlayerScreen(
             )
         }
 
-        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieOfflineActive && !resumeDecisionActive && !browserVisible && activePanel == null && !controlsLocked) {
+        if (controlsVisible && nextCountdown < 0 && finalError == null && !movieModalActive && !browserVisible && activePanel == null && !controlsLocked) {
             if (request.isLive) {
                 val liveDensity = LocalDensity.current
                 val minimumMorePanelHeight = remember(
@@ -1831,7 +1877,7 @@ fun PlayerScreen(
             }
         }
 
-        if (buffering && finalError == null && !resumePromptVisible && !movieOfflineActive) {
+        if (buffering && finalError == null && !movieModalActive && !resumePromptVisible) {
             LoadingRing(
                 label = if (request.isLive) "جاري تشغيل القناة…" else "جاري تجهيز المشاهدة…",
                 modifier = Modifier.align(Alignment.Center),
@@ -1852,8 +1898,29 @@ fun PlayerScreen(
             )
         }
 
-        if (resumePromptVisible && !movieOfflineActive) {
-            ResumePrompt(
+        when {
+            movieErrorActive -> MoviePlayerErrorCard(
+                offline = movieErrorCardOffline,
+                resumePending = resumePromptVisible,
+                savedPositionMs = request.resumePositionMs,
+                failureMessage = finalError,
+                onRetry = {
+                    // While connectivity is unusable the same card stays; otherwise the generic
+                    // failure uses the existing manual retry owner.
+                    if (movieErrorCardOffline) {
+                        if (hasUsableNetwork(context)) {
+                            networkAvailable = true
+                        }
+                    } else {
+                        retryManually()
+                    }
+                },
+                onBack = ::saveAndBack,
+                retryFocusRequester = offlineRetryFocus,
+                backFocusRequester = offlineBackFocus,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            resumePromptVisible -> ResumePrompt(
                 title = playerDisplayTitle,
                 positionMs = request.resumePositionMs,
                 durationMs = durationMs,
@@ -1882,6 +1949,29 @@ fun PlayerScreen(
                 backFocusRequester = resumeBackFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
+            finalError != null -> PlayerErrorPanel(
+                title = if (request.isLive) "تعذر تشغيل القناة" else null,
+                message = finalError!!,
+                canChooseChannel = request.isLive && liveCatalog?.items?.isNotEmpty() == true,
+                canChooseServer = canOfferPlayerErrorSourcePicker(
+                    failureClass = finalFailureClass,
+                    candidateCount = request.candidates.size,
+                ),
+                onRetry = { retryManually() },
+                onChooseChannel = {
+                    suspendFinalErrorForModal()
+                    controlsVisible = false
+                    browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY
+                    browserVisible = true
+                },
+                onChooseServer = {
+                    suspendFinalErrorForModal()
+                    activePanel = PlayerPanel.SERVERS
+                },
+                onBack = ::saveAndBack,
+                retryFocusRequester = errorRetryFocus,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
 
         if (nextCountdown >= 0 && nextEpisodeTitle != null && onPlayNextEpisode != null) {
@@ -1908,50 +1998,6 @@ fun PlayerScreen(
                     controlsVisible = false
                 },
                 focusRequester = unlockFocus,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-
-        if (movieOfflineActive) {
-            MoviePlayerOfflineCard(
-                resumePending = resumePromptVisible,
-                savedPositionMs = request.resumePositionMs,
-                onRetry = {
-                    // One offline surface while still disconnected: only a validated connection
-                    // re-enters the existing recovery path, otherwise the card simply remains.
-                    if (hasUsableNetwork(context)) {
-                        networkAvailable = true
-                    }
-                },
-                onBack = ::saveAndBack,
-                retryFocusRequester = offlineRetryFocus,
-                backFocusRequester = offlineBackFocus,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-
-        if (finalError != null && !movieOfflineActive) {
-            PlayerErrorPanel(
-                title = if (request.isLive) "تعذر تشغيل القناة" else null,
-                message = finalError!!,
-                canChooseChannel = request.isLive && liveCatalog?.items?.isNotEmpty() == true,
-                canChooseServer = canOfferPlayerErrorSourcePicker(
-                    failureClass = finalFailureClass,
-                    candidateCount = request.candidates.size,
-                ),
-                onRetry = { retryManually() },
-                onChooseChannel = {
-                    suspendFinalErrorForModal()
-                    controlsVisible = false
-                    browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY
-                    browserVisible = true
-                },
-                onChooseServer = {
-                    suspendFinalErrorForModal()
-                    activePanel = PlayerPanel.SERVERS
-                },
-                onBack = ::saveAndBack,
-                retryFocusRequester = errorRetryFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -4086,15 +4132,16 @@ private fun ResumePrompt(
 }
 
 /**
- * The single Movie offline surface. Two mutually exclusive states share one composition: a movie
- * that was interrupted while playing, and a saved-position Resume decision that is still pending.
- * The pending ResumePrompt is not composed while this card is up, so its choice and saved position
- * survive untouched.
+ * The single Movie error surface, shared by offline entries and blocking generic failures. The
+ * Resume prompt, player chrome and the legacy error panel are never composed while this card is
+ * up because the presentation decision is exclusive by construction.
  */
 @Composable
-private fun MoviePlayerOfflineCard(
+private fun MoviePlayerErrorCard(
+    offline: Boolean,
     resumePending: Boolean,
     savedPositionMs: Long,
+    failureMessage: String?,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     retryFocusRequester: FocusRequester,
@@ -4103,9 +4150,11 @@ private fun MoviePlayerOfflineCard(
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
-    val copy = movieOfflineCardCopy(
+    val copy = moviePlayerErrorCopy(
+        offline = offline,
         resumePending = resumePending,
         formattedSavedTime = formatTime(savedPositionMs),
+        failureMessage = failureMessage,
     )
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val cardMaxHeight = (maxHeight - 24.dp).coerceAtLeast(0.dp)
@@ -4123,7 +4172,7 @@ private fun MoviePlayerOfflineCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(
-                imageVector = Icons.Rounded.WifiOff,
+                imageVector = moviesErrorIcon(networkFailure = offline),
                 contentDescription = null,
                 tint = colors.gold,
                 modifier = Modifier.size(if (adaptiveUi.isTelevision) 46.dp else 38.dp),

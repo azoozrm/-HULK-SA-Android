@@ -1,5 +1,13 @@
 package sa.hulksa.player.ui.screens
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -9,6 +17,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,6 +56,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -634,21 +647,76 @@ internal fun moviesDetailsErrorCopy(offline: Boolean, serverMessage: String?): M
     }
 
 /**
- * Adaptive Movies notice arrangement: below this width the Retry action reflows beneath the
- * message so complete text and safe focus outlines are preserved on narrow windows.
+ * Observable validated-connectivity state for the Movies error classification. A one-shot
+ * composition read can lag an actual outage; this updates when the system reports connectivity
+ * changes so offline wording/icon are selected from current truth.
  */
-internal fun moviesErrorNoticeStacks(availableWidthDp: Float): Boolean =
-    availableWidthDp < 400f
+@Composable
+internal fun rememberUsableNetworkState(): State<Boolean> {
+    val context = LocalContext.current
+    val state = remember { mutableStateOf(hasUsableNetwork(context)) }
+    DisposableEffect(context) {
+        val manager = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val handler = Handler(Looper.getMainLooper())
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private fun publish() {
+                val available = hasUsableNetwork(context)
+                handler.post { state.value = available }
+            }
+
+            override fun onAvailable(network: Network) = publish()
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = publish()
+            override fun onLost(network: Network) = publish()
+        }
+        if (manager != null) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    manager.registerDefaultNetworkCallback(callback)
+                } else {
+                    manager.registerNetworkCallback(
+                        NetworkRequest.Builder()
+                            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            .build(),
+                        callback,
+                    )
+                }
+            }
+            state.value = hasUsableNetwork(context)
+        }
+        onDispose {
+            handler.removeCallbacksAndMessages(null)
+            if (manager != null) runCatching { manager.unregisterNetworkCallback(callback) }
+        }
+    }
+    return state
+}
+
+/**
+ * Measured fit for the wide notice row: the compact Retry may sit beside the message group only
+ * when their actual text/icon/padding widths fit the available slot; otherwise the notice uses a
+ * centered stack.
+ */
+internal fun moviesErrorNoticeFitsRow(
+    availableWidthPx: Int,
+    messageWidthPx: Int,
+    retryWidthPx: Int,
+    gapPx: Int,
+): Boolean {
+    if (availableWidthPx <= 0 || messageWidthPx <= 0 || retryWidthPx <= 0) return false
+    return messageWidthPx + gapPx + retryWidthPx <= availableWidthPx
+}
 
 /** Truthful Movies error glyph: disconnected Wi-Fi only for a real network condition. */
 internal fun moviesErrorIcon(networkFailure: Boolean): ImageVector =
     if (networkFailure) Icons.Rounded.WifiOff else Icons.Outlined.ErrorOutline
 
 /**
- * One bounded Movies error surface for catalog and Details: accepted dark surface, warm-gold
- * status icon immediately beside the message group and a compact ivory/muted explanation. The
- * notice hugs its content so no large empty span separates the wording from the Retry action,
- * which stays fully readable and explicitly routable in the TV focus graph.
+ * One centered, bounded Movies error surface for catalog and Details. The title and status icon
+ * are centered as one adjacent pair (icon physically LEFT of the wording in RTL), the explanation
+ * is centered beneath, and Retry stays in the same group; on a wide TV slot the compact Retry may
+ * share a centered row when the measured widths fit, otherwise the group stacks. The surface uses
+ * the accepted offline-card width policy on TV and the full safe content width on phone.
  */
 @Composable
 internal fun MoviesErrorNotice(
@@ -656,6 +724,7 @@ internal fun MoviesErrorNotice(
     body: String,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    isTv: Boolean = false,
     networkFailure: Boolean = true,
     retryRequester: FocusRequester? = null,
     onRetryFocusChanged: ((Boolean) -> Unit)? = null,
@@ -664,58 +733,110 @@ internal fun MoviesErrorNotice(
 ) {
     val colors = LocalHulkColors.current
     val shape = RoundedCornerShape(12.dp)
-    BoxWithConstraints(modifier) {
-        val stacked = moviesErrorNoticeStacks(maxWidth.value)
-        val surface = Modifier
-            .then(if (stacked) Modifier.fillMaxWidth() else Modifier.wrapContentWidth(Alignment.Start))
-            .clip(shape)
-            .background(Color(0xFF11120D))
-            .border(1.dp, colors.gold.copy(alpha = .35f), shape)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-        if (stacked) {
-            Column(surface, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MoviesErrorNoticeMessage(title = title, body = body, networkFailure = networkFailure)
-                MoviesErrorNoticeRetry(
-                    onRetry = onRetry,
-                    retryRequester = retryRequester,
-                    onRetryFocusChanged = onRetryFocusChanged,
-                    onRetryUp = onRetryUp,
-                    onRetryDown = onRetryDown,
-                    modifier = Modifier.align(Alignment.Start),
-                )
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val titleStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    val bodyStyle = TextStyle(fontSize = 10.sp)
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        BoxWithConstraints(contentAlignment = Alignment.Center) {
+            val availableWidthPx = with(density) { maxWidth.roundToPx() }
+            val horizontalPaddingPx = with(density) { 12.dp.roundToPx() }
+            val iconPx = with(density) { 18.dp.roundToPx() }
+            val iconGapPx = with(density) { 6.dp.roundToPx() }
+            val blockGapPx = with(density) { 12.dp.roundToPx() }
+            val innerAvailablePx = (availableWidthPx - 2 * horizontalPaddingPx).coerceAtLeast(1)
+            val titleRowWidthPx = textMeasurer.measure(
+                text = AnnotatedString(title),
+                style = titleStyle,
+                maxLines = 1,
+            ).size.width + iconGapPx + iconPx
+            val bodyNaturalWidthPx = textMeasurer.measure(
+                text = AnnotatedString(body),
+                style = bodyStyle,
+            ).size.width
+            val messageWidthPx = maxOf(titleRowWidthPx, minOf(bodyNaturalWidthPx, innerAvailablePx))
+            val retryWidthPx = textMeasurer.measure(
+                text = AnnotatedString("اعادة المحاولة"),
+                style = titleStyle,
+                maxLines = 1,
+            ).size.width + with(density) { 23.dp.roundToPx() } + 2 * horizontalPaddingPx
+            val fitsRow = isTv && moviesErrorNoticeFitsRow(
+                availableWidthPx = innerAvailablePx,
+                messageWidthPx = messageWidthPx,
+                retryWidthPx = retryWidthPx,
+                gapPx = blockGapPx,
+            )
+            val surfaceWidth = if (isTv) {
+                // Same resolved width policy as the accepted Movie offline card: cap, then fraction.
+                Modifier.widthIn(max = 560.dp).fillMaxWidth(.78f)
+            } else {
+                Modifier.fillMaxWidth()
             }
-        } else {
-            Row(
-                surface,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = surfaceWidth
+                    .clip(shape)
+                    .background(Color(0xFF11120D))
+                    .border(1.dp, colors.gold.copy(alpha = .35f), shape)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .focusGroup(),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                MoviesErrorNoticeMessage(title = title, body = body, networkFailure = networkFailure)
-                MoviesErrorNoticeRetry(
-                    onRetry = onRetry,
-                    retryRequester = retryRequester,
-                    onRetryFocusChanged = onRetryFocusChanged,
-                    onRetryUp = onRetryUp,
-                    onRetryDown = onRetryDown,
-                )
+                if (fitsRow) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        MoviesErrorNoticeMessage(
+                            title = title,
+                            body = body,
+                            networkFailure = networkFailure,
+                            centered = true,
+                        )
+                        MoviesErrorNoticeRetry(
+                            onRetry = onRetry,
+                            retryRequester = retryRequester,
+                            onRetryFocusChanged = onRetryFocusChanged,
+                            onRetryUp = onRetryUp,
+                            onRetryDown = onRetryDown,
+                        )
+                    }
+                } else {
+                    MoviesErrorNoticeMessage(
+                        title = title,
+                        body = body,
+                        networkFailure = networkFailure,
+                        centered = true,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    MoviesErrorNoticeRetry(
+                        onRetry = onRetry,
+                        retryRequester = retryRequester,
+                        onRetryFocusChanged = onRetryFocusChanged,
+                        onRetryUp = onRetryUp,
+                        onRetryDown = onRetryDown,
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Title and status icon share one row (icon immediately physically LEFT of the title in RTL) and
- * the explanation sits beneath, so the explanation length can never separate the icon from the
- * title.
+ * Centered title + status icon pair (icon physically LEFT of the wording in RTL) with the complete
+ * explanation beneath; no ellipsis or line cap so long copy wraps naturally.
  */
 @Composable
 private fun MoviesErrorNoticeMessage(
     title: String,
     body: String,
     networkFailure: Boolean,
+    centered: Boolean,
 ) {
     val colors = LocalHulkColors.current
-    Column(Modifier.wrapContentWidth()) {
+    Column(
+        modifier = Modifier.wrapContentWidth(),
+        horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start,
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -740,8 +861,7 @@ private fun MoviesErrorNoticeMessage(
             color = colors.textMuted,
             fontSize = 10.sp,
             lineHeight = 13.sp,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
+            textAlign = if (centered) TextAlign.Center else TextAlign.Start,
         )
     }
 }
@@ -822,7 +942,6 @@ internal fun MoviesOfflineEmptyState(
             color = colors.textMuted,
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
-            maxLines = 2,
         )
         Spacer(Modifier.height(14.dp))
         FocusButton(

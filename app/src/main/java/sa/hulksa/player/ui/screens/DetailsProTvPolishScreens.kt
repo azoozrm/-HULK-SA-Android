@@ -242,7 +242,8 @@ private fun MovieDetailsProTvPolished(
     val movieHeroHeightDp = movieCompactHeroHeightDp(adaptive.screenHeightDp)
     val detailsErrorRetryRequester = remember(item.id) { FocusRequester() }
     var detailsErrorRetryFocused by remember(item.id) { mutableStateOf(false) }
-    val detailsOffline = errorMessage != null && !hasUsableNetwork(context)
+    val detailsNetworkUsable by rememberUsableNetworkState()
+    val detailsOffline = errorMessage != null && !detailsNetworkUsable
     val detailsErrorCopy = moviesDetailsErrorCopy(
         offline = detailsOffline,
         serverMessage = errorMessage,
@@ -533,6 +534,7 @@ private fun MovieDetailsProTvPolished(
                     title = detailsErrorCopy.title,
                     body = detailsErrorCopy.body,
                     onRetry = onRetryDetails,
+                    isTv = true,
                     networkFailure = detailsOffline,
                     retryRequester = detailsErrorRetryRequester,
                     onRetryFocusChanged = { detailsErrorRetryFocused = it },

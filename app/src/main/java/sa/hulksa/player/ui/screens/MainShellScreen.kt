@@ -2191,7 +2191,7 @@ private fun PosterCatalogScreen(
     val showingContinue = state.selectedCategoryId == CONTINUE_CATEGORY_ID
     val resultCount = if (showingContinue) continueWatching.size else visible.size
     val catalogErrorMessage = state.errorMessage
-    val moviesNetworkUsable = hasUsableNetwork(context)
+    val moviesNetworkUsable by rememberUsableNetworkState()
     val moviesError = movieCategoryManagement && catalogErrorMessage != null
     val moviesOfflineError = moviesError && !moviesNetworkUsable
     val moviesErrorCopy = moviesCatalogErrorCopy(
@@ -2337,6 +2337,7 @@ private fun PosterCatalogScreen(
                     title = moviesErrorCopy.title,
                     body = moviesErrorCopy.body,
                     onRetry = onRefresh,
+                    isTv = isTv,
                     networkFailure = moviesOfflineError,
                     retryRequester = noticeRetryRequester,
                     onRetryFocusChanged = { noticeRetryFocused = it },
