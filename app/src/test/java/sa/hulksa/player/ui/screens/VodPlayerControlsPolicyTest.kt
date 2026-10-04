@@ -45,6 +45,25 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun previewPointerStaysUnderTheThumbAndClampsAtEdges() {
+        assertEquals(
+            0f,
+            vodPreviewPointerOffsetPx(thumbXpx = 10f, cardLeftPx = 100f, cardWidthPx = 200f, pointerWidthPx = 14f),
+            0.001f,
+        )
+        assertEquals(
+            43f,
+            vodPreviewPointerOffsetPx(thumbXpx = 150f, cardLeftPx = 100f, cardWidthPx = 200f, pointerWidthPx = 14f),
+            0.001f,
+        )
+        assertEquals(
+            186f,
+            vodPreviewPointerOffsetPx(thumbXpx = 900f, cardLeftPx = 0f, cardWidthPx = 200f, pointerWidthPx = 14f),
+            0.001f,
+        )
+    }
+
+    @Test
     fun morePanelChildReturnsToMenuAndMenuCloses() {
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.SPEED))
         assertEquals(VodMorePanelView.MENU, vodMorePanelBack(VodMorePanelView.PICTURE_SIZE))

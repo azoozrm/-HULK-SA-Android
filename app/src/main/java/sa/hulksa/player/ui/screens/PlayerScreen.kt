@@ -2855,18 +2855,34 @@ private fun VodCompactControlStrip(
             }
             seekPreviewMs?.let { target ->
                 val cardWidth = if (maxWidth < 420.dp) 170.dp else 216.dp
-                val cardHeight = cardWidth * 9f / 16f
                 val fraction = vodPreviewCardFraction(target, durationMs)
                 val horizontalRoom = (maxWidth - cardWidth).coerceAtLeast(0.dp)
                 val cardX = (maxWidth * fraction - cardWidth / 2).coerceIn(0.dp, horizontalRoom)
-                VodSeekPreviewCard(
-                    frame = seekPreviewFrame,
-                    positionMs = target,
-                    cardWidth = cardWidth,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = cardX, y = -(cardHeight + 16.dp)),
-                )
+                // The preview stays on the physical timeline coordinate: LTR placement, the pointer
+                // pinned to the thumb while the bubble clamps at the edges, and a truthful time-only
+                // card when no real frame is available.
+                val previewCardHeight = if (seekPreviewFrame != null) cardWidth * 9f / 16f else 56.dp
+                val density = LocalDensity.current
+                val pointerOffsetPx = vodPreviewPointerOffsetPx(
+                    thumbXpx = with(density) { (maxWidth * fraction).toPx() },
+                    cardLeftPx = with(density) { cardX.toPx() },
+                    cardWidthPx = with(density) { cardWidth.toPx() },
+                    pointerWidthPx = with(density) { 14.dp.toPx() },
+                ).roundToInt()
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Box(Modifier.fillMaxSize()) {
+                        VodSeekPreviewCard(
+                            frame = seekPreviewFrame,
+                            positionMs = target,
+                            cardWidth = cardWidth,
+                            truthfulFallback = true,
+                            pointerOffsetPx = pointerOffsetPx,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .offset(x = cardX, y = -(previewCardHeight + 16.dp)),
+                        )
+                    }
+                }
             }
         }
     }
@@ -2961,55 +2977,99 @@ private fun VodSeekPreviewCard(
     frame: Bitmap?,
     positionMs: Long,
     cardWidth: Dp,
+    truthfulFallback: Boolean = false,
+    pointerOffsetPx: Int? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
+    val density = LocalDensity.current
     val shape = RoundedCornerShape(10.dp)
     Column(modifier = modifier.width(cardWidth), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(Color.Black.copy(alpha = .94f))
-                .border(1.dp, colors.gold.copy(alpha = .85f), shape),
-        ) {
+        if (frame != null || !truthfulFallback) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .background(Color(0xFF0A0B08)),
-                contentAlignment = Alignment.Center,
+                    .clip(shape)
+                    .background(Color.Black.copy(alpha = .94f))
+                    .border(1.dp, colors.gold.copy(alpha = .85f), shape),
             ) {
-                if (frame != null) {
-                    Image(
-                        bitmap = frame.asImageBitmap(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .background(Color(0xFF0A0B08)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (frame != null) {
+                        Image(
+                            bitmap = frame.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    Text(
+                        text = formatTime(positionMs),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = .62f))
+                            .padding(vertical = 3.dp),
+                        textAlign = TextAlign.Center,
                     )
                 }
+            }
+        } else {
+            // No decodable frame: a compact truthful time-only card instead of an empty picture.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(shape)
+                    .background(Color(0xF20A0B08))
+                    .border(1.dp, colors.gold.copy(alpha = .85f), shape),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     text = formatTime(positionMs),
-                    color = Color.White,
-                    fontSize = 13.sp,
+                    color = colors.goldBright,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = .62f))
-                        .padding(vertical = 3.dp),
-                    textAlign = TextAlign.Center,
                 )
             }
         }
-        Canvas(Modifier.size(width = 14.dp, height = 7.dp)) {
-            val pointer = Path().apply {
-                moveTo(0f, 0f)
-                lineTo(size.width, 0f)
-                lineTo(size.width / 2f, size.height)
-                close()
+        if (pointerOffsetPx != null) {
+            val pointerSize = 14.dp
+            val maxOffset = (cardWidth - pointerSize).coerceAtLeast(0.dp)
+            val offset = with(density) { pointerOffsetPx.toDp() }.coerceIn(0.dp, maxOffset)
+            Box(Modifier.fillMaxWidth()) {
+                Canvas(
+                    Modifier
+                        .offset(x = offset)
+                        .size(width = pointerSize, height = 7.dp),
+                ) {
+                    val pointer = Path().apply {
+                        moveTo(0f, 0f)
+                        lineTo(size.width, 0f)
+                        lineTo(size.width / 2f, size.height)
+                        close()
+                    }
+                    drawPath(pointer, colors.goldBright)
+                }
             }
-            drawPath(pointer, colors.goldBright)
+        } else {
+            Canvas(Modifier.size(width = 14.dp, height = 7.dp)) {
+                val pointer = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, 0f)
+                    lineTo(size.width / 2f, size.height)
+                    close()
+                }
+                drawPath(pointer, colors.goldBright)
+            }
         }
     }
 }
@@ -4037,7 +4097,7 @@ private fun VodMorePanel(
                             upFocus = movieUp(1),
                             downFocus = movieDown(1),
                         )
-                        Spacer(Modifier.height(6.dp))
+                        VodPanelDivider()
                         VodMoreRow(
                             text = "السرعة",
                             icon = Icons.Rounded.Speed,
@@ -4048,7 +4108,7 @@ private fun VodMorePanel(
                             upFocus = movieUp(2),
                             downFocus = movieDown(2),
                         )
-                        Spacer(Modifier.height(6.dp))
+                        VodPanelDivider()
                         VodMoreRow(
                             text = "حجم الصورة",
                             icon = vodPictureSizeGlyph(pictureSizeIndex),
@@ -4059,8 +4119,8 @@ private fun VodMorePanel(
                             upFocus = movieUp(3),
                             downFocus = movieDown(3),
                         )
-                        Spacer(Modifier.height(6.dp))
-                        VodMoreRow(
+                        VodPanelDivider()
+                        VodDirectActionRow(
                             text = "من البداية",
                             icon = Icons.Rounded.Replay,
                             onClick = onRestart,
@@ -4068,8 +4128,8 @@ private fun VodMorePanel(
                             upFocus = movieUp(4),
                             downFocus = movieDown(4),
                         )
-                        Spacer(Modifier.height(6.dp))
-                        VodMoreRow(
+                        VodPanelDivider()
+                        VodDirectActionRow(
                             text = "قفل التحكم",
                             icon = Icons.Rounded.Lock,
                             onClick = onLock,
@@ -4080,12 +4140,10 @@ private fun VodMorePanel(
                     }
                     VodMorePanelView.SPEED -> {
                         VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
-                            if (index > 0) Spacer(Modifier.height(6.dp))
-                            VodMoreRow(
-                                text = vodSpeedLabel(option),
-                                icon = Icons.Rounded.Speed,
+                            if (index > 0) VodPanelDivider()
+                            VodNumericOptionRow(
+                                value = vodSpeedLabel(option),
                                 selected = kotlin.math.abs(option - speed) < 0.001f,
-                                reserveCheckSlot = true,
                                 onClick = { onSelectSpeed(option) },
                                 focusRequester = speedOptionFocus[index],
                                 upFocus = movieUp(index + 1),
@@ -4095,7 +4153,7 @@ private fun VodMorePanel(
                     }
                     VodMorePanelView.PICTURE_SIZE -> {
                         LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
-                            if (index > 0) Spacer(Modifier.height(6.dp))
+                            if (index > 0) VodPanelDivider()
                             VodMoreRow(
                                 text = label,
                                 icon = vodPictureSizeGlyph(index),
@@ -4210,16 +4268,25 @@ private fun VodMoreRow(
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights
     val shape = RoundedCornerShape(11.dp)
-    val foreground = if (showFocused) Color(0xFF14120A) else colors.text
+    // Reference: a thin gold edge with a subtle backing, no fill/geometry change. Gold semantic
+    // glyphs stay distinct from the ivory text and the selected check column.
+    val glyphTint = if (showFocused) colors.goldBright else colors.gold
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(
                 when {
-                    showFocused -> colors.gold
+                    showFocused -> colors.gold.copy(alpha = .14f)
                     selected -> colors.gold.copy(alpha = .16f)
                     else -> Color.Transparent
+                },
+            )
+            .then(
+                if (showFocused) {
+                    Modifier.border(1.5.dp, colors.gold, shape)
+                } else {
+                    Modifier
                 },
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
@@ -4239,12 +4306,12 @@ private fun VodMoreRow(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (showFocused) Color(0xFF14120A) else colors.text,
+            tint = glyphTint,
             modifier = Modifier.size(19.dp),
         )
         Text(
             text = text,
-            color = foreground,
+            color = colors.text,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
         )
@@ -4252,7 +4319,7 @@ private fun VodMoreRow(
         value?.let {
             Text(
                 text = it,
-                color = if (showFocused) Color(0xFF14120A) else colors.textMuted,
+                color = colors.textMuted,
                 fontSize = 12.sp,
                 maxLines = 1,
             )
@@ -4263,7 +4330,7 @@ private fun VodMoreRow(
                     Icon(
                         imageVector = Icons.Rounded.Check,
                         contentDescription = null,
-                        tint = if (showFocused) Color(0xFF14120A) else colors.gold,
+                        tint = if (showFocused) colors.goldBright else colors.gold,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -4273,9 +4340,152 @@ private fun VodMoreRow(
             Icon(
                 imageVector = Icons.Rounded.ChevronLeft,
                 contentDescription = null,
-                tint = if (showFocused) Color(0xFF14120A) else colors.textMuted,
+                tint = colors.textMuted,
                 modifier = Modifier.size(18.dp),
             )
+        }
+    }
+}
+
+/** Fine separator between the compact menu rows. */
+@Composable
+private fun VodPanelDivider() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(LocalHulkColors.current.gold.copy(alpha = .18f)),
+    )
+}
+
+/**
+ * Reference direct action: the Arabic label sits on the physical RIGHT and one semantic action
+ * glyph on the physical LEFT (restart, lock). Focus uses the same thin gold edge treatment.
+ */
+@Composable
+private fun VodDirectActionRow(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    upFocus: FocusRequester,
+    downFocus: FocusRequester,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(11.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (showFocused) colors.gold.copy(alpha = .14f) else Color.Transparent)
+            .then(
+                if (showFocused) {
+                    Modifier.border(1.5.dp, colors.gold, shape)
+                } else {
+                    Modifier
+                },
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                up = upFocus
+                down = downFocus
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = text }
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Text(
+            text = text,
+            color = colors.text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.weight(1f))
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (showFocused) colors.goldBright else colors.gold,
+            modifier = Modifier.size(19.dp),
+        )
+    }
+}
+
+/**
+ * Reference numeric option row: the value sits on the physical RIGHT and the reserved selected
+ * check column on the physical LEFT, with no duplicate semantic glyph.
+ */
+@Composable
+private fun VodNumericOptionRow(
+    value: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    upFocus: FocusRequester,
+    downFocus: FocusRequester,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(11.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                when {
+                    showFocused -> colors.gold.copy(alpha = .14f)
+                    selected -> colors.gold.copy(alpha = .16f)
+                    else -> Color.Transparent
+                },
+            )
+            .then(
+                if (showFocused) {
+                    Modifier.border(1.5.dp, colors.gold, shape)
+                } else {
+                    Modifier
+                },
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                up = upFocus
+                down = downFocus
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = value }
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Text(
+            text = value,
+            color = colors.text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.weight(1f))
+        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = if (showFocused) colors.goldBright else colors.gold,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }

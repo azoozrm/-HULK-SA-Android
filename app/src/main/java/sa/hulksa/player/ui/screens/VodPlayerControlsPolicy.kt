@@ -79,6 +79,20 @@ internal fun vodCompactSingleRow(
 ): Boolean = approvedSingleRow && requiredWidthPx in 1..availableWidthPx
 
 /**
+ * Preview pointer x-offset inside the clamped preview card, so the triangle stays under the real
+ * seek thumb at the timeline coordinate while the bubble moves for edge clamping.
+ */
+internal fun vodPreviewPointerOffsetPx(
+    thumbXpx: Float,
+    cardLeftPx: Float,
+    cardWidthPx: Float,
+    pointerWidthPx: Float,
+): Float {
+    val maxOffset = (cardWidthPx - pointerWidthPx).coerceAtLeast(0f)
+    return (thumbXpx - cardLeftPx - pointerWidthPx / 2f).coerceIn(0f, maxOffset)
+}
+
+/**
  * Closed vertical focus cycle for the Movie More panel.
  *
  * Node 0 is the panel header and nodes 1..count-1 are the body rows. UP/DOWN wrap around the
