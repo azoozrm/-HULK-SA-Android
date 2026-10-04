@@ -24,12 +24,11 @@ class VodPlayerControlsPolicyTest {
     )
 
     @Test
-    fun compactStripStaysSingleRowOnlyWhenMeasuredCaptionsFit() {
-        assertFalse(vodCompactSingleRow(approvedSingleRow = false, availableWidthPx = 2_000, requiredWidthPx = 100))
-        assertTrue(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 2_000, requiredWidthPx = 100))
-        assertFalse(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 100, requiredWidthPx = 101))
-        assertTrue(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 100, requiredWidthPx = 100))
-        assertFalse(vodCompactSingleRow(approvedSingleRow = true, availableWidthPx = 100, requiredWidthPx = 0))
+    fun toolsShareTheRowWidthOnlyWhenIntrinsicCaptionsOverflow() {
+        assertFalse(vodToolsUseWeightedSlots(availableWidthPx = 2_000, requiredWidthPx = 320))
+        assertFalse(vodToolsUseWeightedSlots(availableWidthPx = 320, requiredWidthPx = 320))
+        assertTrue(vodToolsUseWeightedSlots(availableWidthPx = 319, requiredWidthPx = 320))
+        assertTrue(vodToolsUseWeightedSlots(availableWidthPx = 0, requiredWidthPx = 1))
     }
 
     @Test
@@ -61,6 +60,64 @@ class VodPlayerControlsPolicyTest {
             vodPreviewPointerOffsetPx(thumbXpx = 900f, cardLeftPx = 0f, cardWidthPx = 200f, pointerWidthPx = 14f),
             0.001f,
         )
+    }
+
+    @Test
+    fun previewOverlayNeverChangesTheControlStripHeight() {
+        // Appearing/disappearing preview must not alter the transport allocation: the placement
+        // always reports zero height contribution, and the bubble only grows upward.
+        val framePlacement = vodPreviewOverlayPlacement(
+            thumbXpx = 500f,
+            timelineWidthPx = 1_000f,
+            timelineHeightPx = 40f,
+            cardWidthPx = 300f,
+            cardHeightPx = 300f,
+            pointerWidthPx = 28f,
+            pointerHeightPx = 14f,
+            topGapPx = 8f,
+        )
+        val fallbackPlacement = vodPreviewOverlayPlacement(
+            thumbXpx = 500f,
+            timelineWidthPx = 1_000f,
+            timelineHeightPx = 40f,
+            cardWidthPx = 300f,
+            cardHeightPx = 120f,
+            pointerWidthPx = 28f,
+            pointerHeightPx = 14f,
+            topGapPx = 8f,
+        )
+        assertEquals(0, framePlacement.heightContributionPx)
+        assertEquals(0, fallbackPlacement.heightContributionPx)
+        assertTrue(framePlacement.topOffsetPx < fallbackPlacement.topOffsetPx)
+        // The pointer stays on the real thumb coordinate inside the bubble.
+        assertEquals(500f - framePlacement.cardLeftPx - 14f, framePlacement.pointerOffsetPx, 0.001f)
+
+        // Edge clamping keeps the bubble inside the timeline while the pointer follows the thumb.
+        assertEquals(0f, vodPreviewCardLeftPx(thumbXpx = 10f, cardWidthPx = 300f, timelineWidthPx = 1_000f), 0.001f)
+        assertEquals(350f, vodPreviewCardLeftPx(thumbXpx = 500f, cardWidthPx = 300f, timelineWidthPx = 1_000f), 0.001f)
+        assertEquals(700f, vodPreviewCardLeftPx(thumbXpx = 995f, cardWidthPx = 300f, timelineWidthPx = 1_000f), 0.001f)
+        val leftEdge = vodPreviewOverlayPlacement(
+            thumbXpx = 10f,
+            timelineWidthPx = 1_000f,
+            timelineHeightPx = 40f,
+            cardWidthPx = 300f,
+            cardHeightPx = 169f,
+            pointerWidthPx = 28f,
+            pointerHeightPx = 14f,
+            topGapPx = 8f,
+        )
+        assertEquals(0f, leftEdge.pointerOffsetPx, 0.001f)
+        val rightEdge = vodPreviewOverlayPlacement(
+            thumbXpx = 995f,
+            timelineWidthPx = 1_000f,
+            timelineHeightPx = 40f,
+            cardWidthPx = 300f,
+            cardHeightPx = 169f,
+            pointerWidthPx = 28f,
+            pointerHeightPx = 14f,
+            topGapPx = 8f,
+        )
+        assertEquals(272f, rightEdge.pointerOffsetPx, 0.001f)
     }
 
     @Test

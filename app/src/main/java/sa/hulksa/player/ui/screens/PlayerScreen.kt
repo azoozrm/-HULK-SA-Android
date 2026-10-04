@@ -66,7 +66,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
-import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -78,6 +77,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -90,6 +90,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Redo
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SkipNext
@@ -122,6 +123,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -133,7 +135,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -2592,6 +2596,40 @@ private fun VodCompactControlStrip(
     val rewindFocus = remember { FocusRequester() }
     val forwardFocus = remember { FocusRequester() }
     val favoriteFocus = remember { FocusRequester() }
+    var timelineBounds by remember { mutableStateOf<Rect?>(null) }
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val baseTextStyle = LocalTextStyle.current
+    val captionStyle = remember(metrics.captionSizeSp, baseTextStyle) {
+        baseTextStyle.copy(fontSize = metrics.captionSizeSp.sp, fontWeight = FontWeight.Bold)
+    }
+    val rewindCaption = remember(stepSeconds) { "رجوع $stepSeconds ث" }
+    val forwardCaption = remember(stepSeconds) { "تقديم $stepSeconds ث" }
+    val playPauseCaption = if (isPlaying) "ايقاف مؤقت" else "تشغيل"
+    val requiredToolsWidthPx = remember(
+        metrics.utilityIconDp,
+        metrics.transportIconDp,
+        metrics.captionSizeSp,
+        metrics.itemSpacingDp,
+        rewindCaption,
+        forwardCaption,
+        playPauseCaption,
+        density.fontScale,
+        density.density,
+        textMeasurer,
+    ) {
+        val utilityBoxPx = with(density) { (metrics.utilityIconDp + 22).dp.roundToPx() }
+        val transportBoxPx = with(density) { (metrics.transportIconDp + 22).dp.roundToPx() }
+        val gapPx = with(density) { metrics.itemSpacingDp.dp.roundToPx() }
+        val captions = listOf("المزيد", rewindCaption, playPauseCaption, forwardCaption, "المفضلة")
+        val boxes = listOf(utilityBoxPx, transportBoxPx, transportBoxPx, transportBoxPx, utilityBoxPx)
+        captions.mapIndexed { index, caption ->
+            maxOf(boxes[index], textMeasurer.measure(caption, captionStyle).size.width)
+        }.sum() + 4 * gapPx
+    }
+    val toolSpacing = (metrics.transportContainerDp * .6f).roundToInt()
+        .coerceAtLeast(metrics.itemSpacingDp)
+        .dp
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -2599,8 +2637,8 @@ private fun VodCompactControlStrip(
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = .48f),
-                        Color.Black.copy(alpha = .84f),
+                        Color.Black.copy(alpha = .42f),
+                        Color.Black.copy(alpha = .80f),
                     ),
                 ),
             )
@@ -2613,295 +2651,146 @@ private fun VodCompactControlStrip(
             ),
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val stripWidth = maxWidth
-            val density = LocalDensity.current
-            val textMeasurer = rememberTextMeasurer()
-            val baseTextStyle = LocalTextStyle.current
-            val captionStyle = remember(metrics.captionSizeSp, baseTextStyle) {
-                baseTextStyle.copy(fontSize = metrics.captionSizeSp.sp, fontWeight = FontWeight.Bold)
-            }
-            val requiredSingleRowWidthPx = remember(
-                metrics.utilityIconDp,
-                metrics.captionSizeSp,
-                isPlaying,
-                stepSeconds,
-                density.density,
-                density.fontScale,
-                textMeasurer,
-            ) {
-                val iconBoxPx = with(density) { (metrics.utilityIconDp + 22).dp.roundToPx() }
-                val separatorPx = with(density) { 1.dp.roundToPx() }
-                val breathingPx = with(density) { 10.dp.roundToPx() }
-                val captions = listOf(
-                    "المزيد",
-                    "رجوع $stepSeconds ث",
-                    if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                    "تقديم $stepSeconds ث",
-                    "المفضلة",
-                )
-                captions.sumOf { caption ->
-                    maxOf(iconBoxPx, textMeasurer.measure(caption, captionStyle).size.width)
-                } + 4 * (separatorPx + breathingPx)
-            }
-            val singleRow = vodCompactSingleRow(
-                approvedSingleRow = metrics.approvedSingleRow,
-                availableWidthPx = with(density) { stripWidth.roundToPx() },
-                requiredWidthPx = requiredSingleRowWidthPx,
+            val weightedTools = vodToolsUseWeightedSlots(
+                availableWidthPx = with(density) { maxWidth.roundToPx() },
+                requiredWidthPx = requiredToolsWidthPx,
             )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xF00C0D0A))
-                    .border(1.dp, colors.gold.copy(alpha = .55f), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 8.dp, vertical = 7.dp),
-            ) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(formatTime(positionMs), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 10.dp)
+                            .onGloballyPositioned { coordinates ->
+                                timelineBounds = coordinates.boundsInParent()
+                            },
                     ) {
-                        Text(formatTime(positionMs), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "-${formatTime((durationMs - positionMs).coerceAtLeast(0L))}",
-                            color = colors.textMuted,
-                            fontSize = 13.sp,
+                        VodSeekBar(
+                            positionMs = positionMs,
+                            durationMs = durationMs,
+                            buffered = bufferedPercent / 100f,
+                            previewMs = seekPreviewMs,
+                            onPreview = onPreview,
+                            onCommit = onCommit,
+                            onPreviewCancel = onPreviewCancel,
+                            focusRequester = seekBarFocusRequester,
+                            remoteActive = remoteSeekActive,
+                            seekStepMs = seekStepMs,
+                            inputEnabled = !inputMuted,
+                            upFocus = topBarBackFocus ?: FocusRequester.Cancel,
+                            downFocus = primaryFocus,
+                            stableLayout = true,
                         )
+                        val bounds = timelineBounds
+                        val previewTarget = seekPreviewMs
+                        if (previewTarget != null && bounds != null) {
+                            VodSeekPreviewOverlay(
+                                targetMs = previewTarget,
+                                frame = seekPreviewFrame,
+                                durationMs = durationMs,
+                                timelineWidthPx = bounds.width.roundToInt(),
+                                timelineHeightPx = bounds.height.roundToInt(),
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(6.dp))
-                    VodSeekBar(
-                        positionMs = positionMs,
-                        durationMs = durationMs,
-                        buffered = bufferedPercent / 100f,
-                        previewMs = seekPreviewMs,
-                        onPreview = onPreview,
-                        onCommit = onCommit,
-                        onPreviewCancel = onPreviewCancel,
-                        focusRequester = seekBarFocusRequester,
-                        remoteActive = remoteSeekActive,
-                        seekStepMs = seekStepMs,
-                        inputEnabled = !inputMuted,
-                        upFocus = topBarBackFocus ?: FocusRequester.Cancel,
-                        downFocus = primaryFocus,
+                    Text(
+                        "-${formatTime((durationMs - positionMs).coerceAtLeast(0L))}",
+                        color = colors.textMuted,
+                        fontSize = 13.sp,
                     )
-                    Spacer(Modifier.height(9.dp))
-                    if (singleRow) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.Bottom,
-                        ) {
-                            VodCompactControl(
-                                icon = Icons.Rounded.MoreHoriz,
-                                caption = "المزيد",
-                                onClick = onMore,
-                                enabled = true,
-                                inputMuted = inputMuted,
-                                iconSizeDp = metrics.utilityIconDp,
-                                captionSizeSp = metrics.captionSizeSp,
-                                selected = moreOpen,
-                                focusRequester = moreTriggerFocus,
-                                upFocus = seekBarFocusRequester,
-                                downFocus = FocusRequester.Cancel,
-                            )
-                            VodControlSeparator(heightDp = metrics.transportContainerDp)
-                            VodCompactControl(
-                                icon = Icons.Rounded.Replay,
-                                caption = "رجوع $stepSeconds ث",
-                                onClick = onRewind,
-                                enabled = true,
-                                inputMuted = inputMuted,
-                                iconSizeDp = metrics.transportIconDp,
-                                captionSizeSp = metrics.captionSizeSp,
-                                focusRequester = rewindFocus,
-                                upFocus = seekBarFocusRequester,
-                                downFocus = FocusRequester.Cancel,
-                            )
-                            VodControlSeparator(heightDp = metrics.transportContainerDp)
-                            VodCompactControl(
-                                icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                                onClick = onPlayPause,
-                                enabled = true,
-                                inputMuted = inputMuted,
-                                iconSizeDp = metrics.transportIconDp,
-                                captionSizeSp = metrics.captionSizeSp,
-                                focusRequester = primaryFocus,
-                                upFocus = seekBarFocusRequester,
-                                downFocus = FocusRequester.Cancel,
-                            )
-                            VodControlSeparator(heightDp = metrics.transportContainerDp)
-                            VodCompactControl(
-                                icon = Icons.AutoMirrored.Rounded.Redo,
-                                caption = "تقديم $stepSeconds ث",
-                                onClick = onForward,
-                                enabled = true,
-                                inputMuted = inputMuted,
-                                iconSizeDp = metrics.transportIconDp,
-                                captionSizeSp = metrics.captionSizeSp,
-                                focusRequester = forwardFocus,
-                                upFocus = seekBarFocusRequester,
-                                downFocus = FocusRequester.Cancel,
-                            )
-                            VodControlSeparator(heightDp = metrics.transportContainerDp)
-                            VodCompactControl(
-                                icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                                caption = "المفضلة",
-                                onClick = onFavorite,
-                                enabled = favoriteEnabled,
-                                inputMuted = inputMuted,
-                                iconSizeDp = metrics.utilityIconDp,
-                                captionSizeSp = metrics.captionSizeSp,
-                                selected = favorite,
-                                focusRequester = favoriteFocus,
-                                upFocus = seekBarFocusRequester,
-                                downFocus = FocusRequester.Cancel,
-                            )
-                        }
-                    } else {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Bottom,
-                            ) {
-                                VodCompactControl(
-                                    icon = Icons.Rounded.Replay,
-                                    caption = "رجوع $stepSeconds ث",
-                                    onClick = onRewind,
-                                    enabled = true,
-                                    inputMuted = inputMuted,
-                                    iconSizeDp = metrics.transportIconDp,
-                                    captionSizeSp = metrics.captionSizeSp,
-                                    modifier = Modifier.weight(1f),
-                                    focusRequester = rewindFocus,
-                                    upFocus = seekBarFocusRequester,
-                                    downFocus = moreTriggerFocus,
-                                )
-                                VodCompactControl(
-                                    icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                                    onClick = onPlayPause,
-                                    enabled = true,
-                                    inputMuted = inputMuted,
-                                    iconSizeDp = metrics.transportIconDp,
-                                    captionSizeSp = metrics.captionSizeSp,
-                                    modifier = Modifier.weight(1f),
-                                    focusRequester = primaryFocus,
-                                    upFocus = seekBarFocusRequester,
-                                    downFocus = favoriteFocus,
-                                )
-                                VodCompactControl(
-                                    icon = Icons.AutoMirrored.Rounded.Redo,
-                                    caption = "تقديم $stepSeconds ث",
-                                    onClick = onForward,
-                                    enabled = true,
-                                    inputMuted = inputMuted,
-                                    iconSizeDp = metrics.transportIconDp,
-                                    captionSizeSp = metrics.captionSizeSp,
-                                    modifier = Modifier.weight(1f),
-                                    focusRequester = forwardFocus,
-                                    upFocus = seekBarFocusRequester,
-                                    downFocus = favoriteFocus,
-                                )
-                            }
-                            Spacer(Modifier.height(metrics.itemSpacingDp.dp))
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(1.dp)
-                                    .background(colors.gold.copy(alpha = .22f)),
-                            )
-                            Spacer(Modifier.height(metrics.itemSpacingDp.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Bottom,
-                            ) {
-                                VodCompactControl(
-                                    icon = Icons.Rounded.MoreHoriz,
-                                    caption = "المزيد",
-                                    onClick = onMore,
-                                    enabled = true,
-                                    inputMuted = inputMuted,
-                                    iconSizeDp = metrics.utilityIconDp,
-                                    captionSizeSp = metrics.captionSizeSp,
-                                    modifier = Modifier.weight(1f),
-                                    selected = moreOpen,
-                                    focusRequester = moreTriggerFocus,
-                                    upFocus = rewindFocus,
-                                    downFocus = FocusRequester.Cancel,
-                                )
-                                VodCompactControl(
-                                    icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                                    caption = "المفضلة",
-                                    onClick = onFavorite,
-                                    enabled = favoriteEnabled,
-                                    inputMuted = inputMuted,
-                                    iconSizeDp = metrics.utilityIconDp,
-                                    captionSizeSp = metrics.captionSizeSp,
-                                    modifier = Modifier.weight(1f),
-                                    selected = favorite,
-                                    focusRequester = favoriteFocus,
-                                    upFocus = forwardFocus,
-                                    downFocus = FocusRequester.Cancel,
-                                )
-                            }
-                        }
-                    }
                 }
-            }
-            seekPreviewMs?.let { target ->
-                val cardWidth = if (maxWidth < 420.dp) 170.dp else 216.dp
-                val fraction = vodPreviewCardFraction(target, durationMs)
-                val horizontalRoom = (maxWidth - cardWidth).coerceAtLeast(0.dp)
-                val cardX = (maxWidth * fraction - cardWidth / 2).coerceIn(0.dp, horizontalRoom)
-                // The preview stays on the physical timeline coordinate: LTR placement, the pointer
-                // pinned to the thumb while the bubble clamps at the edges, and a truthful time-only
-                // card when no real frame is available.
-                val previewCardHeight = if (seekPreviewFrame != null) cardWidth * 9f / 16f else 56.dp
-                val density = LocalDensity.current
-                val pointerOffsetPx = vodPreviewPointerOffsetPx(
-                    thumbXpx = with(density) { (maxWidth * fraction).toPx() },
-                    cardLeftPx = with(density) { cardX.toPx() },
-                    cardWidthPx = with(density) { cardWidth.toPx() },
-                    pointerWidthPx = with(density) { 14.dp.toPx() },
-                ).roundToInt()
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Box(Modifier.fillMaxSize()) {
-                        VodSeekPreviewCard(
-                            frame = seekPreviewFrame,
-                            positionMs = target,
-                            cardWidth = cardWidth,
-                            truthfulFallback = true,
-                            pointerOffsetPx = pointerOffsetPx,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .offset(x = cardX, y = -(previewCardHeight + 16.dp)),
-                        )
-                    }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (weightedTools) {
+                        Arrangement.Start
+                    } else {
+                        Arrangement.spacedBy(toolSpacing, Alignment.CenterHorizontally)
+                    },
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    VodCompactControl(
+                        icon = Icons.Rounded.MoreHoriz,
+                        caption = "المزيد",
+                        onClick = onMore,
+                        enabled = true,
+                        inputMuted = inputMuted,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                        selected = moreOpen,
+                        focusRequester = moreTriggerFocus,
+                        upFocus = seekBarFocusRequester,
+                        downFocus = FocusRequester.Cancel,
+                    )
+                    VodCompactControl(
+                        icon = Icons.Rounded.Replay10,
+                        caption = rewindCaption,
+                        onClick = onRewind,
+                        enabled = true,
+                        inputMuted = inputMuted,
+                        iconSizeDp = metrics.transportIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                        focusRequester = rewindFocus,
+                        upFocus = seekBarFocusRequester,
+                        downFocus = FocusRequester.Cancel,
+                    )
+                    VodCompactControl(
+                        icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        caption = playPauseCaption,
+                        onClick = onPlayPause,
+                        enabled = true,
+                        inputMuted = inputMuted,
+                        iconSizeDp = metrics.transportIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                        primary = true,
+                        focusRequester = primaryFocus,
+                        upFocus = seekBarFocusRequester,
+                        downFocus = FocusRequester.Cancel,
+                    )
+                    VodCompactControl(
+                        icon = Icons.Rounded.Forward10,
+                        caption = forwardCaption,
+                        onClick = onForward,
+                        enabled = true,
+                        inputMuted = inputMuted,
+                        iconSizeDp = metrics.transportIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                        focusRequester = forwardFocus,
+                        upFocus = seekBarFocusRequester,
+                        downFocus = FocusRequester.Cancel,
+                    )
+                    VodCompactControl(
+                        icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                        caption = "المفضلة",
+                        onClick = onFavorite,
+                        enabled = favoriteEnabled,
+                        inputMuted = inputMuted,
+                        iconSizeDp = metrics.utilityIconDp,
+                        captionSizeSp = metrics.captionSizeSp,
+                        modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
+                        selected = favorite,
+                        focusRequester = favoriteFocus,
+                        upFocus = seekBarFocusRequester,
+                        downFocus = FocusRequester.Cancel,
+                    )
                 }
             }
         }
     }
 }
 
-@Composable
-private fun VodControlSeparator(heightDp: Int) {
-    Box(
-        modifier = Modifier
-            .width(1.dp)
-            .height(heightDp.dp)
-            .background(LocalHulkColors.current.gold.copy(alpha = .25f)),
-    )
-}
-
 /**
- * One compact Movie tool: small glyph above a complete caption with a compact pale-gold focus
- * hitbox around the glyph only. Input muting keeps the normal ivory look but removes focus and
- * click handling so an open More panel cannot be bypassed.
+ * One compact Movie tool: glyph above a complete caption. Normal tools are plain ivory glyphs with
+ * a thin pale-gold focus edge and subtle backing; the Play/Pause tool keeps the reference
+ * solid-gold primary disc. Focus never changes the measured size or position.
  */
 @Composable
 private fun VodCompactControl(
@@ -2914,6 +2803,7 @@ private fun VodCompactControl(
     captionSizeSp: Int,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
+    primary: Boolean = false,
     focusRequester: FocusRequester? = null,
     upFocus: FocusRequester? = null,
     downFocus: FocusRequester? = null,
@@ -2922,8 +2812,15 @@ private fun VodCompactControl(
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
     val showFocused = focused && adaptiveUi.showFocusHighlights && !inputMuted
-    val shape = RoundedCornerShape(14.dp)
-    val tint = when {
+    val shape = CircleShape
+    val glyphColor = when {
+        !enabled -> colors.textMuted.copy(alpha = .45f)
+        primary -> Color(0xFF14120A)
+        showFocused -> colors.goldBright
+        selected -> colors.gold
+        else -> colors.text
+    }
+    val captionColor = when {
         !enabled -> colors.textMuted.copy(alpha = .45f)
         showFocused -> colors.goldBright
         selected -> colors.gold
@@ -2937,7 +2834,13 @@ private fun VodCompactControl(
             modifier = Modifier
                 .size((iconSizeDp + 22).dp)
                 .clip(shape)
-                .background(if (showFocused) colors.gold.copy(alpha = .22f) else Color.Transparent)
+                .background(
+                    when {
+                        primary -> colors.gold
+                        showFocused -> colors.gold.copy(alpha = .16f)
+                        else -> Color.Transparent
+                    },
+                )
                 .border(
                     width = if (showFocused) 2.dp else 0.dp,
                     color = if (showFocused) colors.goldBright else Color.Transparent,
@@ -2957,18 +2860,71 @@ private fun VodCompactControl(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = tint,
+                tint = glyphColor,
                 modifier = Modifier.size(iconSizeDp.dp),
             )
         }
         Spacer(Modifier.height(4.dp))
         Text(
             text = caption,
-            color = tint,
+            color = captionColor,
             fontSize = captionSizeSp.sp,
-            fontWeight = if (selected || showFocused) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (selected || showFocused || primary) FontWeight.Bold else FontWeight.Medium,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+/**
+ * Seek preview overlay for the measured timeline. The overlay reports zero size, so appearing or
+ * disappearing never changes the control-strip measurement; the bubble draws above the timeline
+ * with its pointer kept on the real thumb coordinate by [vodPreviewOverlayPlacement].
+ */
+@Composable
+private fun VodSeekPreviewOverlay(
+    targetMs: Long,
+    frame: Bitmap?,
+    durationMs: Long,
+    timelineWidthPx: Int,
+    timelineHeightPx: Int,
+) {
+    val density = LocalDensity.current
+    val compactTimelinePx = with(density) { 420.dp.roundToPx() }
+    val cardWidth = if (timelineWidthPx < compactTimelinePx) 170.dp else 216.dp
+    val cardHeight = if (frame != null) cardWidth * 9f / 16f else 56.dp
+    val placement = vodPreviewOverlayPlacement(
+        thumbXpx = timelineWidthPx * vodPreviewCardFraction(targetMs, durationMs),
+        timelineWidthPx = timelineWidthPx.toFloat(),
+        timelineHeightPx = timelineHeightPx.toFloat(),
+        cardWidthPx = with(density) { cardWidth.toPx() },
+        cardHeightPx = with(density) { cardHeight.toPx() },
+        pointerWidthPx = with(density) { 14.dp.toPx() },
+        pointerHeightPx = with(density) { 7.dp.toPx() },
+        topGapPx = with(density) { 4.dp.toPx() },
+    )
+    Layout(
+        content = {
+            VodSeekPreviewCard(
+                frame = frame,
+                positionMs = targetMs,
+                cardWidth = cardWidth,
+                truthfulFallback = true,
+                pointerOffsetPx = placement.pointerOffsetPx.roundToInt(),
+            )
+        },
+    ) { measurables, _ ->
+        val card = measurables.firstOrNull()
+        if (card == null) {
+            layout(0, 0) { }
+        } else {
+            val placeable = card.measure(Constraints())
+            layout(0, 0) {
+                placeable.place(
+                    x = placement.cardLeftPx.roundToInt(),
+                    y = placement.topOffsetPx.roundToInt(),
+                )
+            }
+        }
     }
 }
 
@@ -3812,6 +3768,7 @@ private fun VodSeekBar(
     inputEnabled: Boolean = true,
     upFocus: FocusRequester? = null,
     downFocus: FocusRequester? = null,
+    stableLayout: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -3824,11 +3781,14 @@ private fun VodSeekBar(
     }
     var dragPreviewMs by remember { mutableStateOf<Long?>(null) }
     val trackHeight = if (active) 9.dp else 6.dp
+    // The Movie overlay keeps the timeline slot height constant across normal/focused/preview
+    // states so focusing or previewing never moves the transport below it.
+    val slotHeight = if (stableLayout) 20.dp else if (active) 20.dp else 16.dp
 
     Box(
         Modifier
             .fillMaxWidth()
-            .height(if (active) 20.dp else 16.dp)
+            .height(slotHeight)
             .then(
                 if (inputEnabled) {
                     Modifier

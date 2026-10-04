@@ -66,17 +66,14 @@ internal fun vodFavoriteControl(
 }
 
 /**
- * Movie-only compact strip reflow decision.
- *
- * The five approved tools stay on one physical row only when the current metrics allow a single
- * row and the measured complete captions really fit the available width. Otherwise the caller
- * reflows into the two-row arrangement; captions are never ellipsized or shrunk to force one row.
+ * Movie controls keep one compact centered tool row. When the measured complete captions cannot
+ * fit at their intrinsic width, the same five tools share the row width evenly instead of being
+ * split into a different arrangement; captions wrap inside their slot.
  */
-internal fun vodCompactSingleRow(
-    approvedSingleRow: Boolean,
+internal fun vodToolsUseWeightedSlots(
     availableWidthPx: Int,
     requiredWidthPx: Int,
-): Boolean = approvedSingleRow && requiredWidthPx in 1..availableWidthPx
+): Boolean = requiredWidthPx > availableWidthPx
 
 /**
  * Preview pointer x-offset inside the clamped preview card, so the triangle stays under the real
@@ -90,6 +87,58 @@ internal fun vodPreviewPointerOffsetPx(
 ): Float {
     val maxOffset = (cardWidthPx - pointerWidthPx).coerceAtLeast(0f)
     return (thumbXpx - cardLeftPx - pointerWidthPx / 2f).coerceIn(0f, maxOffset)
+}
+
+/**
+ * Clamped preview bubble position for a thumb on the measured timeline. The bubble stays inside the
+ * timeline width while its pointer keeps the real thumb coordinate.
+ */
+internal fun vodPreviewCardLeftPx(
+    thumbXpx: Float,
+    cardWidthPx: Float,
+    timelineWidthPx: Float,
+): Float = (thumbXpx - cardWidthPx / 2f).coerceIn(0f, (timelineWidthPx - cardWidthPx).coerceAtLeast(0f))
+
+/**
+ * Measured placement of the seek-preview overlay.
+ *
+ * `heightContributionPx` is always zero: the overlay draws above the timeline without entering the
+ * control-strip measurement, so the transport allocation cannot move when a preview appears.
+ */
+internal data class VodPreviewOverlayPlacement(
+    val cardLeftPx: Float,
+    val pointerOffsetPx: Float,
+    val topOffsetPx: Float,
+    val heightContributionPx: Int,
+)
+
+internal fun vodPreviewOverlayPlacement(
+    thumbXpx: Float,
+    timelineWidthPx: Float,
+    timelineHeightPx: Float,
+    cardWidthPx: Float,
+    cardHeightPx: Float,
+    pointerWidthPx: Float,
+    pointerHeightPx: Float,
+    topGapPx: Float,
+): VodPreviewOverlayPlacement {
+    val cardLeft = vodPreviewCardLeftPx(
+        thumbXpx = thumbXpx,
+        cardWidthPx = cardWidthPx,
+        timelineWidthPx = timelineWidthPx,
+    )
+    return VodPreviewOverlayPlacement(
+        cardLeftPx = cardLeft,
+        pointerOffsetPx = vodPreviewPointerOffsetPx(
+            thumbXpx = thumbXpx,
+            cardLeftPx = cardLeft,
+            cardWidthPx = cardWidthPx,
+            pointerWidthPx = pointerWidthPx,
+        ),
+        // The pointer tip lands on the timeline vertical center; the bubble grows upward.
+        topOffsetPx = -(cardHeightPx + pointerHeightPx) + timelineHeightPx / 2f - topGapPx,
+        heightContributionPx = 0,
+    )
 }
 
 /**
