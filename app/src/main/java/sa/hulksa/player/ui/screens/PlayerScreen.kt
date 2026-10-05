@@ -80,7 +80,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FitScreen
-import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -93,7 +92,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Redo
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
-import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SkipNext
@@ -2626,6 +2624,7 @@ private fun VodCompactControlStrip(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
+    val isTelevision = LocalAdaptiveUi.current.isTelevision
     val stepSeconds = (seekStepMs / 1_000L).coerceAtLeast(1L)
     val rewindFocus = remember { FocusRequester() }
     val forwardFocus = remember { FocusRequester() }
@@ -2644,12 +2643,23 @@ private fun VodCompactControlStrip(
     // Slight Movies-only glyph increase derived from the current adaptive metrics, with the gap
     // that the rendered row actually uses. Fit and render share both expressions.
     val movieGlyphDp = (metrics.transportIconDp * 1.2f).roundToInt().coerceIn(22, 34)
-    val toolSpacing = (movieGlyphDp * 1.1f).roundToInt()
-        .coerceAtLeast(metrics.itemSpacingDp)
-        .dp
+    val toolSpacing = vodToolSpacingDp(
+        movieGlyphDp = movieGlyphDp,
+        itemSpacingDp = metrics.itemSpacingDp,
+    ).dp
     // Measured vertical gap between the timeline slot and the tool row (existing 8.dp source
     // baseline + thumb clearance). Owned by the strip Column, so the rows cannot overlap.
     val toolGap = (metrics.itemSpacingDp + 4).dp
+    // Approved placement: the board sits the timeline + tools slightly lower than the Live
+    // safe-window base. The same lift is moved above the timeline, so the strip keeps its measured
+    // height, timeline-to-tools gap and gradient box while the group (and the gradient support over
+    // the track) shifts down as one stable group.
+    val stripBottomPaddingDp = vodStripBottomPaddingDp(
+        baseBottomDp = layoutMetrics.outerBottomPaddingDp,
+        isTelevision = isTelevision,
+    )
+    val stripTopPaddingDp =
+        layoutMetrics.outerTopPaddingDp + (layoutMetrics.outerBottomPaddingDp - stripBottomPaddingDp)
     val requiredToolsWidthPx = remember(
         movieGlyphDp,
         metrics.captionSizeSp,
@@ -2689,8 +2699,8 @@ private fun VodCompactControlStrip(
             .padding(
                 start = layoutMetrics.outerHorizontalPaddingDp.dp,
                 end = layoutMetrics.outerHorizontalPaddingDp.dp,
-                top = layoutMetrics.outerTopPaddingDp.dp,
-                bottom = layoutMetrics.outerBottomPaddingDp.dp,
+                top = stripTopPaddingDp.dp,
+                bottom = stripBottomPaddingDp.dp,
             ),
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -2777,7 +2787,7 @@ private fun VodCompactControlStrip(
                         downFocus = FocusRequester.Cancel,
                     )
                     VodCompactControl(
-                        icon = Icons.Rounded.Replay10,
+                        icon = MovieRewind10Icon,
                         caption = rewindCaption,
                         onClick = onRewind,
                         enabled = true,
@@ -2804,7 +2814,7 @@ private fun VodCompactControlStrip(
                         downFocus = FocusRequester.Cancel,
                     )
                     VodCompactControl(
-                        icon = Icons.Rounded.Forward10,
+                        icon = MovieForward10Icon,
                         caption = forwardCaption,
                         onClick = onForward,
                         enabled = true,
@@ -3997,25 +4007,25 @@ private fun VodSeekBar(
                 val centerX = vodSeekThumbCenterPx(visualProgress, size.width, diameter)
                 val corner = CornerRadius(trackH / 2f)
                 drawRoundRect(
-                    color = Color.White.copy(alpha = .20f),
+                    color = Color.White.copy(alpha = .30f),
                     topLeft = Offset(0f, centerY - trackH / 2f),
                     size = Size(size.width, trackH),
                     cornerRadius = corner,
                 )
                 drawRoundRect(
-                    color = Color.White.copy(alpha = .32f),
+                    color = Color.White.copy(alpha = .46f),
                     topLeft = Offset(0f, centerY - trackH / 2f),
                     size = Size(size.width * buffered.coerceIn(0f, 1f), trackH),
                     cornerRadius = corner,
                 )
                 drawRoundRect(
-                    color = colors.goldBright,
+                    color = colors.gold,
                     topLeft = Offset(0f, centerY - trackH / 2f),
                     size = Size(centerX, trackH),
                     cornerRadius = corner,
                 )
                 drawCircle(
-                    color = colors.goldBright,
+                    color = colors.gold,
                     radius = radius,
                     center = Offset(centerX, centerY),
                 )

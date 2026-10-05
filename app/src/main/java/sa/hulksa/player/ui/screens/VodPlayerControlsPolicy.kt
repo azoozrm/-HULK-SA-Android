@@ -1,6 +1,7 @@
 package sa.hulksa.player.ui.screens
 
 import sa.hulksa.player.model.ContentItem
+import kotlin.math.roundToInt
 
 /**
  * Approved shared Movies/Series VOD-player controls policy.
@@ -87,6 +88,30 @@ internal fun vodToolsRequiredWidthPx(
     if (iconBoxesPx.isEmpty() || iconBoxesPx.size != captionWidthsPx.size) return 0
     val tools = iconBoxesPx.indices.sumOf { maxOf(iconBoxesPx[it], captionWidthsPx[it]) }
     return tools + (iconBoxesPx.size - 1) * spacingPx.coerceAtLeast(0)
+}
+
+/**
+ * Movies tool-row spacing derived from the rendered glyph size and the shared item spacing.
+ *
+ * This single expression feeds both the fit measurement and the rendered row gap, so a widened row
+ * can never disagree with its own fit check.
+ */
+internal fun vodToolSpacingDp(movieGlyphDp: Int, itemSpacingDp: Int): Int =
+    (movieGlyphDp.coerceAtLeast(0) * 1.33f).roundToInt().coerceAtLeast(itemSpacingDp)
+
+/**
+ * Movies-only bottom placement: the approved board sits the timeline and tools slightly lower than
+ * the Live safe-window base. The lift is bounded and never increases the base, and the floor keeps
+ * the group inside the TV overscan-safe area on compact windows. The caller moves the same amount
+ * into the top padding so the strip keeps its measured height, gap and gradient box.
+ */
+internal fun vodStripBottomPaddingDp(
+    baseBottomDp: Float,
+    isTelevision: Boolean,
+): Float {
+    val liftDp = if (isTelevision) 6f else 4f
+    val floorDp = if (isTelevision) 28f else 14f
+    return (baseBottomDp - liftDp).coerceAtLeast(minOf(floorDp, baseBottomDp))
 }
 
 /**

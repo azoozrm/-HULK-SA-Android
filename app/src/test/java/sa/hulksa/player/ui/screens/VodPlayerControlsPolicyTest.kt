@@ -53,6 +53,25 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun moviesToolSpacingWidensFromTheGlyphAndNeverDropsBelowTheBaseItemSpacing() {
+        // Mi Box: 20dp transport -> 24dp movie glyph -> 32dp widened gap shared by fit + render.
+        assertEquals(32, vodToolSpacingDp(movieGlyphDp = 24, itemSpacingDp = 8))
+        // Narrow fallback: the base item spacing still wins when it is the larger expression.
+        assertEquals(40, vodToolSpacingDp(movieGlyphDp = 22, itemSpacingDp = 40))
+    }
+
+    @Test
+    fun moviesStripLowersTheGroupWithoutCrossingTheSafeFloor() {
+        // Compact TV base 36dp -> 30dp; phone touch base 18dp -> 14dp.
+        assertEquals(30f, vodStripBottomPaddingDp(baseBottomDp = 36f, isTelevision = true), 0.001f)
+        assertEquals(14f, vodStripBottomPaddingDp(baseBottomDp = 18f, isTelevision = false), 0.001f)
+        // A base already below the floor is never increased.
+        assertEquals(20f, vodStripBottomPaddingDp(baseBottomDp = 20f, isTelevision = true), 0.001f)
+        // Large TV windows keep the lift and stay above the overscan floor.
+        assertEquals(38f, vodStripBottomPaddingDp(baseBottomDp = 44f, isTelevision = true), 0.001f)
+    }
+
+    @Test
     fun moviesSeekThumbStaysInsideTheTrackAtBothEndpoints() {
         // 1000px track, 38px thumb: center travels 19 .. 981 with no fixed-offset overflow.
         assertEquals(19f, vodSeekThumbCenterPx(fraction = 0f, trackWidthPx = 1_000f, thumbDiameterPx = 38f), 0.001f)
