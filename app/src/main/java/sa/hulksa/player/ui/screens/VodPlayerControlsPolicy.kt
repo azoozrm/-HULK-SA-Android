@@ -389,3 +389,30 @@ internal fun vodPreviewBucketMs(timeMs: Long, bucketMs: Long = 5_000L): Long =
 
 internal fun vodPreviewCardFraction(previewMs: Long, durationMs: Long): Float =
     if (durationMs <= 0L) 0f else (previewMs.toFloat() / durationMs).coerceIn(0f, 1f)
+
+/**
+ * Movies TV preview window: it stays open while the actual timeline is focused or the existing
+ * remote direct-seek mode remains active. Live/Series players are not affected, and hiding the
+ * controls (Back, modal, lock, error, disposal) suppresses the window with them.
+ */
+internal fun vodPreviewWindowActive(
+    isMovie: Boolean,
+    isLive: Boolean,
+    controlsVisible: Boolean,
+    timelineFocused: Boolean,
+    directSeekActive: Boolean,
+): Boolean = isMovie && !isLive && controlsVisible && (timelineFocused || directSeekActive)
+
+/**
+ * Effective seek-preview target.
+ *
+ * An explicit scrub intent (focus seed or touch drag) always publishes its own target. Otherwise
+ * the resting hold stays visible only while the TV window is active, so a committed seek survives
+ * settlement and idle without following playback, and a closed window can never be reopened by a
+ * late frame completion.
+ */
+internal fun vodEffectivePreviewTargetMs(
+    scrubTargetMs: Long?,
+    holdTargetMs: Long?,
+    windowActive: Boolean,
+): Long? = scrubTargetMs ?: holdTargetMs?.takeIf { windowActive }

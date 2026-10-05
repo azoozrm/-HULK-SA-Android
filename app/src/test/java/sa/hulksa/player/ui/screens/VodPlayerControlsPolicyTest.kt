@@ -331,6 +331,69 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun movieTvPreviewWindowNeedsTimelineFocusOrDirectSeek() {
+        // Timeline focused on TV keeps the window open.
+        assertTrue(
+            vodPreviewWindowActive(
+                isMovie = true, isLive = false, controlsVisible = true,
+                timelineFocused = true, directSeekActive = false,
+            ),
+        )
+        // Remote direct-seek from the surface keeps it open too.
+        assertTrue(
+            vodPreviewWindowActive(
+                isMovie = true, isLive = false, controlsVisible = true,
+                timelineFocused = false, directSeekActive = true,
+            ),
+        )
+        // Touch drag (no timeline focus, no direct-seek mode) is not a persistent window.
+        assertFalse(
+            vodPreviewWindowActive(
+                isMovie = true, isLive = false, controlsVisible = true,
+                timelineFocused = false, directSeekActive = false,
+            ),
+        )
+        // Hidden controls (Back/modal/lock/error/disposal) suppress the window.
+        assertFalse(
+            vodPreviewWindowActive(
+                isMovie = true, isLive = false, controlsVisible = false,
+                timelineFocused = true, directSeekActive = true,
+            ),
+        )
+        // Series and Live are unaffected.
+        assertFalse(
+            vodPreviewWindowActive(
+                isMovie = false, isLive = false, controlsVisible = true,
+                timelineFocused = true, directSeekActive = true,
+            ),
+        )
+        assertFalse(
+            vodPreviewWindowActive(
+                isMovie = true, isLive = true, controlsVisible = true,
+                timelineFocused = true, directSeekActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun movieTvPreviewTargetHoldsWhileActiveAndCannotReopenAfterExit() {
+        // Focus entry or drag: the explicit scrub target always wins.
+        assertEquals(15_000L, vodEffectivePreviewTargetMs(scrubTargetMs = 15_000L, holdTargetMs = null, windowActive = true))
+        // After key release/commit the hold keeps the window open through settlement and idle.
+        assertEquals(15_000L, vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 15_000L, windowActive = true))
+        // Exit (timeline->tools, first DOWN from direct seek, Back): the hold must not show.
+        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 15_000L, windowActive = false))
+        // A late frame cannot reopen a closed window.
+        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = null, windowActive = false))
+        // Phone drag semantics: the explicit target shows during the drag; after drag end the
+        // window is inactive, so the committed hold is dismissed as before.
+        assertEquals(20_000L, vodEffectivePreviewTargetMs(scrubTargetMs = 20_000L, holdTargetMs = null, windowActive = false))
+        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 20_000L, windowActive = false))
+        // No target keeps the compact honest time-only fallback.
+        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = null, windowActive = true))
+    }
+
+    @Test
     fun downloadActionLabelsStayTruthfulAndGlyphFree() {
         val base = OfflineDownload(
             downloadId = 1L,

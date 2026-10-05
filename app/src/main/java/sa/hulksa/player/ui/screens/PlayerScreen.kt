@@ -493,6 +493,10 @@ fun PlayerScreen(
     var vodGoToTimeVisible by remember(request) { mutableStateOf(false) }
     var vodPanelFocusTick by remember(request) { mutableIntStateOf(0) }
     var vodSeekPreviewMs by remember(request) { mutableStateOf<Long?>(null) }
+    // Committed/last seek anchor for the Movies TV preview window; presentation-only and never a
+    // playback-position owner.
+    var vodPreviewHoldMs by remember(request) { mutableStateOf<Long?>(null) }
+    var vodTimelineFocused by remember(request) { mutableStateOf(false) }
     var moreFocusRestoreTick by remember(request) { mutableIntStateOf(0) }
     var isPlaying by remember(request) { mutableStateOf(false) }
     var isMuted by remember(request) { mutableStateOf(false) }
@@ -576,8 +580,19 @@ fun PlayerScreen(
     DisposableEffect(vodPreviewFrames) {
         onDispose { vodPreviewFrames.close() }
     }
-    val vodEffectivePreviewMs = vodSeekPreviewMs
-        ?: manualSeekTargetMs?.takeIf { focusTimelineOnReveal && !request.isLive }
+    val vodDirectSeekActive = focusTimelineOnReveal && !request.isLive
+    val vodPreviewWindowOpen = vodPreviewWindowActive(
+        isMovie = isMovieVod,
+        isLive = request.isLive,
+        controlsVisible = controlsVisible,
+        timelineFocused = vodTimelineFocused,
+        directSeekActive = vodDirectSeekActive,
+    )
+    val vodEffectivePreviewMs = vodEffectivePreviewTargetMs(
+        scrubTargetMs = vodSeekPreviewMs,
+        holdTargetMs = vodPreviewHoldMs,
+        windowActive = vodPreviewWindowOpen,
+    )
     val vodPreviewPublication by vodPreviewFrames.publication.collectAsState()
     // Only the matching source+bucket frame is used; otherwise the time-only fallback stays.
     val vodPreviewFrame = vodPreviewValueFor(
@@ -810,6 +825,9 @@ fun PlayerScreen(
         val target = (base + deltaMs).coerceIn(0L, durationMs)
         manualSeekTargetMs = target
         currentPositionMs = target
+        // Direct-seek mode keeps the last seek target visible after settlement; the hold is only
+        // presented while the TV preview window is active.
+        vodPreviewHoldMs = target
         if (tvRemoteInput) player.seekTo(target)
         val seconds = kotlin.math.abs(deltaMs) / 1_000L
         seekFeedback = if (deltaMs > 0) "+$seconds ث" else "-$seconds ث"
@@ -943,11 +961,15 @@ fun PlayerScreen(
 
     fun commitVodSeek(targetMs: Long) {
         vodSeekPreviewMs = null
+        // Keep the committed target visible as the resting hold while the TV timeline interaction
+        // (timeline focus or direct-seek mode) remains active; the seek owner is unchanged.
+        vodPreviewHoldMs = if (durationMs > 0L) targetMs.coerceIn(0L, durationMs) else targetMs
         seekToPosition(targetMs)
     }
 
     fun cancelVodSeekPreview() {
         vodSeekPreviewMs = null
+        vodPreviewHoldMs = null
         currentPositionMs = player.currentPosition.coerceAtLeast(0L)
     }
 
@@ -1394,13 +1416,15 @@ fun PlayerScreen(
         resumePromptVisible,
         controlsLocked,
         manualSeekTargetMs,
+        vodTimelineFocused,
+        focusTimelineOnReveal,
     ) {
         if (
             playbackSettings.autoHideControls &&
             controlsVisible && !browserVisible && activePanel == null && liveMorePanel == null &&
             vodMorePanel == null && !vodGoToTimeVisible && vodSeekPreviewMs == null &&
             !resumePromptVisible && !buffering && finalError == null && isPlaying && !controlsLocked &&
-            manualSeekTargetMs == null
+            manualSeekTargetMs == null && !vodTimelineFocused && !focusTimelineOnReveal
         ) {
             delay(CONTROLS_TIMEOUT_MS)
             controlsVisible = false
@@ -1880,6 +1904,7 @@ fun PlayerScreen(
                                 onPreview = ::previewVodSeek,
                                 onCommit = ::commitVodSeek,
                                 onPreviewCancel = ::cancelVodSeekPreview,
+                                onTimelineFocusChanged = { vodTimelineFocused = it },
                                 primaryFocus = primaryFocus,
                                 moreTriggerFocus = moreTriggerFocus,
                                 seekBarFocusRequester = seekBarFocus,
@@ -2632,6 +2657,7 @@ private fun VodCompactControlStrip(
     onPreview: (Long) -> Unit,
     onCommit: (Long) -> Unit,
     onPreviewCancel: () -> Unit,
+    onTimelineFocusChanged: (Boolean) -> Unit = {},
     primaryFocus: FocusRequester,
     moreTriggerFocus: FocusRequester,
     seekBarFocusRequester: FocusRequester,
@@ -2785,6 +2811,7 @@ private fun VodCompactControlStrip(
                             onPreview = onPreview,
                             onCommit = onCommit,
                             onPreviewCancel = onPreviewCancel,
+                            onTimelineFocusChanged = onTimelineFocusChanged,
                             focusRequester = seekBarFocusRequester,
                             remoteActive = remoteSeekActive,
                             seekStepMs = seekStepMs,
@@ -3927,6 +3954,7 @@ private fun VodSeekBar(
     stableLayout: Boolean = false,
     moviePresentation: Boolean = false,
     onTrackWidthChanged: ((Int) -> Unit)? = null,
+    onTimelineFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -3991,6 +4019,7 @@ private fun VodSeekBar(
             )
             .onFocusChanged { state ->
                 focused = state.isFocused
+                onTimelineFocusChanged?.invoke(state.isFocused)
                 if (state.isFocused) {
                     onPreview(positionMs.coerceIn(0L, durationMs.coerceAtLeast(0L)))
                 } else if (previewMs != null) {
