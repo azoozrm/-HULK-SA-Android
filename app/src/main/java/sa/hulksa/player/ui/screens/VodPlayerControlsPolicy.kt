@@ -76,6 +76,48 @@ internal fun vodToolsUseWeightedSlots(
 ): Boolean = requiredWidthPx > availableWidthPx
 
 /**
+ * Required intrinsic width of the five-tool row for the measured icon boxes, complete captions and
+ * the SAME spacing expression that renders the row. Fit and render therefore agree.
+ */
+internal fun vodToolsRequiredWidthPx(
+    iconBoxesPx: List<Int>,
+    captionWidthsPx: List<Int>,
+    spacingPx: Int,
+): Int {
+    if (iconBoxesPx.isEmpty() || iconBoxesPx.size != captionWidthsPx.size) return 0
+    val tools = iconBoxesPx.indices.sumOf { maxOf(iconBoxesPx[it], captionWidthsPx[it]) }
+    return tools + (iconBoxesPx.size - 1) * spacingPx.coerceAtLeast(0)
+}
+
+/**
+ * Movies seek-thumb center: inset by the radius so the circle stays fully inside the track at both
+ * endpoints (fraction 0 -> radius, fraction 1 -> width - radius) with no fixed offset.
+ */
+internal fun vodSeekThumbCenterPx(
+    fraction: Float,
+    trackWidthPx: Float,
+    thumbDiameterPx: Float,
+): Float {
+    val diameter = thumbDiameterPx.coerceAtLeast(0f)
+    val travel = (trackWidthPx - diameter).coerceAtLeast(0f)
+    return diameter / 2f + fraction.coerceIn(0f, 1f) * travel
+}
+
+/**
+ * Compact time-only preview bubble width from the measured timestamp plus accepted horizontal
+ * padding, bounded by the available timeline width and never an image-sized reservation.
+ */
+internal fun vodPreviewFallbackWidthPx(
+    textWidthPx: Int,
+    horizontalPaddingPx: Int,
+    availableWidthPx: Int,
+): Int {
+    val padding = horizontalPaddingPx.coerceAtLeast(0)
+    val wanted = (textWidthPx.coerceAtLeast(0) + 2 * padding).coerceAtLeast(padding * 2)
+    return if (availableWidthPx > 0) wanted.coerceAtMost(availableWidthPx) else wanted
+}
+
+/**
  * Preview pointer x-offset inside the clamped preview card, so the triangle stays under the real
  * seek thumb at the timeline coordinate while the bubble moves for edge clamping.
  */

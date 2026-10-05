@@ -17,6 +17,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -99,6 +102,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -123,10 +127,14 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -138,6 +146,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1466,7 +1475,10 @@ fun PlayerScreen(
         onDispose { latestOnBrowserVisibilityChanged(false) }
     }
 
-    val panelInputActive = playerChildPanelInputActive(activePanel != null, liveMorePanel != null)
+    val panelInputActive = playerChildPanelInputActive(
+        activePanel != null,
+        liveMorePanel != null || vodMorePanel != null || vodGoToTimeVisible,
+    )
     val latestOnPanelActiveChanged by rememberUpdatedState(onPanelActiveChanged)
     DisposableEffect(panelInputActive) {
         latestOnPanelActiveChanged(panelInputActive)
@@ -1526,9 +1538,29 @@ fun PlayerScreen(
                         -> false
                     }
                 }
+                if (vodGoToTimeVisible) {
+                    // The time window owns input: consume playback/media/channel commands so the
+                    // player behind it cannot act, while directional/OK/Back/TAB/numeric still
+                    // reach the dialog nodes.
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    return@onPreviewKeyEvent when (keyCode) {
+                        AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                        AndroidKeyEvent.KEYCODE_MEDIA_PLAY,
+                        AndroidKeyEvent.KEYCODE_MEDIA_PAUSE,
+                        AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
+                        AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                        AndroidKeyEvent.KEYCODE_MEDIA_REWIND,
+                        AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                        AndroidKeyEvent.KEYCODE_MEDIA_STOP,
+                        AndroidKeyEvent.KEYCODE_CHANNEL_UP,
+                        AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
+                        -> true
+                        else -> false
+                    }
+                }
                 if (
                     event.type != KeyEventType.KeyDown || browserVisible || activePanel != null ||
-                    liveMorePanel != null || vodMorePanel != null || vodGoToTimeVisible ||
+                    liveMorePanel != null || vodMorePanel != null ||
                     resumePromptVisible || unlockVisible || nextCountdown >= 0
                 ) {
                     return@onPreviewKeyEvent false
@@ -1822,7 +1854,7 @@ fun PlayerScreen(
                                 favorite = vodFavorite.favorite,
                                 favoriteEnabled = vodFavorite.enabled,
                                 moreOpen = vodMorePanel != null,
-                                inputMuted = vodMorePanel != null,
+                                inputMuted = vodMorePanel != null || vodGoToTimeVisible,
                                 onMore = ::openVodMorePanel,
                                 onRewind = { seekBy(-seekStepMs) },
                                 onForward = { seekBy(seekStepMs) },
@@ -1879,6 +1911,7 @@ fun PlayerScreen(
                                     focusTick = vodPanelFocusTick,
                                     panelWidthDp = liveControlMetrics.morePanelWidthDp,
                                     movieStyle = isMovieVod,
+                                    inputMuted = vodGoToTimeVisible,
                                     onBackToMenu = ::handleVodMoreBack,
                                     onOpenGoToTime = {
                                         vodMoreMenuFocusRow = VodMoreRow.GO_TO_TIME
@@ -2149,6 +2182,7 @@ fun PlayerScreen(
             VodGoToTimeDialog(
                 currentPositionMs = currentPositionMs,
                 durationMs = durationMs,
+                exclusiveInput = isMovieVod,
                 onConfirm = { target ->
                     vodGoToTimeVisible = false
                     closeVodMorePanelForSelection()
@@ -2597,6 +2631,7 @@ private fun VodCompactControlStrip(
     val forwardFocus = remember { FocusRequester() }
     val favoriteFocus = remember { FocusRequester() }
     var timelineBounds by remember { mutableStateOf<Rect?>(null) }
+    var trackWidthPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val baseTextStyle = LocalTextStyle.current
@@ -2606,11 +2641,20 @@ private fun VodCompactControlStrip(
     val rewindCaption = remember(stepSeconds) { "رجوع $stepSeconds ث" }
     val forwardCaption = remember(stepSeconds) { "تقديم $stepSeconds ث" }
     val playPauseCaption = if (isPlaying) "ايقاف مؤقت" else "تشغيل"
+    // Slight Movies-only glyph increase derived from the current adaptive metrics, with the gap
+    // that the rendered row actually uses. Fit and render share both expressions.
+    val movieGlyphDp = (metrics.transportIconDp * 1.2f).roundToInt().coerceIn(22, 34)
+    val toolSpacing = (movieGlyphDp * 1.1f).roundToInt()
+        .coerceAtLeast(metrics.itemSpacingDp)
+        .dp
+    // Measured vertical gap between the timeline slot and the tool row (existing 8.dp source
+    // baseline + thumb clearance). Owned by the strip Column, so the rows cannot overlap.
+    val toolGap = (metrics.itemSpacingDp + 4).dp
     val requiredToolsWidthPx = remember(
-        metrics.utilityIconDp,
-        metrics.transportIconDp,
+        movieGlyphDp,
         metrics.captionSizeSp,
         metrics.itemSpacingDp,
+        toolSpacing,
         rewindCaption,
         forwardCaption,
         playPauseCaption,
@@ -2618,18 +2662,17 @@ private fun VodCompactControlStrip(
         density.density,
         textMeasurer,
     ) {
-        val utilityBoxPx = with(density) { (metrics.utilityIconDp + 22).dp.roundToPx() }
-        val transportBoxPx = with(density) { (metrics.transportIconDp + 22).dp.roundToPx() }
-        val gapPx = with(density) { metrics.itemSpacingDp.dp.roundToPx() }
+        val glyphBoxPx = with(density) { (movieGlyphDp + 22).dp.roundToPx() }
+        val spacingPx = with(density) { toolSpacing.roundToPx() }
         val captions = listOf("المزيد", rewindCaption, playPauseCaption, forwardCaption, "المفضلة")
-        val boxes = listOf(utilityBoxPx, transportBoxPx, transportBoxPx, transportBoxPx, utilityBoxPx)
-        captions.mapIndexed { index, caption ->
-            maxOf(boxes[index], textMeasurer.measure(caption, captionStyle).size.width)
-        }.sum() + 4 * gapPx
+        vodToolsRequiredWidthPx(
+            iconBoxesPx = List(captions.size) { glyphBoxPx },
+            captionWidthsPx = captions.map { caption ->
+                textMeasurer.measure(caption, captionStyle).size.width
+            },
+            spacingPx = spacingPx,
+        )
     }
-    val toolSpacing = (metrics.transportContainerDp * .6f).roundToInt()
-        .coerceAtLeast(metrics.itemSpacingDp)
-        .dp
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -2637,8 +2680,8 @@ private fun VodCompactControlStrip(
                 Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = .42f),
-                        Color.Black.copy(alpha = .80f),
+                        Color.Black.copy(alpha = .50f),
+                        Color.Black.copy(alpha = .88f),
                     ),
                 ),
             )
@@ -2656,10 +2699,11 @@ private fun VodCompactControlStrip(
                 requiredWidthPx = requiredToolsWidthPx,
             )
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     Text(formatTime(positionMs), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Box(
                         modifier = Modifier
@@ -2684,15 +2728,20 @@ private fun VodCompactControlStrip(
                             upFocus = topBarBackFocus ?: FocusRequester.Cancel,
                             downFocus = primaryFocus,
                             stableLayout = true,
+                            moviePresentation = true,
+                            onTrackWidthChanged = { trackWidthPx = it },
                         )
                         val bounds = timelineBounds
                         val previewTarget = seekPreviewMs
                         if (previewTarget != null && bounds != null) {
+                            // The overlay shares the seek bar's own measured width so the pointer
+                            // and the drawn thumb use exactly the same coordinate system.
+                            val trackWidth = if (trackWidthPx > 0) trackWidthPx else bounds.width.roundToInt()
                             VodSeekPreviewOverlay(
                                 targetMs = previewTarget,
                                 frame = seekPreviewFrame,
                                 durationMs = durationMs,
-                                timelineWidthPx = bounds.width.roundToInt(),
+                                timelineWidthPx = trackWidth,
                                 timelineHeightPx = bounds.height.roundToInt(),
                             )
                         }
@@ -2703,7 +2752,7 @@ private fun VodCompactControlStrip(
                         fontSize = 13.sp,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(toolGap))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = if (weightedTools) {
@@ -2719,7 +2768,7 @@ private fun VodCompactControlStrip(
                         onClick = onMore,
                         enabled = true,
                         inputMuted = inputMuted,
-                        iconSizeDp = metrics.utilityIconDp,
+                        iconSizeDp = movieGlyphDp,
                         captionSizeSp = metrics.captionSizeSp,
                         modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
                         selected = moreOpen,
@@ -2733,7 +2782,7 @@ private fun VodCompactControlStrip(
                         onClick = onRewind,
                         enabled = true,
                         inputMuted = inputMuted,
-                        iconSizeDp = metrics.transportIconDp,
+                        iconSizeDp = movieGlyphDp,
                         captionSizeSp = metrics.captionSizeSp,
                         modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
                         focusRequester = rewindFocus,
@@ -2746,7 +2795,7 @@ private fun VodCompactControlStrip(
                         onClick = onPlayPause,
                         enabled = true,
                         inputMuted = inputMuted,
-                        iconSizeDp = metrics.transportIconDp,
+                        iconSizeDp = movieGlyphDp,
                         captionSizeSp = metrics.captionSizeSp,
                         modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
                         primary = true,
@@ -2760,7 +2809,7 @@ private fun VodCompactControlStrip(
                         onClick = onForward,
                         enabled = true,
                         inputMuted = inputMuted,
-                        iconSizeDp = metrics.transportIconDp,
+                        iconSizeDp = movieGlyphDp,
                         captionSizeSp = metrics.captionSizeSp,
                         modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
                         focusRequester = forwardFocus,
@@ -2773,7 +2822,7 @@ private fun VodCompactControlStrip(
                         onClick = onFavorite,
                         enabled = favoriteEnabled,
                         inputMuted = inputMuted,
-                        iconSizeDp = metrics.utilityIconDp,
+                        iconSizeDp = movieGlyphDp,
                         captionSizeSp = metrics.captionSizeSp,
                         modifier = if (weightedTools) Modifier.weight(1f) else Modifier,
                         selected = favorite,
@@ -2781,6 +2830,7 @@ private fun VodCompactControlStrip(
                         upFocus = seekBarFocusRequester,
                         downFocus = FocusRequester.Cancel,
                     )
+                }
                 }
             }
         }
@@ -2815,7 +2865,7 @@ private fun VodCompactControl(
     val shape = CircleShape
     val glyphColor = when {
         !enabled -> colors.textMuted.copy(alpha = .45f)
-        primary -> Color(0xFF14120A)
+        primary -> MaterialTheme.colorScheme.onPrimary
         showFocused -> colors.goldBright
         selected -> colors.gold
         else -> colors.text
@@ -2869,7 +2919,8 @@ private fun VodCompactControl(
             text = caption,
             color = captionColor,
             fontSize = captionSizeSp.sp,
-            fontWeight = if (selected || showFocused || primary) FontWeight.Bold else FontWeight.Medium,
+            // Constant weight: focus/selection never changes intrinsic widths or the row fit.
+            fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
     }
@@ -2889,11 +2940,34 @@ private fun VodSeekPreviewOverlay(
     timelineHeightPx: Int,
 ) {
     val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val timeStyle = LocalTextStyle.current.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    val timeSize = textMeasurer.measure(formatTime(targetMs), timeStyle).size
     val compactTimelinePx = with(density) { 420.dp.roundToPx() }
-    val cardWidth = if (timelineWidthPx < compactTimelinePx) 170.dp else 216.dp
-    val cardHeight = if (frame != null) cardWidth * 9f / 16f else 56.dp
+    // The timestamp-only fallback is sized from its real content plus accepted padding, bounded by
+    // the timeline width; it never reserves an image-sized rectangle.
+    val fallbackWidthPx = vodPreviewFallbackWidthPx(
+        textWidthPx = timeSize.width,
+        horizontalPaddingPx = with(density) { 16.dp.roundToPx() },
+        availableWidthPx = timelineWidthPx,
+    )
+    val fallbackHeight = with(density) {
+        (timeSize.height + 2 * 8.dp.roundToPx()).toDp()
+    }
+    val cardWidth = if (frame != null) {
+        if (timelineWidthPx < compactTimelinePx) 170.dp else 216.dp
+    } else {
+        with(density) { fallbackWidthPx.toDp() }
+    }
+    val cardHeight = if (frame != null) cardWidth * 9f / 16f else fallbackHeight
+    // The pointer follows the Movies thumb center (inset by the radius), matching VodSeekBar.
+    val thumbCenterPx = vodSeekThumbCenterPx(
+        fraction = vodPreviewCardFraction(targetMs, durationMs),
+        trackWidthPx = timelineWidthPx.toFloat(),
+        thumbDiameterPx = with(density) { 19.dp.toPx() },
+    )
     val placement = vodPreviewOverlayPlacement(
-        thumbXpx = timelineWidthPx * vodPreviewCardFraction(targetMs, durationMs),
+        thumbXpx = thumbCenterPx,
         timelineWidthPx = timelineWidthPx.toFloat(),
         timelineHeightPx = timelineHeightPx.toFloat(),
         cardWidthPx = with(density) { cardWidth.toPx() },
@@ -2909,6 +2983,7 @@ private fun VodSeekPreviewOverlay(
                 positionMs = targetMs,
                 cardWidth = cardWidth,
                 truthfulFallback = true,
+                fallbackHeight = fallbackHeight,
                 pointerOffsetPx = placement.pointerOffsetPx.roundToInt(),
             )
         },
@@ -2935,6 +3010,7 @@ private fun VodSeekPreviewCard(
     cardWidth: Dp,
     truthfulFallback: Boolean = false,
     pointerOffsetPx: Int? = null,
+    fallbackHeight: Dp? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -2979,11 +3055,12 @@ private fun VodSeekPreviewCard(
                 }
             }
         } else {
-            // No decodable frame: a compact truthful time-only card instead of an empty picture.
+            // No decodable frame: a compact truthful time-only card sized from its content and
+            // accepted padding instead of an empty picture.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .height(fallbackHeight ?: 56.dp)
                     .clip(shape)
                     .background(Color(0xF20A0B08))
                     .border(1.dp, colors.gold.copy(alpha = .85f), shape),
@@ -3621,6 +3698,7 @@ private fun LiveMoreHeaderAction(
     focusRequester: FocusRequester? = null,
     upFocus: FocusRequester? = null,
     downFocus: FocusRequester? = null,
+    enabled: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -3635,17 +3713,20 @@ private fun LiveMoreHeaderAction(
             .then(
                 if (upFocus != null || downFocus != null) {
                     Modifier.focusProperties {
+                        canFocus = enabled
                         up = upFocus ?: FocusRequester.Cancel
                         down = downFocus ?: FocusRequester.Cancel
                         left = FocusRequester.Cancel
                         right = FocusRequester.Cancel
                     }
+                } else if (!enabled) {
+                    Modifier.focusProperties { canFocus = false }
                 } else {
                     Modifier
                 },
             )
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = caption }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -3769,6 +3850,8 @@ private fun VodSeekBar(
     upFocus: FocusRequester? = null,
     downFocus: FocusRequester? = null,
     stableLayout: Boolean = false,
+    moviePresentation: Boolean = false,
+    onTrackWidthChanged: ((Int) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     var focused by remember { mutableStateOf(false) }
@@ -3779,6 +3862,17 @@ private fun VodSeekBar(
     } else {
         0f
     }
+    // Bounded, cancellable visual interpolation only: no committed-time state and no second clock.
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = if (moviePresentation) {
+            tween(durationMillis = 280, easing = LinearEasing)
+        } else {
+            tween(durationMillis = 0)
+        },
+        label = "vodSeekProgress",
+    )
+    val visualProgress = if (moviePresentation) animatedProgress else progress
     var dragPreviewMs by remember { mutableStateOf<Long?>(null) }
     val trackHeight = if (active) 9.dp else 6.dp
     // The Movie overlay keeps the timeline slot height constant across normal/focused/preview
@@ -3789,6 +3883,13 @@ private fun VodSeekBar(
         Modifier
             .fillMaxWidth()
             .height(slotHeight)
+            .then(
+                if (onTrackWidthChanged != null) {
+                    Modifier.onSizeChanged { onTrackWidthChanged(it.width) }
+                } else {
+                    Modifier
+                },
+            )
             .then(
                 if (inputEnabled) {
                     Modifier
@@ -3885,39 +3986,81 @@ private fun VodSeekBar(
             .focusable(inputEnabled),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(trackHeight)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = .20f)),
-        )
-        Box(
-            Modifier
-                .fillMaxWidth(buffered.coerceIn(0f, 1f))
-                .height(trackHeight)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = .32f)),
-        )
-        Box(
-            Modifier
-                .fillMaxWidth(progress)
-                .height(trackHeight)
-                .clip(CircleShape)
-                .background(colors.goldBright),
-        )
-        Box(
-            modifier = Modifier.fillMaxWidth(progress),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
+        if (moviePresentation) {
+            // Movies: one Canvas keeps fill, thumb and endpoints geometrically coherent with no
+            // fixed offset, clipping or layout growth.
+            Canvas(Modifier.matchParentSize()) {
+                val trackH = trackHeight.toPx()
+                val centerY = size.height / 2f
+                val diameter = if (active) 19.dp.toPx() else 15.dp.toPx()
+                val radius = diameter / 2f
+                val centerX = vodSeekThumbCenterPx(visualProgress, size.width, diameter)
+                val corner = CornerRadius(trackH / 2f)
+                drawRoundRect(
+                    color = Color.White.copy(alpha = .20f),
+                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    size = Size(size.width, trackH),
+                    cornerRadius = corner,
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = .32f),
+                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    size = Size(size.width * buffered.coerceIn(0f, 1f), trackH),
+                    cornerRadius = corner,
+                )
+                drawRoundRect(
+                    color = colors.goldBright,
+                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    size = Size(centerX, trackH),
+                    cornerRadius = corner,
+                )
+                drawCircle(
+                    color = colors.goldBright,
+                    radius = radius,
+                    center = Offset(centerX, centerY),
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = .45f),
+                    radius = radius,
+                    center = Offset(centerX, centerY),
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+            }
+        } else {
             Box(
                 Modifier
-                    .offset(x = 5.dp)
-                    .size(if (active) 17.dp else 13.dp)
+                    .fillMaxWidth()
+                    .height(trackHeight)
                     .clip(CircleShape)
-                    .background(colors.goldBright)
-                    .border(2.dp, Color.Black.copy(alpha = .45f), CircleShape),
+                    .background(Color.White.copy(alpha = .20f)),
             )
+            Box(
+                Modifier
+                    .fillMaxWidth(buffered.coerceIn(0f, 1f))
+                    .height(trackHeight)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = .32f)),
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth(progress)
+                    .height(trackHeight)
+                    .clip(CircleShape)
+                    .background(colors.goldBright),
+            )
+            Box(
+                modifier = Modifier.fillMaxWidth(progress),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Box(
+                    Modifier
+                        .offset(x = 5.dp)
+                        .size(if (active) 17.dp else 13.dp)
+                        .clip(CircleShape)
+                        .background(colors.goldBright)
+                        .border(2.dp, Color.Black.copy(alpha = .45f), CircleShape),
+                )
+            }
         }
     }
 }
@@ -3930,6 +4073,7 @@ private fun VodMorePanel(
     menuFocusRow: VodMoreRow,
     focusTick: Int,
     panelWidthDp: Int,
+    inputMuted: Boolean = false,
     onBackToMenu: () -> Unit,
     onOpenGoToTime: () -> Unit,
     onOpenSpeed: () -> Unit,
@@ -4035,6 +4179,7 @@ private fun VodMorePanel(
                     focusRequester = headerFocus,
                     upFocus = movieUp(0),
                     downFocus = movieDown(0),
+                    enabled = !inputMuted,
                 )
             } else {
                 LiveMoreHeaderAction(caption = "رجوع", onClick = onBackToMenu)
@@ -4054,6 +4199,7 @@ private fun VodMorePanel(
                             icon = Icons.Rounded.Schedule,
                             onClick = onOpenGoToTime,
                             focusRequester = goToTimeFocus,
+                            inputMuted = inputMuted,
                             upFocus = movieUp(1),
                             downFocus = movieDown(1),
                         )
@@ -4065,6 +4211,7 @@ private fun VodMorePanel(
                             showChevron = true,
                             onClick = onOpenSpeed,
                             focusRequester = speedFocus,
+                            inputMuted = inputMuted,
                             upFocus = movieUp(2),
                             downFocus = movieDown(2),
                         )
@@ -4076,6 +4223,7 @@ private fun VodMorePanel(
                             showChevron = true,
                             onClick = onOpenPictureSize,
                             focusRequester = pictureFocus,
+                            inputMuted = inputMuted,
                             upFocus = movieUp(3),
                             downFocus = movieDown(3),
                         )
@@ -4085,6 +4233,7 @@ private fun VodMorePanel(
                             icon = Icons.Rounded.Replay,
                             onClick = onRestart,
                             focusRequester = restartFocus,
+                            inputMuted = inputMuted,
                             upFocus = movieUp(4),
                             downFocus = movieDown(4),
                         )
@@ -4094,6 +4243,7 @@ private fun VodMorePanel(
                             icon = Icons.Rounded.Lock,
                             onClick = onLock,
                             focusRequester = lockFocus,
+                            inputMuted = inputMuted,
                             upFocus = movieUp(5),
                             downFocus = movieDown(5),
                         )
@@ -4106,6 +4256,7 @@ private fun VodMorePanel(
                                 selected = kotlin.math.abs(option - speed) < 0.001f,
                                 onClick = { onSelectSpeed(option) },
                                 focusRequester = speedOptionFocus[index],
+                                inputMuted = inputMuted,
                                 upFocus = movieUp(index + 1),
                                 downFocus = movieDown(index + 1),
                             )
@@ -4121,6 +4272,7 @@ private fun VodMorePanel(
                                 reserveCheckSlot = true,
                                 onClick = { onSelectPictureSize(index) },
                                 focusRequester = pictureOptionFocus[index],
+                                inputMuted = inputMuted,
                                 upFocus = movieUp(index + 1),
                                 downFocus = movieDown(index + 1),
                             )
@@ -4216,6 +4368,7 @@ private fun VodMoreRow(
     onClick: () -> Unit,
     upFocus: FocusRequester,
     downFocus: FocusRequester,
+    inputMuted: Boolean = false,
     modifier: Modifier = Modifier,
     value: String? = null,
     selected: Boolean = false,
@@ -4251,13 +4404,14 @@ private fun VodMoreRow(
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .focusProperties {
+                canFocus = !inputMuted
                 up = upFocus
                 down = downFocus
                 left = FocusRequester.Cancel
                 right = FocusRequester.Cancel
             }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = !inputMuted, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = text }
             .padding(horizontal = 11.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -4329,6 +4483,7 @@ private fun VodDirectActionRow(
     onClick: () -> Unit,
     upFocus: FocusRequester,
     downFocus: FocusRequester,
+    inputMuted: Boolean = false,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
 ) {
@@ -4351,13 +4506,14 @@ private fun VodDirectActionRow(
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .focusProperties {
+                canFocus = !inputMuted
                 up = upFocus
                 down = downFocus
                 left = FocusRequester.Cancel
                 right = FocusRequester.Cancel
             }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = !inputMuted, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = text }
             .padding(horizontal = 11.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -4390,6 +4546,7 @@ private fun VodNumericOptionRow(
     onClick: () -> Unit,
     upFocus: FocusRequester,
     downFocus: FocusRequester,
+    inputMuted: Boolean = false,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
 ) {
@@ -4418,13 +4575,14 @@ private fun VodNumericOptionRow(
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .focusProperties {
+                canFocus = !inputMuted
                 up = upFocus
                 down = downFocus
                 left = FocusRequester.Cancel
                 right = FocusRequester.Cancel
             }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = !inputMuted, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = value }
             .padding(horizontal = 11.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -4462,6 +4620,7 @@ private fun VodGoToTimeDialog(
     durationMs: Long,
     onConfirm: (Long) -> Unit,
     onDismiss: () -> Unit,
+    exclusiveInput: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
@@ -4472,6 +4631,13 @@ private fun VodGoToTimeDialog(
     val secondsFocus = remember { FocusRequester() }
     val confirmFocus = remember { FocusRequester() }
     val backFocus = remember { FocusRequester() }
+    val hourUpFocus = remember { FocusRequester() }
+    val hourDownFocus = remember { FocusRequester() }
+    val minuteUpFocus = remember { FocusRequester() }
+    val minuteDownFocus = remember { FocusRequester() }
+    val secondUpFocus = remember { FocusRequester() }
+    val secondDownFocus = remember { FocusRequester() }
+    val fieldsEnabled = durationMs > 0L
     val confirmEnabled = vodGoToTimeConfirmEnabled(
         hours = fields.hours,
         minutes = fields.minutes,
@@ -4479,6 +4645,37 @@ private fun VodGoToTimeDialog(
         durationMs = durationMs,
     )
     val shape = RoundedCornerShape(22.dp)
+
+    // Closed TAB / SHIFT+TAB cycle over every eligible dialog node for the exclusive Movies input:
+    // header fields, six step buttons and the enabled actions. Disabled duration paths keep only
+    // the always-attached Back node so TAB can never leave the window.
+    val tabNodes = remember(exclusiveInput, fieldsEnabled, confirmEnabled) {
+        buildList {
+            if (exclusiveInput) {
+                add(backFocus)
+                if (confirmEnabled) add(confirmFocus)
+                if (fieldsEnabled) {
+                    add(hourUpFocus)
+                    add(hoursFocus)
+                    add(hourDownFocus)
+                    add(minuteUpFocus)
+                    add(minutesFocus)
+                    add(minuteDownFocus)
+                    add(secondUpFocus)
+                    add(secondsFocus)
+                    add(secondDownFocus)
+                }
+            }
+        }
+    }
+    fun tabTarget(target: FocusRequester, delta: Int): FocusRequester {
+        if (tabNodes.isEmpty()) return target
+        val index = tabNodes.indexOf(target)
+        if (index < 0) return target
+        return tabNodes[(index + delta + tabNodes.size) % tabNodes.size]
+    }
+    val tabNeighbor: ((FocusRequester, Int) -> FocusRequester)? =
+        if (exclusiveInput) ({ target, delta -> tabTarget(target, delta) }) else null
 
     LaunchedEffect(Unit) {
         withFrameNanos { }
@@ -4534,8 +4731,11 @@ private fun VodGoToTimeDialog(
                         field = VodTimeField.HOURS,
                         durationMs = durationMs,
                         focusRequester = hoursFocus,
+                        stepUpFocusRequester = hourUpFocus,
+                        stepDownFocusRequester = hourDownFocus,
                         leftTarget = backFocus,
                         rightTarget = minutesFocus,
+                        tabNeighbor = tabNeighbor,
                         onFieldsChange = { fields = it },
                         onConfirmRequest = {
                             vodGoToTimeTargetMs(fields.hours, fields.minutes, fields.seconds, durationMs)?.let(onConfirm)
@@ -4549,8 +4749,11 @@ private fun VodGoToTimeDialog(
                         field = VodTimeField.MINUTES,
                         durationMs = durationMs,
                         focusRequester = minutesFocus,
+                        stepUpFocusRequester = minuteUpFocus,
+                        stepDownFocusRequester = minuteDownFocus,
                         leftTarget = hoursFocus,
                         rightTarget = secondsFocus,
+                        tabNeighbor = tabNeighbor,
                         onFieldsChange = { fields = it },
                         onConfirmRequest = {
                             vodGoToTimeTargetMs(fields.hours, fields.minutes, fields.seconds, durationMs)?.let(onConfirm)
@@ -4564,8 +4767,11 @@ private fun VodGoToTimeDialog(
                         field = VodTimeField.SECONDS,
                         durationMs = durationMs,
                         focusRequester = secondsFocus,
+                        stepUpFocusRequester = secondUpFocus,
+                        stepDownFocusRequester = secondDownFocus,
                         leftTarget = minutesFocus,
                         rightTarget = confirmFocus,
+                        tabNeighbor = tabNeighbor,
                         onFieldsChange = { fields = it },
                         onConfirmRequest = {
                             vodGoToTimeTargetMs(fields.hours, fields.minutes, fields.seconds, durationMs)?.let(onConfirm)
@@ -4601,7 +4807,17 @@ private fun VodGoToTimeDialog(
                             down = FocusRequester.Cancel
                             left = backFocus
                             right = FocusRequester.Cancel
-                        },
+                        }
+                        .then(
+                            if (exclusiveInput) {
+                                Modifier.focusProperties {
+                                    next = tabTarget(confirmFocus, 1)
+                                    previous = tabTarget(confirmFocus, -1)
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
                 )
                 FocusButton(
                     text = "رجوع",
@@ -4619,7 +4835,17 @@ private fun VodGoToTimeDialog(
                             down = FocusRequester.Cancel
                             right = confirmFocus
                             left = FocusRequester.Cancel
-                        },
+                        }
+                        .then(
+                            if (exclusiveInput) {
+                                Modifier.focusProperties {
+                                    next = tabTarget(backFocus, 1)
+                                    previous = tabTarget(backFocus, -1)
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
                 )
             }
         }
@@ -4634,8 +4860,11 @@ private fun VodGoToTimeField(
     field: VodTimeField,
     durationMs: Long,
     focusRequester: FocusRequester,
+    stepUpFocusRequester: FocusRequester,
+    stepDownFocusRequester: FocusRequester,
     leftTarget: FocusRequester?,
     rightTarget: FocusRequester?,
+    tabNeighbor: ((FocusRequester, Int) -> FocusRequester)?,
     onFieldsChange: (VodGoToTimeFields) -> Unit,
     onConfirmRequest: () -> Unit,
 ) {
@@ -4644,9 +4873,16 @@ private fun VodGoToTimeField(
     val enabled = durationMs > 0L
     val shape = RoundedCornerShape(10.dp)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        VodGoToTimeStepButton(up = true, enabled = enabled) {
-            onFieldsChange(vodGoToTimeFieldsStepped(fields, field, 1, durationMs))
-        }
+        VodGoToTimeStepButton(
+            arrowUp = true,
+            enabled = enabled,
+            onClick = {
+                onFieldsChange(vodGoToTimeFieldsStepped(fields, field, 1, durationMs))
+            },
+            focusRequester = stepUpFocusRequester,
+            fieldFocusRequester = focusRequester,
+            tabNeighbor = tabNeighbor,
+        )
         Box(
             modifier = Modifier
                 .width(76.dp)
@@ -4701,6 +4937,10 @@ private fun VodGoToTimeField(
                         right = rightTarget ?: FocusRequester.Cancel
                         up = FocusRequester.Cancel
                         down = FocusRequester.Cancel
+                        tabNeighbor?.let { neighbor ->
+                            next = neighbor(focusRequester, 1)
+                            previous = neighbor(focusRequester, -1)
+                        }
                     }
                     .onFocusChanged { focused = it.isFocused }
                     .onPreviewKeyEvent { event ->
@@ -4734,33 +4974,67 @@ private fun VodGoToTimeField(
                     },
             )
         }
-        VodGoToTimeStepButton(up = false, enabled = enabled) {
-            onFieldsChange(vodGoToTimeFieldsStepped(fields, field, -1, durationMs))
-        }
+        VodGoToTimeStepButton(
+            arrowUp = false,
+            enabled = enabled,
+            onClick = {
+                onFieldsChange(vodGoToTimeFieldsStepped(fields, field, -1, durationMs))
+            },
+            focusRequester = stepDownFocusRequester,
+            fieldFocusRequester = focusRequester,
+            tabNeighbor = tabNeighbor,
+        )
         Spacer(Modifier.height(3.dp))
         Text(label, color = colors.textMuted, fontSize = 11.sp, maxLines = 1)
     }
 }
 
 @Composable
-private fun VodGoToTimeStepButton(up: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun VodGoToTimeStepButton(
+    arrowUp: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    fieldFocusRequester: FocusRequester? = null,
+    tabNeighbor: ((FocusRequester, Int) -> FocusRequester)? = null,
+) {
     val colors = LocalHulkColors.current
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(RoundedCornerShape(8.dp))
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(
+                if (focusRequester != null && tabNeighbor != null) {
+                    Modifier.focusProperties {
+                        canFocus = enabled
+                        if (arrowUp) {
+                            up = FocusRequester.Cancel
+                            down = fieldFocusRequester ?: FocusRequester.Cancel
+                        } else {
+                            up = fieldFocusRequester ?: FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        }
+                        left = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                        next = tabNeighbor(focusRequester, 1)
+                        previous = tabNeighbor(focusRequester, -1)
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = if (up) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+            imageVector = if (arrowUp) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
             contentDescription = null,
             tint = if (enabled) colors.goldBright else colors.textMuted.copy(alpha = .40f),
             modifier = Modifier.size(22.dp),
         )
     }
 }
-
 @Composable
 private fun BufferedProgressBar(progress: Float, buffered: Float) {
     val colors = LocalHulkColors.current

@@ -32,6 +32,46 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun toolsRequiredWidthUsesTheRenderedSpacingForEverySlot() {
+        assertEquals(
+            5 * 46 + 4 * 24,
+            vodToolsRequiredWidthPx(
+                iconBoxesPx = List(5) { 46 },
+                captionWidthsPx = List(5) { 30 },
+                spacingPx = 24,
+            ),
+        )
+        assertEquals(
+            5 * 80 + 4 * 24,
+            vodToolsRequiredWidthPx(
+                iconBoxesPx = List(5) { 46 },
+                captionWidthsPx = List(5) { 80 },
+                spacingPx = 24,
+            ),
+        )
+        assertEquals(0, vodToolsRequiredWidthPx(emptyList(), emptyList(), 24))
+    }
+
+    @Test
+    fun moviesSeekThumbStaysInsideTheTrackAtBothEndpoints() {
+        // 1000px track, 38px thumb: center travels 19 .. 981 with no fixed-offset overflow.
+        assertEquals(19f, vodSeekThumbCenterPx(fraction = 0f, trackWidthPx = 1_000f, thumbDiameterPx = 38f), 0.001f)
+        assertEquals(500f, vodSeekThumbCenterPx(fraction = 0.5f, trackWidthPx = 1_000f, thumbDiameterPx = 38f), 0.001f)
+        assertEquals(981f, vodSeekThumbCenterPx(fraction = 1f, trackWidthPx = 1_000f, thumbDiameterPx = 38f), 0.001f)
+        assertEquals(19f, vodSeekThumbCenterPx(fraction = -1f, trackWidthPx = 1_000f, thumbDiameterPx = 38f), 0.001f)
+        assertEquals(981f, vodSeekThumbCenterPx(fraction = 2f, trackWidthPx = 1_000f, thumbDiameterPx = 38f), 0.001f)
+        // Narrow track shorter than the thumb degrades to the thumb radius without negatives.
+        assertEquals(19f, vodSeekThumbCenterPx(fraction = 1f, trackWidthPx = 20f, thumbDiameterPx = 38f), 0.001f)
+    }
+
+    @Test
+    fun previewFallbackWidthFollowsItsContentAndStaysBounded() {
+        assertEquals(120, vodPreviewFallbackWidthPx(textWidthPx = 88, horizontalPaddingPx = 16, availableWidthPx = 1_000))
+        assertEquals(240, vodPreviewFallbackWidthPx(textWidthPx = 400, horizontalPaddingPx = 16, availableWidthPx = 240))
+        assertEquals(32, vodPreviewFallbackWidthPx(textWidthPx = 0, horizontalPaddingPx = 16, availableWidthPx = 0))
+    }
+
+    @Test
     fun moviePanelVerticalFocusCycleWrapsAndStaysClosed() {
         // Node 0 is the header; nodes 1..5 are the five More rows.
         assertEquals(1, vodPanelVerticalNeighbor(0, 6, 1))
