@@ -17,9 +17,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -107,6 +104,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -565,22 +563,31 @@ fun PlayerScreen(
     val vodFavorite = remember(vodItem, favoriteKeys) {
         vodFavoriteControl(item = vodItem, favoriteKeys = favoriteKeys)
     }
-    val vodPreviewSource = remember(request) { request.candidates.firstOrNull() }
-    val vodPreviewFrames = remember(request) { VodSeekPreviewFrames(vodPreviewSource) }
+    // Preview work binds to the session's planned/prepared source, not the first raw candidate.
+    val vodPreviewSource = remember(playerSession, candidateIndex) {
+        playerSession.sourcePlan.candidate(candidateIndex)?.uri
+    }
+    val vodPreviewFrames = remember(request, vodPreviewSource) {
+        VodSeekPreviewFrames(
+            source = vodPreviewSource,
+            extractor = MediaMetadataVodPreviewExtractor(context.applicationContext),
+        )
+    }
     DisposableEffect(vodPreviewFrames) {
         onDispose { vodPreviewFrames.close() }
     }
-    var vodPreviewFrame by remember(request) { mutableStateOf<Bitmap?>(null) }
     val vodEffectivePreviewMs = vodSeekPreviewMs
         ?: manualSeekTargetMs?.takeIf { focusTimelineOnReveal && !request.isLive }
+    val vodPreviewPublication by vodPreviewFrames.publication.collectAsState()
+    // Only the matching source+bucket frame is used; otherwise the time-only fallback stays.
+    val vodPreviewFrame = vodPreviewValueFor(
+        publication = vodPreviewPublication,
+        sourceKey = vodPreviewFrames.sourceKey,
+        targetMs = vodEffectivePreviewMs,
+    )
     LaunchedEffect(vodEffectivePreviewMs, vodPreviewFrames) {
-        val target = vodEffectivePreviewMs
-        if (target == null) {
-            vodPreviewFrame = null
-            return@LaunchedEffect
-        }
-        val frame = vodPreviewFrames.frameAt(context, target)
-        if (vodEffectivePreviewMs == target) vodPreviewFrame = frame
+        val target = vodEffectivePreviewMs ?: return@LaunchedEffect
+        vodPreviewFrames.request(target)
     }
     val liveControlsLayout = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, tvRemoteInput) {
         liveControlsLayoutMetrics(
@@ -3914,22 +3921,10 @@ private fun VodSeekBar(
     var focused by remember { mutableStateOf(false) }
     val active = focused || remoteActive
     val displayMs = previewMs ?: positionMs
-    val progress = if (durationMs > 0L) {
-        (displayMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
-    // Bounded, cancellable visual interpolation only: no committed-time state and no second clock.
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress,
-        animationSpec = if (moviePresentation) {
-            tween(durationMillis = 280, easing = LinearEasing)
-        } else {
-            tween(durationMillis = 0)
-        },
-        label = "vodSeekProgress",
-    )
-    val visualProgress = if (moviePresentation) animatedProgress else progress
+    // Direct target mapping shared with the preview pointer (vodPreviewCardFraction): no positional
+    // animation, so the thumb, played fill and pointer always show the current seek target for
+    // forward, reverse and endpoint movement.
+    val progress = vodPreviewCardFraction(displayMs, durationMs)
     var dragPreviewMs by remember { mutableStateOf<Long?>(null) }
     val trackHeight = if (active) 9.dp else 6.dp
     // The Movie overlay keeps the timeline slot height constant across normal/focused/preview
@@ -4053,7 +4048,7 @@ private fun VodSeekBar(
                 val trackTop = centerY - trackH / 2f
                 val trackCorner = CornerRadius(trackH / 2f)
                 val centerX = vodSeekThumbCenterPx(
-                    fraction = visualProgress,
+                    fraction = progress,
                     trackWidthPx = size.width,
                     thumbDiameterPx = MOVIE_SEEK_COORDINATE_DIAMETER.toPx(),
                 )

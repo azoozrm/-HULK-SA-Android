@@ -320,6 +320,17 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun seekFractionIsDirectForForwardReverseAndEndpoints() {
+        // The same helper feeds the Movies fill/knob and the preview pointer with no positional
+        // easing, so reverse movement and endpoints map immediately to the current target.
+        assertEquals(0.25f, vodPreviewCardFraction(30_000L, 120_000L), 0.001f)
+        assertEquals(0.75f, vodPreviewCardFraction(90_000L, 120_000L), 0.001f)
+        assertEquals(0.25f, vodPreviewCardFraction(30_000L, 120_000L), 0.001f)
+        assertEquals(19f, vodSeekThumbCenterPx(vodPreviewCardFraction(0L, 120_000L), 1_000f, 38f), 0.001f)
+        assertEquals(981f, vodSeekThumbCenterPx(vodPreviewCardFraction(120_000L, 120_000L), 1_000f, 38f), 0.001f)
+    }
+
+    @Test
     fun downloadActionLabelsStayTruthfulAndGlyphFree() {
         val base = OfflineDownload(
             downloadId = 1L,
