@@ -38,14 +38,32 @@ internal fun <T : Any> vodPreviewValueFor(
         ?.value
 }
 
+/** Outcome of registering a preview target with [VodSeekPreviewLoader.request]. */
+internal enum class VodPreviewRequestDisposition {
+    /** The latest target was already cached and was published immediately. */
+    PUBLISHED_CACHE,
+
+    /** The latest target is already being extracted; its completion is eligible. */
+    AWAITING_IN_FLIGHT,
+
+    /** A new single pending bucket was registered for the worker. */
+    PENDING_NEW,
+
+    /** The loader is closed; the request was ignored. */
+    REJECTED,
+}
+
 /**
- * Bounded single-worker preview scheduling state.
+ * Bounded single-worker preview scheduling state with one authoritative latest request.
  *
  * At most one [load] runs at a time; while it runs, at most one newer pending bucket is retained
- * and the latest request replaces any earlier pending one. Completed values are cached by bucket,
- * so repeating or reversing over a target never re-decodes it. [close] rejects everything after
- * disposal. This class is intentionally free of Android and coroutine types so it can be driven
- * deterministically by tests.
+ * and the latest request replaces any earlier pending one. The latest requested bucket is recorded
+ * on every request, including cache hits and requests returning to the in-flight bucket, so
+ * obsolete pending work is dropped and only a completion still matching the latest target can
+ * publish. Completed values are cached by bucket (obsolete ones included) so repeating or
+ * reversing over a target never re-decodes it. [close] rejects everything after disposal. This
+ * class is intentionally free of Android and coroutine types so it can be driven deterministically
+ * by tests.
  */
 internal class VodSeekPreviewLoader<T : Any>(
     private val sourceKey: Int,
@@ -56,45 +74,74 @@ internal class VodSeekPreviewLoader<T : Any>(
     private val cache = LinkedHashMap<Long, T>(cacheCapacity, 0.75f, true)
     private var inFlightBucket: Long? = null
     private var pendingBucket: Long? = null
+    private var latestBucket: Long? = null
     private var closed = false
 
-    /** Cached value for the bucket, or null after registering the latest pending request. */
-    fun request(bucketMs: Long): T? = synchronized(lock) {
-        if (closed) return null
-        cache[bucketMs]?.let { return it }
-        // The bucket already being extracted needs no second request; its result will publish.
-        if (bucketMs == inFlightBucket) return null
+    /**
+     * Registers [bucketMs] as the latest requested target and reports what the caller must do.
+     *
+     * A cached target drops obsolete pending work and publishes the matching frame inside the same
+     * critical section that updates the latest target, so a late completion can never interleave
+     * between the eligibility decision and the publication write. An in-flight target also drops
+     * obsolete pending work because its own completion is eligible.
+     */
+    fun request(
+        bucketMs: Long,
+        publish: (VodSeekPreviewResult<T>) -> Unit,
+    ): VodPreviewRequestDisposition = synchronized(lock) {
+        if (closed) return VodPreviewRequestDisposition.REJECTED
+        latestBucket = bucketMs
+        val cached = cache[bucketMs]
+        if (cached != null) {
+            pendingBucket = null
+            publish(VodSeekPreviewResult(sourceKey = sourceKey, bucketMs = bucketMs, value = cached))
+            return VodPreviewRequestDisposition.PUBLISHED_CACHE
+        }
+        if (bucketMs == inFlightBucket) {
+            pendingBucket = null
+            return VodPreviewRequestDisposition.AWAITING_IN_FLIGHT
+        }
         pendingBucket = bucketMs
-        null
+        return VodPreviewRequestDisposition.PENDING_NEW
     }
 
     fun hasPending(): Boolean = synchronized(lock) { !closed && pendingBucket != null }
 
-    /** Runs the single latest pending bucket once; null when nothing is pending or load failed. */
-    fun runNext(): VodSeekPreviewResult<T>? {
+    /**
+     * Runs the single latest pending bucket once. Returns true whenever an extraction was
+     * attempted, so the worker re-checks for newer pending work (including after a failure).
+     */
+    fun runNext(publish: (VodSeekPreviewResult<T>) -> Unit): Boolean {
         val bucket = synchronized(lock) {
-            if (closed || inFlightBucket != null) return null
-            val next = pendingBucket ?: return null
+            if (closed || inFlightBucket != null) return false
+            val next = pendingBucket ?: return false
             pendingBucket = null
             inFlightBucket = next
             next
         }
-        val value = try {
-            load(bucket)
-        } finally {
-            synchronized(lock) { inFlightBucket = null }
+        val value = runCatching { load(bucket) }.getOrNull()
+        synchronized(lock) {
+            // Clearing in-flight together with caching closes the gap where a concurrent request
+            // could re-register the same bucket and cause duplicate extraction.
+            inFlightBucket = null
+            if (closed) return false
+            if (value != null) {
+                cache[bucket] = value
+                trimCache()
+                // Only a completion still matching the latest target may publish; obsolete
+                // completions stay cached but never replace the current publication.
+                if (latestBucket == bucket) {
+                    publish(VodSeekPreviewResult(sourceKey = sourceKey, bucketMs = bucket, value = value))
+                }
+            }
         }
-        return synchronized(lock) {
-            if (closed || value == null) return null
-            cache[bucket] = value
-            trimCache()
-            VodSeekPreviewResult(sourceKey = sourceKey, bucketMs = bucket, value = value)
-        }
+        return true
     }
 
     fun close() = synchronized(lock) {
         closed = true
         pendingBucket = null
+        latestBucket = null
         cache.clear()
     }
 
@@ -183,13 +230,17 @@ internal class VodSeekPreviewFrames(
     @Volatile
     private var closed = false
 
+    /** Single publication sink; the loader calls it under its lock for eligibility-atomic writes. */
+    private fun publish(result: VodSeekPreviewResult<Bitmap>) {
+        if (!closed) _publication.value = result
+    }
+
     init {
         scope.launch {
             for (ignored in signal) {
-                while (true) {
-                    val result = loader.runNext() ?: break
-                    if (!closed) _publication.value = result
-                }
+                // Drain pending work; runNext reports true after every attempt so newer pending
+                // targets (including after a failed extraction) are never stranded.
+                while (loader.runNext(::publish)) { }
             }
         }
     }
@@ -198,12 +249,9 @@ internal class VodSeekPreviewFrames(
     fun request(timeMs: Long) {
         if (closed || !vodPreviewDecodableCandidate(media)) return
         val bucket = vodPreviewBucketMs(timeMs)
-        val cached = loader.request(bucket)
-        if (cached != null) {
-            _publication.value = VodSeekPreviewResult(sourceKey = sourceKey, bucketMs = bucket, value = cached)
-            return
+        if (loader.request(bucket, ::publish) == VodPreviewRequestDisposition.PENDING_NEW) {
+            signal.trySend(Unit)
         }
-        signal.trySend(Unit)
     }
 
     fun close() {
