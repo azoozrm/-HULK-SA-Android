@@ -969,7 +969,9 @@ fun PlayerScreen(
 
     fun cancelVodSeekPreview() {
         vodSeekPreviewMs = null
-        vodPreviewHoldMs = null
+        // The resting hold is presentation-only and is gated by the TV preview window, so it is
+        // not cleared here: the freshly composed seek bar reports unfocused before it can be
+        // focused (or during direct-seek reveal) and must not destroy the open window's target.
         currentPositionMs = player.currentPosition.coerceAtLeast(0L)
     }
 
