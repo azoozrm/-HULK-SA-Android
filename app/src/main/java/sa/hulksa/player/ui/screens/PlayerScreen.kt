@@ -1655,6 +1655,17 @@ fun PlayerScreen(
                         seekBy(seekStepMs)
                         true
                     } else false
+                    AndroidKeyEvent.KEYCODE_DPAD_DOWN -> if (
+                        isMovieVod && tvRemoteInput && surfaceFocused && focusTimelineOnReveal &&
+                        controlsVisible
+                    ) {
+                        // Direct-seek exit: the first DOWN from the video surface leaves the
+                        // direct-seek focus mode through the existing focus-transition effect,
+                        // which targets the attached primary tool. The already requested seek
+                        // target is untouched.
+                        focusTimelineOnReveal = false
+                        true
+                    } else false
                     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> if (!request.isLive && surfaceFocused) {
                         seekBy(-seekStepMs); true
                     } else false
