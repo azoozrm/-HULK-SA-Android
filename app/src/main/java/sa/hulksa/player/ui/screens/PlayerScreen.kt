@@ -144,6 +144,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -2624,13 +2625,17 @@ private fun VodCompactControlStrip(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val isTelevision = LocalAdaptiveUi.current.isTelevision
+    val adaptiveUi = LocalAdaptiveUi.current
+    val isTelevision = adaptiveUi.isTelevision
     val stepSeconds = (seekStepMs / 1_000L).coerceAtLeast(1L)
     val rewindFocus = remember { FocusRequester() }
     val forwardFocus = remember { FocusRequester() }
     val favoriteFocus = remember { FocusRequester() }
     var timelineBounds by remember { mutableStateOf<Rect?>(null) }
     var trackWidthPx by remember { mutableIntStateOf(0) }
+    var stripBounds by remember { mutableStateOf<Rect?>(null) }
+    var timelineRowBounds by remember { mutableStateOf<Rect?>(null) }
+    var toolsRowBounds by remember { mutableStateOf<Rect?>(null) }
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val baseTextStyle = LocalTextStyle.current
@@ -2650,16 +2655,38 @@ private fun VodCompactControlStrip(
     // Measured vertical gap between the timeline slot and the tool row (existing 8.dp source
     // baseline + thumb clearance). Owned by the strip Column, so the rows cannot overlap.
     val toolGap = (metrics.itemSpacingDp + 4).dp
-    // Approved placement: the board sits the timeline + tools slightly lower than the Live
-    // safe-window base. The same lift is moved above the timeline, so the strip keeps its measured
-    // height, timeline-to-tools gap and gradient box while the group (and the gradient support over
-    // the track) shifts down as one stable group.
+    // Real lower boundary: the qualified TV overscan inset, without the extra Live presentation
+    // buffer. Touch layouts consume the system navigation inset once via navigationBarsPadding().
+    val safeBottomInsetDp = remember(
+        adaptiveUi.screenWidthDp,
+        adaptiveUi.screenHeightDp,
+        isTelevision,
+    ) {
+        if (isTelevision) {
+            tvPremiumWindowPolicy(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp).verticalSafeInsetDp
+        } else {
+            0f
+        }
+    }
+    // The same lift moves into the top padding, so the strip keeps its Live-base measured height
+    // and the gradient box grows above the timeline while the group shifts down as one group.
     val stripBottomPaddingDp = vodStripBottomPaddingDp(
         baseBottomDp = layoutMetrics.outerBottomPaddingDp,
+        safeBottomInsetDp = safeBottomInsetDp,
         isTelevision = isTelevision,
     )
     val stripTopPaddingDp =
         layoutMetrics.outerTopPaddingDp + (layoutMetrics.outerBottomPaddingDp - stripBottomPaddingDp)
+    // Gradient stops from the real measured row bounds; the even .50/.88 fallback applies only
+    // before the first measurement pass.
+    val gradientStops = remember(stripBounds, timelineRowBounds, toolsRowBounds) {
+        vodStripGradientStops(
+            stripTopPx = stripBounds?.top ?: -1f,
+            stripHeightPx = stripBounds?.height ?: 0f,
+            timelineTopPx = timelineRowBounds?.top ?: -1f,
+            toolsTopPx = toolsRowBounds?.top ?: -1f,
+        )
+    }
     val requiredToolsWidthPx = remember(
         movieGlyphDp,
         metrics.captionSizeSp,
@@ -2686,8 +2713,15 @@ private fun VodCompactControlStrip(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .onGloballyPositioned { stripBounds = it.boundsInRoot() }
             .background(
-                Brush.verticalGradient(
+                gradientStops?.let { stops ->
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        stops.timelineTopFraction to Color.Black.copy(alpha = .50f),
+                        stops.toolsTopFraction to Color.Black.copy(alpha = .88f),
+                    )
+                } ?: Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
                         Color.Black.copy(alpha = .50f),
@@ -2711,7 +2745,9 @@ private fun VodCompactControlStrip(
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Column(Modifier.fillMaxWidth()) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { timelineRowBounds = it.boundsInRoot() },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                     Text(formatTime(positionMs), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -2764,7 +2800,9 @@ private fun VodCompactControlStrip(
                 }
                 Spacer(Modifier.height(toolGap))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onGloballyPositioned { toolsRowBounds = it.boundsInRoot() },
                     horizontalArrangement = if (weightedTools) {
                         Arrangement.Start
                     } else {
@@ -3838,6 +3876,15 @@ private fun LiveMoreRow(
     }
 }
 
+// Movie timeline geometry. The coordinate diameter is shared with the preview overlay and is
+// constant, so focus changes never move the knob center. The focused ring is reserved inside the
+// constant 20.dp slot, so focus decoration never changes layout or clips at the endpoints.
+private val MOVIE_SEEK_COORDINATE_DIAMETER = 19.dp
+private val MOVIE_SEEK_IDLE_DIAMETER = 15.dp
+private val MOVIE_SEEK_ACTIVE_DIAMETER = 17.dp
+private val MOVIE_SEEK_FOCUS_RING_RADIUS = 9.25.dp
+private val MOVIE_SEEK_FOCUS_RING_WIDTH = 1.5.dp
+
 /**
  * Owner-approved VOD timeline: physical LTR axis (past on the LEFT, future on the RIGHT), gold
  * fill and thumb. Touch scrubbing and bar-focused D-pad seeking keep a distinct preview target;
@@ -3997,44 +4044,84 @@ private fun VodSeekBar(
         contentAlignment = Alignment.CenterStart,
     ) {
         if (moviePresentation) {
-            // Movies: one Canvas keeps fill, thumb and endpoints geometrically coherent with no
-            // fixed offset, clipping or layout growth.
+            // Movies: one Canvas keeps fill, thumb and focus decoration geometrically coherent
+            // with no fixed offset, clipping or layout growth. The knob center uses a constant
+            // coordinate diameter (shared with the preview overlay), so focusing never moves it.
             Canvas(Modifier.matchParentSize()) {
                 val trackH = trackHeight.toPx()
                 val centerY = size.height / 2f
-                val diameter = if (active) 19.dp.toPx() else 15.dp.toPx()
-                val radius = diameter / 2f
-                val centerX = vodSeekThumbCenterPx(visualProgress, size.width, diameter)
-                val corner = CornerRadius(trackH / 2f)
+                val trackTop = centerY - trackH / 2f
+                val trackCorner = CornerRadius(trackH / 2f)
+                val centerX = vodSeekThumbCenterPx(
+                    fraction = visualProgress,
+                    trackWidthPx = size.width,
+                    thumbDiameterPx = MOVIE_SEEK_COORDINATE_DIAMETER.toPx(),
+                )
+                // Focused keeps the smaller fill so the ring fits the constant slot; remote reveal
+                // keeps its slightly larger fill but never draws the focus ring.
+                val knobDiameter = when {
+                    focused -> MOVIE_SEEK_IDLE_DIAMETER
+                    active -> MOVIE_SEEK_ACTIVE_DIAMETER
+                    else -> MOVIE_SEEK_IDLE_DIAMETER
+                }.toPx()
+                val knobRadius = knobDiameter / 2f
+                // Restrained dark edge behind the neutral track for separation on any video.
+                val trackEdgeH = trackH + 2.dp.toPx()
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = .50f),
+                    topLeft = Offset(0f, centerY - trackEdgeH / 2f),
+                    size = Size(size.width, trackEdgeH),
+                    cornerRadius = CornerRadius(trackEdgeH / 2f),
+                )
                 drawRoundRect(
                     color = Color.White.copy(alpha = .30f),
-                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    topLeft = Offset(0f, trackTop),
                     size = Size(size.width, trackH),
-                    cornerRadius = corner,
+                    cornerRadius = trackCorner,
                 )
                 drawRoundRect(
                     color = Color.White.copy(alpha = .46f),
-                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    topLeft = Offset(0f, trackTop),
                     size = Size(size.width * buffered.coerceIn(0f, 1f), trackH),
-                    cornerRadius = corner,
+                    cornerRadius = trackCorner,
                 )
                 drawRoundRect(
                     color = colors.gold,
-                    topLeft = Offset(0f, centerY - trackH / 2f),
+                    topLeft = Offset(0f, trackTop),
                     size = Size(centerX, trackH),
-                    cornerRadius = corner,
+                    cornerRadius = trackCorner,
                 )
+                if (focused) {
+                    // Focused-only restrained track emphasis.
+                    drawRoundRect(
+                        color = colors.goldBright.copy(alpha = .50f),
+                        topLeft = Offset(0f, trackTop),
+                        size = Size(size.width, trackH),
+                        cornerRadius = trackCorner,
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                }
                 drawCircle(
                     color = colors.gold,
-                    radius = radius,
+                    radius = knobRadius,
                     center = Offset(centerX, centerY),
                 )
                 drawCircle(
                     color = Color.Black.copy(alpha = .45f),
-                    radius = radius,
+                    radius = knobRadius,
                     center = Offset(centerX, centerY),
                     style = Stroke(width = 2.dp.toPx()),
                 )
+                if (focused) {
+                    // Focused-only light-gold ring around the fill, separated by the dark edge and
+                    // reserved inside the constant 20.dp slot (outer edge touches the slot bound).
+                    drawCircle(
+                        color = colors.goldBright,
+                        radius = MOVIE_SEEK_FOCUS_RING_RADIUS.toPx(),
+                        center = Offset(centerX, centerY),
+                        style = Stroke(width = MOVIE_SEEK_FOCUS_RING_WIDTH.toPx()),
+                    )
+                }
             }
         } else {
             Box(

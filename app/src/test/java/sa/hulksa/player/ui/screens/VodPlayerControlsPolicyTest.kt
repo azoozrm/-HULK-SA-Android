@@ -61,14 +61,53 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun moviesStripLowersTheGroupWithoutCrossingTheSafeFloor() {
-        // Compact TV base 36dp -> 30dp; phone touch base 18dp -> 14dp.
-        assertEquals(30f, vodStripBottomPaddingDp(baseBottomDp = 36f, isTelevision = true), 0.001f)
-        assertEquals(14f, vodStripBottomPaddingDp(baseBottomDp = 18f, isTelevision = false), 0.001f)
-        // A base already below the floor is never increased.
-        assertEquals(20f, vodStripBottomPaddingDp(baseBottomDp = 20f, isTelevision = true), 0.001f)
-        // Large TV windows keep the lift and stay above the overscan floor.
-        assertEquals(38f, vodStripBottomPaddingDp(baseBottomDp = 44f, isTelevision = true), 0.001f)
+    fun moviesStripSitsInsideTheRealSafeBoundaryAndNeverAboveTheLiveBase() {
+        // Mi Box compact TV: overscan inset 16dp + 8dp clearance = 24dp (below the Live 36dp base).
+        assertEquals(
+            24f,
+            vodStripBottomPaddingDp(baseBottomDp = 36f, safeBottomInsetDp = 16f, isTelevision = true),
+            0.001f,
+        )
+        // Standard/large TV: overscan inset 8dp + 8dp clearance = 16dp (below the Live 44dp base).
+        assertEquals(
+            16f,
+            vodStripBottomPaddingDp(baseBottomDp = 44f, safeBottomInsetDp = 8f, isTelevision = true),
+            0.001f,
+        )
+        // Touch already consumes the navigation inset once, so only the clearance remains.
+        assertEquals(
+            8f,
+            vodStripBottomPaddingDp(baseBottomDp = 18f, safeBottomInsetDp = 0f, isTelevision = false),
+            0.001f,
+        )
+        // A base already below the target is never increased (never above the Live base).
+        assertEquals(
+            12f,
+            vodStripBottomPaddingDp(baseBottomDp = 12f, safeBottomInsetDp = 16f, isTelevision = true),
+            0.001f,
+        )
+        // A negative inset cannot shrink the clearance below the constant.
+        assertEquals(
+            8f,
+            vodStripBottomPaddingDp(baseBottomDp = 36f, safeBottomInsetDp = -4f, isTelevision = true),
+            0.001f,
+        )
+    }
+
+    @Test
+    fun moviesStripGradientStopsFollowTheRealRowBounds() {
+        val stops = vodStripGradientStops(
+            stripTopPx = 800f,
+            stripHeightPx = 200f,
+            timelineTopPx = 860f,
+            toolsTopPx = 920f,
+        )
+        assertEquals(0.30f, stops!!.timelineTopFraction, 0.001f)
+        assertEquals(0.60f, stops.toolsTopFraction, 0.001f)
+        // The timeline must never be at/above the strip top and the tools must stay below it.
+        assertNull(vodStripGradientStops(stripTopPx = 800f, stripHeightPx = 0f, timelineTopPx = 860f, toolsTopPx = 920f))
+        assertNull(vodStripGradientStops(stripTopPx = 800f, stripHeightPx = 200f, timelineTopPx = 700f, toolsTopPx = 920f))
+        assertNull(vodStripGradientStops(stripTopPx = 800f, stripHeightPx = 200f, timelineTopPx = 920f, toolsTopPx = 920f))
     }
 
     @Test

@@ -99,19 +99,60 @@ internal fun vodToolsRequiredWidthPx(
 internal fun vodToolSpacingDp(movieGlyphDp: Int, itemSpacingDp: Int): Int =
     (movieGlyphDp.coerceAtLeast(0) * 1.33f).roundToInt().coerceAtLeast(itemSpacingDp)
 
+/** Constant content clearance below the lowest Movies caption inside the real safe boundary. */
+internal const val MOVIE_STRIP_BOTTOM_CLEARANCE_DP = 8f
+
 /**
- * Movies-only bottom placement: the approved board sits the timeline and tools slightly lower than
- * the Live safe-window base. The lift is bounded and never increases the base, and the floor keeps
- * the group inside the TV overscan-safe area on compact windows. The caller moves the same amount
- * into the top padding so the strip keeps its measured height, gap and gradient box.
+ * Movies-only bottom padding inside the real safe boundary.
+ *
+ * TV uses the repository overscan-safe boundary (`tvPremiumWindowPolicy.verticalSafeInsetDp`) plus
+ * one constant content clearance; the extra Live presentation buffer in
+ * `playerTvPremiumOverlayMetrics.safeBottomPaddingDp` is deliberately not applied. Touch layouts
+ * already consume the system navigation inset once through `navigationBarsPadding()`, so only the
+ * content clearance remains. The result never exceeds the Live base, so the Movies group can only
+ * move down from the Live safe-window position, never up.
  */
 internal fun vodStripBottomPaddingDp(
     baseBottomDp: Float,
+    safeBottomInsetDp: Float,
     isTelevision: Boolean,
 ): Float {
-    val liftDp = if (isTelevision) 6f else 4f
-    val floorDp = if (isTelevision) 28f else 14f
-    return (baseBottomDp - liftDp).coerceAtLeast(minOf(floorDp, baseBottomDp))
+    val targetDp = if (isTelevision) {
+        safeBottomInsetDp.coerceAtLeast(0f) + MOVIE_STRIP_BOTTOM_CLEARANCE_DP
+    } else {
+        MOVIE_STRIP_BOTTOM_CLEARANCE_DP
+    }
+    return targetDp.coerceAtMost(baseBottomDp.coerceAtLeast(0f))
+}
+
+/**
+ * Movies bottom-gradient stop fractions derived from the real measured row bounds inside the strip:
+ * transparent at the strip top, black .50 at the timeline row top (so the track never sits above
+ * its backing) and black .88 at the tools row top (so the whole glyph/caption zone has the strong
+ * bottom backing). Returns null until the strip and both rows have been measured.
+ */
+internal data class VodStripGradientStops(
+    val timelineTopFraction: Float,
+    val toolsTopFraction: Float,
+)
+
+internal fun vodStripGradientStops(
+    stripTopPx: Float,
+    stripHeightPx: Float,
+    timelineTopPx: Float,
+    toolsTopPx: Float,
+): VodStripGradientStops? {
+    if (stripHeightPx <= 0f || timelineTopPx <= stripTopPx || toolsTopPx <= timelineTopPx) return null
+    val timelineFraction = ((timelineTopPx - stripTopPx) / stripHeightPx).coerceIn(0f, 1f)
+    val toolsFraction = ((toolsTopPx - stripTopPx) / stripHeightPx).coerceIn(0f, 1f)
+    return if (toolsFraction > timelineFraction) {
+        VodStripGradientStops(
+            timelineTopFraction = timelineFraction,
+            toolsTopFraction = toolsFraction,
+        )
+    } else {
+        null
+    }
 }
 
 /**
