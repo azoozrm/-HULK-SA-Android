@@ -1,316 +1,236 @@
 # HULK SA Android — Permanent Task Execution Contract
 
-This document is the permanent, model-neutral execution contract for substantive authorized HULK SA
-Android Implementation and Correction tasks. It exists so that every future executor inherits the
-same verified execution chain, evidence standard and completion boundary without depending on chat
-history.
+Revised 2026-10-06 · local iteration and accepted-section publication.
 
-Normative execution chain:
+This is the model-neutral execution contract for substantive authorized Implementation/Correction
+work. It owns execution phases and completion boundaries; it grants no authority. Read root
+`AGENTS.md`, applicable override and current task packet first. Read referenced contracts explicitly.
 
-live verification → ownership/evidence → bounded scope → implementation → complete diff review →
-focused validation → build/provenance when applicable → physical qualification when applicable →
-bounded runtime verification when applicable → capture only when explicitly authorized →
-final source freeze → durable evidence → authorized commit/push/PR → configured CI conclusion →
-final report → evidence-based verdict.
+## 1. Authority and scope
 
-This contract owns execution flow only and grants no authority. Root `AGENTS.md`, any applicable
-`AGENTS.override.md`, and the active task packet remain authoritative and are read first.
+Current owner instructions define the result and permitted source, checks, device and Git actions.
+No contract, skill, model or historical prompt can expand them. OpenCode/DeepSeek is the normal
+executor; ChatGPT/Sol coordinates and independently reviews. Audit/Review/Diagnosis stay read-only
+unless specifically authorized. Model capability does not expand scope or risk.
 
-## 1. Authority, applicability and executor neutrality
+More specific live contracts own their subject: lab resources, physical packages/state, compatibility,
+Operations, player/download ownership and release qualification. This file does not duplicate their
+changing package/version/device values. Capture and protected-action boundaries remain unchanged.
 
-- Applies to substantive authorized Implementation and Correction tasks: application source, UI,
-  behavior, tests, tooling, lab automation, and repository governance.
-- Audit, Review and Diagnosis remain read-only unless the active packet explicitly authorizes write
-  actions.
-- Current owner instructions, the active task packet, root `AGENTS.md` and any applicable
-  `AGENTS.override.md` define authority. Follow the standing owner-authorized implementation
-  workflow in root `AGENTS.md` unless the current owner instruction explicitly narrows it.
-  No contract, skill, helper, model, agent, or past chat may widen it.
-- The contract binds the work, not the worker. Every executor — any vendor, model, agent or human —
-  follows the same chain, evidence and verdict rules.
-- Model capability, reasoning variant, agent name and vendor never expand scope, authority or risk.
-- Where this document and a more specific live contract differ for that contract's area, the more
-  specific live contract governs: `AGENTS.override.md`,
-  `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`,
-  `docs/android-engineering-lab/README.md`, and subsystem contracts such as Compatibility Lab V2,
-  HULK Operations, and the release-like benchmark contract.
+## 2. Two explicit phases
 
-## 2. Standalone bounded task packet
+| Phase | Work and completion boundary | Git/CI |
+| --- | --- | --- |
+| LOCAL_ROUND (default for iterative section work) | Small source correction, relevant local checks, applicable state-preserving builds/install, bounded verification, durable evidence and owner review | No automatic commit, push, PR create/update or CI |
+| SECTION_PUBLISH | Review accumulated accepted scope, final relevant regression gates, immutable source/artifact binding, one coherent publication, same section PR and configured CI conclusion | Normal commit/fast-forward push/one PR only under current publication authority |
 
-A substantive task starts from a standalone packet that a fresh executor can execute without hidden
-chat context. The packet states, as applicable:
+LOCAL_ROUND retains successful local changes in the same task worktree/branch. Do not create a new
+branch/PR or run the full publication pipeline for each small fix. Local technical PASS means that
+round's mandatory criteria have evidence, not that a PR exists or owner visual acceptance is complete.
 
-- task identity, task type and goal;
-- repository, official branch, exact expected official HEAD, and expected overlap;
-- executor/model/agent constraints when the owner pins them;
-- authorized write scope: exact files, directories, branches, worktrees or device actions;
-- explicit out-of-scope list;
-- validation expected to prove the change;
-- physical state matrix, or `NONE`;
-- capture authorization for the current task, default OFF when the packet does not state it;
-- stop conditions;
-- required completion report and allowed verdicts;
-- secret-handling constraints.
+The owner’s acceptance/completion instruction for the exact section activates the standing authorized
+publication workflow when that authority is already in session. Do not ask again for authorized steps.
+Without that decision, finish local work/evidence and report its review boundary; do not publish early.
+A later instruction may explicitly allow earlier Git publication or narrow checks.
 
-If the packet lacks fields required to execute safely, the executor does not guess. It records what
-is missing. First resolve routine discoverable facts by safe live inspection; do not ask the owner
-to supply facts already accessible on GitHub/VPS/devices. Return `BLOCKED` for a missing owner
-decision or external dependency, or `STOP` for a contract/live-state conflict.
+An explicitly requested standalone documentation/governance task may use SECTION_PUBLISH directly,
+with one branch/PR and no Android builds or device contact. Changes remain documentation-only.
 
-Read `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md` explicitly for the adopted English
-packet method, NEW/RESUME continuity, exact task delta, preservation and completion fields. It does
-not replace this execution contract or add permission. Historical examples that deferred tests or
-Git actions are not standing deferrals for a new task.
+## 3. Standalone task packet
 
-## 3. Live verification before mutation
+Follow `DEEPSEEK-PROMPT-CONTRACT.md`. A packet identifies:
+- NEW or RESUME, task/section/round and LOCAL_ROUND or SECTION_PUBLISH;
+- owner-observed problem/result and exact element/property or inseparable behavior;
+- repository, verified official/base and relevant PR identities;
+- authorized scope, protected accepted work and any superseded instructions;
+- candidate/evidence identity and current local/remote/dirty state;
+- focused checks and relevant regression criteria;
+- affected approved physical surfaces or NONE, and capture OFF unless explicitly enabled;
+- publication trigger/current authority, stop conditions and completion boundary.
 
-Before any mutation, and again before commit and push, the executor verifies live:
+Resolve discoverable facts through safe current inspection. Do not invent SHAs, paths, package state,
+measurements or results, or ask the owner for accessible evidence. A missing owner decision/external
+dependency is BLOCKED; a live-state/authority conflict is STOP. No unfilled task template is sent.
 
-- canonical clone status and task worktree status;
-- local branch and local HEAD;
-- remote official branch and remote HEAD, freshly fetched;
-- exact expected SHA equality when the packet pins one;
-- open PR overlap for the same atomic problem;
-- PR state, base, head branch and head revision when the task is a PR correction;
-- the applicable repository contracts for the subsystem in scope.
+For UI work explicitly read `../design/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md` and the relevant
+accepted source/boards. All substantive work explicitly reads `DEEPSEEK-EVIDENCE-CONTRACT.md`.
 
-If the expected SHA does not match, if an overlapping PR exists without authorization, if unrelated
-changes cannot be separated safely, or if the applicable remote HEAD changes during work: `STOP`
-before further mutation. Safe reading, inspection, diagnosis and evidence gathering may continue.
+## 4. Live verification before mutation
 
-The intended diff (files and purpose) is recorded before editing.
+Verify canonical/task checkout status, local branch/HEAD, remote official HEAD, exact pinned SHA,
+open-task/PR overlap and applicable live contracts. A PR correction also verifies state/base/head.
+Record intended files/purpose before editing. Recheck relevant live state before commit/push.
 
-## 4. Ownership, root cause and extension path
+If pinned HEAD mismatches, applicable remote changes, unrelated overlapping edits cannot be separated,
+an unapproved PR owns the same work, or a protected contract would change without authority: STOP
+before mutation. Reading/diagnosis may continue. Do not reset, rebase or absorb another actor's work.
 
-For a bug or regression, before editing the executor establishes:
+For a resumed local section, uncommitted changes are expected: identify them by the previous round's
+candidate manifest/diff and preserve valid accepted work. Do not require a clean checkout, discard
+changes or silently start from the official branch merely because no commit/PR exists.
 
-1. actual behavior;
-2. evidence proving or strongly supporting the root cause;
-3. the authoritative owner when ownership matters;
-4. why the proposed change fixes the cause rather than the symptom.
+## 5. Ownership and bounded implementation
 
-For a feature, the executor identifies the existing contract, owner and extension path instead of
-inventing a root cause. If competing ownership is the defect, ownership is fixed rather than layering
-duplicated mutable state or a workaround over it.
+For a defect, establish actual behavior, source/evidence-backed cause, authoritative owner and why the
+change corrects it. For a feature, identify the existing contract/owner/extension path instead.
+Separate Fact, Inference and Assumption; insufficient evidence means diagnosis, not speculative code.
 
-Findings are classified as Fact, Inference, or Assumption. Insufficient evidence means diagnose
-only; no speculative fix.
+Keep one atomic problem or explicitly owner-defined section bundle on one task branch and one PR.
+Within that accepted section scope, related corrections remain local rounds on the same branch.
+Do not accumulate unrelated refactors, independent products or new capabilities under that label.
 
-## 5. One atomic problem per branch and PR
+Make the smallest maintainable correction; reuse existing owners/components and preserve shared
+defaults. No fake data, timing sleeps, duplicated state, new dependencies or broad architecture change
+without demonstrated need and authorized scope.
 
-- One confirmed atomic problem = one task branch, one PR.
-- A correction continues on the current PR HEAD; do not rebase, rewrite, retarget or restart it
-  unless explicitly authorized.
-- Do not combine independent problems, and do not turn a targeted fix into a general refactor.
-- Minimize complexity, surface area, changed files, new mutable state, new abstractions and new
-  dependencies (YAGNI).
-- Reuse existing patterns, owners, navigation and focus behavior unless they are the demonstrated
-  cause.
+## 6. Owner steering, pause and cancellation
 
-## 6. Owner steering and cancellation
+Steering updates the active task while preserving valid work/evidence. Revalidate affected state after
+material changes. Preserve accepted neighbors; supersede only conflicting requirements.
 
-- A new owner/user instruction updates the current task; already-valid work is preserved when safe.
-- After a material change to source, scope, branch, PR or authority, the affected repository state is
-  revalidated before further mutation.
-- On cancellation, the executor stops mutation immediately, does not commit or push partial work
-  unless authorized, records the exact state and reason, and reports `CLOSED` with what exists
-  (worktree, branch, commits, PR, uncommitted changes).
-- A cancelled or superseded task is never recorded as PASS, and its abandoned work is not silently
-  absorbed by another task.
-- No actor may modify, close, reuse or push to another task's branch or PR without explicit
-  authorization.
+Pausing for owner review leaves the complete local candidate/evidence available; it is not permission
+to commit/push or clear the worktree. An accepted part does not automatically accept all remaining work.
 
-## 7. Complete diff self-review
+Cancellation stops mutation and records exact local/branch/PR state as CLOSED. No silent commit,
+publish, destructive cleanup or absorption of abandoned work. Do not touch another task's ownership.
 
-Review the complete diff against the correct base before building and again after the final
-correction:
+## 7. Complete diff review
 
-- scope: only authorized files and behavior changed;
-- ownership: state, callbacks, stable identity/keys, effects, lifecycle, cancellation;
-- accidental edits, formatting churn, generated files, and debug/temp/dead/speculative code;
-- the staged diff and the final tree (`git status`, full diff, staged diff);
-- RTL, focus, adaptive behavior and regression surface where UI is touched.
+Review the current-round delta AND accumulated section diff before builds and completion.
+Check scope, callbacks, stable identity, state/effects/lifecycle/cancellation, RTL/adaptive/focus,
+new/untracked source, generated/temp/dead code, unrelated edits and staged/unstaged state.
+At publication review the full final/staged diff and tree against the verified section base.
+The primary executor owns this review; helpers cannot expand scope or weaken acceptance criteria.
 
-The primary executor owns this review even when subagents performed analysis. Do not weaken tests or
-acceptance criteria to obtain a pass.
+## 8. Proportionate local validation
 
-## 8. Focused validation
+Run the smallest check that proves the changed contract, then affected regressions. A behavioral
+regression test must prove meaningful behavior, not mirror the implementation. Do not add tests for
+every reversible visual detail or run the entire suite after each unchanged small layout correction.
 
-- Run the smallest test that proves the changed contract first, then the affected regression set.
-- Add a regression test when it meaningfully proves the behavior without overfitting to
-  implementation details or unstable timing.
-- Never claim a build, Gradle task, unit test, emulator test, instrumentation test, device action or
-  CI result that did not actually run.
-- Record each validation as PASS, FAIL, BLOCKED or NOT RUN, with the exact command where practical.
-- Distinguish failures caused by the current diff from baseline, infrastructure and flakiness; do not
-  fix unrelated failures.
-- CI is final verification, not a development sandbox.
+A local Android round must still establish that its actual source can build safely and that relevant
+changed behavior is verified before installing. Use the applicable focused test/compile/static checks
+for the task, then required Preview/Benchmark assembly. Record what ran and what was deferred.
 
-## 9. Build and artifact provenance
+Reuse valid unchanged evidence; broaden/repeat checks only for new changes, failures or unresolved
+concerns. Full applicable unit/lint/Compatibility/static gates belong at section publication unless
+a changed contract or current packet requires them earlier. Current explicit task deferrals remain
+bounded to that task; the local workflow is not a permanent exemption from final regression gates.
 
-When a build applies:
+Record PASS/FAIL/BLOCKED/NOT RUN and actual commands. Classify baseline/infrastructure/flaky/current
+diff failures. Fix only in-scope causal defects; do not weaken tests, hide failures or push to diagnose.
 
-- build from the exact task worktree revision and record clean/dirty state;
-- record the exact build command and variant;
-- record artifact SHA-256, package, version identity and signer evidence where applicable;
-- a dirty iteration build is not exact-HEAD evidence;
-- final evidence binds to the immutable final source revision;
-- if a final commit is made after the build, retain the build only when recorded tree/input hashes
-  prove its exact build inputs match that final revision. Keep the original dirty-build attribution;
-  a later commit never retroactively makes it a clean-HEAD build. Rebuild when affected inputs differ;
-- never present debug, benchmark or lab artifacts as production release artifacts.
+## 9. Freeze and local candidate provenance
 
-## 10. Physical qualification
+Freeze each candidate before evidence/build/install. For an uncommitted round retain base HEAD,
+dirty state, reviewed diff/new-file inventory, SOURCE-MANIFEST.sha256 and CANDIDATE.json.
+The candidate ID identifies the frozen content; HEAD alone never identifies a dirty candidate.
 
-Physical work follows the live physical contracts. The standing implementation-round refresh
-obligations in `AGENTS.md` section 15 and `AGENTS.override.md` apply by task type unless the active
-packet explicitly forbids or bounds device contact; no actor may exceed that boundary.
+Build from that exact worktree content. Record command, inputs/options, variant, artifact hash and
+applicable package/version/signer. Outputs/caches/secrets are not source inventory. No source edits
+during a frozen build/verification set. Later edits invalidate affected evidence.
 
-- Persistent instance identity, approved surfaces, refresh procedure, qualification version values
-  and data-preservation rules are owned by `AGENTS.override.md` and
-  `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`. This contract intentionally does
-  not restate package names, devices or version values.
-- Never uninstall, run `pm clear`, wipe data, downgrade, change signer, or manufacture clean state on
-  a persistent package.
-- Verify package identity, qualification version and signer continuity before installation; install
-  only by the state-preserving method the physical contract defines.
-- If a required surface is unreachable, report that validation as BLOCKED or NOT RUN; never silently
-  substitute another device/package and never destroy state to recover reachability.
-- Audit, Review and Diagnosis rounds do not rebuild or reinstall persistent packages.
+Final publication may reuse a local APK/check only when complete material input/option hashes prove
+it matches the committed source. Preserve its original dirty-build attribution. Verify all authorized
+new build inputs as well as tracked inputs. Rebuild affected outputs when any input changed.
+Documentation-only commits do not force identical Android APKs to be rebuilt/reinstalled.
 
-## 11. Bounded runtime verification and owner visual review
+Never present lab/Preview/Benchmark artifacts as signed production-release qualification.
 
-For visible or device-specific changes, compiling is not completion. Runtime verification is
-bounded to the active task, its capture policy, and the live physical contracts:
+## 10. Physical refresh and bounded runtime
 
-1. freeze the candidate source revision;
-2. build the correct variant from that revision;
-3. refresh/install per the live physical contract only when the task authorizes device contact;
-4. perform or record only the interaction needed to verify the changed technical contract;
-5. verify launch, crash-free operation and the behavior signals available without screen capture;
-6. leave visual review to the owner on the actual devices.
+Follow `AGENTS.override.md` and `PHYSICAL-ENGINEERING-INSTANCES.md` for package identity, current
+qualification overrides, approved surfaces, dual refresh and state preservation. Local candidates
+are valid refresh inputs when frozen/proven; a commit or PR is not a prerequisite.
 
-Do not add a full screen/device census or visual journey to a bounded correction. The task's
-approved state matrix selects runtime coverage; an unavailable mandatory surface remains BLOCKED
-or NOT RUN. Work involving documentation only has no Android build/refresh obligation.
+Do not install after required validation/build failure or replace the last known-good copy.
+Verify package/version/signer and record hashes before state-preserving install; launch and verify
+no immediate crash/stale update overlay, preserving established authentication/data.
 
-Capture policy (default OFF):
+Never uninstall, pm clear, wipe, downgrade, change signer or manufacture clean persistent state.
+An unreachable required surface remains BLOCKED/NOT RUN; no silent substitute device/package.
+Audit/Review/Diagnosis and documentation-only tasks do not rebuild/reinstall persistent packages.
 
-- Screenshots, screen recordings, transition-frame capture, frame extraction, montage generation
-  and screenshot comparison are OFF by default.
-- They are enabled only when the owner explicitly requests capture for the current task.
-- Capture authorization is never inferred from a UI change, ADB access, device installation, or
-  the existence of capture tools.
-- Without capture authorization, do not run the capture → open images → compare → fix → rebuild →
-  recapture loop, and do not block a routine task solely because captures are missing.
-- Report automated visual validation as `NOT RUN — CAPTURE NOT AUTHORIZED`. Record owner visual
-  review separately as PENDING, ACCEPTED or REJECTED for the exact candidate/scope; attribute
-  acceptance only after the owner actually confirms it.
-- When capture is explicitly authorized, a capture file existing is not proof of inspection, and
-  captures are compared against the approved specification before any visual claim.
+Bound runtime to changed technical criteria on the selected authorized surfaces. No full device census
+or lengthy visual journey for every correction. Use actual non-capture behavior signals and retain
+precise limits. Source/unit/build success is not device behavior or universal window PASS.
 
-A passing build is not proof of visual correctness or universal device coverage. Screenshot
-baselines are never created, accepted or updated automatically; owner review is required before a
-new baseline becomes accepted.
+## 11. Capture and owner review
 
-## 12. Final source freeze and stale evidence
+Screenshots, recordings, transition frames, extraction, montage and screenshot comparisons are OFF
+unless explicitly requested for the current task. UI changes, ADB access, installation and missing
+captures do not grant capture permission.
 
-- Once final evidence is recorded, the source revision used is the frozen final revision.
-- Any later source edit invalidates the affected evidence; the affected evidence must be
-  regenerated or re-validated on the new revision before any completion claim.
-- Recapture is required only when the task's capture policy is ON. When capture policy is OFF,
-  earlier captures are not refreshed automatically. Owner visual review is PENDING for a new
-  candidate until an actual owner decision; a decision on an older candidate is not copied forward.
-- Evidence is valid only for the exact immutable revision and dirty state recorded with it.
-- Do not mix artifacts, captures or build results from different revisions in one evidence set.
-- The final diff reviewed for completion is the frozen revision's diff.
+With capture OFF, no capture/open/compare/rebuild loop. Record automated visual validation as
+NOT RUN — CAPTURE NOT AUTHORIZED; missing unauthorized captures alone is not a blocker.
+Owner visual/behavior review is separate: PENDING until an actual exact-candidate decision,
+then ACCEPTED or REJECTED with reviewed scope. Do not copy acceptance to a later changed candidate.
 
-## 13. Durable task records
+Authorized capture requirements need actual bytes, hashes and inspection findings. A file/path is not
+proof of image inspection. Screenshot baselines are not automatically created/accepted/updated.
+Changing network/display/font settings or unlocking devices requires applicable separate authority.
 
-Every substantive task produces a durable packet outside the repository, normally:
+## 12. Evidence after every local round
 
-`/srv/hulk-android/reports/YYYY/<task-id>/`
+Follow `DEEPSEEK-EVIDENCE-CONTRACT.md` for canonical originals, minimum records, candidate/APK/state
+binding, complete downloadable ZIP, external SHA-256, archive/manifest verification, bounded hulkapp
+read/traverse access and final filename/path/size/hash handoff.
 
-Minimum retained files:
+Retain focused round records and append owner decisions; do not overwrite earlier results.
+Missing/inaccessible evidence remains explicit. No actor may claim another actor's unexecuted work.
+Protect accepted/open-task evidence; do not erase it to save build space.
+No secrets/private account material in source, prompts, reports, fixtures, logs, archives or PRs.
 
-- `TASK.md` — the exact approved packet; no credentials;
-- `TASK.env` — sanitized live fields: verified HEADs, branch/worktree, overlap check,
-  executor/model/agent configuration, device state matrix, freeze and baseline authority;
-- `RESULT.md` — factual result with the final verdict, evidence summary, validations actually run
-  and not run, and residual risk;
-- `MANIFEST.sha256` — hashes of the packet's durable artifacts.
+## 13. Accepted-section publication
 
-Runtime evidence (diffs, captures, logs, manifests) follows
-`docs/android-engineering-lab/README.md` section 8 and the established packet/evidence convention,
-including per-artifact `source_sha`, build/package/device context, and specific findings, reviewer
-and timestamp. Capture hashes and image-open records apply only to captures the owner explicitly
-authorized for the task.
+SECTION_PUBLISH proceeds after the owner accepted the exact section scope or expressly requested a
+standalone publication task. Recheck remote/overlap/local state and freeze accumulated source.
+Review accepted/rejected/pending decisions and ensure rejected work is corrected, not absorbed.
 
-No raw credentials, tokens, access codes, account secrets, signing material, IPTV credentials or
-private account data may appear in any packet, log, capture or PR text.
+Run final gates appropriate to the accumulated diff:
+- Android behavior/source: applicable full unit/regression, lint/compilation and Compatibility V2/static
+  validation, and the required artifact/physical provenance verification;
+- documentation-only: full documentation diff, references, scope/consistency, evidence/archive checks
+  and relevant repository documentation checks; Android builds/devices are NOT APPLICABLE.
 
-## 14. Actor attribution and evidence integrity
+Do not hard-code historical test counts or claim old runs validate new inputs. Retain valid evidence
+where exact input equality is proven. Any final correction creates a new candidate and requires
+affected verification and owner review when it changes accepted visible behavior.
 
-- Every claimed command, build, test, capture, inspection and review is attributed to the actor that
-  actually performed it.
-- No actor may claim another actor's unexecuted work as completed evidence.
-- Never invent, extrapolate or copy forward a result. A missing mandatory item stays NOT RUN or
-  BLOCKED.
-- Findings are separated into Fact, Inference and Assumption.
-- Subagents may assist with independent read-only analysis; the primary executor owns root-cause
-  judgment, scope, conflict resolution, final diff review and the pre-mutation safety check.
+After final local gates, one coherent section commit, normal fast-forward push and one section PR.
+No experimental commits, automatic per-round push/CI, direct official-branch push or history rewrite.
+Do not commit while applicable task CI is queued/running. Check remote HEAD again before push.
 
-## 15. Completion and PR boundary
+Follow triggered configured checks to final conclusion; inspect the first causal failure and correct
+only an in-scope defect in the same task/PR. Pending/failed mandatory CI is not publication completion.
+No bypass, unneeded reruns or unrelated fixes. Path-filtered CI is NOT RUN with its actual reason;
+do not trigger Android workflows for a docs-only task solely to manufacture a green badge.
 
-- Technical completion means: the frozen diff is reviewed, required validation ran, required
-  physical/technical evidence exists, the durable packet is written, and the authorized branch/PR
-  is updated with final configured CI results. Owner visual acceptance is not a condition of
-  technical completion; report it separately without treating missing unauthorized captures as
-  a technical blocker.
-- Unless the current owner scope narrows Git actions, finish the standing implementation workflow:
-  one coherent commit per correction round, normal fast-forward push and one PR create/update.
-  Do not commit while applicable task Actions are queued/running. A push, pending CI or failed
-  mandatory check is not completion. Inspect failed logs/artifacts, identify the first causal
-  failure and correct only an in-scope defect in the same task/PR; continue until final checks or
-  a real BLOCKED/STOP condition. Do not bypass checks, fix unrelated failures or rewrite history.
-- If path filters do not trigger CI, report CI as NOT RUN with that reason and record the relevant
-  local checks. Do not start Android builds or rerun successful workflows merely for a docs-only PR.
-- The PR/report is the boundary. Merge, signing, tag, release, production deployment and device data
-  changes are separate protected operations requiring explicit owner authorization.
-- A completed task is not a merge recommendation and does not imply production readiness.
-- Report verified facts only: problem/root cause, evidence, files changed, branch/commit/PR, build
-  and CI results, tests actually run and not run, remaining physical verification, residual risk and
-  the verdict.
+Technical publication, owner visual acceptance and protected merge/release remain separate.
+Merge, signing, tags, release, production deployment and device data changes require explicit authority.
+Section acceptance plus publication is not universal device or release readiness.
 
-## 16. Verdicts
+## 14. Verdicts and reporting
 
-Use exactly one final verdict:
+Use one technical verdict with the declared phase:
+- PASS: all mandatory criteria for that phase pass on the frozen candidate; LOCAL_ROUND does not
+  claim a commit/PR/CI, and SECTION_PUBLISH includes its required final Git/CI boundary.
+- FAIL: an executed mandatory criterion failed or the diff is incorrect.
+- BLOCKED: an external dependency/missing owner decision prevents the required work.
+- STOP: live-state, authority, overlap or repository-contract conflict halts mutation.
+- CLOSED: owner cancelled/superseded; record exact state, not a false PASS.
 
-- `PASS` — all mandatory technical criteria have evidence and pass on the frozen revision; the
-  PR/report is review-ready. `PASS` is technical completion and is not owner visual acceptance,
-  universal device coverage, or production readiness; owner visual review is reported separately
-  as PENDING, ACCEPTED or REJECTED for the reviewed candidate/scope.
-- `FAIL` — the task executed, but a mandatory criterion failed or the diff is incorrect; correction
-  is required.
-- `BLOCKED` — execution cannot proceed or complete because of an external dependency or owner
-  decision (for example an unreachable approved surface or withheld authority); no contract
-  conflict.
-- `STOP` — a live-state, authority or contract conflict halted mutation (expected-HEAD mismatch,
-  overlapping PR, remote HEAD change, protected-contract conflict, or an `AGENTS.md` stop
-  condition); mutation stays halted until resolved.
-- `CLOSED` — the owner cancelled or superseded the task; recorded with the exact state and reason,
-  without a false PASS or FAIL.
+Report cause/uncertainty, changed files, phase/candidate/base/dirty identity, actual checks/build/install,
+archive handoff, owner decision, publication status, limits and next boundary.
+Distinguish local technical verification, owner acceptance, Git publication and release qualification.
 
-A verdict is never upgraded by optimism, partial evidence, or a passing build alone.
+## 15. Execution aids
 
-## 17. Relationship to execution aids
-
-`.opencode/skills/hulk-runtime-acceptance/SKILL.md` is an executor aid for visual implementation.
-It grants no authority and is subordinate to root `AGENTS.md`, the active task packet and this
-contract; it cannot widen scope or weaken evidence rules. Skills and helpers may change
-independently; this contract remains model-neutral and binding on their use.
+`.opencode/skills/hulk-runtime-acceptance/SKILL.md` and other aids remain subordinate to the active
+packet and live contracts. Their historical commit/push wording does not widen LOCAL_ROUND into
+SECTION_PUBLISH. Models/configuration are not changed by this contract.
 
 ## Final principle
 
-The current repository defines live truth. Evidence determines root cause. The frozen revision
-determines what can be claimed. Scope determines what may change.
+Accepted source is preserved. Frozen inputs determine valid evidence. Local rounds remain local;
+accepted sections publish once under current authority. Scope determines what may change.

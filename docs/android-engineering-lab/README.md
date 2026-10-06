@@ -51,7 +51,7 @@ For a new implementation task:
 
 1. Verify the current remote official HEAD.
 2. Verify the canonical clone is clean.
-3. Verify no open PR already owns the same atomic problem.
+3. Verify no open PR already owns the same atomic problem or explicitly owner-defined section bundle.
 4. Create one task worktree from the exact verified official HEAD.
 5. Run OpenCode / DeepSeek only inside that task worktree.
 6. Keep one atomic problem on one branch and one PR.
@@ -101,9 +101,12 @@ fields, and subsystem/physical contracts still govern their areas.
 
 Explicitly read the adopted packet method at
 `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md` before drafting or executing these tasks;
-a referenced filename is not automatic instruction loading. Follow the standing implementation
-workflow in root `AGENTS.md` through relevant checks, applicable build/refresh, normal commit/push,
-one PR and final CI results unless the current owner scope narrows it. Captures and visual journeys
+a referenced filename is not automatic instruction loading. Also read
+`docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md` and, for UI,
+`docs/design/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md` explicitly. Follow root `AGENTS.md` and
+TASK-EXECUTION-CONTRACT phases: LOCAL_ROUND for local correction/check/build/refresh/evidence;
+SECTION_PUBLISH for final gates, one section commit/push/PR and final triggered CI after acceptance.
+Do not publish each small local round. Captures and visual journeys
 remain OFF without current task authorization. This requires no OpenCode `/init`, provider/model
 change or configuration rewrite.
 
@@ -163,7 +166,11 @@ Every substantive task should produce a durable result packet outside the reposi
 
 `/srv/hulk-android/reports/YYYY/<task-id>/RESULT.md`
 
-with a `MANIFEST.sha256`.
+with a `MANIFEST.sha256`. Related local rounds retain immutable per-round subdirectories and
+candidate/source/dirty-state identity. The specific evidence/delivery contract is
+`docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`: retain originals, prepare a complete
+review ZIP with external SHA-256, verify archive/manifest integrity and bounded hulkapp read/traverse
+access, and report exact filename/path/byte count/hash. Evidence must be reviewable without a PR.
 
 A result packet records, as applicable:
 

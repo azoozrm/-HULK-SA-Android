@@ -71,7 +71,11 @@ qualification surface.
 
 At the end of every Android IMPLEMENTATION round that reaches a valid, testable state, and unless
 the task explicitly forbids physical-device refresh, refresh BOTH persistent packages from the exact
-same task worktree / PR HEAD:
+same frozen task-worktree candidate. An uncommitted LOCAL_ROUND candidate is valid when its
+base HEAD, dirty state, complete relevant source/diff hashes and APK provenance are recorded under
+TASK-EXECUTION-CONTRACT and DEEPSEEK-EVIDENCE-CONTRACT. Do not force a commit/push/PR before
+local refresh or describe a dirty build as clean-HEAD. The package/version/signer/state rules below
+remain unchanged:
 
 1. Build Preview:
 
@@ -154,7 +158,7 @@ must explicitly carry this contract or direct the executor to read it before dev
 
 The executor must report, when refresh is performed:
 
-- exact source/PR HEAD used;
+- exact source candidate/base HEAD and clean/dirty state, source/diff hashes and PR HEAD when present;
 - Preview APK package/version/hash and install result;
 - Benchmark APK package/version/hash and install result;
 - signer-continuity verification;
