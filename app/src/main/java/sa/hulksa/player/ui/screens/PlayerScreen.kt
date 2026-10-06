@@ -507,6 +507,18 @@ fun PlayerScreen(
     var resumePromptVisible by remember(request) {
         mutableStateOf(playbackSettings.resumePlayback && !request.isLive && request.resumePositionMs > 0L)
     }
+    // Request-owned progress persistence: while a Movie Resume decision is pending, preparation,
+    // cancellation, lifecycle/disposal and late callbacks must not overwrite the stored position
+    // or duration with the provisional zero. Only an explicit Resume/Restart decision clears it.
+    var movieProgressPersistenceBlocked by remember(request) {
+        mutableStateOf(
+            movieProgressPersistenceBlockedInitially(
+                isMovie = isMovieVod,
+                resumePlaybackEnabled = playbackSettings.resumePlayback,
+                resumePositionMs = request.resumePositionMs,
+            ),
+        )
+    }
     var nextCountdown by remember(request) { mutableIntStateOf(-1) }
     var audioTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
     var subtitleTracks by remember(request) { mutableStateOf(emptyList<PlayerTrackOption>()) }
@@ -843,7 +855,7 @@ fun PlayerScreen(
     }
 
     fun saveCurrentProgress() {
-        if (!request.isLive) {
+        if (!request.isLive && !movieProgressPersistenceBlocked) {
             onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
         }
     }
@@ -1210,7 +1222,7 @@ fun PlayerScreen(
         }
         player.addListener(listener)
         onDispose {
-            if (!request.isLive) {
+            if (!request.isLive && !movieProgressPersistenceBlocked) {
                 onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
             }
             player.removeListener(listener)
@@ -1394,7 +1406,9 @@ fun PlayerScreen(
         if (request.isLive) return@LaunchedEffect
         while (isActive) {
             delay(5_000L)
-            onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
+            if (!movieProgressPersistenceBlocked) {
+                onProgress(request, player.currentPosition.coerceAtLeast(0L), player.duration.coerceAtLeast(0L))
+            }
         }
     }
 
@@ -2050,6 +2064,10 @@ fun PlayerScreen(
                 positionMs = request.resumePositionMs,
                 durationMs = durationMs,
                 onResume = {
+                    movieProgressPersistenceBlocked = movieProgressPersistenceBlockedAfterDecision(
+                        blocked = movieProgressPersistenceBlocked,
+                        decisionAccepted = true,
+                    )
                     player.seekTo(request.resumePositionMs)
                     currentPositionMs = request.resumePositionMs
                     resumePromptVisible = false
@@ -2057,6 +2075,10 @@ fun PlayerScreen(
                     player.play()
                 },
                 onRestart = {
+                    movieProgressPersistenceBlocked = movieProgressPersistenceBlockedAfterDecision(
+                        blocked = movieProgressPersistenceBlocked,
+                        decisionAccepted = true,
+                    )
                     player.seekTo(0L)
                     currentPositionMs = 0L
                     resumePromptVisible = false

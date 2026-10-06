@@ -504,6 +504,57 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun movieProgressPersistenceStaysBlockedUntilTheResumeDecisionIsAccepted() {
+        // A Movie with a saved position and resume enabled: preparation/cancellation cannot save.
+        assertTrue(
+            movieProgressPersistenceBlockedInitially(
+                isMovie = true,
+                resumePlaybackEnabled = true,
+                resumePositionMs = 1_200_000L,
+            ),
+        )
+        // No pending decision keeps normal saving.
+        assertFalse(
+            movieProgressPersistenceBlockedInitially(
+                isMovie = true,
+                resumePlaybackEnabled = true,
+                resumePositionMs = 0L,
+            ),
+        )
+        assertFalse(
+            movieProgressPersistenceBlockedInitially(
+                isMovie = true,
+                resumePlaybackEnabled = false,
+                resumePositionMs = 1_200_000L,
+            ),
+        )
+        // Non-Movies (Series/Live) keep their existing behavior.
+        assertFalse(
+            movieProgressPersistenceBlockedInitially(
+                isMovie = false,
+                resumePlaybackEnabled = true,
+                resumePositionMs = 1_200_000L,
+            ),
+        )
+        // Cancellation (no acceptance) keeps the block through lifecycle/disposal/late callbacks.
+        assertTrue(
+            movieProgressPersistenceBlockedAfterDecision(
+                blocked = movieProgressPersistenceBlockedInitially(true, true, 1_200_000L),
+                decisionAccepted = false,
+            ),
+        )
+        // One explicit Resume/Restart clears it; later ticks save normally.
+        assertFalse(
+            movieProgressPersistenceBlockedAfterDecision(
+                blocked = movieProgressPersistenceBlockedInitially(true, true, 1_200_000L),
+                decisionAccepted = true,
+            ),
+        )
+        assertFalse(movieProgressPersistenceBlockedAfterDecision(blocked = false, decisionAccepted = false))
+        assertFalse(movieProgressPersistenceBlockedAfterDecision(blocked = false, decisionAccepted = true))
+    }
+
+    @Test
     fun warmUpBucketsReuseTheFiveSecondBucketWithBoundedLookahead() {
         assertEquals(listOf(0L, 5_000L, 10_000L, 15_000L), vodPreviewWarmUpBuckets(-1L))
         assertEquals(listOf(10_000L, 15_000L, 20_000L, 25_000L), vodPreviewWarmUpBuckets(12_400L))

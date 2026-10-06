@@ -438,6 +438,26 @@ internal fun vodActiveSeekHoldsControls(
 ): Boolean = isMovie && remoteInput && (timelineFocused || directSeekActive)
 
 /**
+ * Whether Movie progress dispatches must stay blocked while the Resume decision is pending.
+ *
+ * A Movie opened with a saved position and resume playback enabled prepares at zero behind the
+ * decision, so video preparation, cancellation, lifecycle/disposal and late callbacks must not
+ * overwrite the stored position or duration. Non-Movies and Movies without a pending decision keep
+ * their existing progress-saving behavior.
+ */
+internal fun movieProgressPersistenceBlockedInitially(
+    isMovie: Boolean,
+    resumePlaybackEnabled: Boolean,
+    resumePositionMs: Long,
+): Boolean = isMovie && resumePlaybackEnabled && resumePositionMs > 0L
+
+/** An explicit Resume/Restart acceptance clears the block permanently for the request. */
+internal fun movieProgressPersistenceBlockedAfterDecision(
+    blocked: Boolean,
+    decisionAccepted: Boolean,
+): Boolean = blocked && !decisionAccepted
+
+/**
  * Bounded speculative Movies seek-preview warm-up set around a prepared playback/resume position.
  *
  * The lookahead reuses the existing five-second bucket and the default ten-second seek step: the
