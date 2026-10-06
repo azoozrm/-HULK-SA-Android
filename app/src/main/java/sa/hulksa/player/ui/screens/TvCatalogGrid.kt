@@ -1,5 +1,8 @@
 package sa.hulksa.player.ui.screens
 
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -8,15 +11,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -36,20 +46,58 @@ import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
 import sa.hulksa.player.ui.components.CompactPosterCard
+import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesPosterCard
+
+// Legibility floor for the Movie-only compact fallback on unusually short usable windows.
+internal const val MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP = 96
 
 internal data class TvCatalogMetrics(
     val minCellWidthDp: Float,
     val horizontalSpacingDp: Float,
     val verticalSpacingDp: Float,
     val horizontalContentPaddingDp: Float,
+    val endContentPaddingDp: Float,
     val bottomContentPaddingDp: Float,
     val focusViewportInsetDp: Float,
+    val focusSafeBottomInsetDp: Float,
 )
+
+/**
+ * Movie-only minimum cell width for the owner-observed wide TV five-column composition.
+ *
+ * Wider cells intentionally yield fewer, shorter cards on wide windows while narrower windows
+ * fall back toward the existing adaptive cell so five columns are never forced on phones,
+ * tablets, split windows or small TVs.
+ */
+internal fun movieCatalogMinCellWidthDp(screenWidthDp: Int): Float {
+    val width = screenWidthDp.coerceAtLeast(1)
+    return when {
+        width >= 1500 -> 205f
+        width >= 1100 -> 190f
+        width >= 900 -> 170f
+        width >= 720 -> 150f
+        width >= 480 -> 132f
+        else -> 120f
+    }
+}
+
+/**
+ * One column policy shared by the actual LazyVerticalGrid layout and the D-pad column arithmetic.
+ */
+internal fun movieCatalogColumnCount(
+    availableWidthDp: Float,
+    spacingDp: Float,
+    minCellWidthDp: Float,
+): Int {
+    if (availableWidthDp <= 0f || minCellWidthDp <= 0f || spacingDp < 0f) return 1
+    return (((availableWidthDp + spacingDp) / (minCellWidthDp + spacingDp)).toInt()).coerceAtLeast(1)
+}
 
 internal fun tvCatalogMetrics(
     screenWidthDp: Int,
     screenHeightDp: Int,
+    movieCards: Boolean = false,
 ): TvCatalogMetrics {
     val width = screenWidthDp.coerceAtLeast(1)
     val height = screenHeightDp.coerceAtLeast(1)
@@ -64,7 +112,11 @@ internal fun tvCatalogMetrics(
     }
 
     return TvCatalogMetrics(
-        minCellWidthDp = (132f * densityScale).coerceIn(124f, 146f),
+        minCellWidthDp = if (movieCards) {
+            movieCatalogMinCellWidthDp(width)
+        } else {
+            (132f * densityScale).coerceIn(124f, 146f)
+        },
         horizontalSpacingDp = (14f * densityScale).coerceIn(12f, 16f),
         verticalSpacingDp = (15f * densityScale).coerceIn(13f, 17f),
         horizontalContentPaddingDp = when {
@@ -72,12 +124,19 @@ internal fun tvCatalogMetrics(
             large -> 12f
             else -> 10f
         },
+        // Movie-only: the physical LEFT end (RTL) uses the real TV safe inset so the focused
+        // card border is not cropped by overscan. Other catalogs keep the historical 6dp.
+        endContentPaddingDp = if (movieCards) policy.horizontalSafeInsetDp else 6f,
         bottomContentPaddingDp = maxOf(44f, policy.verticalSafeInsetDp + 30f),
         focusViewportInsetDp = when {
             compact -> 9f
             large -> 12f
             else -> 10f
         },
+        // Movie-only: the settled focused-card reveal also protects the physical bottom safe
+        // area so the footer and its in-bounds focus edge are never cropped by TV overscan.
+        // Other catalogs keep the historical viewport bounds.
+        focusSafeBottomInsetDp = if (movieCards) policy.verticalSafeInsetDp else 0f,
     )
 }
 
@@ -93,6 +152,11 @@ internal enum class TvCatalogFocusPath {
     INVALID,
 }
 
+/**
+ * Direct vs assisted decision using the same usable-viewport math as the reveal, so a target that
+ * is already inside the final safe bounds takes focus without any scroll. [extraMargin] is the
+ * Movie focus margin; Series passes zero to keep its historical single-inset behavior.
+ */
 internal fun tvCatalogFocusPath(
     targetIndex: Int,
     itemCount: Int,
@@ -100,16 +164,107 @@ internal fun tvCatalogFocusPath(
     itemBottom: Int?,
     viewportStart: Int,
     viewportEnd: Int,
+    extraMargin: Int = 0,
 ): TvCatalogFocusPath {
     if (targetIndex !in 0 until itemCount) return TvCatalogFocusPath.INVALID
     if (itemTop == null || itemBottom == null || itemBottom <= itemTop) {
         return TvCatalogFocusPath.SCROLL_ASSISTED
     }
-    return if (itemTop >= viewportStart && itemBottom <= viewportEnd) {
+    val correction = focusedCardScrollCorrection(
+        itemTop = itemTop,
+        itemBottom = itemBottom,
+        usableStart = viewportStart,
+        usableEnd = viewportEnd,
+        marginPx = extraMargin.coerceAtLeast(0),
+    )
+    return if (correction == 0) {
         TvCatalogFocusPath.DIRECT
     } else {
         TvCatalogFocusPath.SCROLL_ASSISTED
     }
+}
+
+/**
+ * Single authoritative full-visibility math for a focused card and its in-bounds focus edge.
+ *
+ * The margin is kept when the card and both margins fit inside the usable window (which already
+ * excludes the physical safe area); otherwise the margin falls back to zero so a card that
+ * exactly fits is still fully revealed instead of being scrolled to a clipped half position.
+ */
+internal fun focusedCardScrollCorrection(
+    itemTop: Int,
+    itemBottom: Int,
+    usableStart: Int,
+    usableEnd: Int,
+    marginPx: Int,
+): Int {
+    val itemHeight = itemBottom - itemTop
+    val window = usableEnd - usableStart
+    val safeMargin = if (itemHeight + 2 * marginPx <= window) marginPx else 0
+    val revealStart = usableStart + safeMargin
+    val revealEnd = usableEnd - safeMargin
+    return when {
+        itemBottom > revealEnd -> itemBottom - revealEnd
+        itemTop < revealStart -> itemTop - revealStart
+        else -> 0
+    }
+}
+
+/**
+ * One-pass authoritative reveal of a focused grid item. Reads the real settled item rectangle and
+ * applies a single correction inside the usable viewport (safe area plus focus inset already
+ * excluded). Used after focus actually moved and for restoration, never as a polling loop.
+ */
+internal suspend fun revealFocusedGridItem(
+    gridState: LazyGridState,
+    index: Int,
+    focusInsetPx: Int,
+    safeBottomInsetPx: Int,
+    extraMarginPx: Int = 0,
+) {
+    val layoutInfo = gridState.layoutInfo
+    val itemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val correction = focusedCardScrollCorrection(
+        itemTop = itemInfo.offset.y,
+        itemBottom = itemInfo.offset.y + itemInfo.size.height,
+        usableStart = layoutInfo.viewportStartOffset + focusInsetPx,
+        usableEnd = layoutInfo.viewportEndOffset - safeBottomInsetPx - focusInsetPx,
+        marginPx = extraMarginPx,
+    )
+    if (correction != 0) {
+        gridState.scrollBy(correction.toFloat())
+    }
+}
+
+/**
+ * Constraint-aware compact fallback for Movie cards on unusually short usable windows.
+ *
+ * Returns the artwork height that keeps the complete card (footer included) inside the usable
+ * window, or null when the accepted square geometry already fits. Never enlarges the accepted
+ * normal-TV geometry and never returns less than the legibility floor.
+ */
+internal fun movieCompactArtworkHeightPx(
+    cellWidthPx: Int,
+    footerHeightPx: Int,
+    usableHeightPx: Int,
+    minArtworkHeightPx: Int,
+): Int? {
+    if (cellWidthPx <= 0 || footerHeightPx <= 0 || usableHeightPx <= 0) return null
+    if (cellWidthPx + footerHeightPx <= usableHeightPx) return null
+    return (usableHeightPx - footerHeightPx).coerceAtLeast(minArtworkHeightPx).takeIf { it < cellWidthPx }
+}
+
+/**
+ * No-op framework relocation spec for the Movies TV grid: the D-pad transaction below is the sole
+ * vertical scroll owner, so focus grants can never move the viewport on their own (the Downloads
+ * grid uses the same narrowly scoped override).
+ */
+internal fun moviesNoBringIntoViewSpec(): BringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(
+        offset: Float,
+        size: Float,
+        containerSize: Float,
+    ): Float = 0f
 }
 
 internal class TvCatalogFocusMoveState {
@@ -146,19 +301,22 @@ internal fun TvCatalogGrid(
     require(contentKeys.size == content.size)
 
     val adaptiveUi = LocalAdaptiveUi.current
-    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
+    val movieCards = destination == MainDestination.MOVIES
+    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, movieCards) {
         tvCatalogMetrics(
             screenWidthDp = adaptiveUi.screenWidthDp,
             screenHeightDp = adaptiveUi.screenHeightDp,
+            movieCards = movieCards,
         )
     }
     val minCellWidth = metrics.minCellWidthDp.dp
     val horizontalSpacing = metrics.horizontalSpacingDp.dp
     val verticalSpacing = metrics.verticalSpacingDp.dp
     val horizontalContentPadding = metrics.horizontalContentPaddingDp.dp
-    val focusSafeEndPadding = 6.dp
+    val focusSafeEndPadding = metrics.endContentPaddingDp.dp
     val bottomContentPadding = metrics.bottomContentPaddingDp.dp
     val focusViewportInset = metrics.focusViewportInsetDp.dp
+    val focusSafeBottomInset = metrics.focusSafeBottomInsetDp.dp
 
     val remembered = navigationMemory.position(destination)
     val rememberedKeyIndex = contentKeyIndex[remembered.itemKey] ?: -1
@@ -170,26 +328,40 @@ internal fun TvCatalogGrid(
     val focusScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val focusViewportInsetPx = with(density) { focusViewportInset.roundToPx() }
+    val focusSafeBottomInsetPx = with(density) { focusSafeBottomInset.roundToPx() }
     val focusMoveState = remember(contentKeys, destination) { TvCatalogFocusMoveState() }
+    // The Movies TV D-pad transaction is the sole vertical scroll owner: framework BringIntoView
+    // relocation must not move the viewport after focus (Downloads uses the same pattern).
+    val inheritedBringIntoViewSpec = LocalBringIntoViewSpec.current
+    val moviesBringIntoViewSpec = remember { moviesNoBringIntoViewSpec() }
+    val gridBringIntoViewSpec = if (movieCards) moviesBringIntoViewSpec else inheritedBringIntoViewSpec
+    var focusedIndex by remember(contentKeys) { mutableIntStateOf(-1) }
     DisposableEffect(focusMoveState) {
         onDispose { focusMoveState.job?.cancel() }
     }
 
-    suspend fun ensureIndexFullyVisible(index: Int) {
+    /** Null when the item is not attached; otherwise the unified-usable-bounds correction. */
+    fun currentIndexCorrection(index: Int): Int? {
         val layoutInfo = gridState.layoutInfo
-        val itemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
-        val viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx
-        val viewportEnd = layoutInfo.viewportEndOffset - focusViewportInsetPx
-        val itemTop = itemInfo.offset.y
-        val itemBottom = itemTop + itemInfo.size.height
-        val correction = when {
-            itemBottom > viewportEnd -> itemBottom - viewportEnd
-            itemTop < viewportStart -> itemTop - viewportStart
-            else -> 0
-        }
-        if (correction != 0) {
-            gridState.scrollBy(correction.toFloat())
-        }
+        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+        return focusedCardScrollCorrection(
+            itemTop = targetInfo.offset.y,
+            itemBottom = targetInfo.offset.y + targetInfo.size.height,
+            usableStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
+            usableEnd = layoutInfo.viewportEndOffset - focusSafeBottomInsetPx - focusViewportInsetPx,
+            marginPx = if (movieCards) focusViewportInsetPx else 0,
+        )
+    }
+
+    suspend fun ensureIndexFullyVisible(index: Int) {
+        revealFocusedGridItem(
+            gridState = gridState,
+            index = index,
+            focusInsetPx = focusViewportInsetPx,
+            safeBottomInsetPx = focusSafeBottomInsetPx,
+            // Movies add the extra focus margin; Series keeps its historical single-inset bound.
+            extraMarginPx = if (movieCards) focusViewportInsetPx else 0,
+        )
     }
 
     suspend fun focusIndex(
@@ -198,32 +370,40 @@ internal fun TvCatalogGrid(
         ensureFullyVisible: Boolean,
     ) {
         val requester = focusRequesters.getOrNull(index) ?: return
-        val visible = gridState.layoutInfo.visibleItemsInfo
-        if (visible.none { it.index == index }) {
-            val firstVisible = visible.minOfOrNull { it.index } ?: index
-            val lastVisible = visible.maxOfOrNull { it.index } ?: index
-            val visibleRowCount = if (lastVisible >= firstVisible) {
-                ((lastVisible - firstVisible) / columnCount) + 1
-            } else {
-                1
+        // Offscreen targets first get a bounded one-row reveal (nothing can be focused yet); the
+        // attachment below comes from real layout, never from a timer. Once attached, apply the
+        // one measured correction and grant focus immediately without waiting for an animation.
+        if (currentIndexCorrection(index) == null) {
+            repeat(2) {
+                val visible = gridState.layoutInfo.visibleItemsInfo
+                if (visible.any { it.index == index }) return@repeat
+                val rowHeight = visible.firstOrNull()?.size?.height ?: return@repeat
+                val step = rowHeight + with(density) { verticalSpacing.roundToPx() }
+                val firstVisible = visible.minOfOrNull { it.index } ?: return@repeat
+                val lastVisible = visible.maxOfOrNull { it.index } ?: return@repeat
+                when {
+                    index > lastVisible -> gridState.animateScrollBy(step.toFloat())
+                    index < firstVisible -> gridState.animateScrollBy(-step.toFloat())
+                    else -> return@repeat
+                }
             }
-            val anchor = when {
-                index < firstVisible -> index
-                index > lastVisible -> (index - (visibleRowCount - 1) * columnCount).coerceAtLeast(0)
-                else -> firstVisible
-            }
-            gridState.scrollToItem(anchor)
-            snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == index } }
-                .first { it }
         }
         if (ensureFullyVisible) {
-            ensureIndexFullyVisible(index)
+            currentIndexCorrection(index)?.let { correction ->
+                if (correction != 0) gridState.scrollBy(correction.toFloat())
+            }
         }
         runCatching { requester.requestFocus() }
     }
 
     LaunchedEffect(contentKeys, remembered.itemKey, destination, restoreFocusedCard) {
         if (restoreFocusedCard && content.isNotEmpty() && targetKey != null) {
+            // One-time entry/return restoration only. After an ordinary focus change the saved
+            // memory updates and restarts this effect; the grid already owns that transaction, so
+            // restoring the same item again would scroll it a second time (the reported shake).
+            if (focusedIndex == targetIndex) {
+                return@LaunchedEffect
+            }
             gridState.scrollToItem(targetIndex)
             snapshotFlow { gridState.layoutInfo.visibleItemsInfo.any { it.index == targetIndex } }
                 .first { it }
@@ -236,14 +416,52 @@ internal fun TvCatalogGrid(
         val availableGridWidth = (
             maxWidth - horizontalContentPadding - focusSafeEndPadding
         ).coerceAtLeast(minCellWidth)
-        val columnCount = (((availableGridWidth + horizontalSpacing).value) /
-            (minCellWidth + horizontalSpacing).value)
-            .toInt()
-            .coerceAtLeast(1)
+        val columnCount = if (movieCards) {
+            movieCatalogColumnCount(
+                availableWidthDp = availableGridWidth.value,
+                spacingDp = horizontalSpacing.value,
+                minCellWidthDp = minCellWidth.value,
+            )
+        } else {
+            (((availableGridWidth + horizontalSpacing).value) /
+                (minCellWidth + horizontalSpacing).value)
+                .toInt()
+                .coerceAtLeast(1)
+        }
+        // Movie-only compact fallback: measure the real footer, then cap only when the accepted
+        // square card cannot fit the usable grid window. Normal TVs keep the accepted geometry.
+        val cellWidth = ((availableGridWidth - horizontalSpacing * (columnCount - 1)) / columnCount)
+            .coerceAtLeast(1.dp)
+        val usableGridHeightPx = with(density) {
+            (maxHeight - horizontalContentPadding - focusSafeBottomInset).coerceAtLeast(1.dp).roundToPx()
+        }
+        var movieFooterHeightPx by remember(contentKeys) { mutableIntStateOf(0) }
+        val compactArtworkHeightPx = if (movieCards && movieFooterHeightPx > 0) {
+            movieCompactArtworkHeightPx(
+                cellWidthPx = with(density) { cellWidth.roundToPx() },
+                footerHeightPx = movieFooterHeightPx,
+                usableHeightPx = usableGridHeightPx,
+                minArtworkHeightPx = with(density) { MOVIE_COMPACT_ARTWORK_MIN_HEIGHT_DP.dp.roundToPx() },
+            )
+        } else {
+            null
+        }
+        // Header growth/shrink changes the real viewport; re-evaluate the focused card's bounds
+        // from actual layout without resetting identity or jumping to the first item. This is the
+        // only viewport-change movement owner; ordinary focus changes never run it.
+        val latestFocusedIndex by rememberUpdatedState(focusedIndex)
+        LaunchedEffect(usableGridHeightPx) {
+            val index = latestFocusedIndex
+            if (index >= 0) {
+                withFrameNanos { }
+                ensureIndexFullyVisible(index)
+            }
+        }
 
+        CompositionLocalProvider(LocalBringIntoViewSpec provides gridBringIntoViewSpec) {
         LazyVerticalGrid(
             state = gridState,
-            columns = GridCells.Adaptive(minCellWidth),
+            columns = if (movieCards) GridCells.Fixed(columnCount) else GridCells.Adaptive(minCellWidth),
             horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
             verticalArrangement = Arrangement.spacedBy(verticalSpacing),
             contentPadding = PaddingValues(
@@ -305,7 +523,9 @@ internal fun TvCatalogGrid(
                             itemTop = targetInfo?.offset?.y,
                             itemBottom = targetInfo?.let { it.offset.y + it.size.height },
                             viewportStart = layoutInfo.viewportStartOffset + focusViewportInsetPx,
-                            viewportEnd = layoutInfo.viewportEndOffset - focusViewportInsetPx,
+                            viewportEnd = layoutInfo.viewportEndOffset -
+                                focusSafeBottomInsetPx - focusViewportInsetPx,
+                            extraMargin = if (movieCards) focusViewportInsetPx else 0,
                         )
                         if (focusPath == TvCatalogFocusPath.INVALID) {
                             return@onPreviewKeyEvent false
@@ -337,6 +557,7 @@ internal fun TvCatalogGrid(
                     }
                 val onFocusedCard = {
                     focusMoveState.complete(index)
+                    focusedIndex = index
                     navigationMemory.save(destination, key, index)
                 }
 
@@ -349,6 +570,19 @@ internal fun TvCatalogGrid(
                         onLongClick = { onToggleFavorite(item) },
                         onFocused = onFocusedCard,
                     )
+                } else if (destination == MainDestination.MOVIES) {
+                    MoviesCatalogBoxedCard(
+                        item = item,
+                        isFavorite = isFavorite(item),
+                        onClick = { onOpen(item) },
+                        modifier = cardModifier,
+                        onLongClick = { onToggleFavorite(item) },
+                        onFocused = onFocusedCard,
+                        artworkHeightDp = compactArtworkHeightPx?.let { heightPx ->
+                            with(density) { heightPx.toDp() }
+                        },
+                        onFooterHeightMeasured = { movieFooterHeightPx = it },
+                    )
                 } else {
                     CompactPosterCard(
                         item = item,
@@ -360,6 +594,7 @@ internal fun TvCatalogGrid(
                     )
                 }
             }
+        }
         }
     }
 }

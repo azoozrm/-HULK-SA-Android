@@ -22,9 +22,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -43,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -64,10 +68,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sa.hulksa.player.data.HomeHeroMetadataStore
@@ -87,6 +93,7 @@ import sa.hulksa.player.ui.components.CompactPosterCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesPosterCard
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
@@ -161,6 +168,7 @@ fun MovieDetailsProScreen(
     onToggleFavorite: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
@@ -172,18 +180,156 @@ fun MovieDetailsProScreen(
         val cached = metadataStore.cached(metadataOwner, ContentType.MOVIE, item.id)
         DetailsProMovieTechnicalMetadata(cached.quality, cached.durationMs)
     }
-    val progress = historyEntry?.detailsProWatchProgress()
+    val progress = movieResumeProgress(
+        positionMs = historyEntry?.positionMs ?: 0L,
+        durationMs = historyEntry?.durationMs ?: 0L,
+    )
     val resumePosition = historyEntry?.positionMs?.takeIf { progress != null }
+    val movieHeroHeightDp = movieCompactHeroHeightDp(adaptiveUi.screenHeightDp)
+    val detailsErrorRetryRequester = remember(item.id) { FocusRequester() }
+    var detailsErrorRetryFocused by remember(item.id) { mutableStateOf(false) }
+    val detailsNetworkUsable by rememberUsableNetworkState()
+    val detailsOffline = errorMessage != null && !detailsNetworkUsable
+    val detailsErrorCopy = moviesDetailsErrorCopy(
+        offline = detailsOffline,
+        serverMessage = errorMessage,
+    )
     val backdrop = details?.backdropUrl ?: item.backdropUrl ?: item.posterUrl
 
     val backRequester = remember(item.id) { FocusRequester() }
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
-    val cancelDownloadRequester = remember(item.id) { FocusRequester() }
+    val tabRequesters = remember(item.id) { MovieDetailsTab.entries.associateWith { FocusRequester() } }
+    var selectedTab by rememberSaveable(item.id) { mutableStateOf(MovieDetailsTab.STORY) }
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(relatedKeys) { List(relatedItems.size) { FocusRequester() } }
     var heroReturnRequester by remember(item.id) { mutableStateOf(playRequester) }
+    val pageListState = rememberLazyListState()
+    val pageScrollScope = rememberCoroutineScope()
+    var pageScrollJob by remember(item.id) { mutableStateOf<Job?>(null) }
+    var tabRevealTarget by remember(item.id) { mutableStateOf<MovieDetailsTab?>(null) }
+    var tabRevealRequestId by remember(item.id) { mutableIntStateOf(0) }
+    val selectTab: (MovieDetailsTab) -> Unit = { tab ->
+        selectedTab = tab
+        if (tab == MovieDetailsTab.INFORMATION || tab == MovieDetailsTab.RELATED) {
+            tabRevealTarget = tab
+            tabRevealRequestId += 1
+        }
+    }
+    // One parent reveal owner: after an explicit selection has been laid out, scroll the parent
+    // page so the tab row and the complete selected section are visible when they fit. Obsolete
+    // rapid selections cancel the previous animation; metadata refresh never re-triggers it.
+    LaunchedEffect(tabRevealRequestId) {
+        val target = tabRevealTarget ?: return@LaunchedEffect
+        if (target != selectedTab) return@LaunchedEffect
+        withFrameNanos { }
+        val layout = pageListState.layoutInfo
+        val sectionKey = movieDetailsSectionItemKey(target, tvPolished = false)
+        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+        if (
+            movieDetailsSectionNeedsReveal(
+                sectionPresent = section != null,
+                sectionTop = section?.offset ?: 0,
+                sectionBottom = section?.let { it.offset + it.size } ?: 0,
+                viewportStart = layout.viewportStartOffset,
+                viewportEnd = layout.viewportEndOffset,
+            )
+        ) {
+            // One cancellable scroll owner for both the selection reveal and the read scroll, so
+            // a manual D-pad step always takes precedence over an in-flight reveal animation.
+            pageScrollJob?.cancel()
+            pageScrollJob = pageScrollScope.launch {
+                pageListState.animateScrollToItem(
+                    movieDetailsTabsItemIndex(hasError = errorMessage != null),
+                )
+            }
+        }
+    }
+    LaunchedEffect(errorMessage) {
+        if (errorMessage == null && detailsErrorRetryFocused) {
+            // Notice removal while its Retry is focused restores the selected tab.
+            withFrameNanos { }
+            runCatching { tabRequesters.getValue(selectedTab).requestFocus() }
+        }
+    }
+    // Usable D-pad reading path for overflowing Story/Information panels: the selected tab keeps
+    // focus and steps the parent page, so long content stays reachable without field-by-field
+    // focus stops or a second vertical scroller. Related keeps its existing card route.
+    val handleSelectedTabScrollKey: (KeyEvent) -> Boolean = { event ->
+        if (event.type != KeyEventType.KeyDown) {
+            false
+        } else {
+            val layout = pageListState.layoutInfo
+            val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(1)
+            val step = (viewportHeight * 3 / 4).coerceAtLeast(1)
+            when (event.key) {
+                Key.DirectionDown -> {
+                    if (selectedTab == MovieDetailsTab.RELATED) {
+                        false
+                    } else {
+                        val sectionKey = movieDetailsSectionItemKey(selectedTab, tvPolished = false)
+                        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+                        if (
+                            movieDetailsPanelNeedsMoreScroll(
+                                sectionPresent = section != null,
+                                sectionBottom = section?.let { it.offset + it.size } ?: 0,
+                                viewportEnd = layout.viewportEndOffset,
+                            )
+                        ) {
+                            pageScrollJob?.cancel()
+                            pageScrollJob = pageScrollScope.launch {
+                                pageListState.scrollBy(step.toFloat())
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                Key.DirectionUp -> {
+                    val atPageTop = pageListState.firstVisibleItemIndex == 0 &&
+                        pageListState.firstVisibleItemScrollOffset == 0
+                    if (atPageTop) {
+                        false
+                    } else {
+                        pageScrollJob?.cancel()
+                        pageScrollJob = pageScrollScope.launch {
+                            pageListState.scrollBy(-step.toFloat())
+                        }
+                        true
+                    }
+                }
+                else -> false
+            }
+        }
+    }
+
+    var showDownloadPanel by remember(item.id) { mutableStateOf(false) }
+    var restoreDownloadFocus by remember(item.id) { mutableStateOf(false) }
+    val closeDownloadPanel: () -> Unit = {
+        showDownloadPanel = false
+        restoreDownloadFocus = true
+    }
+    // Stale panel content (job removed or completed) dismisses without leaving an orphan window.
+    LaunchedEffect(download?.downloadId, download?.status, item.id) {
+        if (showDownloadPanel && (download == null || download.status == OfflineStatus.COMPLETED)) {
+            showDownloadPanel = false
+            restoreDownloadFocus = true
+        }
+    }
+    // Panel dismissal/actions return focus to the same permanent download control; if the control
+    // became disabled (completed), fall back to the adjacent favorite action instead of losing it.
+    LaunchedEffect(showDownloadPanel) {
+        if (!showDownloadPanel && restoreDownloadFocus) {
+            withFrameNanos { }
+            val restored = runCatching { downloadRequester.requestFocus() }.getOrDefault(false)
+            if (!restored) {
+                runCatching { favoriteRequester.requestFocus() }
+            }
+            restoreDownloadFocus = false
+        }
+    }
 
     LaunchedEffect(item.id, isTv) {
         if (isTv) {
@@ -192,48 +338,8 @@ fun MovieDetailsProScreen(
         }
     }
 
-    val actions = buildList {
-        add(
-            DetailsProAction(
-                text = if (resumePosition != null) {
-                    "▶ متابعة المشاهدة"
-                } else {
-                    "▶ ابدا المشاهدة"
-                },
-                onClick = onPlay,
-                requester = playRequester,
-                primary = true,
-                mobileWeight = 1.5f,
-            ),
-        )
-        add(
-            DetailsProAction(
-                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                onClick = onToggleFavorite,
-                requester = favoriteRequester,
-                mobileWeight = 1f,
-            ),
-        )
-        add(
-            DetailsProAction(
-                text = detailsProMovieDownloadLabel(download),
-                onClick = onDownload,
-                requester = downloadRequester,
-                enabled = download?.status != OfflineStatus.COMPLETED,
-            ),
-        )
-        if (download != null) {
-            add(
-                DetailsProAction(
-                    text = if (download.status == OfflineStatus.COMPLETED) "حذف التحميل" else "الغاء التحميل",
-                    onClick = onCancelDownload,
-                    requester = cancelDownloadRequester,
-                ),
-            )
-        }
-    }
-
     LazyColumn(
+        state = pageListState,
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background),
@@ -243,7 +349,7 @@ fun MovieDetailsProScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(metrics.heroHeightDp.dp)
+                    .height(movieHeroHeightDp.dp)
                     .background(colors.background),
             ) {
                 if (!backdrop.isNullOrBlank()) {
@@ -290,7 +396,7 @@ fun MovieDetailsProScreen(
                     BrandBadge(Modifier.size(if (isTv) 52.dp else 44.dp))
                 }
 
-                Row(
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
@@ -299,74 +405,66 @@ fun MovieDetailsProScreen(
                             end = metrics.horizontalPaddingDp.dp,
                             bottom = metrics.verticalPaddingDp.dp,
                         ),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(
-                        if (metrics.wideLayout) 22.dp else 12.dp,
-                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = "فيلم",
-                            color = colors.goldBright,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = item.name,
-                            color = Color.White,
-                            fontSize = metrics.titleSizeSp.sp,
-                            lineHeight = (metrics.titleSizeSp + 5).sp,
-                            fontWeight = FontWeight.Black,
-                            maxLines = if (metrics.compactHeight) 1 else 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(7.dp))
-                        DetailsProMoviePills(
-                            item = item,
-                            details = details,
-                            technical = technical,
-                            compact = !metrics.wideLayout,
-                        )
-                        val plot = details?.plot ?: item.plot
-                        if (!plot.isNullOrBlank()) {
-                            Spacer(Modifier.height(7.dp))
-                            Text(
-                                text = plot,
-                                color = Color(0xFFE3DFD5),
-                                fontSize = metrics.plotSizeSp.sp,
-                                lineHeight = (metrics.plotSizeSp + 6).sp,
-                                maxLines = when {
-                                    metrics.compactHeight -> 1
-                                    isTv -> 3
-                                    else -> 2
-                                },
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (progress != null && historyEntry != null) {
-                            Spacer(Modifier.height(9.dp))
-                            DetailsProProgress(
-                                progress = progress,
-                                label = "متابعة من ${detailsProFormatTime(historyEntry.positionMs)}",
-                                modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .72f else 1f),
-                            )
-                        }
-                        Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 12.dp))
-                        DetailsProActions(
-                            actions = actions,
-                            isTv = isTv,
-                            upTarget = backRequester,
-                            downTarget = relatedRequesters.firstOrNull(),
-                            onFocused = { heroReturnRequester = it },
-                            wide = metrics.wideLayout,
+                    Text(
+                        text = item.name,
+                        color = colors.text,
+                        fontSize = metrics.titleSizeSp.sp,
+                        lineHeight = (metrics.titleSizeSp + 5).sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(.94f),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    MovieDetailsHeroMetadataRow(
+                        item = item,
+                        genre = details?.genre ?: item.genre,
+                        durationLabel = detailsProDurationLabel(
+                            technical.durationMs ?: detailsProParseDuration(details?.duration),
+                        ),
+                        qualityLabel = technical.quality,
+                        ratingLabel = detailsProRatingLabel(item.rating),
+                        isTv = isTv,
+                        modifier = Modifier.fillMaxWidth(.96f),
+                    )
+                    if (progress != null && historyEntry != null) {
+                        Spacer(Modifier.height(10.dp))
+                        MovieInlineResumeStrip(
+                            positionMs = historyEntry.positionMs,
+                            durationMs = historyEntry.durationMs,
+                            progress = progress,
+                            isTv = false,
+                            modifier = Modifier.fillMaxWidth(if (metrics.wideLayout) .78f else 1f),
                         )
                     }
-
-                    DetailsProPoster(
-                        posterUrl = item.posterUrl,
-                        title = item.name,
-                        modifier = Modifier.width(metrics.heroPosterWidthDp.dp),
+                    Spacer(Modifier.height(if (metrics.compactHeight) 9.dp else 13.dp))
+                    MovieDetailsActionsBar(
+                        isTv = isTv,
+                        rowFraction = if (metrics.wideLayout) .78f else 1f,
+                        minimumActionHeightDp = movieActionHeightDp(
+                            isTv = isTv,
+                            compactHeight = metrics.compactHeight,
+                        ),
+                        resumePositionMs = resumePosition,
+                        isFavorite = isFavorite,
+                        download = download,
+                        playRequester = playRequester,
+                        favoriteRequester = favoriteRequester,
+                        downloadRequester = downloadRequester,
+                        upRequester = null,
+                        tabsDownRequester = if (errorMessage != null) {
+                            detailsErrorRetryRequester
+                        } else {
+                            tabRequesters.getValue(MovieDetailsTab.STORY)
+                        },
+                        onActionFocused = { heroReturnRequester = it },
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavorite,
+                        onDownload = onDownload,
+                        onOpenDownloadPanel = { showDownloadPanel = true },
                     )
                 }
 
@@ -385,49 +483,20 @@ fun MovieDetailsProScreen(
 
         if (errorMessage != null) {
             item(key = "movie_error") {
-                ErrorNotice(
-                    errorMessage,
-                    Modifier.padding(
-                        horizontal = metrics.horizontalPaddingDp.dp,
-                        vertical = 8.dp,
-                    ),
-                )
-            }
-        }
-
-        if (detailsProHasInformation(details)) {
-            item(key = "movie_info") {
-                DetailsProInformationPanel(
-                    title = "معلومات الفيلم",
-                    details = details,
-                    isTv = isTv,
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-
-        if (relatedItems.isNotEmpty()) {
-            item(key = "movie_related") {
-                DetailsProRelatedRow(
-                    title = "اعمال مشابهة",
-                    items = relatedItems,
-                    isTv = isTv,
-                    cardWidthDp = metrics.relatedCardWidthDp,
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                    requesters = relatedRequesters,
-                    upRequester = heroReturnRequester,
-                    isFavorite = isRelatedFavorite,
-                    onToggleFavorite = onToggleRelatedFavorite,
-                    onOpen = onOpenRelated,
-                )
-            }
-        }
-
-        if (download != null && download.status != OfflineStatus.COMPLETED) {
-            item(key = "movie_download_progress") {
-                DetailsProDownloadProgress(
-                    download = download,
+                MoviesErrorNotice(
+                    title = detailsErrorCopy.title,
+                    body = detailsErrorCopy.body,
+                    onRetry = onRetryDetails,
+                    isTv = false,
+                    networkFailure = detailsOffline,
+                    retryRequester = detailsErrorRetryRequester,
+                    onRetryFocusChanged = { detailsErrorRetryFocused = it },
+                    onRetryUp = {
+                        runCatching { heroReturnRequester.requestFocus() }.getOrDefault(false)
+                    },
+                    onRetryDown = {
+                        runCatching { tabRequesters.getValue(selectedTab).requestFocus() }.getOrDefault(false)
+                    },
                     modifier = Modifier.padding(
                         horizontal = metrics.horizontalPaddingDp.dp,
                         vertical = 8.dp,
@@ -435,7 +504,110 @@ fun MovieDetailsProScreen(
                 )
             }
         }
+
+        item(key = "movie_tabs") {
+            Column(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = .08f)),
+                )
+                MovieDetailsTabRow(
+                    selected = selectedTab,
+                    onSelect = selectTab,
+                    requesters = tabRequesters,
+                    upTarget = if (errorMessage != null) detailsErrorRetryRequester else heroReturnRequester,
+                    downTargets = mapOf(MovieDetailsTab.RELATED to relatedRequesters.firstOrNull()),
+                    isTv = isTv,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    onSelectedTabScrollKey = handleSelectedTabScrollKey,
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = .08f)),
+                )
+            }
+        }
+
+        when (selectedTab) {
+            MovieDetailsTab.STORY -> item(key = "movie_story") {
+                MovieDetailsStoryContent(
+                    plot = details?.plot ?: item.plot,
+                    isTv = isTv,
+                    horizontalPaddingDp = metrics.horizontalPaddingDp,
+                )
+            }
+            MovieDetailsTab.INFORMATION -> item(key = "movie_information") {
+                MovieDetailsInfoGrid(
+                    item = item,
+                    details = details,
+                    durationLabel = detailsProDurationLabel(
+                        technical.durationMs ?: detailsProParseDuration(details?.duration),
+                    ),
+                    qualityLabel = technical.quality,
+                    ratingLabel = detailsProRatingLabel(item.rating),
+                    releaseYearLabel = details?.releaseDate,
+                    horizontalPaddingDp = metrics.horizontalPaddingDp,
+                    isTv = isTv,
+                )
+            }
+            MovieDetailsTab.RELATED -> item(key = "movie_related") {
+                if (relatedItems.isEmpty()) {
+                    MovieDetailsEmptyTabMessage("لا توجد افلام مشابهة متاحة", isTv)
+                } else {
+                    DetailsProRelatedRow(
+                        title = "",
+                        showTitle = false,
+                        items = relatedItems,
+                        isTv = isTv,
+                        cardWidthDp = metrics.relatedCardWidthDp,
+                        horizontalPaddingDp = metrics.horizontalPaddingDp,
+                        requesters = relatedRequesters,
+                        upRequester = tabRequesters.getValue(MovieDetailsTab.RELATED),
+                        isFavorite = isRelatedFavorite,
+                        onToggleFavorite = onToggleRelatedFavorite,
+                        onOpen = onOpenRelated,
+                    )
+                }
+            }
+        }
     }
+
+    if (showDownloadPanel && download != null && download.status != OfflineStatus.COMPLETED) {
+        MovieDownloadPanelDialog(
+            download = download,
+            isTv = isTv,
+            onPauseResumeRetry = {
+                onDownload()
+                closeDownloadPanel()
+            },
+            onCancel = {
+                onCancelDownload()
+                closeDownloadPanel()
+            },
+            onDismiss = closeDownloadPanel,
+        )
+    }
+}
+
+internal fun detailsProDurationLabel(durationMs: Long?): String? {
+    val totalMinutes = durationMs?.takeIf { it > 0L }?.div(60_000L) ?: return null
+    if (totalMinutes <= 0L) return null
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return when {
+        hours > 0L && minutes > 0L -> String.format(Locale.US, "%dh %02dm", hours, minutes)
+        hours > 0L -> String.format(Locale.US, "%dh", hours)
+        else -> String.format(Locale.US, "%dm", minutes)
+    }
+}
+
+internal fun detailsProRatingLabel(raw: String?): String? {
+    val value = raw?.trim()?.toDoubleOrNull()?.takeIf { it > 0.0 } ?: return null
+    return String.format(Locale.US, "%.1f", value)
 }
 
 @Composable
@@ -1666,21 +1838,27 @@ private fun DetailsProRelatedRow(
     isFavorite: (ContentItem) -> Boolean,
     onToggleFavorite: (ContentItem) -> Unit,
     onOpen: (ContentItem) -> Unit,
+    showTitle: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = if (isTv) 14.dp else 10.dp, bottom = if (isTv) 14.dp else 10.dp),
+            .padding(
+                top = if (showTitle) if (isTv) 14.dp else 10.dp else 6.dp,
+                bottom = if (isTv) 14.dp else 10.dp,
+            ),
     ) {
-        Text(
-            text = title,
-            color = colors.text,
-            fontSize = if (isTv) 22.sp else 18.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(horizontal = horizontalPaddingDp.dp),
-        )
-        Spacer(Modifier.height(8.dp))
+        if (showTitle) {
+            Text(
+                text = title,
+                color = colors.text,
+                fontSize = if (isTv) 22.sp else 18.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(horizontal = horizontalPaddingDp.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
         LazyRow(
             modifier = Modifier.fillMaxWidth().focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(if (isTv) 12.dp else 9.dp),
@@ -1738,7 +1916,7 @@ private fun DetailsProRelatedRow(
                         onLongClick = { onToggleFavorite(item) },
                     )
                 } else {
-                    CompactPosterCard(
+                    MoviesCatalogBoxedCard(
                         item = item,
                         isFavorite = isFavorite(item),
                         onClick = { onOpen(item) },

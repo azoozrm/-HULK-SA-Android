@@ -176,6 +176,7 @@ In particular:
 - Android Engineering Lab, for lab/runtime/maintenance work: `docs/android-engineering-lab/README.md`
 - Task execution contract, for substantive authorized Implementation/Correction tasks: `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`
 - Adopted DeepSeek task-packet method, read explicitly before drafting or executing substantive Implementation/Correction packets: `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md`
+- Approved unified player reference (owner-accepted design, HULK-PLAYER-20261004), read together with its three unchanged boards under `docs/design/player/reference/20261004/` before player UI work: `docs/design/player/APPROVED-PLAYER-REFERENCE.md`
 
 Substantive authorized Implementation/Correction tasks follow `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`. The active task packet supplies scope and live fields; applicable repository, subsystem and physical contracts still govern.
 

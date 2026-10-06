@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -34,9 +35,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +52,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -57,12 +61,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import sa.hulksa.player.data.HomeHeroMetadataStore
 import sa.hulksa.player.data.SeriesCardMetadataStore
 import sa.hulksa.player.model.ContentDetails
@@ -79,6 +86,7 @@ import sa.hulksa.player.ui.components.CompactPosterCard
 import sa.hulksa.player.ui.components.ErrorNotice
 import sa.hulksa.player.ui.components.FocusButton
 import sa.hulksa.player.ui.components.LoadingRing
+import sa.hulksa.player.ui.components.MoviesCatalogBoxedCard
 import sa.hulksa.player.ui.components.SeriesPosterCard
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
@@ -148,6 +156,7 @@ fun MovieDetailsProPolishedScreen(
     onToggleFavorite: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     if (!isTv) {
         MovieDetailsProScreen(
@@ -168,6 +177,7 @@ fun MovieDetailsProPolishedScreen(
             onToggleFavorite = onToggleFavorite,
             onToggleRelatedFavorite = onToggleRelatedFavorite,
             onOpenRelated = onOpenRelated,
+            onRetryDetails = onRetryDetails,
         )
         return
     }
@@ -189,6 +199,7 @@ fun MovieDetailsProPolishedScreen(
         onToggleFavorite = onToggleFavorite,
         onToggleRelatedFavorite = onToggleRelatedFavorite,
         onOpenRelated = onOpenRelated,
+        onRetryDetails = onRetryDetails,
     )
 }
 
@@ -211,6 +222,7 @@ private fun MovieDetailsProTvPolished(
     onToggleFavorite: () -> Unit,
     onToggleRelatedFavorite: (ContentItem) -> Unit,
     onOpenRelated: (ContentItem) -> Unit,
+    onRetryDetails: () -> Unit,
 ) {
     val colors = LocalHulkColors.current
     val adaptive = LocalAdaptiveUi.current
@@ -223,21 +235,152 @@ private fun MovieDetailsProTvPolished(
         val cached = movieMetadataStore.cached(movieMetadataOwner, ContentType.MOVIE, item.id)
         DetailsTvMovieTechnical(cached.quality, cached.durationMs)
     }
-    val progress = historyEntry?.detailsTvWatchProgress()
-    val movieResumeHeroExtraDp = if (progress != null && historyEntry != null) 34 else 0
+    val progress = movieResumeProgress(
+        positionMs = historyEntry?.positionMs ?: 0L,
+        durationMs = historyEntry?.durationMs ?: 0L,
+    )
+    val movieHeroHeightDp = movieCompactHeroHeightDp(adaptive.screenHeightDp)
+    val detailsErrorRetryRequester = remember(item.id) { FocusRequester() }
+    var detailsErrorRetryFocused by remember(item.id) { mutableStateOf(false) }
+    val detailsNetworkUsable by rememberUsableNetworkState()
+    val detailsOffline = errorMessage != null && !detailsNetworkUsable
+    val detailsErrorCopy = moviesDetailsErrorCopy(
+        offline = detailsOffline,
+        serverMessage = errorMessage,
+    )
     val playRequester = remember(item.id) { FocusRequester() }
     val favoriteRequester = remember(item.id) { FocusRequester() }
     val downloadRequester = remember(item.id) { FocusRequester() }
-    val cancelRequester = remember(item.id) { FocusRequester() }
     val backRequester = remember(item.id) { FocusRequester() }
     val relatedKeys = relatedItems.map { "${it.type}:${it.id}" }
     val relatedRequesters = remember(relatedKeys) { List(relatedItems.size) { FocusRequester() } }
-    val firstBelowRequester = relatedRequesters.firstOrNull()
-    val downloadFocusable = download?.status != OfflineStatus.COMPLETED
-    val favoriteLeftTarget = when {
-        downloadFocusable -> downloadRequester
-        download != null -> cancelRequester
-        else -> FocusRequester.Cancel
+    val tabRequesters = remember(item.id) { MovieDetailsTab.entries.associateWith { FocusRequester() } }
+    var selectedTab by rememberSaveable(item.id) { mutableStateOf(MovieDetailsTab.STORY) }
+    var heroReturnRequester by remember(item.id) { mutableStateOf(playRequester) }
+    val pageListState = rememberLazyListState()
+    val pageScrollScope = rememberCoroutineScope()
+    var pageScrollJob by remember(item.id) { mutableStateOf<Job?>(null) }
+    var tabRevealTarget by remember(item.id) { mutableStateOf<MovieDetailsTab?>(null) }
+    var tabRevealRequestId by remember(item.id) { mutableIntStateOf(0) }
+    val selectTab: (MovieDetailsTab) -> Unit = { tab ->
+        selectedTab = tab
+        if (tab == MovieDetailsTab.INFORMATION || tab == MovieDetailsTab.RELATED) {
+            tabRevealTarget = tab
+            tabRevealRequestId += 1
+        }
+    }
+    // One parent reveal owner: after an explicit selection has been laid out, scroll the parent
+    // page so the tab row and the complete selected section are visible when they fit. Obsolete
+    // rapid selections cancel the previous animation; metadata refresh never re-triggers it.
+    LaunchedEffect(tabRevealRequestId) {
+        val target = tabRevealTarget ?: return@LaunchedEffect
+        if (target != selectedTab) return@LaunchedEffect
+        withFrameNanos { }
+        val layout = pageListState.layoutInfo
+        val sectionKey = movieDetailsSectionItemKey(target, tvPolished = true)
+        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+        if (
+            movieDetailsSectionNeedsReveal(
+                sectionPresent = section != null,
+                sectionTop = section?.offset ?: 0,
+                sectionBottom = section?.let { it.offset + it.size } ?: 0,
+                viewportStart = layout.viewportStartOffset,
+                viewportEnd = layout.viewportEndOffset,
+            )
+        ) {
+            // One cancellable scroll owner for both the selection reveal and the read scroll, so
+            // a manual D-pad step always takes precedence over an in-flight reveal animation.
+            pageScrollJob?.cancel()
+            pageScrollJob = pageScrollScope.launch {
+                pageListState.animateScrollToItem(
+                    movieDetailsTabsItemIndex(hasError = errorMessage != null),
+                )
+            }
+        }
+    }
+    LaunchedEffect(errorMessage) {
+        if (errorMessage == null && detailsErrorRetryFocused) {
+            // Notice removal while its Retry is focused restores the selected tab.
+            withFrameNanos { }
+            runCatching { tabRequesters.getValue(selectedTab).requestFocus() }
+        }
+    }
+    // Usable D-pad reading path for overflowing Story/Information panels: the selected tab keeps
+    // focus and steps the parent page, so long content stays reachable without field-by-field
+    // focus stops or a second vertical scroller. Related keeps its existing card route.
+    val handleSelectedTabScrollKey: (KeyEvent) -> Boolean = { event ->
+        if (event.type != KeyEventType.KeyDown) {
+            false
+        } else {
+            val layout = pageListState.layoutInfo
+            val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(1)
+            val step = (viewportHeight * 3 / 4).coerceAtLeast(1)
+            when (event.key) {
+                Key.DirectionDown -> {
+                    if (selectedTab == MovieDetailsTab.RELATED) {
+                        false
+                    } else {
+                        val sectionKey = movieDetailsSectionItemKey(selectedTab, tvPolished = true)
+                        val section = layout.visibleItemsInfo.firstOrNull { it.key == sectionKey }
+                        if (
+                            movieDetailsPanelNeedsMoreScroll(
+                                sectionPresent = section != null,
+                                sectionBottom = section?.let { it.offset + it.size } ?: 0,
+                                viewportEnd = layout.viewportEndOffset,
+                            )
+                        ) {
+                            pageScrollJob?.cancel()
+                            pageScrollJob = pageScrollScope.launch {
+                                pageListState.scrollBy(step.toFloat())
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                Key.DirectionUp -> {
+                    val atPageTop = pageListState.firstVisibleItemIndex == 0 &&
+                        pageListState.firstVisibleItemScrollOffset == 0
+                    if (atPageTop) {
+                        false
+                    } else {
+                        pageScrollJob?.cancel()
+                        pageScrollJob = pageScrollScope.launch {
+                            pageListState.scrollBy(-step.toFloat())
+                        }
+                        true
+                    }
+                }
+                else -> false
+            }
+        }
+    }
+
+    var showDownloadPanel by remember(item.id) { mutableStateOf(false) }
+    var restoreDownloadFocus by remember(item.id) { mutableStateOf(false) }
+    val closeDownloadPanel: () -> Unit = {
+        showDownloadPanel = false
+        restoreDownloadFocus = true
+    }
+    // Stale panel content (job removed or completed) dismisses without leaving an orphan window.
+    LaunchedEffect(download?.downloadId, download?.status, item.id) {
+        if (showDownloadPanel && (download == null || download.status == OfflineStatus.COMPLETED)) {
+            showDownloadPanel = false
+            restoreDownloadFocus = true
+        }
+    }
+    // Panel dismissal/actions return focus to the same permanent download control; if the control
+    // became disabled (completed), fall back to the adjacent favorite action instead of losing it.
+    LaunchedEffect(showDownloadPanel) {
+        if (!showDownloadPanel && restoreDownloadFocus) {
+            withFrameNanos { }
+            val restored = runCatching { downloadRequester.requestFocus() }.getOrDefault(false)
+            if (!restored) {
+                runCatching { favoriteRequester.requestFocus() }
+            }
+            restoreDownloadFocus = false
+        }
     }
 
     LaunchedEffect(item.id) {
@@ -246,6 +389,7 @@ private fun MovieDetailsProTvPolished(
     }
 
     LazyColumn(
+        state = pageListState,
         modifier = Modifier.fillMaxSize().background(colors.background),
         contentPadding = PaddingValues(bottom = 28.dp),
     ) {
@@ -253,7 +397,7 @@ private fun MovieDetailsProTvPolished(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height((metrics.heroHeightDp + movieResumeHeroExtraDp).dp)
+                    .height(movieHeroHeightDp.dp)
                     .background(Color(0xFF080906)),
             ) {
                 if (!backdrop.isNullOrBlank()) {
@@ -299,153 +443,76 @@ private fun MovieDetailsProTvPolished(
                     BrandBadge(Modifier.size(52.dp))
                 }
 
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
                         .padding(
                             start = metrics.horizontalPaddingDp.dp,
                             end = metrics.horizontalPaddingDp.dp,
-                            top = metrics.safeHeaderDp.dp,
                             bottom = 22.dp,
                         ),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.Bottom,
-                    ) {
-                        Text("فيلم", color = colors.goldBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = item.name,
-                            color = Color.White,
-                            fontSize = metrics.titleSizeSp.sp,
-                            lineHeight = (metrics.titleSizeSp + 5).sp,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth(.90f),
+                    Text(
+                        text = item.name,
+                        color = Color.White,
+                        fontSize = metrics.titleSizeSp.sp,
+                        lineHeight = (metrics.titleSizeSp + 5).sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(.86f),
+                    )
+                    Spacer(Modifier.height(9.dp))
+                    MovieDetailsHeroMetadataRow(
+                        item = item,
+                        genre = details?.genre ?: item.genre,
+                        durationLabel = detailsTvDuration(
+                            technical.durationMs ?: detailsTvParseDurationMs(details?.duration),
+                        ),
+                        qualityLabel = technical.quality,
+                        ratingLabel = detailsTvRating(item.rating),
+                        isTv = true,
+                        modifier = Modifier.fillMaxWidth(.9f),
+                    )
+                    if (progress != null && historyEntry != null) {
+                        Spacer(Modifier.height(10.dp))
+                        MovieInlineResumeStrip(
+                            positionMs = historyEntry.positionMs,
+                            durationMs = historyEntry.durationMs,
+                            progress = progress,
+                            isTv = true,
+                            modifier = Modifier.fillMaxWidth(.72f),
                         )
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(.94f),
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            maxItemsInEachRow = 4,
-                        ) {
-                            detailsTvRating(item.rating)?.let { DetailsTvPill("★ $it") }
-                            (details?.genre ?: item.genre)
-                                ?.trim()
-                                ?.takeIf(String::isNotBlank)
-                                ?.let { DetailsTvPill(it.take(27)) }
-                            technical.quality?.takeIf(String::isNotBlank)?.let { DetailsTvPill(it) }
-                            detailsTvDuration(technical.durationMs ?: detailsTvParseDurationMs(details?.duration))?.let {
-                                DetailsTvPill(it)
-                            }
-                        }
-                        val plot = details?.plot ?: item.plot
-                        if (!plot.isNullOrBlank()) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = plot,
-                                color = Color(0xFFE7E3D9),
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth(.94f),
-                            )
-                        }
-                        if (progress != null && historyEntry != null) {
-                            Spacer(Modifier.height(8.dp))
-                            DetailsTvProgress(
-                                progress = progress,
-                                label = "متابعة من ${detailsTvFormatTime(historyEntry.positionMs)}",
-                                modifier = Modifier.fillMaxWidth(.94f),
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        ) {
-                            FocusButton(
-                                text = if (progress != null && historyEntry != null) {
-                                    "▶ متابعة المشاهدة"
-                                } else {
-                                    "▶ ابدا المشاهدة"
-                                },
-                                onClick = onPlay,
-                                compact = true,
-                                modifier = Modifier
-                                    .weight(1.12f)
-                                    .focusRequester(playRequester)
-                                    .focusProperties {
-                                        up = backRequester
-                                        down = firstBelowRequester ?: FocusRequester.Cancel
-                                        left = favoriteRequester
-                                        right = FocusRequester.Cancel
-                                    },
-                            )
-                            FocusButton(
-                                text = if (isFavorite) "★ في قائمتي" else "+ قائمتي",
-                                onClick = onToggleFavorite,
-                                primary = false,
-                                outlined = true,
-                                compact = true,
-                                modifier = Modifier
-                                    .weight(.86f)
-                                    .focusRequester(favoriteRequester)
-                                    .focusProperties {
-                                        up = backRequester
-                                        down = firstBelowRequester ?: FocusRequester.Cancel
-                                        right = playRequester
-                                        left = favoriteLeftTarget
-                                    },
-                            )
-                            FocusButton(
-                                text = detailsTvMovieDownloadLabel(download),
-                                onClick = onDownload,
-                                primary = false,
-                                outlined = true,
-                                compact = true,
-                                enabled = downloadFocusable,
-                                modifier = Modifier
-                                    .weight(.90f)
-                                    .focusRequester(downloadRequester)
-                                    .focusProperties {
-                                        up = backRequester
-                                        down = firstBelowRequester ?: FocusRequester.Cancel
-                                        right = favoriteRequester
-                                        left = if (download != null) cancelRequester else FocusRequester.Cancel
-                                    },
-                            )
-                            if (download != null) {
-                                FocusButton(
-                                    text = if (download.status == OfflineStatus.COMPLETED) "حذف" else "الغاء",
-                                    onClick = onCancelDownload,
-                                    primary = false,
-                                    outlined = true,
-                                    compact = true,
-                                    modifier = Modifier
-                                        .weight(.58f)
-                                        .focusRequester(cancelRequester)
-                                        .focusProperties {
-                                            up = backRequester
-                                            down = firstBelowRequester ?: FocusRequester.Cancel
-                                            right = if (downloadFocusable) downloadRequester else favoriteRequester
-                                            left = FocusRequester.Cancel
-                                        },
-                                )
-                            }
-                        }
                     }
-
-                    DetailsTvPoster(
-                        posterUrl = item.posterUrl,
-                        title = item.name,
-                        widthDp = metrics.posterWidthDp,
+                    Spacer(Modifier.height(13.dp))
+                    MovieDetailsActionsBar(
+                        isTv = true,
+                        rowFraction = .72f,
+                        minimumActionHeightDp = movieActionHeightDp(isTv = true, compactHeight = false),
+                        resumePositionMs = if (progress != null && historyEntry != null) {
+                            historyEntry.positionMs
+                        } else {
+                            null
+                        },
+                        isFavorite = isFavorite,
+                        download = download,
+                        playRequester = playRequester,
+                        favoriteRequester = favoriteRequester,
+                        downloadRequester = downloadRequester,
+                        upRequester = backRequester,
+                        tabsDownRequester = if (errorMessage != null) {
+                            detailsErrorRetryRequester
+                        } else {
+                            tabRequesters.getValue(MovieDetailsTab.STORY)
+                        },
+                        onActionFocused = { heroReturnRequester = it },
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavorite,
+                        onDownload = onDownload,
+                        onOpenDownloadPanel = { showDownloadPanel = true },
                     )
                 }
 
@@ -463,49 +530,112 @@ private fun MovieDetailsProTvPolished(
 
         if (errorMessage != null) {
             item(key = "movie_tv_polished_error") {
-                ErrorNotice(
-                    errorMessage,
-                    Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 10.dp),
+                MoviesErrorNotice(
+                    title = detailsErrorCopy.title,
+                    body = detailsErrorCopy.body,
+                    onRetry = onRetryDetails,
+                    isTv = true,
+                    networkFailure = detailsOffline,
+                    retryRequester = detailsErrorRetryRequester,
+                    onRetryFocusChanged = { detailsErrorRetryFocused = it },
+                    onRetryUp = {
+                        runCatching { heroReturnRequester.requestFocus() }.getOrDefault(false)
+                    },
+                    onRetryDown = {
+                        runCatching { tabRequesters.getValue(selectedTab).requestFocus() }.getOrDefault(false)
+                    },
+                    modifier = Modifier.padding(
+                        horizontal = metrics.horizontalPaddingDp.dp,
+                        vertical = 10.dp,
+                    ),
                 )
             }
         }
 
-        if (detailsTvHasInformation(details)) {
-            item(key = "movie_tv_polished_info") {
-                DetailsTvInformationPanel(
-                    title = "معلومات الفيلم",
+        item(key = "movie_tv_polished_tabs") {
+            Column(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = .08f)),
+                )
+                MovieDetailsTabRow(
+                    selected = selectedTab,
+                    onSelect = selectTab,
+                    requesters = tabRequesters,
+                    upTarget = if (errorMessage != null) detailsErrorRetryRequester else heroReturnRequester,
+                    downTargets = mapOf(MovieDetailsTab.RELATED to relatedRequesters.firstOrNull()),
+                    isTv = true,
+                    modifier = Modifier.padding(vertical = 5.dp),
+                    onSelectedTabScrollKey = handleSelectedTabScrollKey,
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = .08f)),
+                )
+            }
+        }
+
+        when (selectedTab) {
+            MovieDetailsTab.STORY -> item(key = "movie_tv_polished_story") {
+                MovieDetailsStoryContent(
+                    plot = details?.plot ?: item.plot,
+                    isTv = true,
+                    horizontalPaddingDp = (metrics.horizontalPaddingDp + 90),
+                )
+            }
+            MovieDetailsTab.INFORMATION -> item(key = "movie_tv_polished_information") {
+                MovieDetailsInfoGrid(
+                    item = item,
                     details = details,
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                    widthFraction = .74f,
-                    compact = true,
+                    durationLabel = detailsTvDuration(
+                        technical.durationMs ?: detailsTvParseDurationMs(details?.duration),
+                    ),
+                    qualityLabel = technical.quality,
+                    ratingLabel = detailsTvRating(item.rating),
+                    releaseYearLabel = details?.releaseDate,
+                    horizontalPaddingDp = (metrics.horizontalPaddingDp + 90),
+                    isTv = true,
                 )
             }
+            MovieDetailsTab.RELATED -> item(key = "movie_tv_polished_related_tab") {
+                if (relatedItems.isEmpty()) {
+                    MovieDetailsEmptyTabMessage("لا توجد افلام مشابهة متاحة", isTv = true)
+                } else {
+                    DetailsTvRelatedMovies(
+                        title = "",
+                        showTitle = false,
+                        items = relatedItems,
+                        widthDp = metrics.relatedWidthDp,
+                        horizontalPaddingDp = metrics.horizontalPaddingDp,
+                        requesters = relatedRequesters,
+                        upRequester = tabRequesters.getValue(MovieDetailsTab.RELATED),
+                        isFavorite = isRelatedFavorite,
+                        onToggleFavorite = onToggleRelatedFavorite,
+                        onOpen = onOpenRelated,
+                    )
+                }
+            }
         }
+    }
 
-        if (download != null && download.status != OfflineStatus.COMPLETED) {
-            item(key = "movie_tv_polished_download") {
-                DetailsTvDownloadProgress(
-                    download = download,
-                    modifier = Modifier.padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 8.dp),
-                )
-            }
-        }
-
-        if (relatedItems.isNotEmpty()) {
-            item(key = "movie_tv_polished_related") {
-                DetailsTvRelatedMovies(
-                    title = "اعمال مشابهة",
-                    items = relatedItems,
-                    widthDp = metrics.relatedWidthDp,
-                    horizontalPaddingDp = metrics.horizontalPaddingDp,
-                    requesters = relatedRequesters,
-                    upRequester = playRequester,
-                    isFavorite = isRelatedFavorite,
-                    onToggleFavorite = onToggleRelatedFavorite,
-                    onOpen = onOpenRelated,
-                )
-            }
-        }
+    if (showDownloadPanel && download != null && download.status != OfflineStatus.COMPLETED) {
+        MovieDownloadPanelDialog(
+            download = download,
+            isTv = true,
+            onPauseResumeRetry = {
+                onDownload()
+                closeDownloadPanel()
+            },
+            onCancel = {
+                onCancelDownload()
+                closeDownloadPanel()
+            },
+            onDismiss = closeDownloadPanel,
+        )
     }
 }
 
@@ -1556,23 +1686,30 @@ private fun DetailsTvRelatedMovies(
     isFavorite: (ContentItem) -> Boolean,
     onToggleFavorite: (ContentItem) -> Unit,
     onOpen: (ContentItem) -> Unit,
+    showTitle: Boolean = true,
 ) {
     val colors = LocalHulkColors.current
-    Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 18.dp)) {
-        Text(
-            title,
-            color = colors.text,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(horizontal = horizontalPaddingDp.dp),
-        )
-        Spacer(Modifier.height(8.dp))
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = if (showTitle) 10.dp else 6.dp, bottom = 18.dp),
+    ) {
+        if (showTitle) {
+            Text(
+                title,
+                color = colors.text,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(horizontal = horizontalPaddingDp.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = horizontalPaddingDp.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             itemsIndexed(items, key = { _, item -> "${item.type}:${item.id}" }) { index, item ->
-                CompactPosterCard(
+                MoviesCatalogBoxedCard(
                     item = item,
                     isFavorite = isFavorite(item),
                     onClick = { onOpen(item) },
@@ -1724,29 +1861,6 @@ private fun DetailsTvProgress(progress: Float, label: String, modifier: Modifier
     }
 }
 
-@Composable
-private fun DetailsTvDownloadProgress(download: OfflineDownload, modifier: Modifier = Modifier) {
-    val colors = LocalHulkColors.current
-    val percent = (download.progress * 100).toInt().coerceIn(0, 100)
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(colors.surface.copy(alpha = .75f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(detailsTvDownloadState(download), color = colors.textMuted, fontSize = 9.sp)
-            Spacer(Modifier.weight(1f))
-            Text("$percent%", color = colors.goldBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(5.dp))
-        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = .14f))) {
-            Box(Modifier.fillMaxWidth(download.progress.coerceIn(0f, 1f)).fillMaxHeight().background(colors.goldBright))
-        }
-    }
-}
-
 private fun detailsTvHasInformation(details: ContentDetails?): Boolean =
     !details?.releaseDate.isNullOrBlank() || !details?.director.isNullOrBlank() || !details?.cast.isNullOrBlank()
 
@@ -1837,18 +1951,6 @@ private fun detailsTvEpisodeDownloadLabel(download: OfflineDownload?): String = 
     -> "▶ استئناف"
     OfflineStatus.FAILED -> "↻ اعادة"
     null -> "↓ تحميل"
-}
-
-private fun detailsTvDownloadState(download: OfflineDownload): String = when (download.status) {
-    OfflineStatus.COMPLETED -> "تم التحميل"
-    OfflineStatus.QUEUED -> "في قائمة الانتظار"
-    OfflineStatus.CHECKING -> "جاري فحص الحجم"
-    OfflineStatus.DOWNLOADING -> "جاري التحميل"
-    OfflineStatus.PAUSED -> "متوقف مؤقتا"
-    OfflineStatus.WAITING_SCHEDULE -> "مجدول للتحميل"
-    OfflineStatus.WAITING_NETWORK -> "بانتظار الشبكة"
-    OfflineStatus.WAITING_STORAGE -> "بانتظار مساحة"
-    OfflineStatus.FAILED -> "تعذر التحميل"
 }
 
 private fun detailsTvFormatTime(ms: Long): String {

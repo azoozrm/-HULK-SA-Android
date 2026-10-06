@@ -172,6 +172,7 @@ fun PlayerProScreen(
     liveCatalog: Catalog?,
     isFavorite: (ContentItem) -> Boolean,
     favoriteKeys: Set<String>,
+    vodItem: ContentItem? = null,
     onSelectLiveChannel: (ContentItem) -> Unit,
     onToggleFavorite: (ContentItem) -> Unit,
     onBack: () -> Unit,
@@ -444,6 +445,7 @@ fun PlayerProScreen(
             liveCatalog = liveCatalog,
             isFavorite = isFavorite,
             favoriteKeys = favoriteKeys,
+            vodItem = vodItem,
             onSelectLiveChannel = ::queuePlayerRequestedLiveChannel,
             onToggleFavorite = onToggleFavorite,
             onLastChannel = if (
