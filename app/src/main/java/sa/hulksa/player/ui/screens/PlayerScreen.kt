@@ -571,10 +571,15 @@ fun PlayerScreen(
     val vodPreviewSource = remember(playerSession, candidateIndex) {
         playerSession.sourcePlan.candidate(candidateIndex)?.uri
     }
-    val vodPreviewFrames = remember(request, vodPreviewSource) {
+    val vodPreviewFrames = remember(request, vodPreviewSource, isMovieVod) {
         VodSeekPreviewFrames(
             source = vodPreviewSource,
-            extractor = MediaMetadataVodPreviewExtractor(context.applicationContext),
+            extractor = MediaMetadataVodPreviewExtractor(
+                appContext = context.applicationContext,
+                // Thumbnail retention is an explicit Movies opt-in at construction; Series and any
+                // other default caller keep the exact pre-R23 full-frame extraction.
+                mode = vodPreviewExtractionMode(isMovieVod),
+            ),
         )
     }
     DisposableEffect(vodPreviewFrames) {

@@ -211,7 +211,7 @@ internal interface VodSeekPreviewExtractor {
 }
 
 /**
- * Retained preview-thumbnail budget for the bounded cache.
+ * Retained Movies preview-thumbnail budget for the bounded cache.
  *
  * The largest preview card is 216.dp wide at 16:9, so a 480x270 source thumbnail covers TV and
  * phone densities up to about 2.2x, while eight cached frames stay around 4.1 MB instead of
@@ -220,27 +220,77 @@ internal interface VodSeekPreviewExtractor {
 internal const val VOD_PREVIEW_THUMBNAIL_WIDTH_PX = 480
 internal const val VOD_PREVIEW_THUMBNAIL_HEIGHT_PX = 270
 
-/** Production extractor: one lazy [MediaMetadataRetriever] for the prepared source. */
+/**
+ * Extraction behavior for the shared VOD preview source.
+ *
+ * The pre-R23 pipeline always decoded a full frame with
+ * `getFrameAtTime(timeUs, OPTION_CLOSEST_SYNC)`. The bounded thumbnail path is an explicit Movies
+ * opt-in at construction, so Series/default callers keep the exact legacy call at every API level.
+ */
+internal enum class VodPreviewExtractionMode {
+    LEGACY_FULL_FRAME,
+    THUMBNAIL,
+}
+
+/** Which native frame call one preview extraction performs. */
+internal enum class VodPreviewFramePlan {
+    FULL_FRAME,
+    SCALED,
+    DECODE_THEN_SCALE,
+}
+
+/** Movies opt in to the bounded thumbnail path; every other caller keeps the legacy full frame. */
+internal fun vodPreviewExtractionMode(isMovie: Boolean): VodPreviewExtractionMode =
+    if (isMovie) VodPreviewExtractionMode.THUMBNAIL else VodPreviewExtractionMode.LEGACY_FULL_FRAME
+
+/** First API level that provides `MediaMetadataRetriever.getScaledFrameAtTime`. */
+internal const val VOD_PREVIEW_SCALED_FRAME_MIN_API = 27
+
+internal fun vodPreviewExtractionPlan(
+    mode: VodPreviewExtractionMode,
+    apiLevel: Int,
+): VodPreviewFramePlan = when {
+    mode == VodPreviewExtractionMode.LEGACY_FULL_FRAME -> VodPreviewFramePlan.FULL_FRAME
+    apiLevel >= VOD_PREVIEW_SCALED_FRAME_MIN_API -> VodPreviewFramePlan.SCALED
+    else -> VodPreviewFramePlan.DECODE_THEN_SCALE
+}
+
+/**
+ * Production extractor: one lazy [MediaMetadataRetriever] for the prepared source.
+ *
+ * The default mode is the exact pre-R23 full-frame call; only the Movies call site opts in to the
+ * bounded thumbnail path.
+ */
 internal class MediaMetadataVodPreviewExtractor(
     private val appContext: Context,
+    private val mode: VodPreviewExtractionMode = VodPreviewExtractionMode.LEGACY_FULL_FRAME,
 ) : VodSeekPreviewExtractor {
     private var retriever: MediaMetadataRetriever? = null
 
     override fun extract(source: String, bucketMs: Long): Bitmap? {
         val active = retriever ?: createRetriever(source).also { retriever = it }
         val timeUs = bucketMs * 1_000L
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            active.getScaledFrameAtTime(
-                timeUs,
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                VOD_PREVIEW_THUMBNAIL_WIDTH_PX,
-                VOD_PREVIEW_THUMBNAIL_HEIGHT_PX,
-            )
-        } else {
-            // API < 27 has no scaled frame API; decode then scale while preserving the aspect
-            // ratio so the existing ContentScale.Crop fit is unchanged.
-            active.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?.let(::scaleToPreviewThumbnail)
+        return when (vodPreviewExtractionPlan(mode, Build.VERSION.SDK_INT)) {
+            VodPreviewFramePlan.FULL_FRAME ->
+                active.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            VodPreviewFramePlan.SCALED ->
+                // The plan selects SCALED only at API >= 27; the explicit version guard keeps the
+                // platform requirement visible to static analysis.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    active.getScaledFrameAtTime(
+                        timeUs,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        VOD_PREVIEW_THUMBNAIL_WIDTH_PX,
+                        VOD_PREVIEW_THUMBNAIL_HEIGHT_PX,
+                    )
+                } else {
+                    null
+                }
+            VodPreviewFramePlan.DECODE_THEN_SCALE ->
+                // API < 27 has no scaled frame API; decode then scale while preserving the aspect
+                // ratio so the existing ContentScale.Crop fit is unchanged.
+                active.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?.let(::scaleToPreviewThumbnail)
         }
     }
 

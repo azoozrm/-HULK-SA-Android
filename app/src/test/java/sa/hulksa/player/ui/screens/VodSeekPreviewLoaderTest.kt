@@ -466,4 +466,40 @@ class VodSeekPreviewLoaderTest {
         assertEquals(5_000L, recorder.latest?.bucketMs)
         assertEquals(VOD_PREVIEW_WARM_UP_BUCKETS, loaded.size)
     }
+
+    @Test
+    fun previewExtractionModeIsMoviesOptInAndDefaultsToLegacy() {
+        assertEquals(VodPreviewExtractionMode.THUMBNAIL, vodPreviewExtractionMode(isMovie = true))
+        assertEquals(VodPreviewExtractionMode.LEGACY_FULL_FRAME, vodPreviewExtractionMode(isMovie = false))
+    }
+
+    @Test
+    fun legacyExtractionModeNeverUsesTheThumbnailBranches() {
+        // The default/pre-R23 mode is the full-frame call at every supported API level.
+        listOf(23, 26, 27, 28, 34, 36).forEach { apiLevel ->
+            assertEquals(
+                VodPreviewFramePlan.FULL_FRAME,
+                vodPreviewExtractionPlan(VodPreviewExtractionMode.LEGACY_FULL_FRAME, apiLevel),
+            )
+        }
+    }
+
+    @Test
+    fun moviesThumbnailExtractionKeepsTheBoundedPlanBranches() {
+        assertEquals(
+            VodPreviewFramePlan.DECODE_THEN_SCALE,
+            vodPreviewExtractionPlan(
+                VodPreviewExtractionMode.THUMBNAIL,
+                VOD_PREVIEW_SCALED_FRAME_MIN_API - 1,
+            ),
+        )
+        assertEquals(
+            VodPreviewFramePlan.SCALED,
+            vodPreviewExtractionPlan(VodPreviewExtractionMode.THUMBNAIL, VOD_PREVIEW_SCALED_FRAME_MIN_API),
+        )
+        assertEquals(
+            VodPreviewFramePlan.SCALED,
+            vodPreviewExtractionPlan(VodPreviewExtractionMode.THUMBNAIL, 36),
+        )
+    }
 }
