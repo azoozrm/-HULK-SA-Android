@@ -1610,6 +1610,29 @@ fun PlayerScreen(
                         else -> false
                     }
                 }
+                if (resumePromptVisible) {
+                    // A first remote/TV BACK (or ESCAPE) cancels the pending Resume through the
+                    // existing handler and is consumed before the dialog focus can merely clear.
+                    // Touch-platform system Back remains with the screen BackHandler for a single
+                    // cancellation; every other key keeps the dialog's focus graph unchanged.
+                    when (
+                        movieResumeBackDisposition(
+                            isBackKey = keyCode == AndroidKeyEvent.KEYCODE_BACK,
+                            isEscapeKey = keyCode == AndroidKeyEvent.KEYCODE_ESCAPE,
+                            keyDown = event.type == KeyEventType.KeyDown,
+                            isRepeat = event.nativeKeyEvent.repeatCount > 0,
+                            remoteInput = tvRemoteInput,
+                        )
+                    ) {
+                        MovieResumeBackDisposition.HANDLE_AND_CONSUME -> {
+                            handleBackAction()
+                            return@onPreviewKeyEvent true
+                        }
+                        MovieResumeBackDisposition.PASS_TO_SYSTEM,
+                        MovieResumeBackDisposition.PASS_TO_DIALOG,
+                        -> return@onPreviewKeyEvent false
+                    }
+                }
                 if (
                     event.type != KeyEventType.KeyDown || browserVisible || activePanel != null ||
                     liveMorePanel != null || vodMorePanel != null ||
@@ -1618,7 +1641,9 @@ fun PlayerScreen(
                     return@onPreviewKeyEvent false
                 }
                 if (keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
-                    handleBackAction()
+                    // A held/repeated Back must not navigate a second time; the first handled press
+                    // owns the transition.
+                    if (event.nativeKeyEvent.repeatCount == 0) handleBackAction()
                     return@onPreviewKeyEvent true
                 }
                 if (controlsLocked) {

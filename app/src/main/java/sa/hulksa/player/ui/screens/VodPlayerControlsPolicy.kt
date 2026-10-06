@@ -457,6 +457,40 @@ internal fun movieProgressPersistenceBlockedAfterDecision(
     decisionAccepted: Boolean,
 ): Boolean = blocked && !decisionAccepted
 
+/** What the pending Movie Resume dialog does with one key event. */
+internal enum class MovieResumeBackDisposition {
+    /** Cancel the pending Resume through the existing handler and consume the event. */
+    HANDLE_AND_CONSUME,
+
+    /** Leave the event to the platform BackHandler for exactly one touch/system cancellation. */
+    PASS_TO_SYSTEM,
+
+    /** Not a cancel press: background suppression stays and the dialog keeps its focus graph. */
+    PASS_TO_DIALOG,
+}
+
+/**
+ * Pending Resume input ownership for BACK/ESCAPE.
+ *
+ * A first remote/TV BACK (or any ESCAPE) must cancel through the existing handler before the
+ * dialog focus can merely clear; touch-platform system Back stays with the screen BackHandler so
+ * the cancellation happens exactly once. Key releases, repeats and every other key keep the
+ * dialog's D-pad/OK focus graph and the suppressed background commands unchanged.
+ */
+internal fun movieResumeBackDisposition(
+    isBackKey: Boolean,
+    isEscapeKey: Boolean,
+    keyDown: Boolean,
+    isRepeat: Boolean,
+    remoteInput: Boolean,
+): MovieResumeBackDisposition = when {
+    !keyDown || isRepeat -> MovieResumeBackDisposition.PASS_TO_DIALOG
+    isEscapeKey -> MovieResumeBackDisposition.HANDLE_AND_CONSUME
+    isBackKey && remoteInput -> MovieResumeBackDisposition.HANDLE_AND_CONSUME
+    isBackKey -> MovieResumeBackDisposition.PASS_TO_SYSTEM
+    else -> MovieResumeBackDisposition.PASS_TO_DIALOG
+}
+
 /**
  * Bounded speculative Movies seek-preview warm-up set around a prepared playback/resume position.
  *

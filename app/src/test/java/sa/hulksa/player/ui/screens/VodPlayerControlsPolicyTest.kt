@@ -555,6 +555,62 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun movieResumeBackHandlesOneNavigationPerPress() {
+        fun disposition(
+            key: String,
+            keyDown: Boolean = true,
+            isRepeat: Boolean = false,
+            remoteInput: Boolean,
+        ): MovieResumeBackDisposition = movieResumeBackDisposition(
+            isBackKey = key == "BACK",
+            isEscapeKey = key == "ESCAPE",
+            keyDown = keyDown,
+            isRepeat = isRepeat,
+            remoteInput = remoteInput,
+        )
+
+        // Remote BACK: the first down dispatches the cancellation exactly once; the release and
+        // any repeat are never handled again.
+        val remotePress = listOf(
+            disposition("BACK", keyDown = true, remoteInput = true),
+            disposition("BACK", keyDown = false, remoteInput = true),
+        )
+        assertEquals(MovieResumeBackDisposition.HANDLE_AND_CONSUME, remotePress[0])
+        assertEquals(MovieResumeBackDisposition.PASS_TO_DIALOG, remotePress[1])
+        assertEquals(1, remotePress.count { it == MovieResumeBackDisposition.HANDLE_AND_CONSUME })
+        assertEquals(
+            MovieResumeBackDisposition.PASS_TO_DIALOG,
+            disposition("BACK", keyDown = true, isRepeat = true, remoteInput = true),
+        )
+
+        // Touch BACK: the system/BackHandler owner performs the single cancellation.
+        val touchPress = listOf(
+            disposition("BACK", keyDown = true, remoteInput = false),
+            disposition("BACK", keyDown = false, remoteInput = false),
+        )
+        assertEquals(MovieResumeBackDisposition.PASS_TO_SYSTEM, touchPress[0])
+        assertEquals(1, touchPress.count { it == MovieResumeBackDisposition.PASS_TO_SYSTEM })
+
+        // ESCAPE is always handled; every other key keeps the dialog focus graph and background
+        // suppression unchanged.
+        assertEquals(
+            MovieResumeBackDisposition.HANDLE_AND_CONSUME,
+            disposition("ESCAPE", remoteInput = false),
+        )
+        assertEquals(
+            MovieResumeBackDisposition.PASS_TO_DIALOG,
+            disposition("DPAD_DOWN", remoteInput = true),
+        )
+        assertEquals(
+            MovieResumeBackDisposition.PASS_TO_DIALOG,
+            disposition("DPAD_CENTER", remoteInput = true),
+        )
+
+        // Cancelling through Back never enables progress persistence (R27 protection).
+        assertTrue(movieProgressPersistenceBlockedAfterDecision(blocked = true, decisionAccepted = false))
+    }
+
+    @Test
     fun warmUpBucketsReuseTheFiveSecondBucketWithBoundedLookahead() {
         assertEquals(listOf(0L, 5_000L, 10_000L, 15_000L), vodPreviewWarmUpBuckets(-1L))
         assertEquals(listOf(10_000L, 15_000L, 20_000L, 25_000L), vodPreviewWarmUpBuckets(12_400L))
