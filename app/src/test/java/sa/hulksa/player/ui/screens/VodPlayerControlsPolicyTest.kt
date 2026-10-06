@@ -279,6 +279,33 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun goToTimeSteppingHoldsStartAndEndBoundsWithCarry() {
+        // Start clamp: decrementing at zero stays at zero.
+        assertEquals(
+            VodGoToTimeFields(0, 0, 0),
+            vodGoToTimeFieldsStepped(VodGoToTimeFields(0, 0, 0), VodTimeField.SECONDS, -1, 3_723_000L),
+        )
+        // End clamp: incrementing past the media duration clamps to the duration.
+        assertEquals(
+            VodGoToTimeFields(1, 2, 3),
+            vodGoToTimeFieldsStepped(VodGoToTimeFields(1, 2, 3), VodTimeField.SECONDS, 1, 3_723_000L),
+        )
+        // Carry/borrow across second and minute boundaries.
+        assertEquals(
+            VodGoToTimeFields(1, 3, 0),
+            vodGoToTimeFieldsStepped(VodGoToTimeFields(1, 2, 59), VodTimeField.SECONDS, 1, 7_200_000L),
+        )
+        assertEquals(
+            VodGoToTimeFields(1, 1, 59),
+            vodGoToTimeFieldsStepped(VodGoToTimeFields(1, 2, 0), VodTimeField.SECONDS, -1, 7_200_000L),
+        )
+        assertEquals(
+            VodGoToTimeFields(2, 0, 0),
+            vodGoToTimeFieldsStepped(VodGoToTimeFields(1, 59, 0), VodTimeField.MINUTES, 1, 7_200_000L),
+        )
+    }
+
+    @Test
     fun speedOptionsAreTheApprovedBoundedSet() {
         assertEquals(listOf(0.75f, 1f, 1.25f, 1.5f, 2f), VOD_PLAYER_SPEED_OPTIONS)
         assertEquals("1x", vodSpeedLabel(1f))

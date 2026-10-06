@@ -62,8 +62,6 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
@@ -131,7 +129,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
@@ -149,9 +146,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -4226,6 +4221,7 @@ private fun VodMorePanel(
                         VodMoreRow(
                             text = "الانتقال الى وقت",
                             icon = Icons.Rounded.Schedule,
+                            showChevron = true,
                             onClick = onOpenGoToTime,
                             focusRequester = goToTimeFocus,
                             inputMuted = inputMuted,
@@ -4930,34 +4926,10 @@ private fun VodGoToTimeField(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center,
         ) {
-            BasicTextField(
-                value = value.toString().padStart(2, '0'),
-                onValueChange = { raw ->
-                    val digits = raw.filter(Char::isDigit).takeLast(2)
-                    val parsed = digits.toIntOrNull() ?: 0
-                    val bounded = when (field) {
-                        VodTimeField.HOURS -> parsed.coerceIn(0, VOD_GO_TO_TIME_MAX_HOURS)
-                        VodTimeField.MINUTES,
-                        VodTimeField.SECONDS,
-                        -> parsed.coerceIn(0, 59)
-                    }
-                    val updated = when (field) {
-                        VodTimeField.HOURS -> fields.copy(hours = bounded)
-                        VodTimeField.MINUTES -> fields.copy(minutes = bounded)
-                        VodTimeField.SECONDS -> fields.copy(seconds = bounded)
-                    }
-                    onFieldsChange(updated)
-                },
-                enabled = enabled,
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = TextStyle(
-                    color = if (enabled) Color.White else colors.textMuted.copy(alpha = .55f),
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                ),
-                cursorBrush = SolidColor(colors.goldBright),
+            // Non-editable numeric selector: a focusable display with no text-input connection, so
+            // focusing or tapping it can never open an IME. TV UP/DOWN step this unit and phone
+            // taps use the arrows above and below.
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
@@ -5000,8 +4972,18 @@ private fun VodGoToTimeField(
                             }
                             else -> false
                         }
-                    },
-            )
+                    }
+                    .focusable(enabled = enabled),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = value.toString().padStart(2, '0'),
+                    color = if (enabled) Color.White else colors.textMuted.copy(alpha = .55f),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
         VodGoToTimeStepButton(
             arrowUp = false,
