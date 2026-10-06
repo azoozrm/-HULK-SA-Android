@@ -1570,12 +1570,16 @@ fun PlayerScreen(
                 if (vodGoToTimeVisible) {
                     // The time window owns input: consume playback/media/channel commands so the
                     // player behind it cannot act, while directional/OK/TAB/numeric still reach the
-                    // dialog nodes. Back dismisses the dialog through the existing More ownership
-                    // and returns focus to the originating Go-to-time row.
+                    // dialog nodes. Remote/TV Back is consumed here; touch-platform system Back
+                    // falls through to the screen BackHandler, so the dialog is dismissed exactly
+                    // once and focus returns to the originating Go-to-time row.
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     if (keyCode == AndroidKeyEvent.KEYCODE_BACK || keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
-                        handleBackAction()
-                        return@onPreviewKeyEvent true
+                        if (keyCode == AndroidKeyEvent.KEYCODE_ESCAPE || tvRemoteInput) {
+                            handleBackAction()
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
                     }
                     return@onPreviewKeyEvent when (keyCode) {
                         AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
