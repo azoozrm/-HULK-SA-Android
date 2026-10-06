@@ -445,6 +445,38 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
+    fun activeSeekHoldsControlsOnlyForMoviesWithRemoteInput() {
+        // Movies TV timeline focus or direct seeking keeps the tools usable.
+        assertTrue(
+            vodActiveSeekHoldsControls(
+                isMovie = true, remoteInput = true, timelineFocused = true, directSeekActive = false,
+            ),
+        )
+        assertTrue(
+            vodActiveSeekHoldsControls(
+                isMovie = true, remoteInput = true, timelineFocused = false, directSeekActive = true,
+            ),
+        )
+        // Leaving the interaction restores ordinary auto-hide.
+        assertFalse(
+            vodActiveSeekHoldsControls(
+                isMovie = true, remoteInput = true, timelineFocused = false, directSeekActive = false,
+            ),
+        )
+        // Phone touch and Series/Live callers keep their existing behavior.
+        assertFalse(
+            vodActiveSeekHoldsControls(
+                isMovie = true, remoteInput = false, timelineFocused = true, directSeekActive = true,
+            ),
+        )
+        assertFalse(
+            vodActiveSeekHoldsControls(
+                isMovie = false, remoteInput = true, timelineFocused = true, directSeekActive = true,
+            ),
+        )
+    }
+
+    @Test
     fun warmUpBucketsReuseTheFiveSecondBucketWithBoundedLookahead() {
         assertEquals(listOf(0L, 5_000L, 10_000L, 15_000L), vodPreviewWarmUpBuckets(-1L))
         assertEquals(listOf(10_000L, 15_000L, 20_000L, 25_000L), vodPreviewWarmUpBuckets(12_400L))

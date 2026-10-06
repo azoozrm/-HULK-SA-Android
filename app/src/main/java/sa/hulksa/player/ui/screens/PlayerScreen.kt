@@ -139,9 +139,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.SubcomposeLayout
-import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -179,6 +177,7 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -493,9 +492,6 @@ fun PlayerScreen(
     var vodGoToTimeVisible by remember(request) { mutableStateOf(false) }
     var vodPanelFocusTick by remember(request) { mutableIntStateOf(0) }
     var vodSeekPreviewMs by remember(request) { mutableStateOf<Long?>(null) }
-    // Committed/last seek anchor for the Movies TV preview window; presentation-only and never a
-    // playback-position owner.
-    var vodPreviewHoldMs by remember(request) { mutableStateOf<Long?>(null) }
     var vodTimelineFocused by remember(request) { mutableStateOf(false) }
     var moreFocusRestoreTick by remember(request) { mutableIntStateOf(0) }
     var isPlaying by remember(request) { mutableStateOf(false) }
@@ -571,50 +567,48 @@ fun PlayerScreen(
     val vodPreviewSource = remember(playerSession, candidateIndex) {
         playerSession.sourcePlan.candidate(candidateIndex)?.uri
     }
+    // The Movies seek preview is cancelled: Movies never construct the extraction worker, never
+    // warm up and never request or decode a frame. Only the shared Series surface keeps the
+    // existing pre-R23 preview source.
     val vodPreviewFrames = remember(request, vodPreviewSource, isMovieVod) {
-        VodSeekPreviewFrames(
-            source = vodPreviewSource,
-            extractor = MediaMetadataVodPreviewExtractor(
-                appContext = context.applicationContext,
-                // Thumbnail retention is an explicit Movies opt-in at construction; Series and any
-                // other default caller keep the exact pre-R23 full-frame extraction.
-                mode = vodPreviewExtractionMode(isMovieVod),
-            ),
-        )
+        if (isMovieVod) {
+            null
+        } else {
+            VodSeekPreviewFrames(
+                source = vodPreviewSource,
+                extractor = MediaMetadataVodPreviewExtractor(context.applicationContext),
+            )
+        }
     }
     DisposableEffect(vodPreviewFrames) {
-        onDispose { vodPreviewFrames.close() }
+        onDispose { vodPreviewFrames?.close() }
     }
     val vodDirectSeekActive = focusTimelineOnReveal && !request.isLive
-    val vodPreviewWindowOpen = vodPreviewWindowActive(
+    // Active-seek control visibility no longer depends on the cancelled preview window: controls
+    // stay usable while the Movies TV timeline/direct-seek interaction is live and ordinary
+    // auto-hide resumes after exit.
+    val vodActiveSeekInteraction = vodActiveSeekHoldsControls(
         isMovie = isMovieVod,
-        isLive = request.isLive,
         remoteInput = tvRemoteInput,
-        controlsVisible = controlsVisible,
         timelineFocused = vodTimelineFocused,
         directSeekActive = vodDirectSeekActive,
     )
-    // Pre-R22 shared fallback: the transient direct-seek target shows for every non-live caller
-    // while its remote interaction is active; only the opt-in Movies TV window owns the hold.
-    val vodLegacyDirectSeekTargetMs = manualSeekTargetMs?.takeIf {
-        focusTimelineOnReveal && !request.isLive
-    }
-    val vodEffectivePreviewMs = vodEffectivePreviewTargetMs(
-        scrubTargetMs = vodSeekPreviewMs,
-        holdTargetMs = vodPreviewHoldMs,
-        windowActive = vodPreviewWindowOpen,
-        legacyFallbackTargetMs = vodLegacyDirectSeekTargetMs,
-    )
-    val vodPreviewPublication by vodPreviewFrames.publication.collectAsState()
-    // Only the matching source+bucket frame is used; otherwise the time-only fallback stays.
+    // Pre-R22 shared seek-target presentation: the explicit scrub target wins, otherwise the
+    // transient direct-seek target shows while the remote interaction is active. This drives the
+    // timeline thumb and progress; it is not an extraction request by itself.
+    val vodEffectivePreviewMs = vodSeekPreviewMs
+        ?: manualSeekTargetMs?.takeIf { focusTimelineOnReveal && !request.isLive }
+    // Series keeps the shared preview card; Movies have no preview source or publication.
+    val vodEmptyPreviewPublication = remember { MutableStateFlow<VodSeekPreviewResult<Bitmap>?>(null) }
+    val vodPreviewPublication by (vodPreviewFrames?.publication ?: vodEmptyPreviewPublication).collectAsState()
     val vodPreviewFrame = vodPreviewValueFor(
         publication = vodPreviewPublication,
-        sourceKey = vodPreviewFrames.sourceKey,
+        sourceKey = vodPreviewFrames?.sourceKey ?: 0,
         targetMs = vodEffectivePreviewMs,
     )
     LaunchedEffect(vodEffectivePreviewMs, vodPreviewFrames) {
         val target = vodEffectivePreviewMs ?: return@LaunchedEffect
-        vodPreviewFrames.request(target)
+        vodPreviewFrames?.request(target)
     }
     val liveControlsLayout = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp, tvRemoteInput) {
         liveControlsLayoutMetrics(
@@ -672,21 +666,6 @@ fun PlayerScreen(
     val movieModalActive = isMovieVod && moviePresentation != MoviePlayerPresentation.PLAYER
     // The card uses offline wording/icon only for genuinely unusable connectivity.
     val movieErrorCardOffline = isMovieVod && !localPlayback && (movieOfflineInitial || !networkAvailable)
-    // Movies-only bounded warm-up: once the prepared movie can afford background work, warm a short
-    // forward lookahead near the authoritative current/resume position so an early scrub does not
-    // start cold. Speculative work is dropped while playback buffers, the app backgrounds or a modal
-    // owns the player; the loader never publishes warm work by itself.
-    val vodWarmUpEligible = isMovieVod && appForeground && !buffering && !movieModalActive &&
-        !resumePromptVisible && finalError == null && !offlineFailure && durationMs > 0L
-    LaunchedEffect(vodWarmUpEligible, vodPreviewFrames) {
-        if (!vodWarmUpEligible) {
-            vodPreviewFrames.cancelWarmUp()
-            return@LaunchedEffect
-        }
-        val anchor = maxOf(player.currentPosition.coerceAtLeast(0L), currentPositionMs)
-            .coerceIn(0L, durationMs)
-        vodPreviewWarmUpBuckets(anchor).forEach(vodPreviewFrames::warmUp)
-    }
     val recoveryDispatchOwner = RecoveryDispatchOwner(
         generationId = playerSession.generation.id,
         playerInstanceId = playerInstanceGeneration,
@@ -852,9 +831,6 @@ fun PlayerScreen(
         val target = (base + deltaMs).coerceIn(0L, durationMs)
         manualSeekTargetMs = target
         currentPositionMs = target
-        // Direct-seek mode keeps the last seek target visible after settlement; the hold is only
-        // presented while the opt-in Movies TV preview window is active.
-        if (isMovieVod && tvRemoteInput) vodPreviewHoldMs = target
         if (tvRemoteInput) player.seekTo(target)
         val seconds = kotlin.math.abs(deltaMs) / 1_000L
         seekFeedback = if (deltaMs > 0) "+$seconds ث" else "-$seconds ث"
@@ -988,19 +964,13 @@ fun PlayerScreen(
 
     fun commitVodSeek(targetMs: Long) {
         vodSeekPreviewMs = null
-        // Keep the committed target visible as the resting hold while the opt-in Movies TV
-        // timeline interaction remains active; the seek owner is unchanged.
-        if (isMovieVod && tvRemoteInput) {
-            vodPreviewHoldMs = if (durationMs > 0L) targetMs.coerceIn(0L, durationMs) else targetMs
-        }
+        // The committed position stays under its existing owner; the cancelled preview no longer
+        // keeps a presentation hold.
         seekToPosition(targetMs)
     }
 
     fun cancelVodSeekPreview() {
         vodSeekPreviewMs = null
-        // The resting hold is presentation-only and is gated by the TV preview window, so it is
-        // not cleared here: the freshly composed seek bar reports unfocused before it can be
-        // focused (or during direct-seek reveal) and must not destroy the open window's target.
         currentPositionMs = player.currentPosition.coerceAtLeast(0L)
     }
 
@@ -1455,7 +1425,7 @@ fun PlayerScreen(
             controlsVisible && !browserVisible && activePanel == null && liveMorePanel == null &&
             vodMorePanel == null && !vodGoToTimeVisible && vodSeekPreviewMs == null &&
             !resumePromptVisible && !buffering && finalError == null && isPlaying && !controlsLocked &&
-            manualSeekTargetMs == null && !vodPreviewWindowOpen
+            manualSeekTargetMs == null && !vodActiveSeekInteraction
         ) {
             delay(CONTROLS_TIMEOUT_MS)
             controlsVisible = false
@@ -1547,7 +1517,10 @@ fun PlayerScreen(
     }
 
     val interactionModifier = Modifier
-        .pointerInput(request, finalError) {
+        // movieModalActive is a derived plain value; it must be a key so the tap detector is
+        // re-registered when a Resume/error/offline modal closes, otherwise the block created while
+        // the modal was visible keeps rejecting every later surface tap in the same session.
+        .pointerInput(request, finalError, movieModalActive) {
             detectTapGestures(onTap = {
                 if (finalError != null || resumePromptVisible || movieModalActive) return@detectTapGestures
                 when {
@@ -1922,7 +1895,6 @@ fun PlayerScreen(
                                 durationMs = durationMs,
                                 bufferedPercent = bufferedPercent,
                                 seekPreviewMs = vodEffectivePreviewMs,
-                                seekPreviewFrame = vodPreviewFrame,
                                 favorite = vodFavorite.favorite,
                                 favoriteEnabled = vodFavorite.enabled,
                                 moreOpen = vodMorePanel != null,
@@ -2380,7 +2352,7 @@ private fun PlayerTopBar(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = if (isLive) "● بث مباشر" else "HULK SA",
-                    color = if (isLive) Color(0xFFFF4E55) else colors.goldBright,
+                    color = if (isLive) Color(0xFFFF4E55) else colors.gold,
                     fontSize = 11.sp,
                     fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal,
                 )
@@ -2675,7 +2647,6 @@ private fun VodCompactControlStrip(
     durationMs: Long,
     bufferedPercent: Int,
     seekPreviewMs: Long?,
-    seekPreviewFrame: Bitmap?,
     favorite: Boolean,
     favoriteEnabled: Boolean,
     moreOpen: Boolean,
@@ -2706,8 +2677,6 @@ private fun VodCompactControlStrip(
     val rewindFocus = remember { FocusRequester() }
     val forwardFocus = remember { FocusRequester() }
     val favoriteFocus = remember { FocusRequester() }
-    var timelineBounds by remember { mutableStateOf<Rect?>(null) }
-    var trackWidthPx by remember { mutableIntStateOf(0) }
     var stripBounds by remember { mutableStateOf<Rect?>(null) }
     var timelineRowBounds by remember { mutableStateOf<Rect?>(null) }
     var toolsRowBounds by remember { mutableStateOf<Rect?>(null) }
@@ -2829,10 +2798,7 @@ private fun VodCompactControlStrip(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 10.dp)
-                            .onGloballyPositioned { coordinates ->
-                                timelineBounds = coordinates.boundsInParent()
-                            },
+                            .padding(horizontal = 10.dp),
                     ) {
                         VodSeekBar(
                             positionMs = positionMs,
@@ -2851,22 +2817,7 @@ private fun VodCompactControlStrip(
                             downFocus = primaryFocus,
                             stableLayout = true,
                             moviePresentation = true,
-                            onTrackWidthChanged = { trackWidthPx = it },
                         )
-                        val bounds = timelineBounds
-                        val previewTarget = seekPreviewMs
-                        if (previewTarget != null && bounds != null) {
-                            // The overlay shares the seek bar's own measured width so the pointer
-                            // and the drawn thumb use exactly the same coordinate system.
-                            val trackWidth = if (trackWidthPx > 0) trackWidthPx else bounds.width.roundToInt()
-                            VodSeekPreviewOverlay(
-                                targetMs = previewTarget,
-                                frame = seekPreviewFrame,
-                                durationMs = durationMs,
-                                timelineWidthPx = trackWidth,
-                                timelineHeightPx = bounds.height.roundToInt(),
-                            )
-                        }
                     }
                     Text(
                         "-${formatTime((durationMs - positionMs).coerceAtLeast(0L))}",
@@ -3047,83 +2998,6 @@ private fun VodCompactControl(
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-/**
- * Seek preview overlay for the measured timeline. The overlay reports zero size, so appearing or
- * disappearing never changes the control-strip measurement; the bubble draws above the timeline
- * with its pointer kept on the real thumb coordinate by [vodPreviewOverlayPlacement].
- */
-@Composable
-private fun VodSeekPreviewOverlay(
-    targetMs: Long,
-    frame: Bitmap?,
-    durationMs: Long,
-    timelineWidthPx: Int,
-    timelineHeightPx: Int,
-) {
-    val density = LocalDensity.current
-    val textMeasurer = rememberTextMeasurer()
-    val timeStyle = LocalTextStyle.current.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold)
-    val timeSize = textMeasurer.measure(formatTime(targetMs), timeStyle).size
-    val compactTimelinePx = with(density) { 420.dp.roundToPx() }
-    // The timestamp-only fallback is sized from its real content plus accepted padding, bounded by
-    // the timeline width; it never reserves an image-sized rectangle.
-    val fallbackWidthPx = vodPreviewFallbackWidthPx(
-        textWidthPx = timeSize.width,
-        horizontalPaddingPx = with(density) { 16.dp.roundToPx() },
-        availableWidthPx = timelineWidthPx,
-    )
-    val fallbackHeight = with(density) {
-        (timeSize.height + 2 * 8.dp.roundToPx()).toDp()
-    }
-    val cardWidth = if (frame != null) {
-        if (timelineWidthPx < compactTimelinePx) 170.dp else 216.dp
-    } else {
-        with(density) { fallbackWidthPx.toDp() }
-    }
-    val cardHeight = if (frame != null) cardWidth * 9f / 16f else fallbackHeight
-    // The pointer follows the Movies thumb center (inset by the radius), matching VodSeekBar.
-    val thumbCenterPx = vodSeekThumbCenterPx(
-        fraction = vodPreviewCardFraction(targetMs, durationMs),
-        trackWidthPx = timelineWidthPx.toFloat(),
-        thumbDiameterPx = with(density) { 19.dp.toPx() },
-    )
-    val placement = vodPreviewOverlayPlacement(
-        thumbXpx = thumbCenterPx,
-        timelineWidthPx = timelineWidthPx.toFloat(),
-        timelineHeightPx = timelineHeightPx.toFloat(),
-        cardWidthPx = with(density) { cardWidth.toPx() },
-        cardHeightPx = with(density) { cardHeight.toPx() },
-        pointerWidthPx = with(density) { 14.dp.toPx() },
-        pointerHeightPx = with(density) { 7.dp.toPx() },
-        topGapPx = with(density) { 4.dp.toPx() },
-    )
-    Layout(
-        content = {
-            VodSeekPreviewCard(
-                frame = frame,
-                positionMs = targetMs,
-                cardWidth = cardWidth,
-                truthfulFallback = true,
-                fallbackHeight = fallbackHeight,
-                pointerOffsetPx = placement.pointerOffsetPx.roundToInt(),
-            )
-        },
-    ) { measurables, _ ->
-        val card = measurables.firstOrNull()
-        if (card == null) {
-            layout(0, 0) { }
-        } else {
-            val placeable = card.measure(Constraints())
-            layout(0, 0) {
-                placeable.place(
-                    x = placement.cardLeftPx.roundToInt(),
-                    y = placement.topOffsetPx.roundToInt(),
-                )
-            }
-        }
     }
 }
 
@@ -3984,7 +3858,6 @@ private fun VodSeekBar(
     downFocus: FocusRequester? = null,
     stableLayout: Boolean = false,
     moviePresentation: Boolean = false,
-    onTrackWidthChanged: ((Int) -> Unit)? = null,
     onTimelineFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
@@ -4005,13 +3878,6 @@ private fun VodSeekBar(
         Modifier
             .fillMaxWidth()
             .height(slotHeight)
-            .then(
-                if (onTrackWidthChanged != null) {
-                    Modifier.onSizeChanged { onTrackWidthChanged(it.width) }
-                } else {
-                    Modifier
-                },
-            )
             .then(
                 if (inputEnabled) {
                     Modifier

@@ -423,6 +423,21 @@ internal fun vodEffectivePreviewTargetMs(
 ): Long? = scrubTargetMs ?: holdTargetMs?.takeIf { windowActive } ?: legacyFallbackTargetMs
 
 /**
+ * Active-seek control visibility for the shared VOD strip.
+ *
+ * While the Movies TV timeline focus or the existing remote direct-seek interaction is active, the
+ * controls stay usable; after the interaction exits, ordinary auto-hide resumes. The cancelled
+ * Movies preview window no longer participates in control visibility, and non-opt-in callers keep
+ * their existing behavior.
+ */
+internal fun vodActiveSeekHoldsControls(
+    isMovie: Boolean,
+    remoteInput: Boolean,
+    timelineFocused: Boolean,
+    directSeekActive: Boolean,
+): Boolean = isMovie && remoteInput && (timelineFocused || directSeekActive)
+
+/**
  * Bounded speculative Movies seek-preview warm-up set around a prepared playback/resume position.
  *
  * The lookahead reuses the existing five-second bucket and the default ten-second seek step: the
