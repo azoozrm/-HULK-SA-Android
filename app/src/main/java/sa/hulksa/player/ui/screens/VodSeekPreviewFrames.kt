@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -60,10 +62,12 @@ internal enum class VodPreviewRequestDisposition {
  * and the latest request replaces any earlier pending one. The latest requested bucket is recorded
  * on every request, including cache hits and requests returning to the in-flight bucket, so
  * obsolete pending work is dropped and only a completion still matching the latest target can
- * publish. Completed values are cached by bucket (obsolete ones included) so repeating or
- * reversing over a target never re-decodes it. [close] rejects everything after disposal. This
- * class is intentionally free of Android and coroutine types so it can be driven deterministically
- * by tests.
+ * publish. A small bounded warm-up queue holds speculative lookahead buckets that never touch the
+ * latest user target; the worker always drains user pending work first, and [cancelWarmUp] drops
+ * pending speculation without interrupting an already-running extraction. Completed values are
+ * cached by bucket (obsolete ones included) so repeating or reversing over a target never
+ * re-decodes it. [close] rejects everything after disposal. This class is intentionally free of
+ * Android and coroutine types so it can be driven deterministically by tests.
  */
 internal class VodSeekPreviewLoader<T : Any>(
     private val sourceKey: Int,
@@ -72,6 +76,7 @@ internal class VodSeekPreviewLoader<T : Any>(
 ) {
     private val lock = Any()
     private val cache = LinkedHashMap<Long, T>(cacheCapacity, 0.75f, true)
+    private val warmQueue = ArrayDeque<Long>()
     private var inFlightBucket: Long? = null
     private var pendingBucket: Long? = null
     private var latestBucket: Long? = null
@@ -101,21 +106,61 @@ internal class VodSeekPreviewLoader<T : Any>(
             pendingBucket = null
             return VodPreviewRequestDisposition.AWAITING_IN_FLIGHT
         }
+        // Real demand now owns this bucket: drop a matching speculative entry so it can never
+        // cause a duplicate extraction after the user's own request completes.
+        warmQueue.remove(bucketMs)
         pendingBucket = bucketMs
         return VodPreviewRequestDisposition.PENDING_NEW
     }
 
     fun hasPending(): Boolean = synchronized(lock) { !closed && pendingBucket != null }
 
+    fun hasWarmUpPending(): Boolean = synchronized(lock) { !closed && warmQueue.isNotEmpty() }
+
     /**
-     * Runs the single latest pending bucket once. Returns true whenever an extraction was
-     * attempted, so the worker re-checks for newer pending work (including after a failure).
+     * Registers one speculative warm-up bucket without touching the user's latest target.
+     *
+     * Cached, user-pending, in-flight or latest user buckets are never queued again; the bounded
+     * warm queue only holds a short lookahead. Returns true when a new speculative entry was added.
+     */
+    fun warmUp(bucketMs: Long): Boolean = synchronized(lock) {
+        if (closed) return false
+        if (
+            bucketMs == latestBucket || bucketMs == pendingBucket || bucketMs == inFlightBucket ||
+            cache.containsKey(bucketMs) || warmQueue.contains(bucketMs)
+        ) {
+            return false
+        }
+        if (warmQueue.size >= VOD_PREVIEW_WARM_UP_BUCKETS) return false
+        warmQueue.addLast(bucketMs)
+        true
+    }
+
+    /**
+     * Drops pending speculative work. An already-running native extraction cannot be interrupted;
+     * its completion still lands in the bounded cache but can never publish by itself.
+     */
+    fun cancelWarmUp() = synchronized(lock) {
+        warmQueue.clear()
+    }
+
+    /**
+     * Runs one extraction: the user's latest pending bucket first, then one speculative warm-up
+     * bucket. Returns true whenever an extraction was attempted, so the worker re-checks for newer
+     * pending work (including after a failure).
      */
     fun runNext(publish: (VodSeekPreviewResult<T>) -> Unit): Boolean {
         val bucket = synchronized(lock) {
             if (closed || inFlightBucket != null) return false
-            val next = pendingBucket ?: return false
-            pendingBucket = null
+            // Real user demand is always processed before pending speculative warm-up work.
+            val userPending = pendingBucket
+            val next = if (userPending != null) {
+                pendingBucket = null
+                userPending
+            } else {
+                if (warmQueue.isEmpty()) return false
+                warmQueue.removeFirst()
+            }
             inFlightBucket = next
             next
         }
@@ -141,6 +186,7 @@ internal class VodSeekPreviewLoader<T : Any>(
     fun close() = synchronized(lock) {
         closed = true
         pendingBucket = null
+        warmQueue.clear()
         latestBucket = null
         cache.clear()
     }
@@ -164,6 +210,16 @@ internal interface VodSeekPreviewExtractor {
     fun close()
 }
 
+/**
+ * Retained preview-thumbnail budget for the bounded cache.
+ *
+ * The largest preview card is 216.dp wide at 16:9, so a 480x270 source thumbnail covers TV and
+ * phone densities up to about 2.2x, while eight cached frames stay around 4.1 MB instead of
+ * retaining full-size video frames.
+ */
+internal const val VOD_PREVIEW_THUMBNAIL_WIDTH_PX = 480
+internal const val VOD_PREVIEW_THUMBNAIL_HEIGHT_PX = 270
+
 /** Production extractor: one lazy [MediaMetadataRetriever] for the prepared source. */
 internal class MediaMetadataVodPreviewExtractor(
     private val appContext: Context,
@@ -172,13 +228,44 @@ internal class MediaMetadataVodPreviewExtractor(
 
     override fun extract(source: String, bucketMs: Long): Bitmap? {
         val active = retriever ?: createRetriever(source).also { retriever = it }
-        return active.getFrameAtTime(bucketMs * 1_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        val timeUs = bucketMs * 1_000L
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            active.getScaledFrameAtTime(
+                timeUs,
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                VOD_PREVIEW_THUMBNAIL_WIDTH_PX,
+                VOD_PREVIEW_THUMBNAIL_HEIGHT_PX,
+            )
+        } else {
+            // API < 27 has no scaled frame API; decode then scale while preserving the aspect
+            // ratio so the existing ContentScale.Crop fit is unchanged.
+            active.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?.let(::scaleToPreviewThumbnail)
+        }
     }
 
     override fun close() {
         val active = retriever ?: return
         retriever = null
         runCatching { active.release() }
+    }
+
+    private fun scaleToPreviewThumbnail(frame: Bitmap): Bitmap {
+        val width = frame.width.coerceAtLeast(1)
+        val height = frame.height.coerceAtLeast(1)
+        val scale = minOf(
+            VOD_PREVIEW_THUMBNAIL_WIDTH_PX.toFloat() / width,
+            VOD_PREVIEW_THUMBNAIL_HEIGHT_PX.toFloat() / height,
+        )
+        if (scale >= 1f) return frame
+        val scaled = Bitmap.createScaledBitmap(
+            frame,
+            (width * scale).roundToInt().coerceAtLeast(1),
+            (height * scale).roundToInt().coerceAtLeast(1),
+            true,
+        )
+        if (scaled !== frame) frame.recycle()
+        return scaled
     }
 
     private fun createRetriever(media: String): MediaMetadataRetriever {
@@ -200,10 +287,11 @@ internal class MediaMetadataVodPreviewExtractor(
  *
  * One worker thread drives [VodSeekPreviewLoader]: a new target only replaces the single pending
  * bucket, so a continuous seek cannot build a FIFO backlog, and a completed frame is published
- * while the user keeps seeking. Every publication carries its source key and bucket, and the UI
- * accepts it only for the matching target. Every failure returns no frame, which keeps the
- * timestamp-only preview without fabricating an image. No media bytes are written to disk and no
- * URL is ever logged.
+ * while the user keeps seeking. A short bounded warm-up lookahead can be registered speculatively;
+ * it never becomes the latest target and is only ever published through the matching-demand path.
+ * Every publication carries its source key and bucket, and the UI accepts it only for the matching
+ * target. Every failure returns no frame, which keeps the timestamp-only preview without
+ * fabricating an image. No media bytes are written to disk and no URL is ever logged.
  */
 internal class VodSeekPreviewFrames(
     source: String?,
@@ -252,6 +340,24 @@ internal class VodSeekPreviewFrames(
         if (loader.request(bucket, ::publish) == VodPreviewRequestDisposition.PENDING_NEW) {
             signal.trySend(Unit)
         }
+    }
+
+    /**
+     * Registers one speculative pre-extraction bucket near the prepared playback position.
+     *
+     * Warm work never becomes the latest target, so it can only become visible when the user later
+     * requests the same bucket; otherwise its decoded frame is cached and never published. Source
+     * eligibility and the five-second bucket match [request].
+     */
+    fun warmUp(timeMs: Long) {
+        if (closed || !vodPreviewDecodableCandidate(media)) return
+        val bucket = vodPreviewBucketMs(timeMs)
+        if (loader.warmUp(bucket)) signal.trySend(Unit)
+    }
+
+    /** Drops pending warm-up work; an already-running extraction still finishes and is cached. */
+    fun cancelWarmUp() {
+        loader.cancelWarmUp()
     }
 
     fun close() {

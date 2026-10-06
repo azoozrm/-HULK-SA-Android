@@ -331,45 +331,52 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun movieTvPreviewWindowNeedsTimelineFocusOrDirectSeek() {
+    fun movieTvPreviewWindowIsOptInForMoviesWithRemoteInput() {
         // Timeline focused on TV keeps the window open.
         assertTrue(
             vodPreviewWindowActive(
-                isMovie = true, isLive = false, controlsVisible = true,
+                isMovie = true, isLive = false, remoteInput = true, controlsVisible = true,
                 timelineFocused = true, directSeekActive = false,
             ),
         )
         // Remote direct-seek from the surface keeps it open too.
         assertTrue(
             vodPreviewWindowActive(
-                isMovie = true, isLive = false, controlsVisible = true,
+                isMovie = true, isLive = false, remoteInput = true, controlsVisible = true,
                 timelineFocused = false, directSeekActive = true,
             ),
         )
         // Touch drag (no timeline focus, no direct-seek mode) is not a persistent window.
         assertFalse(
             vodPreviewWindowActive(
-                isMovie = true, isLive = false, controlsVisible = true,
+                isMovie = true, isLive = false, remoteInput = true, controlsVisible = true,
                 timelineFocused = false, directSeekActive = false,
             ),
         )
         // Hidden controls (Back/modal/lock/error/disposal) suppress the window.
         assertFalse(
             vodPreviewWindowActive(
-                isMovie = true, isLive = false, controlsVisible = false,
+                isMovie = true, isLive = false, remoteInput = true, controlsVisible = false,
+                timelineFocused = true, directSeekActive = true,
+            ),
+        )
+        // Touch input never owns the persistent Movies window even with focus flags settled.
+        assertFalse(
+            vodPreviewWindowActive(
+                isMovie = true, isLive = false, remoteInput = false, controlsVisible = true,
                 timelineFocused = true, directSeekActive = true,
             ),
         )
         // Series and Live are unaffected.
         assertFalse(
             vodPreviewWindowActive(
-                isMovie = false, isLive = false, controlsVisible = true,
+                isMovie = false, isLive = false, remoteInput = true, controlsVisible = true,
                 timelineFocused = true, directSeekActive = true,
             ),
         )
         assertFalse(
             vodPreviewWindowActive(
-                isMovie = true, isLive = true, controlsVisible = true,
+                isMovie = true, isLive = true, remoteInput = true, controlsVisible = true,
                 timelineFocused = true, directSeekActive = true,
             ),
         )
@@ -391,6 +398,59 @@ class VodPlayerControlsPolicyTest {
         assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 20_000L, windowActive = false))
         // No target keeps the compact honest time-only fallback.
         assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = null, windowActive = true))
+    }
+
+    @Test
+    fun nonOptInCallersKeepTheLegacyTransientDirectSeekTarget() {
+        // Pre-R22 shared behavior: Series/Live surface direct seeking shows the transient manual
+        // target while the interaction is active; the persistent hold is never used.
+        assertEquals(
+            30_000L,
+            vodEffectivePreviewTargetMs(
+                scrubTargetMs = null,
+                holdTargetMs = 30_000L,
+                windowActive = false,
+                legacyFallbackTargetMs = 30_000L,
+            ),
+        )
+        // Settlement/exit clears the transient target; a late frame cannot reopen it.
+        assertNull(
+            vodEffectivePreviewTargetMs(
+                scrubTargetMs = null,
+                holdTargetMs = 30_000L,
+                windowActive = false,
+                legacyFallbackTargetMs = null,
+            ),
+        )
+        // An explicit scrub target still wins for non-opt-in touch dragging.
+        assertEquals(
+            12_000L,
+            vodEffectivePreviewTargetMs(
+                scrubTargetMs = 12_000L,
+                holdTargetMs = null,
+                windowActive = false,
+                legacyFallbackTargetMs = 30_000L,
+            ),
+        )
+        // Inside the opt-in window the persistent hold owns the target over any stale legacy value.
+        assertEquals(
+            15_000L,
+            vodEffectivePreviewTargetMs(
+                scrubTargetMs = null,
+                holdTargetMs = 15_000L,
+                windowActive = true,
+                legacyFallbackTargetMs = 30_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun warmUpBucketsReuseTheFiveSecondBucketWithBoundedLookahead() {
+        assertEquals(listOf(0L, 5_000L, 10_000L, 15_000L), vodPreviewWarmUpBuckets(-1L))
+        assertEquals(listOf(10_000L, 15_000L, 20_000L, 25_000L), vodPreviewWarmUpBuckets(12_400L))
+        assertEquals(listOf(10_000L, 15_000L), vodPreviewWarmUpBuckets(10_000L, count = 2))
+        assertTrue(vodPreviewWarmUpBuckets(10_000L).size <= VOD_PREVIEW_WARM_UP_BUCKETS)
+        assertTrue(vodPreviewWarmUpBuckets(0L, count = 0).isEmpty())
     }
 
     @Test

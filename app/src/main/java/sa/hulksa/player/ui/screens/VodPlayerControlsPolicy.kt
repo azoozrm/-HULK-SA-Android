@@ -392,27 +392,50 @@ internal fun vodPreviewCardFraction(previewMs: Long, durationMs: Long): Float =
 
 /**
  * Movies TV preview window: it stays open while the actual timeline is focused or the existing
- * remote direct-seek mode remains active. Live/Series players are not affected, and hiding the
- * controls (Back, modal, lock, error, disposal) suppresses the window with them.
+ * remote direct-seek mode remains active. The window is explicitly opt-in for Movies with
+ * TV/remote input; Series, Live and touch callers keep their previous direct-seek behavior, and
+ * hiding the controls (Back, modal, lock, error, disposal) suppresses the window with them.
  */
 internal fun vodPreviewWindowActive(
     isMovie: Boolean,
     isLive: Boolean,
+    remoteInput: Boolean,
     controlsVisible: Boolean,
     timelineFocused: Boolean,
     directSeekActive: Boolean,
-): Boolean = isMovie && !isLive && controlsVisible && (timelineFocused || directSeekActive)
+): Boolean = isMovie && !isLive && remoteInput && controlsVisible &&
+    (timelineFocused || directSeekActive)
 
 /**
  * Effective seek-preview target.
  *
  * An explicit scrub intent (focus seed or touch drag) always publishes its own target. Otherwise
- * the resting hold stays visible only while the TV window is active, so a committed seek survives
- * settlement and idle without following playback, and a closed window can never be reopened by a
- * late frame completion.
+ * the resting hold stays visible only while the opt-in Movies TV window is active, so a committed
+ * seek survives settlement and idle without following playback, and a closed window can never be
+ * reopened by a late frame completion. Every non-opt-in caller keeps the pre-R22 transient
+ * direct-seek target through [legacyFallbackTargetMs].
  */
 internal fun vodEffectivePreviewTargetMs(
     scrubTargetMs: Long?,
     holdTargetMs: Long?,
     windowActive: Boolean,
-): Long? = scrubTargetMs ?: holdTargetMs?.takeIf { windowActive }
+    legacyFallbackTargetMs: Long? = null,
+): Long? = scrubTargetMs ?: holdTargetMs?.takeIf { windowActive } ?: legacyFallbackTargetMs
+
+/**
+ * Bounded speculative Movies seek-preview warm-up set around a prepared playback/resume position.
+ *
+ * The lookahead reuses the existing five-second bucket and the default ten-second seek step: the
+ * anchor bucket plus three forward buckets (about 15 s) covers one forward step plus the bucket
+ * right after it, and never exceeds half of the eight-frame preview cache.
+ */
+internal const val VOD_PREVIEW_WARM_UP_BUCKETS = 4
+
+internal fun vodPreviewWarmUpBuckets(
+    timeMs: Long,
+    count: Int = VOD_PREVIEW_WARM_UP_BUCKETS,
+): List<Long> {
+    if (count <= 0) return emptyList()
+    val anchor = vodPreviewBucketMs(timeMs)
+    return List(count) { index -> anchor + index * 5_000L }
+}

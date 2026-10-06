@@ -584,14 +584,21 @@ fun PlayerScreen(
     val vodPreviewWindowOpen = vodPreviewWindowActive(
         isMovie = isMovieVod,
         isLive = request.isLive,
+        remoteInput = tvRemoteInput,
         controlsVisible = controlsVisible,
         timelineFocused = vodTimelineFocused,
         directSeekActive = vodDirectSeekActive,
     )
+    // Pre-R22 shared fallback: the transient direct-seek target shows for every non-live caller
+    // while its remote interaction is active; only the opt-in Movies TV window owns the hold.
+    val vodLegacyDirectSeekTargetMs = manualSeekTargetMs?.takeIf {
+        focusTimelineOnReveal && !request.isLive
+    }
     val vodEffectivePreviewMs = vodEffectivePreviewTargetMs(
         scrubTargetMs = vodSeekPreviewMs,
         holdTargetMs = vodPreviewHoldMs,
         windowActive = vodPreviewWindowOpen,
+        legacyFallbackTargetMs = vodLegacyDirectSeekTargetMs,
     )
     val vodPreviewPublication by vodPreviewFrames.publication.collectAsState()
     // Only the matching source+bucket frame is used; otherwise the time-only fallback stays.
@@ -660,6 +667,21 @@ fun PlayerScreen(
     val movieModalActive = isMovieVod && moviePresentation != MoviePlayerPresentation.PLAYER
     // The card uses offline wording/icon only for genuinely unusable connectivity.
     val movieErrorCardOffline = isMovieVod && !localPlayback && (movieOfflineInitial || !networkAvailable)
+    // Movies-only bounded warm-up: once the prepared movie can afford background work, warm a short
+    // forward lookahead near the authoritative current/resume position so an early scrub does not
+    // start cold. Speculative work is dropped while playback buffers, the app backgrounds or a modal
+    // owns the player; the loader never publishes warm work by itself.
+    val vodWarmUpEligible = isMovieVod && appForeground && !buffering && !movieModalActive &&
+        !resumePromptVisible && finalError == null && !offlineFailure && durationMs > 0L
+    LaunchedEffect(vodWarmUpEligible, vodPreviewFrames) {
+        if (!vodWarmUpEligible) {
+            vodPreviewFrames.cancelWarmUp()
+            return@LaunchedEffect
+        }
+        val anchor = maxOf(player.currentPosition.coerceAtLeast(0L), currentPositionMs)
+            .coerceIn(0L, durationMs)
+        vodPreviewWarmUpBuckets(anchor).forEach(vodPreviewFrames::warmUp)
+    }
     val recoveryDispatchOwner = RecoveryDispatchOwner(
         generationId = playerSession.generation.id,
         playerInstanceId = playerInstanceGeneration,
@@ -826,8 +848,8 @@ fun PlayerScreen(
         manualSeekTargetMs = target
         currentPositionMs = target
         // Direct-seek mode keeps the last seek target visible after settlement; the hold is only
-        // presented while the TV preview window is active.
-        vodPreviewHoldMs = target
+        // presented while the opt-in Movies TV preview window is active.
+        if (isMovieVod && tvRemoteInput) vodPreviewHoldMs = target
         if (tvRemoteInput) player.seekTo(target)
         val seconds = kotlin.math.abs(deltaMs) / 1_000L
         seekFeedback = if (deltaMs > 0) "+$seconds ث" else "-$seconds ث"
@@ -961,9 +983,11 @@ fun PlayerScreen(
 
     fun commitVodSeek(targetMs: Long) {
         vodSeekPreviewMs = null
-        // Keep the committed target visible as the resting hold while the TV timeline interaction
-        // (timeline focus or direct-seek mode) remains active; the seek owner is unchanged.
-        vodPreviewHoldMs = if (durationMs > 0L) targetMs.coerceIn(0L, durationMs) else targetMs
+        // Keep the committed target visible as the resting hold while the opt-in Movies TV
+        // timeline interaction remains active; the seek owner is unchanged.
+        if (isMovieVod && tvRemoteInput) {
+            vodPreviewHoldMs = if (durationMs > 0L) targetMs.coerceIn(0L, durationMs) else targetMs
+        }
         seekToPosition(targetMs)
     }
 
@@ -1426,7 +1450,7 @@ fun PlayerScreen(
             controlsVisible && !browserVisible && activePanel == null && liveMorePanel == null &&
             vodMorePanel == null && !vodGoToTimeVisible && vodSeekPreviewMs == null &&
             !resumePromptVisible && !buffering && finalError == null && isPlaying && !controlsLocked &&
-            manualSeekTargetMs == null && !vodTimelineFocused && !focusTimelineOnReveal
+            manualSeekTargetMs == null && !vodPreviewWindowOpen
         ) {
             delay(CONTROLS_TIMEOUT_MS)
             controlsVisible = false

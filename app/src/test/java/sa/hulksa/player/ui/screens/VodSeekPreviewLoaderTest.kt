@@ -258,4 +258,212 @@ class VodSeekPreviewLoaderTest {
         assertNull(vodPreviewValueFor(frame, sourceKey = 5, targetMs = null))
         assertNull(vodPreviewValueFor(null, sourceKey = 5, targetMs = 10_000L))
     }
+
+    @Test
+    fun warmUpCachesWithoutPublishingAndSatisfiesMatchingDemand() {
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 21,
+            load = { bucket ->
+                loaded += bucket
+                "frame-$bucket"
+            },
+        )
+        val recorder = Recorder<String>()
+
+        assertTrue(loader.warmUp(10_000L))
+        assertFalse(loader.warmUp(10_000L))
+        assertTrue(loader.hasWarmUpPending())
+        assertTrue(loader.runNext(recorder::publish))
+        // Speculative work never publishes by itself.
+        assertTrue(recorder.publications.isEmpty())
+        assertFalse(loader.runNext(recorder::publish))
+        assertEquals(listOf(10_000L), loaded)
+
+        // A later real request is served from the warm cache without duplicate extraction.
+        assertEquals(VodPreviewRequestDisposition.PUBLISHED_CACHE, loader.request(10_000L, recorder::publish))
+        assertEquals(VodSeekPreviewResult(sourceKey = 21, bucketMs = 10_000L, value = "frame-10000"), recorder.latest)
+        assertEquals(listOf(10_000L), loaded)
+    }
+
+    @Test
+    fun userDemandOvertakesPendingWarmUpWorkAndPromotionAvoidsDuplicates() {
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 22,
+            load = { bucket ->
+                loaded += bucket
+                "frame-$bucket"
+            },
+        )
+        val recorder = Recorder<String>()
+
+        assertTrue(loader.warmUp(10_000L))
+        assertTrue(loader.warmUp(15_000L))
+        assertTrue(loader.warmUp(20_000L))
+
+        // Real demand for a queued warm bucket runs first and removes the speculative duplicate.
+        assertEquals(VodPreviewRequestDisposition.PENDING_NEW, loader.request(15_000L, recorder::publish))
+        assertTrue(loader.runNext(recorder::publish))
+        assertEquals(15_000L, recorder.latest?.bucketMs)
+        assertEquals(listOf(15_000L), loaded)
+
+        // Remaining bounded warm work runs after user demand and never replaces the publication.
+        assertTrue(loader.runNext(recorder::publish))
+        assertEquals(15_000L, recorder.latest?.bucketMs)
+        assertTrue(loader.runNext(recorder::publish))
+        assertEquals(15_000L, recorder.latest?.bucketMs)
+        assertFalse(loader.runNext(recorder::publish))
+        assertFalse(loader.hasWarmUpPending())
+        assertEquals(listOf(15_000L, 10_000L, 20_000L), loaded)
+    }
+
+    @Test
+    fun matchingInFlightWarmUpSatisfiesRealRequestWithoutDuplicateExtraction() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 23,
+            load = { bucket ->
+                loaded += bucket
+                if (bucket == 10_000L) {
+                    started.countDown()
+                    release.await()
+                }
+                "frame-$bucket"
+            },
+        )
+        val recorder = Recorder<String>()
+
+        assertTrue(loader.warmUp(10_000L))
+        val worker = Thread { assertTrue(loader.runNext(recorder::publish)) }.apply { start() }
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+
+        assertEquals(VodPreviewRequestDisposition.AWAITING_IN_FLIGHT, loader.request(10_000L, recorder::publish))
+        release.countDown()
+        worker.join(2_000)
+
+        assertEquals(listOf(10_000L), loaded)
+        assertEquals(10_000L, recorder.latest?.bucketMs)
+        assertEquals(23, recorder.latest?.sourceKey)
+        assertFalse(loader.hasWarmUpPending())
+    }
+
+    @Test
+    fun cancelWarmUpDropsPendingSpeculationAndCloseClearsWarmWork() {
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 24,
+            load = { bucket ->
+                loaded += bucket
+                "frame-$bucket"
+            },
+        )
+        val recorder = Recorder<String>()
+
+        assertTrue(loader.warmUp(10_000L))
+        assertTrue(loader.warmUp(15_000L))
+        loader.cancelWarmUp()
+        assertFalse(loader.hasWarmUpPending())
+        assertFalse(loader.runNext(recorder::publish))
+        assertTrue(loaded.isEmpty())
+
+        assertTrue(loader.warmUp(20_000L))
+        loader.close()
+        assertFalse(loader.runNext(recorder::publish))
+        assertTrue(recorder.publications.isEmpty())
+        assertEquals(VodPreviewRequestDisposition.REJECTED, loader.request(10_000L, recorder::publish))
+    }
+
+    @Test
+    fun warmUpNeverOverwritesLatestIntentAndObsoleteWarmCompletionStaysUnpublished() {
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 25,
+            load = { bucket ->
+                loaded += bucket
+                "frame-$bucket"
+            },
+        )
+        val recorder = Recorder<String>()
+
+        assertEquals(VodPreviewRequestDisposition.PENDING_NEW, loader.request(20_000L, recorder::publish))
+        assertTrue(loader.runNext(recorder::publish))
+        assertEquals(20_000L, recorder.latest?.bucketMs)
+
+        // The user still owns 20_000; the speculative completion is cached but not published.
+        assertTrue(loader.warmUp(10_000L))
+        assertTrue(loader.runNext(recorder::publish))
+        assertEquals(20_000L, recorder.latest?.bucketMs)
+        assertEquals(listOf(20_000L, 10_000L), loaded)
+
+        // Rapid reversal to the warmed bucket is a cache hit with no extra extraction.
+        assertEquals(VodPreviewRequestDisposition.PUBLISHED_CACHE, loader.request(10_000L, recorder::publish))
+        assertEquals(10_000L, recorder.latest?.bucketMs)
+        assertEquals(listOf(20_000L, 10_000L), loaded)
+    }
+
+    @Test
+    fun warmUpFailureDoesNotStrandRealDemand() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 26,
+            load = { bucket ->
+                loaded += bucket
+                if (bucket == 10_000L) {
+                    started.countDown()
+                    release.await()
+                    null
+                } else {
+                    "frame-$bucket"
+                }
+            },
+        )
+        val recorder = Recorder<String>()
+
+        assertTrue(loader.warmUp(10_000L))
+        val worker = Thread { assertTrue(loader.runNext(recorder::publish)) }.apply { start() }
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        assertEquals(VodPreviewRequestDisposition.PENDING_NEW, loader.request(20_000L, recorder::publish))
+
+        release.countDown()
+        worker.join(2_000)
+        assertFalse(loader.hasWarmUpPending())
+        assertTrue(recorder.publications.isEmpty())
+
+        assertTrue(loader.runNext(recorder::publish))
+        assertEquals(20_000L, recorder.latest?.bucketMs)
+        assertEquals(listOf(10_000L, 20_000L), loaded)
+    }
+
+    @Test
+    fun warmUpQueueIsBoundedAndServesLaterDemandFromTheBoundedCache() {
+        val loaded = mutableListOf<Long>()
+        val loader = VodSeekPreviewLoader<String>(
+            sourceKey = 27,
+            load = { bucket ->
+                loaded += bucket
+                "frame-$bucket"
+            },
+        )
+        val recorder = Recorder<String>()
+
+        repeat(VOD_PREVIEW_WARM_UP_BUCKETS) { index ->
+            assertTrue(loader.warmUp(index * 5_000L))
+        }
+        // No long speculative backlog can be queued.
+        assertFalse(loader.warmUp(40_000L))
+        while (loader.runNext(recorder::publish)) { }
+
+        assertEquals(VOD_PREVIEW_WARM_UP_BUCKETS, loaded.size)
+        assertTrue(recorder.publications.isEmpty())
+
+        // The warmed frame later satisfies a real request without another extraction.
+        assertEquals(VodPreviewRequestDisposition.PUBLISHED_CACHE, loader.request(5_000L, recorder::publish))
+        assertEquals(5_000L, recorder.latest?.bucketMs)
+        assertEquals(VOD_PREVIEW_WARM_UP_BUCKETS, loaded.size)
+    }
 }
