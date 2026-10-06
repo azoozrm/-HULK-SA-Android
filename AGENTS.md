@@ -16,7 +16,9 @@ Audit / Review / Diagnosis is read-only. Do not modify files, create branches, c
 
 No merge, signing, tag, or release without explicit user authorization.
 
-Standing owner-authorized Implementation/Correction workflow: complete the bounded source change, relevant focused checks and affected regressions, applicable builds and state-preserving installation/launch verification on approved surfaces, durable evidence, one coherent commit per correction round, normal fast-forward push, and creation/update of one PR. Continue through the configured CI checks to their final result; do not stop at a push, pending CI, or an in-scope failure. The current owner instruction may explicitly narrow this workflow or defer a step. Read-only tasks do not inherit write authority, and documentation-only work does not require Android builds or device refresh.
+Standing owner-authorized iterative Implementation/Correction workflow: LOCAL_ROUND is the default. Complete the bounded source change, relevant local checks, applicable builds and state-preserving refresh on approved surfaces, bounded technical verification and durable evidence in the same task worktree. Preserve successful local changes for owner review; do not automatically commit, push, create/update a PR or run CI for each small correction.
+
+After the owner accepts/completes the exact section, SECTION_PUBLISH performs final applicable regressions, frozen source/artifact binding, one coherent section commit, normal fast-forward push and one section PR, continuing triggered CI to its final result. An explicitly requested standalone documentation/governance task may publish as one bounded docs-only PR. Current owner instructions may narrow or alter these phases; do not ask again for already authorized steps. Read-only work inherits no write authority. Documentation-only work requires no Android builds or device refresh. Read the execution contract for phase boundaries.
 
 ChatGPT / Sol prepares and independently reviews the task packet; OpenCode / DeepSeek is the normal executor. Routine execution does not require Codex/Astra or a new approval at each authorized step. Owner visual acceptance and protected actions remain separate.
 
@@ -62,7 +64,7 @@ For a correction inside an existing PR, continue from the current remote PR HEAD
 
 One confirmed atomic problem should remain one branch and one PR unless the user explicitly requests otherwise or the work is already inside an existing PR.
 
-Do not combine independent problems or turn a targeted fix into a general refactor.
+Do not combine independent problems or turn a targeted fix into a general refactor. An explicitly owner-defined section bundle may retain its related local correction rounds on one branch and publish as one section PR; that exception does not absorb unrelated work.
 
 Minimize:
 
@@ -176,7 +178,9 @@ In particular:
 - Android Engineering Lab, for lab/runtime/maintenance work: `docs/android-engineering-lab/README.md`
 - Task execution contract, for substantive authorized Implementation/Correction tasks: `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`
 - Adopted DeepSeek task-packet method, read explicitly before drafting or executing substantive Implementation/Correction packets: `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md`
-- Approved unified player reference (owner-accepted design, HULK-PLAYER-20261004), read together with its three unchanged boards under `docs/design/player/reference/20261004/` before player UI work: `docs/design/player/APPROVED-PLAYER-REFERENCE.md`
+- Shared UI design contract, read explicitly before UI work; preserves the accepted Movies result and defines section variants: `docs/design/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md`
+- Evidence retention/delivery contract, read explicitly for substantive work: `docs/android-engineering-lab/DEEPSEEK-EVIDENCE-CONTRACT.md`
+- Original player-board index and supersession record: `docs/design/player/APPROVED-PLAYER-REFERENCE.md`. Its unchanged 20261004 boards are historical visual references; later owner decisions and the shared contract control current behavior.
 
 Substantive authorized Implementation/Correction tasks follow `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`. The active task packet supplies scope and live fields; applicable repository, subsystem and physical contracts still govern.
 
@@ -240,7 +244,7 @@ Before commit:
 - check generated files, imports, formatting churn, and task-created debug/temp/dead/speculative code;
 - verify unrelated changes are excluded.
 
-Use one coherent commit per authorized correction round. Do not create experimental or diagnostic commits.
+Use one coherent commit for an authorized SECTION_PUBLISH boundary. LOCAL_ROUND does not automatically commit/push or create/update a PR. Do not create experimental or diagnostic commits.
 
 Do not commit while the current task's applicable GitHub Actions checks are queued or running. Inspect their final result first. Repair an in-scope CI defect in the same task/PR after identifying its cause; do not bypass a failed check, widen scope to unrelated failures, or rerun a successful workflow without reason. Missing CI due to path filters is NOT RUN with a reason, never PASS.
 
@@ -302,10 +306,12 @@ The specific authoritative contract for persistent package identity, approved ph
 - `AGENTS.override.md`;
 - `docs/android-engineering-lab/PHYSICAL-ENGINEERING-INSTANCES.md`.
 
-At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device, refresh **both** persistent packages from the exact current task worktree / PR HEAD with the owner-approved qualification overrides `-PHULK_QUALIFICATION_VERSION_CODE=<n>` and `-PHULK_QUALIFICATION_VERSION_NAME=<name>`:
+At the end of any Android implementation round that reaches a valid, testable state, unless the task explicitly forbids touching the device, refresh **both** persistent packages from the exact frozen current task-worktree candidate with the owner-approved qualification overrides `-PHULK_QUALIFICATION_VERSION_CODE=<n>` and `-PHULK_QUALIFICATION_VERSION_NAME=<name>`:
 
 - `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assemblePreview`;
 - `./gradlew -PHULK_QUALIFICATION_VERSION_CODE=<n> -PHULK_QUALIFICATION_VERSION_NAME=<name> :app:assembleBenchmark`.
+
+An uncommitted local candidate is a valid refresh input when its base HEAD, dirty state, diff/source hashes and artifact provenance are recorded under the execution/evidence contracts. A commit/PR is not a prerequisite for local installation; never claim a dirty build is a clean-HEAD build.
 
 The Preview build currently fails closed when either override property is missing; the Benchmark variant has no equivalent build-level guard yet, so its built APK version must always be verified explicitly before installation. Using the overrides keeps each installed versionCode/versionName aligned with the live Operations latest and avoids a stale Optional Update overlay.
 

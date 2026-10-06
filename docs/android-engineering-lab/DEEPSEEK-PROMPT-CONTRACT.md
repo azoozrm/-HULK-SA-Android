@@ -6,7 +6,8 @@ Implementation/Correction packet. Referencing a filename does not load its conte
 
 Current owner instructions define scope and may narrow the standing implementation workflow
 in root `AGENTS.md`. This method grants no additional authority. Read the live
-`TASK-EXECUTION-CONTRACT.md`, applicable override, lab, physical and subsystem contracts;
+`TASK-EXECUTION-CONTRACT.md` and `DEEPSEEK-EVIDENCE-CONTRACT.md`, applicable override, lab,
+physical and subsystem contracts; for UI also read the shared design contract explicitly;
 do not replace them with copied chat text, research, or template examples.
 
 ## 1. One bounded result
@@ -26,7 +27,8 @@ do not replace them with copied chat text, research, or template examples.
 
 ## 2. Live fields and authority
 
-Include the target repository/task/branch/PR, expected SHA when verified, approved source and
+Include NEW/RESUME, LOCAL_ROUND or SECTION_PUBLISH, section/round/candidate identity, the target
+repository/task/branch/PR when present, expected SHA when verified, approved source and
 physical scope, acceptance conditions, checks, current deferrals and completion boundary.
 Mark executor verification outstanding when a live fact is unavailable to the coordinator.
 Resolve discoverable facts from GitHub, the task checkout or approved devices; never invent
@@ -41,31 +43,33 @@ attachment filenames only when needed. Prefer already accessible GitHub/VPS evid
 interpretation requires actual image access; a path string is not proof of image delivery.
 Keep model/provider research dated and separate; it authorizes no configuration or tool changes.
 
-## 3. Complete the authorized round
+## 3. Complete the declared phase
 
-For an owner-authorized Implementation/Correction round, follow root `AGENTS.md`'s standing
-workflow unless the current owner instruction explicitly narrows it:
+LOCAL_ROUND is the default for iterative section work:
+1. Verify live authority/task/worktree/remote state; preserve valid accumulated local work.
+2. Trace the active source owner/cause, make the bounded correction and review both round and section diff.
+3. Run relevant focused local checks and affected regressions; record current bounded deferrals.
+4. Freeze the local candidate with base HEAD, dirty state, diff/source hashes; build and refresh only
+   applicable approved surfaces under the physical contract, preserving data.
+5. Perform bounded technical verification and prepare complete durable evidence/ZIP/checksum.
+6. Report local technical verdict and exact-candidate owner review status. Keep accepted local changes.
+   No automatic commit/push/PR/CI for each correction and no clean-HEAD claim for dirty source.
 
-1. Verify live state and instruction scope; trace the actual source owner and cause.
-2. Make the smallest correct source change and review the complete diff.
-3. Run relevant focused checks and affected regressions. Tests are not deferred by default;
-   honor only the current task's explicit deferrals.
-4. Build applicable variants and refresh the approved persistent device/package surfaces under
-   the physical contract, with truthful source/APK identity and state preservation. A task
-   involving documentation only does not require an Android build or device refresh.
-5. Retain the frozen candidate, provenance, actual results and limitations in durable task records.
-6. Once local validation and Git gates pass, make one coherent commit per authorized correction
-   round, use normal fast-forward push and create/update the same single PR. No experimental
-   commits, history rewrite, direct official-branch push or commit while task CI is running.
-7. Follow configured PR checks until final. For a failure, inspect full relevant logs/artifacts,
-   classify the first cause and fix an in-scope defect in the same task/PR. A successful push,
-   pending CI or a failed check is not technical completion. If path filters do not trigger CI,
-   record NOT RUN with the actual reason; do not manufacture a pass or rerun a successful build.
-8. Finish with one factual report. Separate technical completion, owner visual acceptance and
-   release qualification. Merge, signing, tags, release and deployment require separate authority.
+SECTION_PUBLISH follows owner section acceptance/completion or an explicitly requested standalone
+publication task:
+1. Review accumulated accepted scope and run final applicable regression/documentation gates.
+2. Bind final artifacts/evidence to immutable source; retain a proven matching dirty build without
+   relabeling it, or rebuild affected inputs.
+3. Make one coherent section commit, normal fast-forward push and one section PR; verify remote
+   heads and honor existing Git/overlap/CI stop rules.
+4. Follow triggered checks to final; diagnose first causal failures and fix only in-scope defects.
+   Path-filtered CI is NOT RUN, not PASS. Documentation-only publication has no Android build/refresh.
+5. Deliver one factual final report and complete evidence archive. Merge/signing/tag/release remain
+   separate protected actions.
 
-Continue routine authorized work without repeated permission requests. Persistence never overrides
-STOP rules, a real external blocker or protected-action limits; report those precisely.
+Read the execution contract for phase completion. Existing authority does not need another approval.
+Persistence never overrides STOP, a real external dependency or protected-action limits.
+A referenced skill's older commit/push language cannot expand LOCAL_ROUND into publication.
 
 ## 4. Capture and runtime boundary
 
