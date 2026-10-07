@@ -129,7 +129,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
@@ -6513,47 +6513,66 @@ private fun LiveCategoryManagerRow(
                     Modifier.pointerInput(category.id) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
-                            // A quick release toggles once; slop movement stays with ordinary list
-                            // scrolling and never enters move mode.
+                            // A real unconsumed quick release toggles once; a consumed/cancelled
+                            // change never toggles, starts a drag or commits. Slop movement stays
+                            // with ordinary list scrolling.
                             var lastPosition = down.position
                             val resolvedEarly = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                                 var early = false
                                 while (!early) {
-                                    val event = awaitPointerEvent()
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
                                     val change = event.changes.firstOrNull { it.id == down.id }
-                                    if (change == null || change.changedToUpIgnoreConsumed()) {
-                                        if (change != null) currentOnToggle()
-                                        early = true
-                                    } else {
-                                        lastPosition = change.position
-                                        if (
-                                            (change.position - down.position).getDistance() >
-                                            viewConfiguration.touchSlop
-                                        ) {
+                                    when (
+                                        liveCategoryPreLongPressDecision(
+                                            hasChange = change != null,
+                                            pressed = change?.pressed ?: false,
+                                            consumed = change?.isConsumed ?: false,
+                                            movedBeyondSlop = change != null &&
+                                                (change.position - down.position).getDistance() >
+                                                viewConfiguration.touchSlop,
+                                        )
+                                    ) {
+                                        LiveCategoryGestureDecision.TOGGLE -> {
+                                            currentOnToggle()
                                             early = true
                                         }
+                                        LiveCategoryGestureDecision.CANCEL -> early = true
+                                        else -> if (change != null) lastPosition = change.position
                                     }
                                 }
                                 true
                             }
                             if (resolvedEarly != null) return@awaitEachGesture
-                            // One continuous long-press drag owns the gesture; the drop commits and
-                            // the release is consumed so no tap toggle can follow. The drag starts
-                            // from the real current pointer coordinate of this gesture.
+                            // One continuous long-press drag owns the gesture; only an unconsumed
+                            // release commits, and it is consumed so no tap toggle can follow. The
+                            // drag starts from the real current pointer coordinate of this gesture.
                             currentOnDragStart(rowTopWindow.floatValue + lastPosition.y)
                             var dropped = false
                             try {
                                 while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    if (change.changedToUpIgnoreConsumed()) {
-                                        currentOnDrop()
-                                        dropped = true
-                                        change.consume()
-                                        break
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    when (
+                                        liveCategoryDragDecision(
+                                            hasChange = change != null,
+                                            pressed = change?.pressed ?: false,
+                                            consumed = change?.isConsumed ?: false,
+                                        )
+                                    ) {
+                                        LiveCategoryGestureDecision.DROP -> {
+                                            currentOnDrop()
+                                            dropped = true
+                                            change?.consume()
+                                            break
+                                        }
+                                        LiveCategoryGestureDecision.CANCEL -> break
+                                        else -> {
+                                            currentOnDragMove(
+                                                rowTopWindow.floatValue + (change?.position?.y ?: 0f),
+                                            )
+                                            change?.consume()
+                                        }
                                     }
-                                    currentOnDragMove(rowTopWindow.floatValue + change.position.y)
-                                    change.consume()
                                 }
                             } finally {
                                 if (!dropped) currentOnDragCancel()

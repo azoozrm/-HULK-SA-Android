@@ -103,6 +103,44 @@ internal fun liveCategoryDragTargetKey(
     pointerY >= top && pointerY <= top + row.size
 }?.key
 
+/**
+ * Consumption-aware decisions for the Live manager touch gesture.
+ *
+ * Consumption always wins over release: a change that another owner consumed (including a
+ * synthetic/cancelled release) must never toggle visibility, start a drag or commit an order.
+ * Only a real, unconsumed release may complete an interaction.
+ */
+internal enum class LiveCategoryGestureDecision {
+    CONTINUE,
+    TOGGLE,
+    DROP,
+    CANCEL,
+}
+
+internal fun liveCategoryPreLongPressDecision(
+    hasChange: Boolean,
+    pressed: Boolean,
+    consumed: Boolean,
+    movedBeyondSlop: Boolean,
+): LiveCategoryGestureDecision = when {
+    !hasChange -> LiveCategoryGestureDecision.CANCEL
+    consumed -> LiveCategoryGestureDecision.CANCEL
+    !pressed -> LiveCategoryGestureDecision.TOGGLE
+    movedBeyondSlop -> LiveCategoryGestureDecision.CANCEL
+    else -> LiveCategoryGestureDecision.CONTINUE
+}
+
+internal fun liveCategoryDragDecision(
+    hasChange: Boolean,
+    pressed: Boolean,
+    consumed: Boolean,
+): LiveCategoryGestureDecision = when {
+    !hasChange -> LiveCategoryGestureDecision.CANCEL
+    consumed -> LiveCategoryGestureDecision.CANCEL
+    !pressed -> LiveCategoryGestureDecision.DROP
+    else -> LiveCategoryGestureDecision.CONTINUE
+}
+
 /** Moves one stable category id; unknown ids or an out-of-range target leave the order unchanged. */
 internal fun moveLiveCategory(ids: List<String>, categoryId: String, targetIndex: Int): List<String> {
     val from = ids.indexOf(categoryId)
