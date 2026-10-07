@@ -98,6 +98,38 @@ class LiveControlsLayoutPolicyTest {
     }
 
     @Test
+    fun liveRowModeUsesTheMeasuredCompleteCaptionsInsteadOfWidthAlone() {
+        assertEquals(
+            LiveControlsRowMode.SINGLE_ROW,
+            liveControlsRowMode(availableWidthPx = 900, requiredSingleRowWidthPx = 860),
+        )
+        assertEquals(
+            LiveControlsRowMode.TWO_ROWS,
+            liveControlsRowMode(availableWidthPx = 900, requiredSingleRowWidthPx = 960),
+        )
+        assertEquals(
+            LiveControlsRowMode.TWO_ROWS,
+            liveControlsRowMode(availableWidthPx = 0, requiredSingleRowWidthPx = 100),
+        )
+        assertEquals(
+            LiveControlsRowMode.TWO_ROWS,
+            liveControlsRowMode(availableWidthPx = 900, requiredSingleRowWidthPx = 0),
+        )
+    }
+
+    @Test
+    fun liveStripGradientAnchorsOnTheMeasuredToolRow() {
+        assertEquals(
+            0.4f,
+            liveStripGradientStopFraction(stripHeightPx = 100f, toolsTopPx = 40f)!!,
+            0.001f,
+        )
+        assertNull(liveStripGradientStopFraction(stripHeightPx = 0f, toolsTopPx = 40f))
+        assertNull(liveStripGradientStopFraction(stripHeightPx = 100f, toolsTopPx = 0f))
+        assertNull(liveStripGradientStopFraction(stripHeightPx = 100f, toolsTopPx = 100f))
+    }
+
+    @Test
     fun livePlayerResizeLabelsKeepTheAlefOnlyCorrection() {
         assertEquals(listOf("ملائم", "تكبير", "ملء الشاشة"), LIVE_PLAYER_RESIZE_LABELS)
         assertEquals("ملائم", livePlayerResizeLabel(0))

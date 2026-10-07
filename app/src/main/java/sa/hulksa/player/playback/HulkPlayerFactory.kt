@@ -47,13 +47,20 @@ internal class HulkPlayerFactory(context: Context) {
             .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
-        return ExoPlayer.Builder(appContext)
+        val createStartMs = android.os.SystemClock.uptimeMillis()
+        val created = ExoPlayer.Builder(appContext)
             .setRenderersFactory(renderersFactory)
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .build()
+        android.util.Log.i(
+            "HulkPlayer",
+            "player created t=${android.os.SystemClock.elapsedRealtime()} mode=$outputMode " +
+                "in ${android.os.SystemClock.uptimeMillis() - createStartMs}ms",
+        )
+        return created
             .also { player ->
                 if (outputMode == PlayerAudioOutputMode.PLATFORM_SOFTWARE_PCM) {
                     player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()

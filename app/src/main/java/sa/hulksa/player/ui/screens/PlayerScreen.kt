@@ -23,6 +23,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -142,6 +145,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -207,6 +211,7 @@ import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
 
 private const val CONTROLS_TIMEOUT_MS = 5_000L
+private const val LIVE_CONTROL_HOLD_REPEAT_MS = 180L
 private const val NEXT_EPISODE_SECONDS = 8
 private const val PLAYER_OFFLINE_MESSAGE = "لا يوجد اتصال بالانترنت. سيتم استئناف التشغيل تلقائيا عند عودة الاتصال."
 
@@ -301,6 +306,51 @@ internal fun moviePlayerErrorCopy(
         } else {
             "مكان توقفك محفوظ"
         },
+    )
+}
+
+/** Copy for the single Live error card: offline wording only for real unusable connectivity. */
+internal data class LivePlayerErrorPresentation(
+    val title: String,
+    val body: String,
+    val offline: Boolean,
+)
+
+/**
+ * Truthful Live player error presentation.
+ *
+ * `offlineFailure` is the typed unusable-connectivity state (never message-string matching). A
+ * started broadcast that was playing when connectivity dropped keeps the automatic-return wording
+ * because the existing network-restore owner replays the captured intent; an offline entry or a
+ * paused broadcast never promises autoplay. Online Live failures keep the real server/media message
+ * under the Live channel-recovery title. No Movie saved-position/Resume wording is used.
+ */
+internal fun livePlayerErrorPresentation(
+    offlineFailure: Boolean,
+    playbackStarted: Boolean,
+    autoResumeIntent: Boolean,
+    failureMessage: String?,
+): LivePlayerErrorPresentation = when {
+    offlineFailure && playbackStarted && autoResumeIntent -> LivePlayerErrorPresentation(
+        title = "انقطع اتصال الانترنت",
+        body = "سيعود تشغيل القناة تلقائيا عند عودة الاتصال",
+        offline = true,
+    )
+    offlineFailure && playbackStarted -> LivePlayerErrorPresentation(
+        title = "انقطع اتصال الانترنت",
+        body = "القناة متوقفة مؤقتا ، اضغط تشغيل للمتابعة بعد عودة الاتصال",
+        offline = true,
+    )
+    offlineFailure -> LivePlayerErrorPresentation(
+        title = "لا يوجد اتصال بالانترنت",
+        body = "تعذر تشغيل القناة ، تحقق من الاتصال وحاول مرة اخرى",
+        offline = true,
+    )
+    else -> LivePlayerErrorPresentation(
+        title = "تعذر تشغيل القناة",
+        body = failureMessage?.trim()?.takeIf { it.isNotEmpty() }
+            ?: "البث غير متاح حاليا ، جرب اعادة المحاولة او اختر قناة اخرى",
+        offline = false,
     )
 }
 
@@ -419,6 +469,14 @@ fun PlayerScreen(
     onProgress: (request: PlaybackRequest, positionMs: Long, durationMs: Long) -> Unit,
     nextEpisodeTitle: String? = null,
     onPlayNextEpisode: (() -> Unit)? = null,
+    liveControlsRevealRequested: Boolean = false,
+    liveControlsInteractionTick: Int = 0,
+    liveChannelHoldRepeat: Boolean = false,
+    onPreviousLiveChannel: (() -> Int)? = null,
+    onNextLiveChannel: (() -> Int)? = null,
+    onLiveChannelHoldRelease: (() -> Unit)? = null,
+    onLiveChannelHoldCancelled: ((Int) -> Unit)? = null,
+    liveCatalogIndex: LiveChannelCatalogIndex? = null,
     onErrorModalActiveChanged: (Boolean) -> Unit = {},
     onBrowserVisibilityChanged: (Boolean) -> Unit = {},
     onPanelActiveChanged: (Boolean) -> Unit = {},
@@ -470,13 +528,20 @@ fun PlayerScreen(
     var finalError by remember(request) { mutableStateOf<String?>(null) }
     var finalFailureClass by remember(request) { mutableStateOf<RecoveryFailureClass?>(null) }
     var suspendedFinalError by remember(request) { mutableStateOf<SuspendedPlayerError?>(null) }
+    // Live error-origin foreground surfaces (channel browser / source picker) suppress the
+    // background error presentation, key ownership and focus acquisition together while they own
+    // input. The failure/recovery state itself stays live so closing restores only a still-valid
+    // error and never a stale snapshot from a recovered or replaced request.
+    var liveErrorSurfaceSuppressed by remember(request) { mutableStateOf(false) }
     var offlineFailure by remember(request) { mutableStateOf(false) }
     var offlineWasPlaying by remember(request) { mutableStateOf(false) }
     var restoredPlayWhenReady by remember(request) { mutableStateOf<Boolean?>(null) }
     var networkAvailable by remember(context, request) { mutableStateOf(hasUsableNetwork(context)) }
     val isMovieVod = !request.isLive && request.streamKind.equals("movie", ignoreCase = true)
     var buffering by remember(request) { mutableStateOf(true) }
-    var controlsVisible by remember(request) { mutableStateOf(!request.isLive) }
+    var controlsVisible by remember(request) {
+        mutableStateOf(liveControlsVisibleOnRequestStart(request.isLive, liveControlsRevealRequested))
+    }
     var browserVisible by remember(request) { mutableStateOf(false) }
     var browserOrigin by remember(request) { mutableStateOf(LiveChannelBrowserOrigin.NORMAL_LIVE) }
     var activePanel by remember(request) { mutableStateOf<PlayerPanel?>(null) }
@@ -490,6 +555,9 @@ fun PlayerScreen(
     var vodTimelineFocused by remember(request) { mutableStateOf(false) }
     var moreFocusRestoreTick by remember(request) { mutableIntStateOf(0) }
     var isPlaying by remember(request) { mutableStateOf(false) }
+    // Distinguishes an offline entry from a connectivity drop during a started Live broadcast so
+    // the Live error copy never promises an automatic return that the captured intent cannot honor.
+    var livePlaybackStarted by remember(request) { mutableStateOf(false) }
     var isMuted by remember(request) { mutableStateOf(false) }
     var videoHeight by remember(request) { mutableIntStateOf(0) }
     var resizeModeIndex by remember(request) { mutableIntStateOf(0) }
@@ -554,8 +622,23 @@ fun PlayerScreen(
     val errorRetryFocus = remember { FocusRequester() }
     val offlineRetryFocus = remember { FocusRequester() }
     val offlineBackFocus = remember { FocusRequester() }
-    val currentChannel = remember(liveCatalog, request.streamId) {
-        liveCatalog?.items?.firstOrNull { it.id == request.streamId }
+    // The Pro layer owns one catalog index per catalog instance and passes it down; the direct
+    // (Kids) caller builds its own. Either way the index is remembered per catalog instance.
+    val ownedLiveCatalogIndex = remember(liveCatalog, liveCatalogIndex) {
+        liveCatalogIndex ?: LiveChannelCatalogIndex(liveCatalog?.items.orEmpty())
+    }
+    val resolvedLiveCatalogIndex = liveCatalogIndex ?: ownedLiveCatalogIndex
+    val currentChannel = remember(resolvedLiveCatalogIndex, request.streamId) {
+        val lookupStartMs = android.os.SystemClock.elapsedRealtime()
+        val found = resolvedLiveCatalogIndex.byId[request.streamId]
+        if (request.isLive) {
+            android.util.Log.i(
+                "HulkPlayer",
+                "currentChannel lookup t=${android.os.SystemClock.elapsedRealtime()} " +
+                    "self=${android.os.SystemClock.elapsedRealtime() - lookupStartMs}ms id=${request.streamId}",
+            )
+        }
+        found
     }
     val liveFavoriteChannel = currentChannel.takeIf { request.isLive }
     // The observed favorites snapshot is an explicit reactive input. The authoritative predicate
@@ -577,8 +660,10 @@ fun PlayerScreen(
     // The Movies seek preview is cancelled: Movies never construct the extraction worker, never
     // warm up and never request or decode a frame. Only the shared Series surface keeps the
     // existing pre-R23 preview source.
+    // The bounded Series seek-preview surface is never shown for Live playback, so Live commits
+    // must not construct or dispose its executor/scope/StateFlow on every channel switch.
     val vodPreviewFrames = remember(request, vodPreviewSource, isMovieVod) {
-        if (isMovieVod) {
+        if (isMovieVod || request.isLive) {
             null
         } else {
             VodSeekPreviewFrames(
@@ -631,11 +716,19 @@ fun PlayerScreen(
             remoteLayout = tvRemoteInput,
         )
     }
-    val channelSequence = remember(liveCatalog, currentChannel) {
-        val inCategory = currentChannel?.let { current ->
-            liveCatalog?.items.orEmpty().filter { it.categoryId == current.categoryId }
-        }.orEmpty()
-        inCategory.ifEmpty { liveCatalog?.items.orEmpty() }
+    val channelSequence = remember(resolvedLiveCatalogIndex, currentChannel) {
+        val sequenceStartMs = android.os.SystemClock.elapsedRealtime()
+        val resolved = resolvedLiveCatalogIndex
+            .channelsInCategory(currentChannel?.categoryId)
+            .ifEmpty { resolvedLiveCatalogIndex.items }
+        if (currentChannel != null && resolved.isNotEmpty()) {
+            android.util.Log.i(
+                "HulkPlayer",
+                "channelSequence build t=${android.os.SystemClock.elapsedRealtime()} " +
+                    "self=${android.os.SystemClock.elapsedRealtime() - sequenceStartMs}ms size=${resolved.size}",
+            )
+        }
+        resolved
     }
     val switchRelative: (Int) -> Unit = { delta ->
         if (channelSequence.isNotEmpty()) {
@@ -673,6 +766,12 @@ fun PlayerScreen(
     val movieModalActive = isMovieVod && moviePresentation != MoviePlayerPresentation.PLAYER
     // The card uses offline wording/icon only for genuinely unusable connectivity.
     val movieErrorCardOffline = isMovieVod && !localPlayback && (movieOfflineInitial || !networkAvailable)
+    // One foreground eligibility shared by the error path's rendering, key/pointer ownership and
+    // focus acquisition. While a Live error-origin surface owns input, all three are suspended.
+    val liveErrorForegroundActive = playerErrorForegroundActive(
+        finalErrorPresent = finalError != null,
+        liveSurfaceSuppressed = liveErrorSurfaceSuppressed,
+    )
     val recoveryDispatchOwner = RecoveryDispatchOwner(
         generationId = playerSession.generation.id,
         playerInstanceId = playerInstanceGeneration,
@@ -703,13 +802,20 @@ fun PlayerScreen(
 
     fun closeBrowserAndRestoreError() {
         browserVisible = false
-        restoreSuspendedFinalError()
+        when (playerErrorSurfaceRelease(liveErrorSurfaceSuppressed)) {
+            PlayerErrorSurfaceRelease.CLEAR_LIVE_SUPPRESSION -> liveErrorSurfaceSuppressed = false
+            PlayerErrorSurfaceRelease.RESTORE_SUSPENDED_ERROR -> restoreSuspendedFinalError()
+        }
     }
 
     fun closeActivePanelAndRestoreError() {
         val restoreError = activePanel == PlayerPanel.SERVERS
         activePanel = null
-        if (restoreError) restoreSuspendedFinalError()
+        if (!restoreError) return
+        when (playerErrorSurfaceRelease(liveErrorSurfaceSuppressed)) {
+            PlayerErrorSurfaceRelease.CLEAR_LIVE_SUPPRESSION -> liveErrorSurfaceSuppressed = false
+            PlayerErrorSurfaceRelease.RESTORE_SUSPENDED_ERROR -> restoreSuspendedFinalError()
+        }
     }
 
     fun captureReplacementState(
@@ -983,14 +1089,14 @@ fun PlayerScreen(
 
     fun handleBackAction() {
         when {
-            browserVisible -> browserVisible = false
-            finalError != null -> saveAndBack()
+            browserVisible -> closeBrowserAndRestoreError()
+            liveErrorForegroundActive -> saveAndBack()
             vodGoToTimeVisible -> {
                 vodGoToTimeVisible = false
                 vodMoreMenuFocusRow = VodMoreRow.GO_TO_TIME
                 vodPanelFocusTick += 1
             }
-            activePanel != null -> activePanel = null
+            activePanel != null -> closeActivePanelAndRestoreError()
             vodMorePanel != null -> handleVodMoreBack()
             liveMorePanel != null -> handleLiveMoreBack()
             resumePromptVisible -> {
@@ -1020,6 +1126,17 @@ fun PlayerScreen(
     }
     BackHandler(enabled = !browserVisible) {
         handleBackAction()
+    }
+
+    // An accepted remote channel switch carries its reveal intent into this request's existing
+    // controls owner: the compact Live strip appears instead of a separate switching overlay, and
+    // the existing auto-hide effect owns hiding it again. Every accepted repeat is a fresh
+    // interaction through the tick, so re-reveal and auto-hide refresh work while visibility is
+    // already true.
+    LaunchedEffect(request.historyKey, liveControlsRevealRequested, liveControlsInteractionTick) {
+        if (liveControlsRevealRequested) {
+            controlsVisible = true
+        }
     }
 
     DisposableEffect(lifecycleOwner, playerSession, player) {
@@ -1152,7 +1269,11 @@ fun PlayerScreen(
                     finalFailureClass = null
                     buffering = false
                     controlsVisible = true
-                    offlineWasPlaying = player.playWhenReady || player.isPlaying
+                    offlineWasPlaying = playerOfflinePlayIntentCapture(
+                        alreadyOffline = offlineFailure,
+                        previousIntent = offlineWasPlaying,
+                        currentPlayingIntent = player.playWhenReady || player.isPlaying,
+                    )
                     offlineFailure = true
                     finalError = PLAYER_OFFLINE_MESSAGE
                 },
@@ -1161,6 +1282,15 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+                if (playbackState == Player.STATE_READY) {
+                    android.util.Log.i(
+                        "HulkPlayer",
+                        "ready t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
+                    )
+                }
+                if (playbackState == Player.STATE_READY && request.isLive) {
+                    livePlaybackStarted = true
+                }
                 if (playbackState == Player.STATE_READY && suspendedFinalError == null) {
                     finalError = null
                     finalFailureClass = null
@@ -1228,7 +1358,15 @@ fun PlayerScreen(
             player.removeListener(listener)
             playerDiagnostics.detach(player)
             playerSession.detach(player)
+            val releaseStartMs = android.os.SystemClock.uptimeMillis()
             player.release()
+            if (request.isLive) {
+                android.util.Log.i(
+                    "HulkPlayer",
+                    "player released t=${android.os.SystemClock.elapsedRealtime()} " +
+                        "streamId=${request.streamId} in ${android.os.SystemClock.uptimeMillis() - releaseStartMs}ms",
+                )
+            }
         }
     }
 
@@ -1258,6 +1396,10 @@ fun PlayerScreen(
         audioLanguageLabel = ""
         subtitleLanguageLabel = ""
         player.setMediaItem(mediaItem)
+        android.util.Log.i(
+            "HulkPlayer",
+            "media set t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
+        )
 
         val replacement = pendingPlayerReplacement?.takeIf { pending ->
             pending.candidateIndex == candidateIndex && pending.outputMode == audioOutputMode
@@ -1268,6 +1410,10 @@ fun PlayerScreen(
             player.setPlaybackSpeed(replacement.speed)
             player.volume = replacement.volume
             player.prepare()
+            android.util.Log.i(
+                "HulkPlayer",
+                "prepare issued t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
+            )
             player.playWhenReady = replacement.playWhenReady
             pendingPlayerReplacement = null
             pendingSeekMs = 0L
@@ -1282,6 +1428,10 @@ fun PlayerScreen(
         }
         if (seekTarget > 0L) player.seekTo(seekTarget)
         player.prepare()
+        android.util.Log.i(
+            "HulkPlayer",
+            "prepare issued t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId}",
+        )
         // A connectivity restore replays the intent captured when the network dropped, so a
         // manually paused movie stays paused and a pending Resume decision never auto-plays.
         player.playWhenReady = restoredPlayWhenReady ?: !resumePromptVisible
@@ -1310,7 +1460,11 @@ fun PlayerScreen(
                 maxOf(pendingSeekMs, currentPositionMs, player.currentPosition.coerceAtLeast(0L))
             }
             playerSession.onNetworkUnavailable()
-            offlineWasPlaying = player.playWhenReady || player.isPlaying
+            offlineWasPlaying = playerOfflinePlayIntentCapture(
+                alreadyOffline = offlineFailure,
+                previousIntent = offlineWasPlaying,
+                currentPlayingIntent = player.playWhenReady || player.isPlaying,
+            )
             player.pause()
             suspendedFinalError = null
             finalFailureClass = null
@@ -1428,6 +1582,9 @@ fun PlayerScreen(
         manualSeekTargetMs,
         vodTimelineFocused,
         focusTimelineOnReveal,
+        // A fresh accepted Live switch interaction restarts the existing auto-hide delay even when
+        // the controls are already visible (same timeout owner, no second timer).
+        liveControlsInteractionTick,
     ) {
         if (
             playbackSettings.autoHideControls &&
@@ -1467,7 +1624,7 @@ fun PlayerScreen(
         activePanel,
         vodMorePanel,
         browserVisible,
-        finalError,
+        liveErrorForegroundActive,
         offlineFailure,
         movieModalActive,
         movieErrorActive,
@@ -1480,7 +1637,7 @@ fun PlayerScreen(
     ) {
         val target = when {
             movieErrorActive -> offlineRetryFocus
-            finalError != null -> null
+            liveErrorForegroundActive -> null
             browserVisible || activePanel != null -> null
             vodMorePanel != null -> null
             resumePromptVisible -> resumeFocus
@@ -1502,7 +1659,10 @@ fun PlayerScreen(
         runCatching { moreTriggerFocus.requestFocus() }
     }
 
-    val errorModalInputActive = finalError != null || suspendedFinalError != null
+    val errorModalInputActive = playerErrorModalOwnsInput(
+        errorForegroundActive = liveErrorForegroundActive,
+        suspendedErrorPresent = suspendedFinalError != null,
+    )
     val latestOnErrorModalActiveChanged by rememberUpdatedState(onErrorModalActiveChanged)
     DisposableEffect(errorModalInputActive) {
         latestOnErrorModalActiveChanged(errorModalInputActive)
@@ -1528,10 +1688,14 @@ fun PlayerScreen(
     val interactionModifier = Modifier
         // movieModalActive is a derived plain value; it must be a key so the tap detector is
         // re-registered when a Resume/error/offline modal closes, otherwise the block created while
-        // the modal was visible keeps rejecting every later surface tap in the same session.
-        .pointerInput(request, finalError, movieModalActive) {
+        // the modal was visible keeps rejecting every later surface tap in the same session. The
+        // browser and a suppressed Live error surface are keys for the same reason: while they own
+        // input the player surface behind them must not toggle controls or switch channels.
+        .pointerInput(request, liveErrorForegroundActive, liveErrorSurfaceSuppressed, movieModalActive, browserVisible) {
             detectTapGestures(onTap = {
-                if (finalError != null || resumePromptVisible || movieModalActive) return@detectTapGestures
+                if (browserVisible || liveErrorSurfaceSuppressed || resumePromptVisible || movieModalActive) {
+                    return@detectTapGestures
+                }
                 when {
                     liveMorePanel != null -> closeLiveMorePanelToTrigger()
                     isMovieVod && vodMorePanel != null -> closeVodMorePanelToTrigger()
@@ -1540,8 +1704,8 @@ fun PlayerScreen(
                 }
             })
         }
-        .pointerInput(request.isLive, finalError) {
-            if (request.isLive && finalError == null) {
+        .pointerInput(request.isLive, liveErrorForegroundActive, liveErrorSurfaceSuppressed, browserVisible) {
+            if (request.isLive && !browserVisible && !liveErrorSurfaceSuppressed && !liveErrorForegroundActive) {
                 var verticalDrag = 0f
                 detectVerticalDragGestures(
                     onVerticalDrag = { change, amount -> change.consume(); verticalDrag += amount },
@@ -1566,7 +1730,7 @@ fun PlayerScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 val keyCode = event.nativeKeyEvent.keyCode
-                if (finalError != null) {
+                if (liveErrorForegroundActive) {
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     return@onPreviewKeyEvent when (
                         playerErrorModalInputDisposition(keyCode.toPlayerErrorModalInput())
@@ -1840,10 +2004,14 @@ fun PlayerScreen(
                             favoriteEnabled = liveFavoriteControl.enabled,
                             lastChannelEnabled = onLastChannel != null,
                             moreOpen = liveMorePanel != null,
+                            inputMuted = liveMorePanel != null,
+                            holdRepeatEnabled = liveChannelHoldRepeat,
+                            onHoldRepeatRelease = onLiveChannelHoldRelease,
+                            onHoldCancel = onLiveChannelHoldCancelled,
                             onMore = ::openLiveMorePanel,
                             onLastChannel = { onLastChannel?.invoke() },
-                            onPrevious = { switchRelative(-1) },
-                            onNext = { switchRelative(1) },
+                            onPrevious = onPreviousLiveChannel ?: { switchRelative(-1); 0 },
+                            onNext = onNextLiveChannel ?: { switchRelative(1); 0 },
                             onPlayPause = { if (player.isPlaying) player.pause() else player.play() },
                             onFavorite = { liveFavoriteChannel?.let(onToggleFavorite) },
                             onChannels = {
@@ -2045,6 +2213,8 @@ fun PlayerScreen(
             LoadingRing(
                 label = if (request.isLive) "جاري تشغيل القناة…" else "جاري تجهيز المشاهدة…",
                 modifier = Modifier.align(Alignment.Center),
+                // Television Live startup keeps a constant sweep; phone and VOD keep the default.
+                constantRotation = adaptiveUi.isTelevision && request.isLive,
             )
         }
 
@@ -2060,6 +2230,21 @@ fun PlayerScreen(
                     .background(Color.Black.copy(alpha = .78f))
                     .padding(horizontal = 24.dp, vertical = 16.dp),
             )
+        }
+
+        // The Live error card derives truthful Live wording and the real connectivity glyph from
+        // typed state; non-Live callers keep their existing finalError message unchanged.
+        val liveErrorPresentation = if (request.isLive) {
+            finalError?.let { message ->
+                livePlayerErrorPresentation(
+                    offlineFailure = offlineFailure,
+                    playbackStarted = livePlaybackStarted,
+                    autoResumeIntent = offlineWasPlaying,
+                    failureMessage = message,
+                )
+            }
+        } else {
+            null
         }
 
         when {
@@ -2121,9 +2306,10 @@ fun PlayerScreen(
                 backFocusRequester = resumeBackFocus,
                 modifier = Modifier.align(Alignment.Center),
             )
-            finalError != null -> PlayerErrorPanel(
-                title = if (request.isLive) "تعذر تشغيل القناة" else null,
-                message = finalError!!,
+            liveErrorForegroundActive -> PlayerErrorPanel(
+                title = liveErrorPresentation?.title,
+                message = liveErrorPresentation?.body ?: finalError!!,
+                networkFailure = liveErrorPresentation?.offline == true,
                 canChooseChannel = request.isLive && liveCatalog?.items?.isNotEmpty() == true,
                 canChooseServer = canOfferPlayerErrorSourcePicker(
                     failureClass = finalFailureClass,
@@ -2131,14 +2317,22 @@ fun PlayerScreen(
                 ),
                 onRetry = { retryManually() },
                 onChooseChannel = {
-                    suspendFinalErrorForModal()
+                    // Live keeps the failure state live and suppresses only its foreground
+                    // presentation, so repeated offline notifications cannot re-open the modal
+                    // behind the browser and the first Back can restore a still-valid error.
+                    liveErrorSurfaceSuppressed = true
                     controlsVisible = false
                     browserOrigin = LiveChannelBrowserOrigin.ERROR_RECOVERY
                     browserVisible = true
                 },
                 onChooseServer = {
-                    suspendFinalErrorForModal()
-                    activePanel = PlayerPanel.SERVERS
+                    if (request.isLive) {
+                        liveErrorSurfaceSuppressed = true
+                        activePanel = PlayerPanel.SERVERS
+                    } else {
+                        suspendFinalErrorForModal()
+                        activePanel = PlayerPanel.SERVERS
+                    }
                 },
                 onBack = ::saveAndBack,
                 retryFocusRequester = errorRetryFocus,
@@ -2194,7 +2388,11 @@ fun PlayerScreen(
                     }
                 },
                 onSelectChannel = { channel ->
-                    suspendedFinalError = null
+                    // The real selection dispatches once and invalidates the old error state, so
+                    // the replaced request can never flash the old failure or restore a snapshot;
+                    // the replacement request owns its own failure presentation if it fails.
+                    clearFinalErrorState()
+                    liveErrorSurfaceSuppressed = false
                     browserVisible = false
                     onSelectLiveChannel(channel)
                 },
@@ -2323,7 +2521,10 @@ fun PlayerScreen(
                         onOpenSource = {},
                         onOpenResize = {},
                         onSelectSource = { index ->
+                            // The selected source supersedes the suspended error surface; the new
+                            // prepare owns any new failure presentation on its own.
                             activePanel = null
+                            liveErrorSurfaceSuppressed = false
                             suspendedFinalError = null
                             retryManually(index)
                         },
@@ -3293,10 +3494,14 @@ private fun LivePlayerControls(
     favoriteEnabled: Boolean,
     lastChannelEnabled: Boolean,
     moreOpen: Boolean,
+    inputMuted: Boolean,
+    holdRepeatEnabled: Boolean = false,
+    onHoldRepeatRelease: (() -> Unit)? = null,
+    onHoldCancel: ((Int) -> Unit)? = null,
     onMore: () -> Unit,
     onLastChannel: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
+    onPrevious: () -> Int,
+    onNext: () -> Int,
     onPlayPause: () -> Unit,
     onFavorite: () -> Unit,
     onChannels: () -> Unit,
@@ -3306,16 +3511,79 @@ private fun LivePlayerControls(
     metrics: LivePlayerControlsMetrics,
     modifier: Modifier = Modifier,
 ) {
-    val colors = LocalHulkColors.current
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val baseTextStyle = LocalTextStyle.current
+    val captionStyle = remember(metrics.captionSizeSp, baseTextStyle) {
+        baseTextStyle.copy(fontSize = metrics.captionSizeSp.sp, fontWeight = FontWeight.Bold)
+    }
+    val playPauseCaption = if (isPlaying) "ايقاف مؤقت" else "تشغيل"
+    val toolGlyphDp = metrics.transportIconDp
+    val toolSpacing = vodToolSpacingDp(
+        movieGlyphDp = toolGlyphDp,
+        itemSpacingDp = metrics.itemSpacingDp,
+    ).dp
+    var stripBounds by remember { mutableStateOf<Rect?>(null) }
+    var toolsBounds by remember { mutableStateOf<Rect?>(null) }
+    // Restrained measured gradient: the transparent-to-strong ramp is anchored on the real tool-row
+    // position inside the measured strip, so it is never an arbitrary fixed stop.
+    val gradientStopFraction = remember(stripBounds, toolsBounds) {
+        val stripTop = stripBounds?.top ?: return@remember null
+        val stripHeight = stripBounds?.height ?: return@remember null
+        val toolsTop = toolsBounds?.top ?: return@remember null
+        liveStripGradientStopFraction(
+            stripHeightPx = stripHeight,
+            toolsTopPx = toolsTop - stripTop,
+        )
+    }
+    // Physical LEFT-to-RIGHT caption order of the seven Live tools; the list membership (not the
+    // width alone) is also what the measured single-row fit consumes.
+    val toolCaptions = remember(playPauseCaption) {
+        listOf(
+            "المزيد",
+            "اخر قناة",
+            "القناة التالية",
+            playPauseCaption,
+            "القناة السابقة",
+            "المفضلة",
+            "القنوات",
+        )
+    }
+    val requiredSingleRowWidthPx = remember(
+        toolGlyphDp,
+        metrics.captionSizeSp,
+        metrics.itemSpacingDp,
+        toolSpacing,
+        toolCaptions,
+        density.fontScale,
+        density.density,
+        textMeasurer,
+    ) {
+        val glyphBoxPx = with(density) { (toolGlyphDp + 22).dp.roundToPx() }
+        vodToolsRequiredWidthPx(
+            iconBoxesPx = List(toolCaptions.size) { glyphBoxPx },
+            captionWidthsPx = toolCaptions.map { caption ->
+                textMeasurer.measure(caption, captionStyle).size.width
+            },
+            spacingPx = with(density) { toolSpacing.roundToPx() },
+        )
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .onGloballyPositioned { stripBounds = it.boundsInRoot() }
             .background(
-                Brush.verticalGradient(
+                gradientStopFraction?.let { fraction ->
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        fraction to Color.Black.copy(alpha = .50f),
+                        1f to Color.Black.copy(alpha = .88f),
+                    )
+                } ?: Brush.verticalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.Black.copy(alpha = .42f),
-                        Color.Black.copy(alpha = .78f),
+                        Color.Black.copy(alpha = .50f),
+                        Color.Black.copy(alpha = .88f),
                     ),
                 ),
             )
@@ -3327,163 +3595,83 @@ private fun LivePlayerControls(
                 bottom = layoutMetrics.outerBottomPaddingDp.dp,
             ),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(Color(0xF00C0D0A))
-                .border(1.dp, colors.gold.copy(alpha = .55f), RoundedCornerShape(18.dp))
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-        ) {
-            if (metrics.approvedSingleRow) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.Bottom,
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val rowMode = liveControlsRowMode(
+                availableWidthPx = with(density) { maxWidth.roundToPx() },
+                requiredSingleRowWidthPx = requiredSingleRowWidthPx,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { toolsBounds = it.boundsInRoot() },
+            ) {
+                when (rowMode) {
+                    // Accepted wide arrangement. The row is composed in RTL, so the first child is
+                    // physically RIGHT; composing the reverse of the required physical
+                    // LEFT-to-RIGHT order keeps المزيد at physical LEFT and القنوات at physical
+                    // RIGHT with the Play/Pause tool centered.
+                    LiveControlsRowMode.SINGLE_ROW -> Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(
+                            toolSpacing,
+                            Alignment.CenterHorizontally,
+                        ),
+                        verticalAlignment = Alignment.Top,
                     ) {
                         LiveControlUtility(
                             icon = Icons.AutoMirrored.Rounded.List,
                             caption = "القنوات",
                             onClick = onChannels,
                             enabled = true,
-                            iconSizeDp = metrics.utilityIconDp,
+                            inputMuted = inputMuted,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
                         LiveControlUtility(
                             icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
                             caption = "المفضلة",
                             onClick = onFavorite,
                             enabled = favoriteEnabled,
+                            inputMuted = inputMuted,
                             selected = favorite,
-                            iconSizeDp = metrics.utilityIconDp,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
-                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
                         LiveControlUtility(
                             icon = Icons.Rounded.SkipPrevious,
                             caption = "القناة السابقة",
-                            onClick = onPrevious,
+                            holdRepeat = holdRepeatEnabled,
+                            onHoldRelease = onHoldRepeatRelease,
+                            onHoldCancel = onHoldCancel,
+                            onHoldRepeat = onPrevious,
+                            onClick = { onPrevious() },
                             enabled = true,
-                            iconSizeDp = metrics.transportIconDp,
-                            captionSizeSp = metrics.captionSizeSp,
-                        )
-                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
-                    }
-                    LiveControlUtility(
-                        icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
-                        onClick = onPlayPause,
-                        enabled = true,
-                        iconSizeDp = metrics.transportIconDp,
-                        captionSizeSp = metrics.captionSizeSp,
-                        emphasis = true,
-                        focusRequester = primaryFocus,
-                    )
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
-                        LiveControlUtility(
-                            icon = Icons.Rounded.SkipNext,
-                            caption = "القناة التالية",
-                            onClick = onNext,
-                            enabled = true,
-                            iconSizeDp = metrics.transportIconDp,
-                            captionSizeSp = metrics.captionSizeSp,
-                        )
-                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
-                        LiveControlUtility(
-                            icon = Icons.Rounded.History,
-                            caption = "اخر قناة",
-                            onClick = onLastChannel,
-                            enabled = lastChannelEnabled,
-                            iconSizeDp = metrics.utilityIconDp,
-                            captionSizeSp = metrics.captionSizeSp,
-                        )
-                        LiveControlSeparator(heightDp = metrics.transportContainerDp)
-                        LiveControlUtility(
-                            icon = Icons.Rounded.MoreHoriz,
-                            caption = "المزيد",
-                            onClick = onMore,
-                            enabled = true,
-                            selected = moreOpen,
-                            iconSizeDp = metrics.utilityIconDp,
-                            captionSizeSp = metrics.captionSizeSp,
-                            focusRequester = moreTriggerFocus,
-                        )
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        LiveControlUtility(
-                            icon = Icons.Rounded.SkipPrevious,
-                            caption = "القناة السابقة",
-                            onClick = onPrevious,
-                            enabled = true,
-                            iconSizeDp = metrics.transportIconDp,
+                            inputMuted = inputMuted,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
                         LiveControlUtility(
                             icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            caption = if (isPlaying) "ايقاف مؤقت" else "تشغيل",
+                            caption = playPauseCaption,
                             onClick = onPlayPause,
                             enabled = true,
-                            iconSizeDp = metrics.transportIconDp,
+                            inputMuted = inputMuted,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
-                            emphasis = true,
+                            primary = true,
                             focusRequester = primaryFocus,
                         )
                         LiveControlUtility(
                             icon = Icons.Rounded.SkipNext,
                             caption = "القناة التالية",
-                            onClick = onNext,
+                            holdRepeat = holdRepeatEnabled,
+                            onHoldRelease = onHoldRepeatRelease,
+                            onHoldCancel = onHoldCancel,
+                            onHoldRepeat = onNext,
+                            onClick = { onNext() },
                             enabled = true,
-                            iconSizeDp = metrics.transportIconDp,
-                            captionSizeSp = metrics.captionSizeSp,
-                        )
-                    }
-                    Spacer(Modifier.height(metrics.itemSpacingDp.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(Color.White.copy(alpha = .08f)),
-                    )
-                    Spacer(Modifier.height(metrics.itemSpacingDp.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        LiveControlUtility(
-                            icon = Icons.AutoMirrored.Rounded.List,
-                            caption = "القنوات",
-                            onClick = onChannels,
-                            enabled = true,
-                            iconSizeDp = metrics.utilityIconDp,
-                            captionSizeSp = metrics.captionSizeSp,
-                        )
-                        LiveControlUtility(
-                            icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
-                            caption = "المفضلة",
-                            onClick = onFavorite,
-                            enabled = favoriteEnabled,
-                            selected = favorite,
-                            iconSizeDp = metrics.utilityIconDp,
+                            inputMuted = inputMuted,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
                         LiveControlUtility(
@@ -3491,7 +3679,8 @@ private fun LivePlayerControls(
                             caption = "اخر قناة",
                             onClick = onLastChannel,
                             enabled = lastChannelEnabled,
-                            iconSizeDp = metrics.utilityIconDp,
+                            inputMuted = inputMuted,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
                         )
                         LiveControlUtility(
@@ -3499,11 +3688,115 @@ private fun LivePlayerControls(
                             caption = "المزيد",
                             onClick = onMore,
                             enabled = true,
+                            inputMuted = inputMuted,
                             selected = moreOpen,
-                            iconSizeDp = metrics.utilityIconDp,
+                            iconSizeDp = toolGlyphDp,
                             captionSizeSp = metrics.captionSizeSp,
                             focusRequester = moreTriggerFocus,
                         )
+                    }
+                    // Existing narrow-window grouping and logical order, with full captions
+                    // sharing their row width instead of truncating or shrinking.
+                    LiveControlsRowMode.TWO_ROWS -> Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            LiveControlUtility(
+                                icon = Icons.Rounded.SkipPrevious,
+                                caption = "القناة السابقة",
+                                holdRepeat = holdRepeatEnabled,
+                                onHoldRelease = onHoldRepeatRelease,
+                                onHoldCancel = onHoldCancel,
+                                onHoldRepeat = onPrevious,
+                                onClick = { onPrevious() },
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            LiveControlUtility(
+                                icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                caption = playPauseCaption,
+                                onClick = onPlayPause,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                primary = true,
+                                focusRequester = primaryFocus,
+                                modifier = Modifier.weight(1f),
+                            )
+                            LiveControlUtility(
+                                icon = Icons.Rounded.SkipNext,
+                                caption = "القناة التالية",
+                                holdRepeat = holdRepeatEnabled,
+                                onHoldRelease = onHoldRepeatRelease,
+                                onHoldCancel = onHoldCancel,
+                                onHoldRepeat = onNext,
+                                onClick = { onNext() },
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Spacer(Modifier.height(metrics.itemSpacingDp.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(metrics.itemSpacingDp.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            LiveControlUtility(
+                                icon = Icons.AutoMirrored.Rounded.List,
+                                caption = "القنوات",
+                                onClick = onChannels,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            LiveControlUtility(
+                                icon = if (favorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                                caption = "المفضلة",
+                                onClick = onFavorite,
+                                enabled = favoriteEnabled,
+                                inputMuted = inputMuted,
+                                selected = favorite,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            LiveControlUtility(
+                                icon = Icons.Rounded.History,
+                                caption = "اخر قناة",
+                                onClick = onLastChannel,
+                                enabled = lastChannelEnabled,
+                                inputMuted = inputMuted,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            LiveControlUtility(
+                                icon = Icons.Rounded.MoreHoriz,
+                                caption = "المزيد",
+                                onClick = onMore,
+                                enabled = true,
+                                inputMuted = inputMuted,
+                                selected = moreOpen,
+                                iconSizeDp = toolGlyphDp,
+                                captionSizeSp = metrics.captionSizeSp,
+                                focusRequester = moreTriggerFocus,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
@@ -3511,16 +3804,12 @@ private fun LivePlayerControls(
     }
 }
 
-@Composable
-private fun LiveControlSeparator(heightDp: Int) {
-    Box(
-        modifier = Modifier
-            .width(1.dp)
-            .height(heightDp.dp)
-            .background(Color.White.copy(alpha = .08f)),
-    )
-}
-
+/**
+ * One compact Live tool: glyph above a complete caption. Adopts the accepted VOD compact control
+ * appearance: plain ivory glyphs with a thin pale-gold focus edge and subtle circle backing; the
+ * Play/Pause tool keeps the solid-gold primary circle with the dark glyph. The fixed caption weight
+ * and the absence of an ellipsis keep focus/selection/favorite changes from moving the row.
+ */
 @Composable
 private fun LiveControlUtility(
     icon: ImageVector,
@@ -3531,18 +3820,58 @@ private fun LiveControlUtility(
     captionSizeSp: Int,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
-    emphasis: Boolean = false,
+    primary: Boolean = false,
+    inputMuted: Boolean = false,
+    holdRepeat: Boolean = false,
+    onHoldRelease: (() -> Unit)? = null,
+    onHoldRepeat: (() -> Int)? = null,
+    onHoldCancel: ((Int) -> Unit)? = null,
     focusRequester: FocusRequester? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
-    val showFocused = focused && adaptiveUi.showFocusHighlights
-    val shape = RoundedCornerShape(14.dp)
-    val tint = when {
+    // Touch press-and-hold repeat for the Live previous/next tools. A quick press stays a tap;
+    // a completed hold repeats without adding an unintended release click. The repeat stops on
+    // release, cancellation, eligibility loss or leaving the screen (effect/gesture disposal).
+    var controlPressed by remember { mutableStateOf(false) }
+    var holdRepeatActive by remember { mutableStateOf(false) }
+    var holdEngaged by remember { mutableStateOf(false) }
+    var lastHoldToken by remember { mutableIntStateOf(-1) }
+    // The hold loop outlives several request replacements; it must always call the latest
+    // navigation callback instead of the one captured at press-down.
+    val latestOnClick by rememberUpdatedState(onClick)
+    val latestOnHoldRelease by rememberUpdatedState(onHoldRelease)
+    val latestOnHoldCancel by rememberUpdatedState(onHoldCancel)
+    // The repeat token callback must also stay current across request replacements.
+    val latestOnHoldRepeat by rememberUpdatedState(onHoldRepeat)
+    val holdLongPressTimeoutMs = LocalViewConfiguration.current.longPressTimeoutMillis
+    if (holdRepeat) {
+        LaunchedEffect(controlPressed, enabled, inputMuted, holdRepeat) {
+            if (!controlPressed || !enabled || inputMuted) return@LaunchedEffect
+            delay(holdLongPressTimeoutMs)
+            holdRepeatActive = true
+            holdEngaged = true
+            while (true) {
+                lastHoldToken = latestOnHoldRepeat?.invoke() ?: -1
+                if (latestOnHoldRepeat == null) latestOnClick()
+                delay(LIVE_CONTROL_HOLD_REPEAT_MS)
+            }
+        }
+    }
+    val showFocused = focused && adaptiveUi.showFocusHighlights && !inputMuted
+    val shape = CircleShape
+    val glyphColor = when {
+        !enabled -> colors.textMuted.copy(alpha = .45f)
+        primary -> MaterialTheme.colorScheme.onPrimary
+        showFocused -> colors.goldBright
+        selected -> colors.gold
+        else -> colors.text
+    }
+    val captionColor = when {
         !enabled -> colors.textMuted.copy(alpha = .45f)
         showFocused -> colors.goldBright
-        emphasis || selected -> colors.gold
+        selected -> colors.gold
         else -> colors.text
     }
     Column(
@@ -3553,33 +3882,75 @@ private fun LiveControlUtility(
             modifier = Modifier
                 .size((iconSizeDp + 22).dp)
                 .clip(shape)
-                .background(if (showFocused) colors.gold.copy(alpha = .22f) else Color.Transparent)
+                .background(
+                    when {
+                        primary -> colors.gold
+                        showFocused -> colors.gold.copy(alpha = .16f)
+                        else -> Color.Transparent
+                    },
+                )
                 .border(
                     width = if (showFocused) 2.dp else 0.dp,
                     color = if (showFocused) colors.goldBright else Color.Transparent,
                     shape = shape,
                 )
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .focusProperties { canFocus = enabled && !inputMuted }
                 .onFocusChanged { focused = it.isFocused }
-                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .then(
+                    if (holdRepeat) {
+                        Modifier.pointerInput(enabled, inputMuted) {
+                            if (!enabled || inputMuted) return@pointerInput
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                holdRepeatActive = false
+                                holdEngaged = false
+                                controlPressed = true
+                                var cancelled = true
+                                try {
+                                    if (waitForUpOrCancellation() != null) cancelled = false
+                                } finally {
+                                    // Cancellation, eligibility loss or disposal must always clean the
+                                    // pressed state and must never flush pending hold work or swallow
+                                    // the next tap/remote OK.
+                                    controlPressed = false
+                                    if (cancelled) {
+                                        if (holdEngaged) latestOnHoldCancel?.invoke(lastHoldToken)
+                                        holdRepeatActive = false
+                                        holdEngaged = false
+                                    }
+                                }
+                                // Only a valid release settles once; the clickable release handler then
+                                // consumes holdRepeatActive so no extra click is delivered.
+                                if (!cancelled && holdEngaged) latestOnHoldRelease?.invoke()
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
+                .clickable(enabled = enabled && !inputMuted, role = Role.Button) {
+                    // Suppress the click that the pointer-up would otherwise deliver after a hold.
+                    if (holdRepeatActive) holdRepeatActive = false else onClick()
+                }
                 .semantics(mergeDescendants = true) { contentDescription = caption },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = tint,
+                tint = glyphColor,
                 modifier = Modifier.size(iconSizeDp.dp),
             )
         }
         Spacer(Modifier.height(4.dp))
         Text(
             text = caption,
-            color = tint,
+            color = captionColor,
             fontSize = captionSizeSp.sp,
-            fontWeight = if (selected || emphasis || showFocused) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            // Constant weight: focus/selection/favorite never changes intrinsic widths.
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -3655,7 +4026,7 @@ private fun LiveMorePanel(
                     PlayerLiveMorePanelView.SOURCE -> "اختيار المصدر"
                     PlayerLiveMorePanelView.RESIZE -> "حجم الصورة"
                 },
-                color = Color.White,
+                color = colors.text,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
@@ -3680,16 +4051,18 @@ private fun LiveMorePanel(
                         icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
                         onClick = onToggleMute,
                         focusRequester = muteFocus,
+                        directAction = true,
                     )
-                    Spacer(Modifier.height(6.dp))
+                    VodPanelDivider()
                     LiveMoreRow(
                         text = "اعادة التحميل",
                         icon = Icons.Rounded.Refresh,
                         onClick = onReload,
                         focusRequester = reloadFocus,
+                        directAction = true,
                     )
                     if (canOfferPlayerLiveSourcePicker(sourceCount)) {
-                        Spacer(Modifier.height(6.dp))
+                        VodPanelDivider()
                         LiveMoreRow(
                             text = "اختيار المصدر",
                             icon = Icons.Rounded.SettingsInputAntenna,
@@ -3699,10 +4072,10 @@ private fun LiveMorePanel(
                             focusRequester = sourceFocus,
                         )
                     }
-                    Spacer(Modifier.height(6.dp))
+                    VodPanelDivider()
                     LiveMoreRow(
                         text = "حجم الصورة",
-                        icon = Icons.Rounded.AspectRatio,
+                        icon = vodPictureSizeGlyph(resizeModeIndex),
                         value = livePlayerResizeLabel(resizeModeIndex),
                         showChevron = true,
                         onClick = onOpenResize,
@@ -3711,11 +4084,12 @@ private fun LiveMorePanel(
                 }
                 PlayerLiveMorePanelView.SOURCE -> {
                     repeat(sourceCount) { index ->
-                        if (index > 0) Spacer(Modifier.height(6.dp))
+                        if (index > 0) VodPanelDivider()
                         LiveMoreRow(
                             text = "المصدر ${index + 1}",
                             icon = Icons.Rounded.SettingsInputAntenna,
                             selected = index == candidateIndex,
+                            reserveCheckSlot = true,
                             onClick = { onSelectSource(index) },
                             focusRequester = if (index == candidateIndex) selectedOptionFocus else null,
                         )
@@ -3723,11 +4097,12 @@ private fun LiveMorePanel(
                 }
                 PlayerLiveMorePanelView.RESIZE -> {
                     LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
-                        if (index > 0) Spacer(Modifier.height(6.dp))
+                        if (index > 0) VodPanelDivider()
                         LiveMoreRow(
                             text = label,
-                            icon = Icons.Rounded.AspectRatio,
+                            icon = vodPictureSizeGlyph(index),
                             selected = index == resizeModeIndex,
+                            reserveCheckSlot = true,
                             onClick = { onSelectResize(index) },
                             focusRequester = if (index == resizeModeIndex) selectedOptionFocus else null,
                         )
@@ -3799,8 +4174,126 @@ private fun LiveMoreHeaderAction(
     }
 }
 
+/**
+ * Approved Live More row anatomy, aligned with the accepted VOD row reference.
+ *
+ * Child/value rows put the semantic glyph immediately beside the label at the physical RIGHT, then
+ * the real value, the reserved check slot and the left-facing opening chevron at the physical LEFT.
+ * Direct actions keep the label at the physical RIGHT with one action glyph at the physical LEFT.
+ * Focus is a thin gold 1.5dp edge over a 14% gold backing (never a solid fill); the selected
+ * unfocused option keeps a 16% backing with a persistent gold check in its reserved slot.
+ */
 @Composable
 private fun LiveMoreRow(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    value: String? = null,
+    selected: Boolean = false,
+    showChevron: Boolean = false,
+    reserveCheckSlot: Boolean = false,
+    directAction: Boolean = false,
+    focusRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
+    var focused by remember { mutableStateOf(false) }
+    val showFocused = focused && adaptiveUi.showFocusHighlights
+    val shape = RoundedCornerShape(11.dp)
+    val glyphTint = if (showFocused) colors.goldBright else colors.gold
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                when {
+                    showFocused -> colors.gold.copy(alpha = .14f)
+                    selected -> colors.gold.copy(alpha = .16f)
+                    else -> Color.Transparent
+                },
+            )
+            .then(
+                if (showFocused) {
+                    Modifier.border(1.5.dp, colors.gold, shape)
+                } else {
+                    Modifier
+                },
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = text }
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        if (directAction) {
+            Text(
+                text = text,
+                color = colors.text,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = glyphTint,
+                modifier = Modifier.size(19.dp),
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = glyphTint,
+                modifier = Modifier.size(19.dp),
+            )
+            Text(
+                text = text,
+                color = colors.text,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            value?.let {
+                Text(
+                    text = it,
+                    color = colors.textMuted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                )
+            }
+            if (selected || reserveCheckSlot) {
+                Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                    if (selected) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = if (showFocused) colors.goldBright else colors.gold,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+            if (showChevron) {
+                Icon(
+                    imageVector = Icons.Rounded.ChevronLeft,
+                    contentDescription = null,
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Legacy Series non-Movie More row, preserved exactly as before the Live alignment: Series
+ * migration is a later bounded task and this task must not change Series behavior.
+ */
+@Composable
+private fun LegacySeriesMoreRow(
     text: String,
     icon: ImageVector,
     onClick: () -> Unit,
@@ -4363,14 +4856,14 @@ private fun VodMorePanel(
             } else {
                 when (view) {
                     VodMorePanelView.MENU -> {
-                        LiveMoreRow(
+                        LegacySeriesMoreRow(
                             text = "الانتقال الى وقت",
                             icon = Icons.Rounded.Schedule,
                             onClick = onOpenGoToTime,
                             focusRequester = goToTimeFocus,
                         )
                         Spacer(Modifier.height(6.dp))
-                        LiveMoreRow(
+                        LegacySeriesMoreRow(
                             text = "السرعة",
                             icon = Icons.Rounded.Speed,
                             value = vodSpeedLabel(speed),
@@ -4379,7 +4872,7 @@ private fun VodMorePanel(
                             focusRequester = speedFocus,
                         )
                         Spacer(Modifier.height(6.dp))
-                        LiveMoreRow(
+                        LegacySeriesMoreRow(
                             text = "حجم الصورة",
                             icon = Icons.Rounded.CropFree,
                             value = livePlayerResizeLabel(pictureSizeIndex),
@@ -4388,14 +4881,14 @@ private fun VodMorePanel(
                             focusRequester = pictureFocus,
                         )
                         Spacer(Modifier.height(6.dp))
-                        LiveMoreRow(
+                        LegacySeriesMoreRow(
                             text = "من البداية",
                             icon = Icons.Rounded.Replay,
                             onClick = onRestart,
                             focusRequester = restartFocus,
                         )
                         Spacer(Modifier.height(6.dp))
-                        LiveMoreRow(
+                        LegacySeriesMoreRow(
                             text = "قفل التحكم",
                             icon = Icons.Rounded.Lock,
                             onClick = onLock,
@@ -4406,7 +4899,7 @@ private fun VodMorePanel(
                         VOD_PLAYER_SPEED_OPTIONS.forEachIndexed { index, option ->
                             if (index > 0) Spacer(Modifier.height(6.dp))
                             val selected = kotlin.math.abs(option - speed) < 0.001f
-                            LiveMoreRow(
+                            LegacySeriesMoreRow(
                                 text = vodSpeedLabel(option),
                                 icon = Icons.Rounded.Speed,
                                 selected = selected,
@@ -4418,7 +4911,7 @@ private fun VodMorePanel(
                     VodMorePanelView.PICTURE_SIZE -> {
                         LIVE_PLAYER_RESIZE_LABELS.forEachIndexed { index, label ->
                             if (index > 0) Spacer(Modifier.height(6.dp))
-                            LiveMoreRow(
+                            LegacySeriesMoreRow(
                                 text = label,
                                 icon = when (index) {
                                     1 -> Icons.Rounded.ZoomIn
@@ -5612,6 +6105,7 @@ private fun PlayerErrorModalAction.liveHasIcon(): Boolean = this != PlayerErrorM
 private fun PlayerErrorPanel(
     title: String?,
     message: String,
+    networkFailure: Boolean = false,
     canChooseChannel: Boolean,
     canChooseServer: Boolean,
     onRetry: () -> Unit,
@@ -5783,9 +6277,15 @@ private fun PlayerErrorPanel(
                 .widthIn(max = if (adaptiveUi.isTelevision) 920.dp else 620.dp)
                 .then(if (livePresentation) Modifier.safeDrawingPadding() else Modifier)
                 .then(if (livePresentation) Modifier.heightIn(max = cardMaxHeight) else Modifier)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.Black.copy(alpha = .96f))
-                .border(1.dp, colors.gold.copy(alpha = if (livePresentation) .55f else .34f), RoundedCornerShape(20.dp))
+                // Live adopts the accepted Movie error-card surface family (dark raised card,
+                // warm-gold edge); the bounded scrolling and measured actions stay Live-specific.
+                .clip(RoundedCornerShape(if (livePresentation) 22.dp else 20.dp))
+                .background(if (livePresentation) Color(0xF2141510) else Color.Black.copy(alpha = .96f))
+                .border(
+                    1.dp,
+                    colors.gold.copy(alpha = if (livePresentation) .60f else .34f),
+                    RoundedCornerShape(if (livePresentation) 22.dp else 20.dp),
+                )
                 .then(if (livePresentation) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                 .focusGroup()
                 .padding(if (adaptiveUi.isTelevision) 24.dp else 18.dp),
@@ -5793,7 +6293,7 @@ private fun PlayerErrorPanel(
         ) {
             if (livePresentation) {
                 Icon(
-                    imageVector = Icons.Outlined.ErrorOutline,
+                    imageVector = moviesErrorIcon(networkFailure = networkFailure),
                     contentDescription = null,
                     tint = colors.gold,
                     modifier = Modifier.size(if (adaptiveUi.isTelevision) 38.dp else 32.dp),

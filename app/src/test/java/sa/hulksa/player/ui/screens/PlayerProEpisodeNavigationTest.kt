@@ -170,6 +170,98 @@ class PlayerProEpisodeNavigationTest {
         assertEquals(26, large.zapTitleSizeSp)
     }
 
+    @Test
+    fun rapidRepeatBurstAccumulatesFromPendingWrapsReversesAndRestartsAfterCancel() {
+        val sequence = (1..5).map { channel(it, "news") }
+        // Production queueLiveRelative anchors every accepted step (including native repeats) on the
+        // current pending target; this loop mirrors that accumulation exactly.
+        var pending: Int? = null
+        val visited = mutableListOf<Int>()
+        repeat(5) {
+            val target = playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = pending,
+                delta = 1,
+            ) ?: error("burst step must be accepted")
+            pending = target.id
+            visited += target.id
+        }
+
+        assertEquals(listOf(2, 3, 4, 5, 1), visited)
+
+        // A reverse step re-anchors on the pending target, not the committed channel.
+        assertEquals(
+            5,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = pending,
+                delta = -1,
+            )?.id,
+        )
+
+        // Cancellation restores the committed channel as the anchor for the next burst.
+        assertEquals(
+            2,
+            playerProQueuedRelativeChannel(
+                sequence = sequence,
+                currentStreamId = 1,
+                pendingStreamId = null,
+                delta = 1,
+            )?.id,
+        )
+    }
+
+    @Test
+    fun catalogIndexNavigationSequenceMatchesTheAcceptedScanSemantics() {
+        val channels = listOf(
+            channel(1, "news"),
+            channel(2, "news"),
+            channel(3, "sports"),
+            channel(4, "sports"),
+            channel(5, "movies"),
+        )
+        val index = LiveChannelCatalogIndex(channels)
+        val favoriteIds = setOf(1, 3, 5)
+        val recentIds = listOf(5, 2)
+
+        listOf(1, 2, 3, 5, 99).forEach { current ->
+            listOf(
+                LIVE_TV_PRO_CONTEXT_ALL,
+                LIVE_TV_PRO_CONTEXT_FAVORITES,
+                LIVE_TV_PRO_CONTEXT_RECENT,
+                "sports",
+                "missing",
+            ).forEach { context ->
+                assertEquals(
+                    playerProLiveNavigationSequence(
+                        channels = channels,
+                        currentStreamId = current,
+                        launchContext = context,
+                        favoriteIds = favoriteIds,
+                        recentIds = recentIds,
+                    ).map(ContentItem::id),
+                    liveNavigationSequenceFromIndex(
+                        index = index,
+                        currentStreamId = current,
+                        launchContext = context,
+                        favoriteChannels = index.favoriteChannels(favoriteIds),
+                        recentChannels = index.recentChannels(recentIds),
+                    ).map(ContentItem::id),
+                )
+            }
+            assertEquals(
+                liveTvProChannelSequence(channels, current).map(ContentItem::id),
+                index.sequenceFor(current).map(ContentItem::id),
+            )
+        }
+        assertEquals(channels, index.channelsInCategory(null))
+        assertEquals(listOf(1, 2), index.channelsInCategory("news").map(ContentItem::id))
+        assertEquals(listOf(1, 3, 5), index.favoriteChannels(favoriteIds).map(ContentItem::id))
+        assertEquals(listOf(5, 2), index.recentChannels(recentIds).map(ContentItem::id))
+    }
+
     private fun episode(
         id: Int,
         season: Int,

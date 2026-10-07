@@ -15,6 +15,14 @@ internal const val LIVE_TV_PRO_CONTEXT_ALL = "__all__"
 internal const val LIVE_TV_PRO_CONTEXT_FAVORITES = "__favorites__"
 internal const val LIVE_TV_PRO_CONTEXT_RECENT = "__recent__"
 
+/** Fixed semantic Live rows that are never part of the server order, hide or reorder surface. */
+internal fun isLiveCategorySpecialId(categoryId: String): Boolean =
+    categoryId == LIVE_TV_PRO_MAIN_FAVORITES_CATEGORY ||
+        categoryId == LIVE_TV_PRO_MAIN_CONTINUE_CATEGORY ||
+        categoryId == LIVE_TV_PRO_MAIN_RECENT_CATEGORY ||
+        categoryId == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY ||
+        categoryId == LIVE_TV_PRO_BROWSER_CONTINUE_CATEGORY
+
 private const val LIVE_TV_PRO_CONTEXT_PREFS = "live_player_context"
 private const val LIVE_TV_PRO_CONTEXT_CATEGORY_KEY = "category_id"
 private const val LIVE_TV_PRO_HISTORY_PREFS = "live_player_history"

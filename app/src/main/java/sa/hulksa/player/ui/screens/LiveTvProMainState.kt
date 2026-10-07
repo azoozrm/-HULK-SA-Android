@@ -32,18 +32,6 @@ internal fun liveTvProDecorateMainState(
     val categories = (listOf(recentCategory) + liveCatalog.categories)
         .distinctBy(Category::id)
 
-    val orderPrefs = context.applicationContext
-        .getSharedPreferences("live_category_order", Context.MODE_PRIVATE)
-    val currentOrder = orderPrefs.getString("ids", "")
-        .orEmpty()
-        .split(',')
-        .filter(String::isNotBlank)
-    if (currentOrder.firstOrNull() != LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
-        val updatedOrder = listOf(LIVE_TV_PRO_MAIN_RECENT_CATEGORY) +
-            currentOrder.filterNot { it == LIVE_TV_PRO_MAIN_RECENT_CATEGORY }
-        orderPrefs.edit().putString("ids", updatedOrder.joinToString(",")).apply()
-    }
-
     val presentedItems = if (state.selectedCategoryId == LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
         liveTvProRecentOverlayItems(
             items = liveCatalog.items,
