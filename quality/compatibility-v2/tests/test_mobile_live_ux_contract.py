@@ -92,10 +92,10 @@ class MobileLiveUxQualificationTest(unittest.TestCase):
         player = self.read(PLAYER_SCREEN)
         browser_before_panel = re.compile(
             r"fun handleBackAction\(\) \{\s*when \{\s*"
-            r"browserVisible -> browserVisible = false\s*"
-            r"finalError != null -> saveAndBack\(\)\s*"
+            r"browserVisible -> closeBrowserAndRestoreError\(\)\s*"
+            r"liveErrorForegroundActive -> saveAndBack\(\)\s*"
             r"(?:(?!else -> saveAndBack\(\)).)*?"
-            r"activePanel != null -> activePanel = null",
+            r"activePanel != null -> closeActivePanelAndRestoreError\(\)",
             re.DOTALL,
         )
         self.assertRegex(player, browser_before_panel)

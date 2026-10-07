@@ -3522,7 +3522,13 @@ class HulkViewModel(application: Application) : AndroidViewModel(application) {
         }
         playerProgressProfileOwner = profileStore.activeProfileId()
         val resumable = request.copy(resumePositionMs = userLibrary.resumePosition(request.historyKey))
+        val historyStartMs = android.os.SystemClock.uptimeMillis()
         val updatedHistory = userLibrary.recordStart(resumable)
+        android.util.Log.i(
+            "HulkPlayer",
+            "history recorded t=${android.os.SystemClock.elapsedRealtime()} streamId=${request.streamId} " +
+                "in ${android.os.SystemClock.uptimeMillis() - historyStartMs}ms",
+        )
         mutableState.update {
             it.copy(
                 screen = HulkScreen.PLAYER,

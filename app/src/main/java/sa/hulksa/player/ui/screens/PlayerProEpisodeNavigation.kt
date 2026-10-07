@@ -1,56 +1,33 @@
 package sa.hulksa.player.ui.screens
 
+import android.os.SystemClock
 import android.view.KeyEvent as AndroidKeyEvent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import sa.hulksa.player.model.Catalog
 import sa.hulksa.player.model.ContentItem
 import sa.hulksa.player.model.Episode
 import sa.hulksa.player.model.PlaybackRequest
-import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
-import sa.hulksa.player.ui.components.ChannelLogo
-import sa.hulksa.player.ui.theme.LocalHulkColors
 import kotlin.math.roundToInt
 
 private const val ANDROID_KEYCODE_LAST_CHANNEL = 229
-private const val LIVE_TV_PRO_ZAP_COMMIT_DELAY_MS = 220L
-private const val LIVE_TV_PRO_ZAP_INDICATOR_TIMEOUT_MS = 2_400L
 
 internal data class PlayerProEpisodeNeighbors(
     val previous: Episode?,
@@ -183,19 +160,21 @@ fun PlayerProScreen(
     onPlayNextEpisode: (() -> Unit)?,
 ) {
     val context = LocalContext.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val tvOverlayMetrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
-        playerTvPremiumOverlayMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
-    }
     val liveChannels = liveCatalog?.items.orEmpty()
     val liveProfileScope = context.liveTvProStateScope()
     var recentChannelIds by remember(liveCatalog, liveProfileScope) {
         mutableStateOf(context.liveTvProRecentChannelIds())
     }
-    var pendingLiveChannelId by remember(request.streamId, liveCatalog) { mutableStateOf<Int?>(null) }
-    var liveZapInteractionTick by remember(request.streamId) { mutableIntStateOf(0) }
-    var liveZapIndicatorChannelId by remember(liveCatalog) { mutableStateOf<Int?>(null) }
-    var liveZapIndicatorTick by remember(liveCatalog) { mutableIntStateOf(0) }
+    // Latest queued Live target. It deliberately survives request replacement so newer accepted
+    // input is never dropped while an earlier switch is still settling.
+    var pendingLiveChannelId by remember(liveCatalog, liveProfileScope) { mutableStateOf<Int?>(null) }
+    var lastLiveDispatchAtMs by remember(liveCatalog, liveProfileScope) { mutableLongStateOf(0L) }
+    var lastLiveDispatchedTargetId by remember(liveCatalog, liveProfileScope) { mutableStateOf<Int?>(null) }
+    // Explicit reveal intent carried into the existing PlayerScreen controls owner. It is set by an
+    // accepted remote switch command (so the current request reveals the compact Live strip) and is
+    // consumed once by the newly committed request so the reveal survives the request replacement.
+    // Every accepted step is also a fresh interaction for the existing reveal/auto-hide owner.
+    var liveControlsInteraction by remember { mutableStateOf(LiveControlsInteractionState()) }
     var childErrorModalInputActive by remember(request.historyKey) { mutableStateOf(false) }
     var childLiveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
     var childPanelInputActive by remember(request.historyKey) { mutableStateOf(false) }
@@ -224,61 +203,189 @@ fun PlayerProScreen(
             )
         }
     }
-    val liveZapIndicatorChannel = remember(liveCatalog, liveZapIndicatorChannelId) {
-        val indicatorId = liveZapIndicatorChannelId
-        if (indicatorId == null) null else liveChannels.firstOrNull { it.id == indicatorId }
+    // Observed launch context. The browser can change the saved category and close without
+    // replacing the channel request, so the context is re-read on browser close and on request
+    // replacement and is a real cache key below.
+    var liveLaunchContext by remember(liveProfileScope) {
+        mutableStateOf(context.liveTvProLaunchContext())
+    }
+    LaunchedEffect(request.historyKey, childLiveBrowserVisible) {
+        liveLaunchContext = context.liveTvProLaunchContext()
+    }
+    // Catalog-keyed index plus cached favorites/recent lists remove the repeated O(catalog) scans
+    // from every accepted switch; the sequence is rebuilt only when its real inputs change.
+    val liveCatalogIndex = remember(liveChannels) {
+        LiveChannelCatalogIndex(liveChannels)
+    }
+    val liveFavoriteIds = remember(liveCatalogIndex, favoriteKeys) {
+        liveCatalogIndex.items.asSequence().filter(isFavorite).map(ContentItem::id).toSet()
+    }
+    val liveFavoriteChannels = remember(liveCatalogIndex, liveFavoriteIds) {
+        liveCatalogIndex.favoriteChannels(liveFavoriteIds)
+    }
+    val liveRecentChannels = remember(liveCatalogIndex, recentChannelIds) {
+        liveCatalogIndex.recentChannels(recentChannelIds)
+    }
+    val liveNavigationSequence = remember(
+        request.streamId,
+        liveCatalogIndex,
+        liveFavoriteChannels,
+        liveRecentChannels,
+        liveLaunchContext,
+    ) {
+        liveNavigationSequenceFromIndex(
+            index = liveCatalogIndex,
+            currentStreamId = request.streamId,
+            launchContext = liveLaunchContext,
+            favoriteChannels = liveFavoriteChannels,
+            recentChannels = liveRecentChannels,
+        )
     }
 
+    /**
+     * The single Live zap scheduler.
+     *
+     * A normal accepted press dispatches immediately (leading edge, no quiet-period wait). While
+     * input continues, the latest target is committed at a bounded cadence and never starves until
+     * release. Only the latest target is kept; no stale FIFO backlog and no player creation for
+     * every native repeat. Modal surfaces gate and clear the queue.
+     */
     LaunchedEffect(
         request.isLive,
+        liveTvProEnabled,
         request.streamId,
         pendingLiveChannelId,
-        liveZapInteractionTick,
-        liveCatalog,
+        liveChannels,
+        childErrorModalInputActive,
+        childLiveBrowserVisible,
+        childPanelInputActive,
     ) {
-        if (!request.isLive) {
+        if (!request.isLive || !liveTvProEnabled) {
             pendingLiveChannelId = null
             return@LaunchedEffect
         }
-        val targetId = pendingLiveChannelId ?: return@LaunchedEffect
-        val interaction = liveZapInteractionTick
-        delay(LIVE_TV_PRO_ZAP_COMMIT_DELAY_MS)
-        if (pendingLiveChannelId != targetId || liveZapInteractionTick != interaction) {
+        if (liveZapDispatchBlocked(
+                errorModalInputActive = childErrorModalInputActive,
+                browserVisible = childLiveBrowserVisible,
+                panelInputActive = childPanelInputActive,
+            )
+        ) {
             return@LaunchedEffect
         }
-        val target = liveChannels.firstOrNull { it.id == targetId }
-        pendingLiveChannelId = null
-        if (target != null && target.id != request.streamId) {
+        while (true) {
+            val targetId = pendingLiveChannelId ?: return@LaunchedEffect
+            val plan = planLiveZapDispatch(
+                state = LiveZapSchedulerState(
+                    pendingTargetId = targetId,
+                    lastDispatchAtMs = lastLiveDispatchAtMs,
+                    lastDispatchedTargetId = lastLiveDispatchedTargetId,
+                ),
+                currentStreamId = request.streamId,
+                pendingTargetExists = liveChannels.any { it.id == targetId },
+                nowMs = SystemClock.uptimeMillis(),
+            )
+            pendingLiveChannelId = plan.state.pendingTargetId
+            lastLiveDispatchAtMs = plan.state.lastDispatchAtMs
+            lastLiveDispatchedTargetId = plan.state.lastDispatchedTargetId
+            if (plan.waitMs > 0L) {
+                delay(plan.waitMs)
+                if (!request.isLive) return@LaunchedEffect
+                if (liveZapDispatchBlocked(
+                        errorModalInputActive = childErrorModalInputActive,
+                        browserVisible = childLiveBrowserVisible,
+                        panelInputActive = childPanelInputActive,
+                    )
+                ) {
+                    return@LaunchedEffect
+                }
+                continue
+            }
+            val dispatchId = plan.dispatchTargetId ?: return@LaunchedEffect
+            val target = liveChannels.firstOrNull { it.id == dispatchId } ?: run {
+                pendingLiveChannelId = null
+                lastLiveDispatchedTargetId = null
+                return@LaunchedEffect
+            }
+            android.util.Log.i(
+                "HulkPlayer",
+                "live zap dispatch t=${SystemClock.elapsedRealtime()} targetId=$dispatchId " +
+                    "fromStreamId=${request.streamId}",
+            )
             onSelectLiveChannel(target)
-        }
-    }
-
-    LaunchedEffect(request.isLive, liveZapIndicatorChannelId, liveZapIndicatorTick) {
-        if (!request.isLive) {
-            liveZapIndicatorChannelId = null
             return@LaunchedEffect
         }
-        val indicatorId = liveZapIndicatorChannelId ?: return@LaunchedEffect
-        val interaction = liveZapIndicatorTick
-        delay(LIVE_TV_PRO_ZAP_INDICATOR_TIMEOUT_MS)
-        if (liveZapIndicatorChannelId == indicatorId && liveZapIndicatorTick == interaction) {
-            liveZapIndicatorChannelId = null
+    }
+
+    // A request change consumes the reveal intent after the new request has composed with it. A
+    // newer accepted switch that arrived in the same window keeps the intent for its own request.
+    LaunchedEffect(request.historyKey) {
+        liveControlsInteraction = liveControlsInteraction.onRequestReplacement(
+            pendingSwitchPresent = pendingLiveChannelId != null,
+        )
+    }
+
+    // A foreground panel, browser or error surface owns input; drop queued switching so nothing
+    // zaps behind it.
+    LaunchedEffect(
+        liveTvProEnabled,
+        childErrorModalInputActive,
+        childLiveBrowserVisible,
+        childPanelInputActive,
+    ) {
+        if (!liveTvProEnabled ||
+            liveZapDispatchBlocked(
+                errorModalInputActive = childErrorModalInputActive,
+                browserVisible = childLiveBrowserVisible,
+                panelInputActive = childPanelInputActive,
+            )
+        ) {
+            pendingLiveChannelId = null
+            lastLiveDispatchedTargetId = null
         }
     }
 
-    fun dismissLiveZapIndicator() {
-        liveZapIndicatorChannelId = null
-        liveZapIndicatorTick += 1
-    }
-
-    fun showLiveZapIndicator(channel: ContentItem) {
-        liveZapIndicatorChannelId = channel.id
-        liveZapIndicatorTick += 1
+    fun requestLiveControlsReveal() {
+        liveControlsInteraction = liveControlsInteraction.onAcceptedSwitchInteraction()
     }
 
     fun cancelPendingLiveZap() {
         pendingLiveChannelId = null
-        liveZapInteractionTick += 1
+        lastLiveDispatchedTargetId = null
+        liveControlsInteraction = liveControlsInteraction.onCancel()
+    }
+
+    /**
+     * Settle the latest queued target immediately on release, without waiting for the next bounded
+     * dispatch slot. Re-dispatches are skipped when the target is already in flight or committed.
+     */
+    fun flushPendingLiveTarget() {
+        if (!request.isLive || !liveTvProEnabled) return
+        if (liveZapDispatchBlocked(
+                errorModalInputActive = childErrorModalInputActive,
+                browserVisible = childLiveBrowserVisible,
+                panelInputActive = childPanelInputActive,
+            )
+        ) {
+            return
+        }
+        val targetId = pendingLiveChannelId ?: return
+        val target = liveChannels.firstOrNull { it.id == targetId }
+        if (target == null || target.id == request.streamId) {
+            pendingLiveChannelId = null
+            lastLiveDispatchedTargetId = null
+            return
+        }
+        val releaseTargetId = liveZapReleaseDispatchTargetId(
+            state = LiveZapSchedulerState(
+                pendingTargetId = targetId,
+                lastDispatchAtMs = lastLiveDispatchAtMs,
+                lastDispatchedTargetId = lastLiveDispatchedTargetId,
+            ),
+            currentStreamId = request.streamId,
+        ) ?: return
+        lastLiveDispatchAtMs = SystemClock.uptimeMillis()
+        lastLiveDispatchedTargetId = releaseTargetId
+        onSelectLiveChannel(target)
     }
 
     /**
@@ -288,32 +395,53 @@ fun PlayerProScreen(
     fun playLastChannel(): Boolean {
         val channel = lastChannel ?: return false
         cancelPendingLiveZap()
-        showLiveZapIndicator(channel)
+        requestLiveControlsReveal()
         onSelectLiveChannel(channel)
         return true
     }
 
-    fun liveNavigationSequence(): List<ContentItem> = playerProLiveNavigationSequence(
-        channels = liveChannels,
-        currentStreamId = request.streamId,
-        launchContext = context.liveTvProLaunchContext(),
-        favoriteIds = liveChannels.asSequence().filter(isFavorite).map(ContentItem::id).toSet(),
-        recentIds = recentChannelIds,
-    )
-
-    fun queueLiveRelative(delta: Int): Boolean {
-        if (!request.isLive) return false
+    /**
+     * Accept one relative switch step and return the interaction token of that acceptance, or -1
+     * when it was not accepted. The token lets a cancelled touch gesture discard only its own
+     * uncommitted target without touching a newer interaction.
+     */
+    fun queueLiveRelativeWithToken(delta: Int): Int {
+        if (!request.isLive || !liveTvProEnabled) return -1
         val channel = playerProQueuedRelativeChannel(
-            sequence = liveNavigationSequence(),
+            sequence = liveNavigationSequence,
             currentStreamId = request.streamId,
             pendingStreamId = pendingLiveChannelId,
             delta = delta,
-        ) ?: return false
-        if (channel.id == request.streamId && pendingLiveChannelId == null) return false
+        ) ?: return -1
+        if (channel.id == request.streamId && pendingLiveChannelId == null) return -1
         pendingLiveChannelId = channel.id
-        liveZapInteractionTick += 1
-        showLiveZapIndicator(channel)
-        return true
+        requestLiveControlsReveal()
+        android.util.Log.i(
+            "HulkPlayer",
+            "live zap accept t=${SystemClock.elapsedRealtime()} tick=${liveControlsInteraction.interactionTick} " +
+                "targetId=${channel.id} fromStreamId=${request.streamId}",
+        )
+        return liveControlsInteraction.interactionTick
+    }
+
+    fun queueLiveRelative(delta: Int): Boolean = queueLiveRelativeWithToken(delta) >= 0
+
+    /**
+     * Cancelled touch gesture cleanup for the queue owner. It discards the uncommitted target and
+     * reveal intent only when the cancelling gesture still owns the latest accepted interaction, so
+     * cleanup from an obsolete gesture cannot cancel a newer interaction or undo a committed
+     * channel (commits never revert here; only the pending/uncommitted target is dropped).
+     */
+    fun cancelLiveHoldPending(interactionToken: Int) {
+        if (interactionToken < 0) return
+        if (liveControlsInteraction.interactionTick != interactionToken) return
+        if (pendingLiveChannelId == null) return
+        android.util.Log.i(
+            "HulkPlayer",
+            "live zap cancel t=${SystemClock.elapsedRealtime()} tick=$interactionToken " +
+                "targetId=$pendingLiveChannelId",
+        )
+        cancelPendingLiveZap()
     }
 
     fun queuePlayerRequestedLiveChannel(channel: ContentItem) {
@@ -323,10 +451,7 @@ fun PlayerProScreen(
         }
         if (channel.id == request.streamId && pendingLiveChannelId == null) return
 
-        val sequence = liveTvProChannelSequence(
-            channels = liveChannels,
-            currentStreamId = request.streamId,
-        )
+        val sequence = liveCatalogIndex.sequenceFor(request.streamId)
         val currentIndex = sequence.indexOfFirst { it.id == request.streamId }
         val requestedIndex = sequence.indexOfFirst { it.id == channel.id }
         val relativeDelta = if (currentIndex >= 0 && requestedIndex >= 0 && sequence.size > 1) {
@@ -345,7 +470,6 @@ fun PlayerProScreen(
             queueLiveRelative(relativeDelta)
         } else {
             cancelPendingLiveZap()
-            dismissLiveZapIndicator()
             onSelectLiveChannel(channel)
         }
     }
@@ -354,9 +478,23 @@ fun PlayerProScreen(
         modifier = Modifier
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
+                val keyCode = event.nativeKeyEvent.keyCode
+                if (request.isLive && liveTvProEnabled && event.type == KeyEventType.KeyUp) {
+                    // A held/native-repeat sequence settles on its latest target as soon as the key
+                    // is released, without waiting for the next bounded dispatch slot.
+                    when (keyCode) {
+                        AndroidKeyEvent.KEYCODE_CHANNEL_UP,
+                        AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
+                        AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
+                        AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                        AndroidKeyEvent.KEYCODE_DPAD_UP,
+                        AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+                        -> flushPendingLiveTarget()
+                    }
+                    return@onPreviewKeyEvent false
+                }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
-                val keyCode = event.nativeKeyEvent.keyCode
                 if (request.isLive && liveTvProEnabled) {
                     if (
                         !playerLiveProLayerOwnsInput(
@@ -392,7 +530,6 @@ fun PlayerProScreen(
                         AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                         -> {
                             cancelPendingLiveZap()
-                            dismissLiveZapIndicator()
                             return@onPreviewKeyEvent false
                         }
 
@@ -406,7 +543,6 @@ fun PlayerProScreen(
                         AndroidKeyEvent.KEYCODE_ESCAPE,
                         -> {
                             cancelPendingLiveZap()
-                            dismissLiveZapIndicator()
                             return@onPreviewKeyEvent false
                         }
                     }
@@ -463,133 +599,33 @@ fun PlayerProScreen(
             onProgress = onProgress,
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
             onPlayNextEpisode = onPlayNextEpisode,
+            liveControlsRevealRequested = liveControlsInteraction.revealRequested,
+            liveControlsInteractionTick = liveControlsInteraction.interactionTick,
+            liveChannelHoldRepeat = liveTvProEnabled && request.isLive,
+            onPreviousLiveChannel = if (liveTvProEnabled && request.isLive) {
+                { queueLiveRelativeWithToken(-1) }
+            } else {
+                null
+            },
+            onNextLiveChannel = if (liveTvProEnabled && request.isLive) {
+                { queueLiveRelativeWithToken(1) }
+            } else {
+                null
+            },
+            onLiveChannelHoldRelease = if (liveTvProEnabled && request.isLive) {
+                { flushPendingLiveTarget() }
+            } else {
+                null
+            },
+            onLiveChannelHoldCancelled = if (liveTvProEnabled && request.isLive) {
+                { token -> cancelLiveHoldPending(token) }
+            } else {
+                null
+            },
+            liveCatalogIndex = liveCatalogIndex,
             onErrorModalActiveChanged = { childErrorModalInputActive = it },
             onBrowserVisibilityChanged = { childLiveBrowserVisible = it },
             onPanelActiveChanged = { childPanelInputActive = it },
         )
-
-        if (liveTvProEnabled && request.isLive && liveZapIndicatorChannel != null && !childLiveBrowserVisible) {
-            LiveZapIndicator(
-                channel = liveZapIndicatorChannel,
-                modifier = Modifier
-                    .align(
-                        if (adaptiveUi.isTelevision) {
-                            Alignment.BottomStart
-                        } else {
-                            Alignment.BottomCenter
-                        },
-                    )
-                    .padding(
-                        start = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeHorizontalPaddingDp.dp else 16.dp,
-                        end = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeHorizontalPaddingDp.dp else 16.dp,
-                        bottom = if (adaptiveUi.isTelevision) tvOverlayMetrics.safeBottomPaddingDp.dp else 94.dp,
-                    ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LiveZapIndicator(
-    channel: ContentItem,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalHulkColors.current
-    val adaptiveUi = LocalAdaptiveUi.current
-    val isTv = adaptiveUi.isTelevision
-    val metrics = remember(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp) {
-        playerTvPremiumOverlayMetrics(adaptiveUi.screenWidthDp, adaptiveUi.screenHeightDp)
-    }
-    val logoShape = RoundedCornerShape(if (isTv) 18.dp else 15.dp)
-    val textFade = if (isTv) {
-        // Localized dark fade under the text, strongest next to the gold accent.
-        Brush.horizontalGradient(
-            listOf(Color.Transparent, Color.Black.copy(alpha = .78f)),
-        )
-    } else {
-        Brush.horizontalGradient(
-            listOf(Color.Transparent, Color.Black.copy(alpha = .72f), Color.Transparent),
-        )
-    }
-
-    Row(
-        modifier = modifier
-            .widthIn(
-                min = if (isTv) metrics.zapMinWidthDp.dp else 300.dp,
-                max = if (isTv) metrics.zapMaxWidthDp.dp else 370.dp,
-            )
-            .padding(vertical = if (isTv) metrics.zapVerticalPaddingDp.dp else 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(if (isTv) 14.dp else 10.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(if (isTv) metrics.zapLogoSizeDp.dp else 70.dp)
-                .clip(logoShape)
-                .background(Color(0xFFF7F5EF))
-                .border(1.dp, colors.gold.copy(alpha = .55f), logoShape)
-                .padding(5.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            ChannelLogo(channel, Modifier.fillMaxSize())
-        }
-
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .height(if (isTv) (metrics.zapLogoSizeDp * .62f).dp else 46.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(colors.gold),
-        )
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .background(textFade)
-                .padding(
-                    start = if (isTv) 6.dp else 8.dp,
-                    end = if (isTv) metrics.zapHorizontalPaddingDp.dp else 10.dp,
-                    top = 4.dp,
-                    bottom = 4.dp,
-                ),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "تبديل القناة",
-                    color = colors.goldBright,
-                    fontSize = if (isTv) 13.sp else 11.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .size(if (isTv) 8.dp else 7.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFFF4E55)),
-                )
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    text = "مباشر",
-                    color = Color.White,
-                    fontSize = if (isTv) 13.sp else 11.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Text(
-                text = channel.name,
-                color = Color.White,
-                fontSize = if (isTv) metrics.zapTitleSizeSp.sp else 20.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "جاري فتح البث المباشر",
-                color = colors.textMuted,
-                fontSize = if (isTv) 12.sp else 11.sp,
-                maxLines = 1,
-            )
-        }
     }
 }

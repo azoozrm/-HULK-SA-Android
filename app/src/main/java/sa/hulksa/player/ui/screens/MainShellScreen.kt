@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.StatFs
+import android.view.KeyEvent as AndroidKeyEvent
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -13,8 +14,11 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -64,6 +68,7 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.Favorite
@@ -119,11 +124,14 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -131,6 +139,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -151,9 +163,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import sa.hulksa.player.BuildConfig
 import sa.hulksa.player.HulkUiState
 import sa.hulksa.player.MainDestination
+import sa.hulksa.player.data.AccountProfileStateScope
 import sa.hulksa.player.data.GrowthAction
 import sa.hulksa.player.data.GrowthDestination
 import sa.hulksa.player.data.RenewalBannerContent
@@ -2491,6 +2505,25 @@ internal fun isLivePreviewSelected(
     channel: ContentItem,
 ): Boolean = preview?.id == channel.id
 
+internal data class LiveCatalogErrorCopy(val title: String, val body: String)
+
+/**
+ * Live catalog error copy: validated connectivity selects the offline wording, otherwise a truthful
+ * Live load failure keeps the real server message in the same accepted dark/gold/ivory notice.
+ */
+internal fun liveCatalogErrorCopy(offline: Boolean, serverMessage: String?): LiveCatalogErrorCopy =
+    if (offline) {
+        LiveCatalogErrorCopy(
+            title = "لا يوجد اتصال بالانترنت",
+            body = "تعذر تحديث القنوات ، تحقق من الاتصال وحاول مرة اخرى",
+        )
+    } else {
+        LiveCatalogErrorCopy(
+            title = "تعذر تحديث القنوات",
+            body = serverMessage?.trim()?.takeIf { it.isNotEmpty() } ?: "حاول مرة اخرى",
+        )
+    }
+
 @Composable
 private fun LiveCatalogScreen(
     state: HulkUiState,
@@ -2514,9 +2547,36 @@ private fun LiveCatalogScreen(
                 item.matchesSearch(state.searchQuery)
         }
     }
-    var hiddenCategoryIds by remember { mutableStateOf(context.liveHiddenCategoryIds()) }
     var showCategoryManager by remember { mutableStateOf(false) }
     var restoreManagerEntryFocus by remember { mutableStateOf(false) }
+    // One shared committed order + hidden owner for the strip, the manager and the browser. The
+    // manager interaction scope is captured when it opens so a later profile change cannot redirect
+    // an in-flight write to a newer scope.
+    val liveProfileScope = context.liveCategoryStateScope()
+    var hiddenCategoryIds by remember(liveProfileScope, catalog) {
+        mutableStateOf(context.liveHiddenCategoryIds())
+    }
+    var committedOrderIds by remember(liveProfileScope, catalog) {
+        mutableStateOf(context.liveCommittedCategoryOrderIds())
+    }
+    var managerScope by remember { mutableStateOf<AccountProfileStateScope?>(null) }
+    LaunchedEffect(liveProfileScope, catalog) {
+        context.adoptLiveCommittedCategoryOrderOnce()
+        committedOrderIds = context.liveCommittedCategoryOrderIds()
+    }
+    // An account/profile switch invalidates an open manager session before any stale draft can act.
+    LaunchedEffect(liveProfileScope) {
+        if (showCategoryManager) {
+            showCategoryManager = false
+            managerScope = null
+        }
+    }
+    val serverCategories = remember(catalog?.categories, committedOrderIds) {
+        orderedLiveServerCategories(catalog?.categories.orEmpty(), committedOrderIds)
+    }
+    val visibleServerCategories = remember(serverCategories, hiddenCategoryIds) {
+        serverCategories.filterNot { it.id in hiddenCategoryIds }
+    }
     val manageCategoriesRequester = remember { FocusRequester() }
     val toggleCategoryVisibility: (String) -> Unit = { categoryId ->
         val updated = if (categoryId in hiddenCategoryIds) {
@@ -2525,7 +2585,7 @@ private fun LiveCatalogScreen(
             hiddenCategoryIds + categoryId
         }
         hiddenCategoryIds = updated
-        context.saveLiveHiddenCategoryIds(updated)
+        context.saveLiveHiddenCategoryIds(updated, managerScope)
     }
     val remembered = navigationMemory.position(MainDestination.LIVE)
     val rememberedIndex = remembered.itemIndex.coerceIn(0, visible.lastIndex.coerceAtLeast(0))
@@ -2534,6 +2594,26 @@ private fun LiveCatalogScreen(
     val playRequester = remember { FocusRequester() }
     val favoriteRequester = remember { FocusRequester() }
     val categoryFocusRestoreController = remember { CategoryFocusRestoreController() }
+    // Accepted Live catalog error classification: typed validated connectivity plus the real
+    // server error, rendered by the shared MoviesErrorNotice family with the actual Live refresh
+    // callback. Cached channels, category, item and scroll identity stay intact.
+    val liveNetworkUsable by rememberUsableNetworkState()
+    val liveError = state.errorMessage != null
+    val liveOfflineError = liveError && !liveNetworkUsable
+    val liveErrorCopy = liveCatalogErrorCopy(offline = liveOfflineError, serverMessage = state.errorMessage)
+    val noticeRetryRequester = remember { FocusRequester() }
+    val refreshRequester = remember { FocusRequester() }
+    var noticeRetryFocused by remember { mutableStateOf(false) }
+    val noticeWasVisible = remember { mutableStateOf(false) }
+    LaunchedEffect(liveError, catalog) {
+        val noticeVisible = liveError && catalog != null
+        if (noticeWasVisible.value && !noticeVisible && noticeRetryFocused) {
+            withFrameNanos { }
+            val restored = runCatching { refreshRequester.requestFocus() }.getOrDefault(false)
+            if (!restored) categoryFocusRestoreController.requestFromSource()
+        }
+        noticeWasVisible.value = noticeVisible
+    }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = rememberedIndex)
     val focusedChannelIndex = remember(visible) { intArrayOf(rememberedIndex) }
     var nextCategoryContentFocusRequestId by remember { mutableLongStateOf(0L) }
@@ -2653,28 +2733,55 @@ private fun LiveCatalogScreen(
                 isTv = isTv,
                 onMoveToCategories = categoryFocusRestoreController::requestFromSource,
                 onManageCategories = {
+                    managerScope = context.liveCategoryStateScope()
                     restoreManagerEntryFocus = true
                     showCategoryManager = true
                 },
                 manageCategoriesRequester = manageCategoriesRequester,
                 searchIcon = Icons.Rounded.Search,
+                toolbarIconTint = colors.gold,
+                countUnit = "قناة",
+                refreshRequester = refreshRequester,
+                downOverrideRequester = noticeRetryRequester.takeIf { liveError && catalog != null },
             )
-            if (state.errorMessage != null) { Spacer(Modifier.height(9.dp)); ErrorNotice(state.errorMessage) }
+            if (liveError && catalog != null) {
+                Spacer(Modifier.height(9.dp))
+                MoviesErrorNotice(
+                    title = liveErrorCopy.title,
+                    body = liveErrorCopy.body,
+                    onRetry = onRefresh,
+                    isTv = isTv,
+                    networkFailure = liveOfflineError,
+                    retryRequester = noticeRetryRequester,
+                    onRetryFocusChanged = { noticeRetryFocused = it },
+                    onRetryUp = { runCatching { refreshRequester.requestFocus() }.getOrDefault(false) },
+                    onRetryDown = { categoryFocusRestoreController.requestFromSource() },
+                )
+            }
             Spacer(Modifier.height(10.dp))
-            ReorderableLiveCategoryBar(
+            LiveCategoryBar(
                 categories = catalog?.categories.orEmpty(),
+                serverCategories = visibleServerCategories,
                 selectedId = state.selectedCategoryId,
                 onSelect = selectCategoryAndEnterContent,
                 isTv = isTv,
                 focusRestoreController = categoryFocusRestoreController,
                 initialAllFocusRequester = initialAllFocusRequester,
                 initialAllFocusPending = initialAllFocusPending,
-                hiddenCategoryIds = hiddenCategoryIds,
+                noticeRetryRequester = noticeRetryRequester.takeIf { liveError && catalog != null },
             )
             Spacer(Modifier.height(6.dp))
         }
         if (catalog == null && ContentType.LIVE in state.loadingTypes) {
             LoadingRing(label = "جاري تحميل القنوات…", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 90.dp))
+        } else if (catalog == null && liveError) {
+            MoviesOfflineEmptyState(
+                onRetry = onRefresh,
+                modifier = Modifier.padding(top = 40.dp),
+                title = liveErrorCopy.title,
+                body = liveErrorCopy.body,
+                networkFailure = liveOfflineError,
+            )
         } else if (visible.isEmpty()) {
             EmptyState("لا توجد قنوات مطابقة")
         } else if (isTv) {
@@ -2768,14 +2875,21 @@ private fun LiveCatalogScreen(
     }
     if (showCategoryManager) {
         CategoryManagerDialog(
-            categories = catalog?.categories.orEmpty()
-                .filter { it.id != LIVE_TV_PRO_MAIN_RECENT_CATEGORY },
+            categories = serverCategories,
             hiddenIds = hiddenCategoryIds,
             onToggle = toggleCategoryVisibility,
-            onDismiss = { showCategoryManager = false },
+            onDismiss = {
+                showCategoryManager = false
+                managerScope = null
+            },
             title = "ادارة الفئات",
-            scopeText = "اخفاء الفئة يخفيها من شريط البث المباشر فقط.",
-            emptyText = "لا توجد فئات.",
+            scopeText = "الترتيب والاخفاء يطبقان على البث ومستعرض القنوات",
+            emptyText = "لا توجد فئات",
+            liveStyle = true,
+            onCommitOrder = { ids ->
+                committedOrderIds = ids
+                context.saveLiveCommittedCategoryOrderIds(managerScope, ids)
+            },
         )
     }
 }
@@ -5541,42 +5655,45 @@ private fun rememberLiveCategoryStripMetrics(): LiveCategoryStripMetrics {
     )
 }
 
+/**
+ * Live category selector.
+ *
+ * Selection only: All, Favorites and Recent are fixed semantic rows and the real server categories
+ * follow in the single committed order shared with the manager and the browser. Long-press reorder
+ * no longer exists on this surface; a held activation can never reorder or repeatedly select.
+ */
 @Composable
-private fun ReorderableLiveCategoryBar(
+private fun LiveCategoryBar(
     categories: List<Category>,
+    serverCategories: List<Category>,
     selectedId: String?,
     onSelect: (String?) -> Unit,
     isTv: Boolean,
     focusRestoreController: CategoryFocusRestoreController,
     initialAllFocusRequester: FocusRequester? = null,
     initialAllFocusPending: Boolean = false,
-    hiddenCategoryIds: Set<String> = emptySet(),
+    noticeRetryRequester: FocusRequester? = null,
 ) {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("live_category_order", android.content.Context.MODE_PRIVATE) }
-    var ids by remember(categories) {
-        mutableStateOf(prefs.getString("ids", "").orEmpty().split(',').filter { it.isNotBlank() })
-    }
-    var moving by remember { mutableStateOf<String?>(null) }
+    val colors = LocalHulkColors.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val ownedAllFocusRequester = remember { FocusRequester() }
     val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
     val favoritesFocusRequester = remember { FocusRequester() }
+    val recentFocusRequester = remember { FocusRequester() }
     val stableCategoryIds = remember(categories) { categories.map(Category::id) }
     val categoryFocusRequesters = remember(stableCategoryIds) {
         stableCategoryIds.associateWith { FocusRequester() }
     }
     var categoryBarHasFocus by remember { mutableStateOf(false) }
-    val allOrdered = remember(categories, ids) {
-        val byId = categories.associateBy { it.id }
-        (ids.mapNotNull(byId::get) + categories.filterNot { it.id in ids }).distinctBy { it.id }
+    val recentCategory = remember(categories) {
+        categories.firstOrNull { it.id == LIVE_TV_PRO_MAIN_RECENT_CATEGORY }
     }
-    val ordered = remember(allOrdered, hiddenCategoryIds) {
-        allOrdered.filterNot { it.id in hiddenCategoryIds }
-    }
+    val orderedIds = remember(serverCategories) { serverCategories.map(Category::id) }
     val itemMetrics = rememberLiveCategoryStripMetrics()
-    val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID) }
+    val leadingIds = remember(recentCategory) {
+        listOf<String?>(null, FAVORITES_CATEGORY_ID) + listOfNotNull(recentCategory?.id)
+    }
     val baseContentPadding = 8.dp
     val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
 
@@ -5584,11 +5701,12 @@ private fun ReorderableLiveCategoryBar(
         val targetIndex = selectedCategoryFocusIndex(
             selectedId = selectedId,
             leadingIds = leadingIds,
-            orderedIds = ordered.map(Category::id),
+            orderedIds = orderedIds,
         ) ?: return null
         val requester = when (selectedId) {
             null -> allFocusRequester
             FAVORITES_CATEGORY_ID -> favoritesFocusRequester
+            LIVE_TV_PRO_MAIN_RECENT_CATEGORY -> recentFocusRequester
             else -> selectedId?.let(categoryFocusRequesters::get)
         } ?: return null
         return CategoryFocusTarget(selectedId, targetIndex, requester)
@@ -5610,12 +5728,12 @@ private fun ReorderableLiveCategoryBar(
         }
     }
 
-    LaunchedEffect(isTv, selectedId, ordered) {
+    LaunchedEffect(isTv, selectedId, orderedIds) {
         if (isTv) return@LaunchedEffect
         val targetIndex = selectedCategoryFocusIndex(
             selectedId = selectedId,
             leadingIds = leadingIds,
-            orderedIds = ordered.map(Category::id),
+            orderedIds = orderedIds,
         )
         if (targetIndex != null) {
             val anchorIndex = (targetIndex - 1).coerceAtLeast(0)
@@ -5623,24 +5741,6 @@ private fun ReorderableLiveCategoryBar(
         }
     }
 
-    fun move(id: String, direction: Int) {
-        val values = allOrdered.map { it.id }.toMutableList()
-        val from = values.indexOf(id)
-        if (from < 0) return
-        var to = from + direction
-        while (to in values.indices && values[to] in hiddenCategoryIds) to += direction
-        if (to !in values.indices || to == from) return
-        values.add(to, values.removeAt(from))
-        ids = values
-        prefs.edit().putString("ids", values.joinToString(",")).apply()
-        val targetIndex = values.filterNot { it in hiddenCategoryIds }.indexOf(id)
-        if (targetIndex < 0) return
-        scope.launch {
-            delay(40L)
-            val anchorIndex = (targetIndex + 1).coerceAtLeast(0)
-            listState.scrollToItem(anchorIndex)
-        }
-    }
     LazyRow(
         state = listState,
         modifier = Modifier
@@ -5658,6 +5758,19 @@ private fun ReorderableLiveCategoryBar(
             }
             .focusGroup()
             .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .then(
+                // With a visible notice, UP from any category chip returns to its Retry; without
+                // one the accepted Live spatial route is untouched.
+                if (noticeRetryRequester != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        event.type == KeyEventType.KeyDown &&
+                            event.key == Key.DirectionUp &&
+                            runCatching { noticeRetryRequester.requestFocus() }.getOrDefault(false)
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         contentPadding = PaddingValues(
@@ -5694,6 +5807,7 @@ private fun ReorderableLiveCategoryBar(
                 scaleOnFocus = false,
                 textSizeSp = itemMetrics.textSizeSp,
                 trailingIcon = Icons.Outlined.StarBorder,
+                trailingIconTint = if (selectedId == FAVORITES_CATEGORY_ID) Color.Black else colors.gold,
                 modifier = Modifier
                     .categoryChipFocus(
                         isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
@@ -5702,43 +5816,39 @@ private fun ReorderableLiveCategoryBar(
                     .then(itemMetrics.compactHeightModifier),
             )
         }
-        items(ordered, key = Category::id) { category ->
-            if (category.id == LIVE_TV_PRO_MAIN_RECENT_CATEGORY) {
+        if (recentCategory != null) {
+            item {
                 FocusButton(
                     "اخر مشاهدة",
-                    { onSelect(category.id) },
-                    primary = selectedId == category.id,
+                    { onSelect(recentCategory.id) },
+                    primary = selectedId == recentCategory.id,
                     compact = true,
                     scaleOnFocus = false,
                     textSizeSp = itemMetrics.textSizeSp,
                     trailingIcon = Icons.Outlined.Schedule,
+                    trailingIconTint = if (selectedId == recentCategory.id) Color.Black else colors.gold,
                     modifier = Modifier
                         .categoryChipFocus(
-                            isTv, category.id, selectedId, categoryBarHasFocus,
-                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                            isTv, recentCategory.id, selectedId, categoryBarHasFocus,
+                            recentFocusRequester, focusRestoreController,
                         )
                         .then(itemMetrics.compactHeightModifier),
                 )
-            } else {
-                LiveCategoryChip(
-                    category = category,
-                    selected = selectedId == category.id,
-                    moving = moving == category.id,
-                    onClick = {
-                        if (moving == category.id) moving = null else onSelect(category.id)
-                    },
-                    onLongClick = { moving = category.id },
-                    onMoveLeft = { move(category.id, 1) },
-                    onMoveRight = { move(category.id, -1) },
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, category.id, selectedId, categoryBarHasFocus,
-                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
-                        ),
-                    metrics = itemMetrics,
-                    framedBrandBadge = true,
-                )
             }
+        }
+        items(serverCategories, key = Category::id) { category ->
+            LiveCategoryChip(
+                category = category,
+                selected = selectedId == category.id,
+                onClick = { onSelect(category.id) },
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, category.id, selectedId, categoryBarHasFocus,
+                        categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                    ),
+                metrics = itemMetrics,
+                framedBrandBadge = true,
+            )
         }
     }
 }
@@ -5903,26 +6013,29 @@ private fun MovieCategoryChip(
 private fun LiveCategoryChip(
     category: Category,
     selected: Boolean,
-    moving: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onMoveLeft: () -> Unit,
-    onMoveRight: () -> Unit,
     modifier: Modifier = Modifier,
     metrics: LiveCategoryStripMetrics = LiveCategoryStripMetrics.Default,
     framedBrandBadge: Boolean = false,
+    moving: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+    onMoveLeft: (() -> Unit)? = null,
+    onMoveRight: (() -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
+    // Series keeps its existing long-press reorder callbacks; the Live selector passes none, so
+    // the complete Live-only reorder machinery stays inactive there.
+    val reorderable = onLongClick != null && onMoveLeft != null && onMoveRight != null
     var focused by remember { mutableStateOf(false) }
     var remoteLongPressHandled by remember { mutableStateOf(false) }
     var selectPressed by remember { mutableStateOf(false) }
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(selectPressed) {
-        if (selectPressed) {
+    LaunchedEffect(selectPressed, reorderable) {
+        if (selectPressed && reorderable) {
             delay(650L)
             if (selectPressed && !remoteLongPressHandled) {
                 remoteLongPressHandled = true
-                onLongClick()
+                onLongClick?.invoke()
             }
         }
     }
@@ -5944,21 +6057,23 @@ private fun LiveCategoryChip(
                 if (focused || moving) colors.goldBright else colors.line.copy(alpha = .40f),
                 shape,
             )
-            .pointerInput(category.id) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onLongPress = { onLongClick() },
-                )
+            .pointerInput(category.id, reorderable) {
+                if (reorderable) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = onLongClick?.let { longPress -> { longPress() } },
+                    )
+                }
             }
-            .pointerInput(category.id, moving) {
-                if (moving) {
+            .pointerInput(category.id, moving, reorderable) {
+                if (reorderable && moving) {
                     detectHorizontalDragGestures(
                         onDragStart = { dragAccumulator = 0f },
                         onDragCancel = { dragAccumulator = 0f },
                         onDragEnd = {
                             when {
-                                dragAccumulator >= 48f -> onMoveRight()
-                                dragAccumulator <= -48f -> onMoveLeft()
+                                dragAccumulator >= 48f -> onMoveRight?.invoke()
+                                dragAccumulator <= -48f -> onMoveLeft?.invoke()
                             }
                             dragAccumulator = 0f
                         },
@@ -5970,6 +6085,7 @@ private fun LiveCategoryChip(
             }
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { event ->
+                if (!reorderable) return@onPreviewKeyEvent false
                 val selectKey = event.key == Key.Enter || event.key == Key.DirectionCenter
                 when {
                     selectKey && event.type == KeyEventType.KeyDown -> {
@@ -5983,10 +6099,10 @@ private fun LiveCategoryChip(
                         true
                     }
                     moving && event.type == KeyEventType.KeyUp && event.key == Key.DirectionLeft -> {
-                        onMoveLeft(); true
+                        onMoveLeft?.invoke(); true
                     }
                     moving && event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight -> {
-                        onMoveRight(); true
+                        onMoveRight?.invoke(); true
                     }
                     moving && event.type == KeyEventType.KeyDown &&
                         (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) -> true
@@ -6023,6 +6139,14 @@ private fun LiveCategoryChip(
     }
 }
 
+/**
+ * Centered bounded dark category manager.
+ *
+ * Movies keeps its existing visibility-only behavior. The Live variant additionally owns the only
+ * server-category reorder surface: a fixed header/footer with a scrolling list, one TV focus target
+ * per row, remote long-OK move mode with explicit commit/cancel and a continuous phone
+ * long-press drag whose stable-id order commits only on drop.
+ */
 @Composable
 private fun CategoryManagerDialog(
     categories: List<Category>,
@@ -6032,10 +6156,111 @@ private fun CategoryManagerDialog(
     title: String,
     scopeText: String,
     emptyText: String,
+    liveStyle: Boolean = false,
+    onCommitOrder: ((List<String>) -> Unit)? = null,
 ) {
     val colors = LocalHulkColors.current
     val adaptiveUi = LocalAdaptiveUi.current
+    val density = LocalDensity.current
+    val reorderEnabled = onCommitOrder != null
+    val commitOrder by rememberUpdatedState(onCommitOrder)
+    val committedIds = remember(categories) { categories.map(Category::id) }
+    val orderDraft = remember { LiveCategoryOrderDraft(committedIds) }
+    var movingId by remember { mutableStateOf<String?>(null) }
+    var remoteMoving by remember { mutableStateOf(false) }
+    var dragActive by remember { mutableStateOf(false) }
+    var backSequenceConsumed by remember { mutableStateOf(false) }
+    // NaN until a drag gesture binds its real pointer coordinate; never inherited across gestures.
+    var dragPointerY by remember { mutableFloatStateOf(Float.NaN) }
+    var listWindowBounds by remember { mutableStateOf<Rect?>(null) }
+    val displayIds = orderDraft.displayIds
+    val displayCategories = remember(displayIds, categories) {
+        val byId = categories.associateBy(Category::id)
+        (displayIds.mapNotNull(byId::get) + categories.filterNot { it.id in displayIds })
+            .distinctBy(Category::id)
+    }
+    val categoryFocusRequesters = remember(categories) {
+        categories.associate { it.id to FocusRequester() }
+    }
+    val listState = rememberLazyListState()
     val initialFocusRequester = remember { FocusRequester() }
+
+    fun finishMove() {
+        movingId = null
+        remoteMoving = false
+        dragActive = false
+        dragPointerY = Float.NaN
+    }
+    fun cancelMove() {
+        orderDraft.cancel()
+        finishMove()
+    }
+    fun commitMove() {
+        val committed = orderDraft.commit() ?: return
+        finishMove()
+        commitOrder?.invoke(committed)
+    }
+    val applyDragPointer: (Float) -> Unit = { pointerY ->
+        dragPointerY = pointerY
+        val currentMoving = movingId
+        val listRect = listWindowBounds
+        if (currentMoving != null && listRect != null) {
+            // Hit-test only the currently laid-out rows so scrolling/recycling can never target a
+            // disposed row's stale geometry.
+            val rows = listState.layoutInfo.visibleItemsInfo.mapNotNull { item ->
+                val key = item.key as? String ?: return@mapNotNull null
+                LiveCategoryRowGeometry(key = key, offset = item.offset, size = item.size)
+            }
+            val hovered = liveCategoryDragTargetKey(rows, pointerY, listRect.top)
+            if (hovered != null && hovered != currentMoving) {
+                val targetIndex = orderDraft.displayIds.indexOf(hovered)
+                if (targetIndex >= 0) orderDraft.move(currentMoving, targetIndex)
+            }
+        }
+    }
+    // An incompatible catalog/scope change cancels the obsolete draft; disposal cancels too.
+    LaunchedEffect(committedIds) {
+        orderDraft.reset(committedIds)
+        finishMove()
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            orderDraft.cancel()
+            finishMove()
+        }
+    }
+    // Phone drag edge auto-scroll: one bounded step per frame while the finger holds near an edge.
+    LaunchedEffect(dragActive) {
+        if (!dragActive) return@LaunchedEffect
+        val edge = with(density) { 30.dp.toPx() }
+        val step = with(density) { 8.dp.toPx() }
+        while (dragActive) {
+            val bounds = listWindowBounds
+            val delta = when {
+                bounds == null || !dragPointerY.isFinite() -> 0f
+                dragPointerY < bounds.top + edge -> -step
+                dragPointerY > bounds.bottom - edge -> step
+                else -> 0f
+            }
+            if (delta != 0f) {
+                listState.scrollBy(delta)
+                applyDragPointer(dragPointerY)
+            }
+            withFrameNanos { }
+        }
+    }
+    // A remote move keeps the moved category attached, revealed and focused after each step.
+    LaunchedEffect(displayIds, movingId, remoteMoving) {
+        val id = movingId ?: return@LaunchedEffect
+        if (!remoteMoving) return@LaunchedEffect
+        val index = displayIds.indexOf(id)
+        if (index < 0) return@LaunchedEffect
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            listState.scrollToItem(index)
+            withFrameNanos { }
+            runCatching { categoryFocusRequesters[id]?.requestFocus() }
+        }
+    }
     LaunchedEffect(Unit) {
         withFrameNanos { }
         runCatching { initialFocusRequester.requestFocus() }
@@ -6065,7 +6290,24 @@ private fun CategoryManagerDialog(
                     .clip(shape)
                     .background(colors.surface)
                     .border(1.dp, colors.line, shape)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                    .onPreviewKeyEvent { event ->
+                        // While moving, consume the complete BACK sequence: the first press cancels
+                        // the draft, keeps the manager open and its release can never close it.
+                        val isBack =
+                            event.nativeKeyEvent.keyCode == AndroidKeyEvent.KEYCODE_BACK
+                        if (reorderEnabled && isBack && (movingId != null || backSequenceConsumed)) {
+                            if (event.type == KeyEventType.KeyDown) {
+                                if (movingId != null) cancelMove()
+                                backSequenceConsumed = true
+                            } else if (event.type == KeyEventType.KeyUp) {
+                                backSequenceConsumed = false
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    },
             ) {
                 Text(title, color = colors.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
@@ -6079,19 +6321,58 @@ private fun CategoryManagerDialog(
                     Text(emptyText, color = colors.textMuted, fontSize = 12.sp)
                 } else {
                     LazyColumn(
-                        modifier = Modifier.weight(1f, fill = false),
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .onGloballyPositioned { listWindowBounds = it.boundsInWindow() },
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        items(categories, key = Category::id) { category ->
+                        items(displayCategories, key = Category::id) { category ->
                             LiveCategoryManagerRow(
                                 category = category,
                                 hidden = category.id in hiddenIds,
-                                onToggle = { onToggle(category.id) },
-                                modifier = if (category.id == categories.first().id) {
+                                moving = movingId == category.id,
+                                reorderEnabled = reorderEnabled,
+                                onToggle = { if (movingId == null) onToggle(category.id) },
+                                onEnterMove = {
+                                    if (movingId == null) {
+                                        orderDraft.start()
+                                        movingId = category.id
+                                        remoteMoving = true
+                                    }
+                                },
+                                onMoveUp = {
+                                    val index = orderDraft.displayIds.indexOf(category.id)
+                                    if (index > 0) orderDraft.move(category.id, index - 1)
+                                },
+                                onMoveDown = {
+                                    val index = orderDraft.displayIds.indexOf(category.id)
+                                    if (index in 0 until orderDraft.displayIds.lastIndex) {
+                                        orderDraft.move(category.id, index + 1)
+                                    }
+                                },
+                                onCommitMove = { commitMove() },
+                                onDragStart = { pointerY ->
+                                    if (movingId == null) {
+                                        // Bind this gesture's real pointer coordinate before the
+                                        // auto-scroll loop can read it.
+                                        dragPointerY = pointerY
+                                        orderDraft.start()
+                                        movingId = category.id
+                                        remoteMoving = false
+                                        dragActive = true
+                                    }
+                                },
+                                onDragMove = applyDragPointer,
+                                onDrop = { commitMove() },
+                                onDragCancel = { cancelMove() },
+                                modifier = if (category.id == displayCategories.first().id) {
                                     Modifier.focusRequester(initialFocusRequester)
                                 } else {
                                     Modifier
                                 },
+                                focusRequester = categoryFocusRequesters[category.id],
+                                liveStyle = liveStyle,
                             )
                         }
                     }
@@ -6099,13 +6380,14 @@ private fun CategoryManagerDialog(
                 Spacer(Modifier.height(10.dp))
                 FocusButton(
                     "تم",
-                    onDismiss,
+                    onClick = { if (movingId == null) onDismiss() },
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
                         .then(
                             if (categories.isEmpty()) Modifier.focusRequester(initialFocusRequester) else Modifier,
                         ),
                     compact = true,
+                    scaleOnFocus = !liveStyle,
                 )
             }
         }
@@ -6116,24 +6398,209 @@ private fun CategoryManagerDialog(
 private fun LiveCategoryManagerRow(
     category: Category,
     hidden: Boolean,
+    moving: Boolean,
+    reorderEnabled: Boolean,
     onToggle: () -> Unit,
+    onEnterMove: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onCommitMove: () -> Unit,
+    onDragStart: (Float) -> Unit,
+    onDragMove: (Float) -> Unit,
+    onDrop: () -> Unit,
+    onDragCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+    liveStyle: Boolean = false,
 ) {
     val colors = LocalHulkColors.current
+    val adaptiveUi = LocalAdaptiveUi.current
     var focused by remember { mutableStateOf(false) }
+    var longPressConsumed by remember(category.id) { mutableStateOf(false) }
+    val rowTopWindow = remember { mutableFloatStateOf(0f) }
+    val currentOnToggle by rememberUpdatedState(onToggle)
+    val currentOnEnterMove by rememberUpdatedState(onEnterMove)
+    val currentOnMoveUp by rememberUpdatedState(onMoveUp)
+    val currentOnMoveDown by rememberUpdatedState(onMoveDown)
+    val currentOnCommitMove by rememberUpdatedState(onCommitMove)
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDragMove by rememberUpdatedState(onDragMove)
+    val currentOnDrop by rememberUpdatedState(onDrop)
+    val currentOnDragCancel by rememberUpdatedState(onDragCancel)
+    // Focus is distinct from hidden/moving state and never toggles visibility; the pale edge stays
+    // inside the row bounds with no scale or size jump.
+    val showFocused = focused && adaptiveUi.showFocusHighlights
     val shape = RoundedCornerShape(12.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (hidden) Color(0xFF10110D) else Color(0xFF181914))
+            .background(
+                when {
+                    moving -> colors.gold.copy(alpha = .20f)
+                    hidden -> Color(0xFF10110D)
+                    else -> Color(0xFF181914)
+                },
+            )
             .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) colors.goldBright else Color.White.copy(alpha = .07f),
+                width = if (showFocused) 2.dp else 1.dp,
+                color = when {
+                    showFocused -> colors.goldBright
+                    moving -> colors.gold.copy(alpha = .45f)
+                    else -> Color.White.copy(alpha = .07f)
+                },
                 shape = shape,
             )
+            .then(
+                if (reorderEnabled && focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
+            )
+            .onGloballyPositioned { coordinates ->
+                // Only this row's own anchor coordinate is kept; hit-testing uses the list's
+                // current laid-out rows, never a stored per-row bounds map.
+                rowTopWindow.floatValue = coordinates.boundsInWindow().top
+            }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onToggle)
+            .then(if (reorderEnabled) Modifier.focusable() else Modifier)
+            .then(
+                if (reorderEnabled) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        val selectKey = event.key == Key.Enter || event.key == Key.DirectionCenter
+                        when {
+                            moving -> when {
+                                selectKey -> {
+                                    if (event.type == KeyEventType.KeyUp) {
+                                        if (longPressConsumed) {
+                                            longPressConsumed = false
+                                        } else {
+                                            currentOnCommitMove()
+                                        }
+                                    }
+                                    true
+                                }
+                                event.key == Key.DirectionUp -> {
+                                    if (event.type == KeyEventType.KeyUp) currentOnMoveUp()
+                                    true
+                                }
+                                event.key == Key.DirectionDown -> {
+                                    if (event.type == KeyEventType.KeyUp) currentOnMoveDown()
+                                    true
+                                }
+                                else -> false
+                            }
+                            selectKey && event.type == KeyEventType.KeyDown -> {
+                                if (event.nativeKeyEvent.repeatCount > 0 || event.nativeKeyEvent.isLongPress) {
+                                    if (!longPressConsumed) {
+                                        longPressConsumed = true
+                                        currentOnEnterMove()
+                                    }
+                                }
+                                true
+                            }
+                            selectKey && event.type == KeyEventType.KeyUp -> {
+                                if (!longPressConsumed) currentOnToggle()
+                                longPressConsumed = false
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .then(
+                if (reorderEnabled) {
+                    Modifier.pointerInput(category.id) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            // A real unconsumed quick release toggles once; a consumed/cancelled
+                            // change never toggles, starts a drag or commits. Slop movement stays
+                            // with ordinary list scrolling.
+                            var lastPosition = down.position
+                            val resolvedEarly = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                var early = false
+                                while (!early) {
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    when (
+                                        liveCategoryPreLongPressDecision(
+                                            hasChange = change != null,
+                                            pressed = change?.pressed ?: false,
+                                            consumed = change?.isConsumed ?: false,
+                                            movedBeyondSlop = change != null &&
+                                                (change.position - down.position).getDistance() >
+                                                viewConfiguration.touchSlop,
+                                        )
+                                    ) {
+                                        LiveCategoryGestureDecision.TOGGLE -> {
+                                            currentOnToggle()
+                                            early = true
+                                        }
+                                        LiveCategoryGestureDecision.CANCEL -> early = true
+                                        else -> if (change != null) lastPosition = change.position
+                                    }
+                                }
+                                true
+                            }
+                            if (resolvedEarly != null) return@awaitEachGesture
+                            // One continuous long-press drag owns the gesture; only an unconsumed
+                            // release commits, and it is consumed so no tap toggle can follow. The
+                            // drag starts from the real current pointer coordinate of this gesture.
+                            currentOnDragStart(rowTopWindow.floatValue + lastPosition.y)
+                            var dropped = false
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    when (
+                                        liveCategoryDragDecision(
+                                            hasChange = change != null,
+                                            pressed = change?.pressed ?: false,
+                                            consumed = change?.isConsumed ?: false,
+                                        )
+                                    ) {
+                                        LiveCategoryGestureDecision.DROP -> {
+                                            currentOnDrop()
+                                            dropped = true
+                                            change?.consume()
+                                            break
+                                        }
+                                        LiveCategoryGestureDecision.CANCEL -> break
+                                        else -> {
+                                            currentOnDragMove(
+                                                rowTopWindow.floatValue + (change?.position?.y ?: 0f),
+                                            )
+                                            change?.consume()
+                                        }
+                                    }
+                                }
+                            } finally {
+                                if (!dropped) currentOnDragCancel()
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .then(
+                if (reorderEnabled) {
+                    // Accessible hide/show activation and state without a second pointer handler:
+                    // touch stays owned by the custom gesture, TV by the preview key handler.
+                    Modifier.semantics(mergeDescendants = true) {
+                        role = Role.Button
+                        stateDescription = if (hidden) "مخفية" else "ظاهرة"
+                        if (!moving) {
+                            onClick(label = if (hidden) "اظهار الفئة" else "اخفاء الفئة") {
+                                currentOnToggle()
+                                true
+                            }
+                        }
+                    }
+                } else {
+                    Modifier.clickable(role = Role.Button, onClick = onToggle)
+                },
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -6143,16 +6610,28 @@ private fun LiveCategoryManagerRow(
             color = if (hidden) colors.textMuted else colors.text,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = if (reorderEnabled) Int.MAX_VALUE else 1,
+            overflow = if (reorderEnabled) TextOverflow.Clip else TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         Icon(
             imageVector = if (hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
             contentDescription = if (hidden) "مخفية" else "ظاهرة",
-            tint = if (hidden) colors.textMuted else colors.goldBright,
+            tint = when {
+                hidden -> colors.textMuted
+                liveStyle -> colors.gold
+                else -> colors.goldBright
+            },
             modifier = Modifier.size(18.dp),
         )
+        if (reorderEnabled) {
+            Icon(
+                imageVector = Icons.Rounded.DragHandle,
+                contentDescription = "اسحب للترتيب",
+                tint = if (moving) colors.goldBright else colors.textMuted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 

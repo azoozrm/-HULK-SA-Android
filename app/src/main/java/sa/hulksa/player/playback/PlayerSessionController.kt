@@ -156,7 +156,16 @@ internal class PlayerSessionController(
                 output: Any,
                 renderTimeMs: Long,
             ) {
-                if (accepts(player)) firstFrameRendered = true
+                if (!accepts(player)) return
+                if (!firstFrameRendered) {
+                    firstFrameRendered = true
+                    Log.i(
+                        HULK_PLAYER_LOG_TAG,
+                        "first frame rendered t=${SystemClock.elapsedRealtime()} renderTimeMs=$renderTimeMs " +
+                            "generation=${generation.safeLogId} streamId=${request.streamId} " +
+                            "candidate=$boundCandidateIndex",
+                    )
+                }
             }
 
             override fun onAudioEnabled(

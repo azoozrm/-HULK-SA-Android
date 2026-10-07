@@ -3,6 +3,8 @@ package sa.hulksa.player.ui.components
 import android.content.Context
 import android.content.ContextWrapper
 import android.view.KeyEvent as AndroidKeyEvent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -507,13 +509,24 @@ fun ErrorNotice(message: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun LoadingRing(modifier: Modifier = Modifier, label: String? = null) {
+fun LoadingRing(
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    constantRotation: Boolean = false,
+) {
     val colors = LocalHulkColors.current
     val transition = rememberInfiniteTransition(label = "loading")
+    // The television Live channel-startup loader keeps a constant angular velocity; every other
+    // caller preserves the existing default easing exactly.
     val rotation by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(900)),
+        animationSpec = infiniteRepeatable(
+            tween(
+                durationMillis = 900,
+                easing = if (constantRotation) LinearEasing else FastOutSlowInEasing,
+            ),
+        ),
         label = "loadingRotation",
     )
     Column(

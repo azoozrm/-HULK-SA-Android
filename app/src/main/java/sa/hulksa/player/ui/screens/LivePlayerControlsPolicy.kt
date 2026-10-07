@@ -220,6 +220,159 @@ internal fun playerErrorActionNeighbors(
 }
 
 /**
+ * Initial controls visibility for a new player request.
+ *
+ * VOD starts with the controls visible; Live starts hidden unless an accepted remote channel switch
+ * carried its reveal intent across the request replacement. The intent is request-scoped, so a
+ * normal Live entry never starts with permanent controls.
+ */
+internal fun liveControlsVisibleOnRequestStart(
+    isLive: Boolean,
+    revealRequested: Boolean,
+): Boolean = !isLive || revealRequested
+
+/**
+ * Reveal intent for the compact Live controls across accepted remote switch interactions.
+ *
+ * `interactionTick` is a fresh-interaction nonce: every accepted step (including native repeats)
+ * bumps it so the existing controls reveal effect and the existing auto-hide delay restart even
+ * while the controls are already visible. `revealRequested` survives the committed request
+ * replacement and is consumed by it, unless a newer accepted switch already owns the next request.
+ */
+internal data class LiveControlsInteractionState(
+    val revealRequested: Boolean = false,
+    val interactionTick: Int = 0,
+)
+
+internal fun LiveControlsInteractionState.onAcceptedSwitchInteraction(): LiveControlsInteractionState =
+    copy(revealRequested = true, interactionTick = interactionTick + 1)
+
+internal fun LiveControlsInteractionState.onRequestReplacement(
+    pendingSwitchPresent: Boolean,
+): LiveControlsInteractionState = copy(revealRequested = revealRequested && pendingSwitchPresent)
+
+internal fun LiveControlsInteractionState.onCancel(): LiveControlsInteractionState =
+    copy(revealRequested = false)
+
+/** Bounded Live zap dispatch cadence while held/repeated input continues. */
+internal const val LIVE_ZAP_COMMIT_INTERVAL_MS = 300L
+
+/**
+ * Single Live zap scheduler state.
+ *
+ * `pendingTargetId` is the latest accepted target and deliberately survives request replacement.
+ * `lastDispatchedTargetId` is the last target handed to the playback owner, so a release flush can
+ * skip a target whose request replacement is already in flight.
+ */
+internal data class LiveZapSchedulerState(
+    val pendingTargetId: Int? = null,
+    val lastDispatchAtMs: Long = 0L,
+    val lastDispatchedTargetId: Int? = null,
+)
+
+/**
+ * One scheduler step. A normal press plans an immediate dispatch (leading edge). While input
+ * continues, the latest target is dispatched at the bounded interval; the wait is measured from the
+ * last dispatch, so new input never restarts or starves the commitment.
+ */
+internal data class LiveZapDispatchPlan(
+    val dispatchTargetId: Int?,
+    val waitMs: Long,
+    val state: LiveZapSchedulerState,
+)
+
+internal fun planLiveZapDispatch(
+    state: LiveZapSchedulerState,
+    currentStreamId: Int,
+    pendingTargetExists: Boolean,
+    nowMs: Long,
+    intervalMs: Long = LIVE_ZAP_COMMIT_INTERVAL_MS,
+): LiveZapDispatchPlan {
+    val pending = state.pendingTargetId
+        ?: return LiveZapDispatchPlan(dispatchTargetId = null, waitMs = 0L, state = state)
+    if (!pendingTargetExists) {
+        return LiveZapDispatchPlan(
+            dispatchTargetId = null,
+            waitMs = 0L,
+            state = state.copy(pendingTargetId = null, lastDispatchedTargetId = null),
+        )
+    }
+    if (pending == currentStreamId) {
+        return LiveZapDispatchPlan(
+            dispatchTargetId = null,
+            waitMs = 0L,
+            state = state.copy(pendingTargetId = null, lastDispatchedTargetId = null),
+        )
+    }
+    val waitMs = (state.lastDispatchAtMs + intervalMs.coerceAtLeast(0L) - nowMs).coerceAtLeast(0L)
+    if (waitMs > 0L) return LiveZapDispatchPlan(dispatchTargetId = null, waitMs = waitMs, state = state)
+    return LiveZapDispatchPlan(
+        dispatchTargetId = pending,
+        waitMs = 0L,
+        state = state.copy(lastDispatchAtMs = nowMs, lastDispatchedTargetId = pending),
+    )
+}
+
+/**
+ * Release target for a held/repeated Live interaction: settle the latest pending target unless it
+ * is already committed or its dispatch is already in flight.
+ */
+internal fun liveZapReleaseDispatchTargetId(
+    state: LiveZapSchedulerState,
+    currentStreamId: Int,
+): Int? {
+    val pending = state.pendingTargetId ?: return null
+    if (pending == currentStreamId) return null
+    if (pending == state.lastDispatchedTargetId) return null
+    return pending
+}
+
+/** Foreground surfaces that own input; queued Live switching is dropped while any is active. */
+internal fun liveZapDispatchBlocked(
+    errorModalInputActive: Boolean,
+    browserVisible: Boolean,
+    panelInputActive: Boolean,
+): Boolean = errorModalInputActive || browserVisible || panelInputActive
+
+/**
+ * Live strip row allocation.
+ *
+ * `SINGLE_ROW` is the accepted wide arrangement; `TWO_ROWS` keeps the existing narrow-window
+ * grouping. The decision is never made from a device class alone: the caller measures the complete
+ * captions at the real typography/font scale and this policy selects the single row only when the
+ * real usable content width can hold all seven Live tools.
+ */
+internal enum class LiveControlsRowMode { SINGLE_ROW, TWO_ROWS }
+
+internal fun liveControlsRowMode(
+    availableWidthPx: Int,
+    requiredSingleRowWidthPx: Int,
+): LiveControlsRowMode = if (
+    availableWidthPx > 0 &&
+    requiredSingleRowWidthPx > 0 &&
+    requiredSingleRowWidthPx <= availableWidthPx
+) {
+    LiveControlsRowMode.SINGLE_ROW
+} else {
+    LiveControlsRowMode.TWO_ROWS
+}
+
+/**
+ * Fraction of the measured Live strip at which the tool row starts.
+ *
+ * The compact strip draws a restrained bottom gradient measured from the real row position: fully
+ * transparent above the row, medium backing at its top and the strong backing below it. Returns
+ * `null` before the first measurement pass so the bounded default stops are used.
+ */
+internal fun liveStripGradientStopFraction(
+    stripHeightPx: Float,
+    toolsTopPx: Float,
+): Float? {
+    if (stripHeightPx <= 0f || toolsTopPx <= 0f || toolsTopPx >= stripHeightPx) return null
+    return (toolsTopPx / stripHeightPx).coerceIn(0f, 1f)
+}
+
+/**
  * Adaptive geometry for the compact Live controls and the More panel.
  *
  * The transport controls share the accepted utility glyph and interaction container so the strip

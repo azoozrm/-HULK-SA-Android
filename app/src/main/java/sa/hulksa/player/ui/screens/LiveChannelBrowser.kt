@@ -7,7 +7,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,7 +38,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -167,37 +165,23 @@ internal fun LiveChannelBrowser(
         catalog?.items?.firstOrNull { it.id == currentStreamId }
     }
 
-    val categoryOrderPrefs = remember(context) {
-        context.getSharedPreferences("live_category_order", Context.MODE_PRIVATE)
-    }
-    var orderedCategoryIds by remember(catalog) {
-        mutableStateOf(
-            categoryOrderPrefs.getString("ids", "")
-                .orEmpty()
-                .split(',')
-                .filter(String::isNotBlank),
-        )
-    }
-    var movingCategoryId by remember { mutableStateOf<String?>(null) }
-    val orderedCategories = remember(catalog?.categories, orderedCategoryIds) {
-        val categories = catalog?.categories.orEmpty()
-        val byId = categories.associateBy { it.id }
-        (orderedCategoryIds.mapNotNull(byId::get) + categories.filterNot { it.id in orderedCategoryIds })
-            .distinctBy { it.id }
-    }
-
-    fun moveCategory(id: String, delta: Int) {
-        val values = orderedCategories.map { it.id }.toMutableList()
-        val from = values.indexOf(id)
-        if (from < 0) return
-        val to = (from + delta).coerceIn(0, values.lastIndex)
-        if (from == to) return
-        values.add(to, values.removeAt(from))
-        orderedCategoryIds = values
-        categoryOrderPrefs.edit().putString("ids", values.joinToString(",")).apply()
-    }
-
     val liveProfileScope = context.liveTvProStateScope()
+    // Same authoritative profile-scoped hidden ids and single committed order as the main Live
+    // strip and the Live manager: hidden server categories are absent from the browser list while
+    // remaining in the manager, and the visible list follows the committed server order.
+    val hiddenCategoryIds = remember(liveProfileScope, catalog) {
+        context.liveHiddenCategoryIds()
+    }
+    val committedCategoryOrderIds = remember(liveProfileScope, catalog) {
+        context.liveCommittedCategoryOrderIds()
+    }
+    LaunchedEffect(liveProfileScope, catalog) {
+        context.adoptLiveCommittedCategoryOrderOnce()
+    }
+    val orderedCategories = remember(catalog?.categories, committedCategoryOrderIds, hiddenCategoryIds) {
+        orderedLiveServerCategories(catalog?.categories.orEmpty(), committedCategoryOrderIds)
+            .filterNot { it.id in hiddenCategoryIds }
+    }
     var recentChannelIds by remember(catalog, currentStreamId, liveProfileScope) {
         mutableStateOf(context.liveTvProRecentChannelIds())
     }
@@ -235,17 +219,29 @@ internal fun LiveChannelBrowser(
         currentStreamId,
         favoriteIds,
         recentChannelIds,
+        hiddenCategoryIds,
     ) {
-        liveTvProInitialBrowserCategory(
+        val resolved = liveTvProInitialBrowserCategory(
             launchContext = launchContext,
             currentCategoryId = current?.categoryId,
             currentStreamId = currentStreamId,
             favoriteIds = favoriteIds,
             recentIds = recentChannelIds,
         ) ?: if (launchContext == LIVE_TV_PRO_CONTEXT_ALL) null else current?.categoryId
+        // A hidden saved selection resolves to visible "الكل" instead of an invisible target.
+        resolved?.takeUnless { it in hiddenCategoryIds }
     }
-    var selectedCategory by remember(catalog, currentStreamId, launchContext) {
+    var selectedCategory by remember(catalog, currentStreamId, launchContext, hiddenCategoryIds) {
         mutableStateOf(initialCategory)
+    }
+    // Profile or manager visibility changes while the browser is open resolve the current
+    // selection to "الكل" without switching the playing channel.
+    LaunchedEffect(hiddenCategoryIds, catalog) {
+        val selected = selectedCategory
+        if (selected != null && selected in hiddenCategoryIds) {
+            selectedCategory = null
+            context.saveLiveTvProLaunchContext(liveTvProBrowserCategoryToContext(null))
+        }
     }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -332,24 +328,23 @@ internal fun LiveChannelBrowser(
     }
 
     LaunchedEffect(visible, selectedCategory, normalizedQuery) {
-        if (visible.isNotEmpty() && normalizedQuery.isBlank()) {
+        if (normalizedQuery.isNotBlank()) return@LaunchedEffect
+        if (visible.isNotEmpty()) {
             listState.scrollToItem(focusIndex)
             withFrameNanos { }
             runCatching { channelFocus.requestFocus() }
-        }
-    }
-    LaunchedEffect(orderedCategoryIds, movingCategoryId) {
-        val movingId = movingCategoryId ?: return@LaunchedEffect
-        val categoryIndex = orderedCategories.indexOfFirst { it.id == movingId }
-        if (categoryIndex >= 0) {
-            categoryListState.scrollToItem(categoryIndex + 3)
+        } else {
+            // Deterministic empty-cache fallback: the foreground browser always attaches focus to a
+            // real composed target, preferring the selected category and falling back to "الكل".
             withFrameNanos { }
-            runCatching { categoryFocusRequesters[movingId]?.requestFocus() }
+            val preferred = categoryFocusRequester(selectedCategory) ?: allCategoryFocus
+            val acquired = runCatching { preferred.requestFocus() }.getOrDefault(false)
+            if (!acquired) {
+                runCatching { allCategoryFocus.requestFocus() }
+            }
         }
     }
-
     fun selectCategory(id: String?) {
-        movingCategoryId = null
         selectedCategory = id
         searchQuery = ""
         context.saveLiveTvProLaunchContext(liveTvProBrowserCategoryToContext(id))
@@ -536,27 +531,17 @@ internal fun LiveChannelBrowser(
     }
 
     @Composable
-    fun ReorderableCategoryRow(
+    fun BrowserServerCategoryRow(
         category: sa.hulksa.player.model.Category,
         focusRequester: FocusRequester?,
     ) {
         var focused by remember(category.id) { mutableStateOf(false) }
-        var selectPressed by remember(category.id) { mutableStateOf(false) }
-        var longPressHandled by remember(category.id) { mutableStateOf(false) }
-        var dragAccumulator by remember(category.id) { mutableFloatStateOf(0f) }
-        val moving = movingCategoryId == category.id
         val showFocused = focused && adaptiveUi.showFocusHighlights
+        // Committed server selection uses the same accepted gold fill/dark wording as the simple
+        // categories; selection takes precedence over the separate transient focus backing.
+        val selected = selectedCategory == category.id && searchQuery.isBlank()
+        val darkOnGold = Color(0xFF030402)
         val shape = RoundedCornerShape(11.dp)
-
-        LaunchedEffect(selectPressed, moving) {
-            if (selectPressed && !moving) {
-                delay(650L)
-                if (selectPressed && !longPressHandled) {
-                    longPressHandled = true
-                    movingCategoryId = category.id
-                }
-            }
-        }
 
         Row(
             modifier = Modifier
@@ -564,9 +549,8 @@ internal fun LiveChannelBrowser(
                 .clip(shape)
                 .background(
                     when {
+                        selected -> colors.gold
                         showFocused -> colors.gold.copy(alpha = .24f)
-                        selectedCategory == category.id && searchQuery.isBlank() -> colors.gold.copy(alpha = .14f)
-                        moving -> colors.gold.copy(alpha = .20f)
                         else -> Color.White.copy(alpha = .045f)
                     },
                 )
@@ -574,69 +558,16 @@ internal fun LiveChannelBrowser(
                     width = if (showFocused) 2.dp else 1.dp,
                     color = when {
                         showFocused -> colors.goldBright
-                        selectedCategory == category.id && searchQuery.isBlank() -> colors.gold.copy(alpha = .60f)
-                        moving -> colors.gold.copy(alpha = .45f)
+                        selected -> Color.Transparent
                         else -> Color.White.copy(alpha = .10f)
                     },
                     shape = shape,
                 )
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .onFocusChanged { focused = it.isFocused }
-                .onPreviewKeyEvent { event ->
-                    val code = event.nativeKeyEvent.keyCode
-                    val selectKey = code == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
-                        code == AndroidKeyEvent.KEYCODE_ENTER ||
-                        code == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
-                    when {
-                        selectKey && event.type == KeyEventType.KeyDown -> {
-                            selectPressed = true
-                            true
-                        }
-                        selectKey && event.type == KeyEventType.KeyUp -> {
-                            selectPressed = false
-                            if (!longPressHandled) {
-                                if (moving) movingCategoryId = null else selectCategory(category.id)
-                            }
-                            longPressHandled = false
-                            true
-                        }
-                        moving && event.type == KeyEventType.KeyDown &&
-                            (code == AndroidKeyEvent.KEYCODE_DPAD_UP || code == AndroidKeyEvent.KEYCODE_DPAD_DOWN) -> true
-                        moving && event.type == KeyEventType.KeyUp && code == AndroidKeyEvent.KEYCODE_DPAD_UP -> {
-                            moveCategory(category.id, -1)
-                            true
-                        }
-                        moving && event.type == KeyEventType.KeyUp && code == AndroidKeyEvent.KEYCODE_DPAD_DOWN -> {
-                            moveCategory(category.id, 1)
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                .pointerInput(category.id, moving, tvLayout) {
-                    if (!tvLayout && moving) {
-                        detectVerticalDragGestures(
-                            onDragStart = { dragAccumulator = 0f },
-                            onDragCancel = { dragAccumulator = 0f },
-                            onDragEnd = {
-                                when {
-                                    dragAccumulator >= 48f -> moveCategory(category.id, 1)
-                                    dragAccumulator <= -48f -> moveCategory(category.id, -1)
-                                }
-                                dragAccumulator = 0f
-                            },
-                        ) { change, dragAmount ->
-                            change.consume()
-                            dragAccumulator += dragAmount
-                        }
-                    }
-                }
                 .combinedClickable(
                     role = Role.Button,
-                    onClick = {
-                        if (moving) movingCategoryId = null else selectCategory(category.id)
-                    },
-                    onLongClick = { movingCategoryId = category.id },
+                    onClick = { selectCategory(category.id) },
                 )
                 .focusable()
                 .padding(horizontal = 9.dp, vertical = 8.dp),
@@ -645,9 +576,9 @@ internal fun LiveChannelBrowser(
         ) {
             BrowserCategoryBadge()
             Text(
-                text = if (moving) "↕ ${category.name}" else category.name,
+                text = category.name,
                 modifier = Modifier.weight(1f),
-                color = colors.text,
+                color = if (selected) darkOnGold else colors.text,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -663,19 +594,22 @@ internal fun LiveChannelBrowser(
         selected: Boolean,
         onClick: () -> Unit,
         focusRequester: FocusRequester,
-        iconTint: Color? = null,
     ) {
         var focused by remember { mutableStateOf(false) }
         val showFocused = focused && adaptiveUi.showFocusHighlights
         val shape = RoundedCornerShape(11.dp)
+        // Committed simple category: the accepted gold fill with dark wording/simple glyph, so the
+        // selection persists while focus moves. Unselected rows stay dark with a warm-gold glyph.
+        // Focus remains a separate pale edge inside the same bounds (no scale, no reflow).
+        val darkOnGold = Color(0xFF030402)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(shape)
                 .background(
                     when {
+                        selected -> colors.gold
                         showFocused -> colors.gold.copy(alpha = .24f)
-                        selected -> colors.gold.copy(alpha = .14f)
                         else -> Color.White.copy(alpha = .045f)
                     },
                 )
@@ -683,7 +617,7 @@ internal fun LiveChannelBrowser(
                     width = if (showFocused) 2.dp else 1.dp,
                     color = when {
                         showFocused -> colors.goldBright
-                        selected -> colors.gold.copy(alpha = .60f)
+                        selected -> Color.Transparent
                         else -> Color.White.copy(alpha = .10f)
                     },
                     shape = shape,
@@ -697,7 +631,7 @@ internal fun LiveChannelBrowser(
         ) {
             Text(
                 text = text,
-                color = colors.text,
+                color = if (selected) darkOnGold else colors.text,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -707,7 +641,7 @@ internal fun LiveChannelBrowser(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = iconTint ?: if (selected) colors.gold else colors.textMuted,
+                tint = if (selected) darkOnGold else colors.gold,
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -752,7 +686,6 @@ internal fun LiveChannelBrowser(
                     BrowserCategoryRow(
                         text = "المفضلة",
                         icon = Icons.Rounded.Star,
-                        iconTint = colors.gold,
                         selected = selectedCategory == LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY && searchQuery.isBlank(),
                         onClick = { selectCategory(LIVE_TV_PRO_BROWSER_FAVORITES_CATEGORY) },
                         focusRequester = favoritesCategoryFocus,
@@ -768,29 +701,9 @@ internal fun LiveChannelBrowser(
                     )
                 }
                 items(orderedCategories, key = { it.id }) { category ->
-                    ReorderableCategoryRow(category, categoryFocusRequesters[category.id])
+                    BrowserServerCategoryRow(category, categoryFocusRequesters[category.id])
                 }
             }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                text = if (movingCategoryId != null) {
-                    if (tvLayout) {
-                        "وضع الترتيب : حرك الفئة ↑ ↓ ثم اضغط OK للحفظ"
-                    } else {
-                        "وضع الترتيب : اسحب الفئة ↑ ↓ ثم اضغط عليها للحفظ"
-                    }
-                } else {
-                    if (tvLayout) {
-                        "ترتيب الفئات : اضغط OK مطولا على الفئة، ثم حرك ↑ ↓ واضغط OK للحفظ"
-                    } else {
-                        "ترتيب الفئات : اضغط مطولا على الفئة ثم اسحبها ↑ ↓"
-                    }
-                },
-                color = if (movingCategoryId != null) colors.goldBright else colors.textMuted,
-                fontSize = hintFontSize,
-                lineHeight = hintLineHeight,
-                fontWeight = if (movingCategoryId != null) FontWeight.Bold else FontWeight.Medium,
-            )
         }
     }
 

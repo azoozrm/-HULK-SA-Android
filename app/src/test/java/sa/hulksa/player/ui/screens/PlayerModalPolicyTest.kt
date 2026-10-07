@@ -364,4 +364,60 @@ class PlayerModalPolicyTest {
             ).isEmpty(),
         )
     }
+
+    @Test
+    fun `live error surface suppression suspends the foreground error consistently`() {
+        assertTrue(playerErrorForegroundActive(finalErrorPresent = true, liveSurfaceSuppressed = false))
+        assertFalse(playerErrorForegroundActive(finalErrorPresent = true, liveSurfaceSuppressed = true))
+        assertFalse(playerErrorForegroundActive(finalErrorPresent = false, liveSurfaceSuppressed = false))
+        assertFalse(playerErrorForegroundActive(finalErrorPresent = false, liveSurfaceSuppressed = true))
+    }
+
+    @Test
+    fun `error modal input ownership combines the foreground error and the non-live suspension`() {
+        assertTrue(playerErrorModalOwnsInput(errorForegroundActive = true, suspendedErrorPresent = false))
+        assertTrue(playerErrorModalOwnsInput(errorForegroundActive = false, suspendedErrorPresent = true))
+        assertFalse(playerErrorModalOwnsInput(errorForegroundActive = false, suspendedErrorPresent = false))
+    }
+
+    @Test
+    fun `live error surface release clears suppression instead of restoring a snapshot`() {
+        assertEquals(
+            PlayerErrorSurfaceRelease.CLEAR_LIVE_SUPPRESSION,
+            playerErrorSurfaceRelease(liveSuppressionActive = true),
+        )
+        assertEquals(
+            PlayerErrorSurfaceRelease.RESTORE_SUSPENDED_ERROR,
+            playerErrorSurfaceRelease(liveSuppressionActive = false),
+        )
+    }
+
+    @Test
+    fun `offline play intent is captured once and retained across repeated offline notifications`() {
+        // First transition captures the real pre-outage intent.
+        assertTrue(
+            playerOfflinePlayIntentCapture(
+                alreadyOffline = false,
+                previousIntent = false,
+                currentPlayingIntent = true,
+            ),
+        )
+        // Repeated offline notifications keep the original intent even though the player is now
+        // paused by the first outage handling.
+        assertTrue(
+            playerOfflinePlayIntentCapture(
+                alreadyOffline = true,
+                previousIntent = true,
+                currentPlayingIntent = false,
+            ),
+        )
+        // A player that was paused before the outage must never start playing on reconnect.
+        assertFalse(
+            playerOfflinePlayIntentCapture(
+                alreadyOffline = true,
+                previousIntent = false,
+                currentPlayingIntent = true,
+            ),
+        )
+    }
 }

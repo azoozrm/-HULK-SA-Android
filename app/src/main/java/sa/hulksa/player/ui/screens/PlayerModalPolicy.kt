@@ -69,6 +69,54 @@ internal fun canOfferPlayerErrorSourcePicker(
     candidateCount: Int,
 ): Boolean = failureClass == RecoveryFailureClass.SOURCE && candidateCount > 1
 
+/**
+ * Foreground error eligibility.
+ *
+ * Rendering, key/pointer ownership and focus acquisition all share this single eligibility. While a
+ * Live error-origin foreground surface (the channel browser or the source picker) owns input, the
+ * background error presentation is suspended even though the underlying failure/recovery state and
+ * the request identity are retained for when the surface closes.
+ */
+internal fun playerErrorForegroundActive(
+    finalErrorPresent: Boolean,
+    liveSurfaceSuppressed: Boolean,
+): Boolean = finalErrorPresent && !liveSurfaceSuppressed
+
+/** Child error-modal input ownership; the suspended-snapshot path serves only non-Live callers. */
+internal fun playerErrorModalOwnsInput(
+    errorForegroundActive: Boolean,
+    suspendedErrorPresent: Boolean,
+): Boolean = errorForegroundActive || suspendedErrorPresent
+
+internal enum class PlayerErrorSurfaceRelease { CLEAR_LIVE_SUPPRESSION, RESTORE_SUSPENDED_ERROR }
+
+/**
+ * What closing a foreground error surface does to the error state.
+ *
+ * A Live surface releases its suppression and lets the retained current failure (or its successful
+ * recovery) decide the final presentation, so a recovered or replaced request can never restore a
+ * stale error. Non-Live callers keep the existing suspended-snapshot restore.
+ */
+internal fun playerErrorSurfaceRelease(liveSuppressionActive: Boolean): PlayerErrorSurfaceRelease =
+    if (liveSuppressionActive) {
+        PlayerErrorSurfaceRelease.CLEAR_LIVE_SUPPRESSION
+    } else {
+        PlayerErrorSurfaceRelease.RESTORE_SUSPENDED_ERROR
+    }
+
+/**
+ * Pre-outage play-intent capture.
+ *
+ * The intent is captured only on the first transition into the offline failure. Repeated offline
+ * notifications and late failures must not overwrite the already-paused player's original intent,
+ * so a reconnect still replays what the user was actually doing before the outage.
+ */
+internal fun playerOfflinePlayIntentCapture(
+    alreadyOffline: Boolean,
+    previousIntent: Boolean,
+    currentPlayingIntent: Boolean,
+): Boolean = if (alreadyOffline) previousIntent else currentPlayingIntent
+
 internal fun canOfferPlayerLiveSourcePicker(candidateCount: Int): Boolean = candidateCount > 1
 
 internal fun playerErrorModalActions(

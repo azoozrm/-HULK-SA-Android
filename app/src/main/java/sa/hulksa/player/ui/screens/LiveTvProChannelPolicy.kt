@@ -9,6 +9,61 @@ import sa.hulksa.player.model.ContentItem
  * familiar "last channel" action. UI wiring stays separate from this pure policy so TV remote
  * focus and playback behavior can be qualified independently.
  */
+/**
+ * One catalog-keyed Live channel index.
+ *
+ * Building it costs one pass over the real catalog; every later current-channel lookup, category
+ * sequence, favorites/recent mapping and relative switch then avoids the repeated O(catalog) scans
+ * that delayed television channel startup. Owners remember it per catalog instance, so any actual
+ * catalog change naturally builds a fresh index.
+ */
+class LiveChannelCatalogIndex(
+    val items: List<ContentItem>,
+) {
+    val byId: Map<Int, ContentItem> = items.associateBy(ContentItem::id)
+    val byCategory: Map<String, List<ContentItem>> = items.groupBy(ContentItem::categoryId)
+
+    fun channelsInCategory(categoryId: String?): List<ContentItem> =
+        if (categoryId == null) items else byCategory[categoryId].orEmpty()
+
+    fun favoriteChannels(favoriteIds: Set<Int>): List<ContentItem> =
+        if (favoriteIds.isEmpty()) emptyList() else items.filter { it.id in favoriteIds }
+
+    fun recentChannels(recentIds: List<Int>): List<ContentItem> =
+        if (recentIds.isEmpty()) emptyList() else recentIds.mapNotNull(byId::get).distinctBy(ContentItem::id)
+
+    fun sequenceFor(currentStreamId: Int): List<ContentItem> {
+        if (items.isEmpty()) return emptyList()
+        val current = byId[currentStreamId] ?: return items
+        val sameCategory = byCategory[current.categoryId].orEmpty()
+        return sameCategory.takeIf { it.size > 1 } ?: items
+    }
+}
+
+/**
+ * Index-backed equivalent of the contextual launch sequence with cached favorites/recent lists.
+ *
+ * Ordering and fallback semantics are identical to `playerProLiveNavigationSequence` +
+ * `liveTvProChannelSequence`; only the repeated catalog scans are removed.
+ */
+internal fun liveNavigationSequenceFromIndex(
+    index: LiveChannelCatalogIndex,
+    currentStreamId: Int,
+    launchContext: String,
+    favoriteChannels: List<ContentItem>,
+    recentChannels: List<ContentItem>,
+): List<ContentItem> {
+    if (index.items.isEmpty()) return emptyList()
+    val contextual = when (launchContext) {
+        LIVE_TV_PRO_CONTEXT_FAVORITES -> favoriteChannels
+        LIVE_TV_PRO_CONTEXT_RECENT -> recentChannels
+        LIVE_TV_PRO_CONTEXT_ALL -> index.items
+        else -> index.channelsInCategory(launchContext)
+    }
+    return contextual.takeIf { sequence -> sequence.any { it.id == currentStreamId } }
+        ?: index.sequenceFor(currentStreamId)
+}
+
 internal fun liveTvProChannelSequence(
     channels: List<ContentItem>,
     currentStreamId: Int,
