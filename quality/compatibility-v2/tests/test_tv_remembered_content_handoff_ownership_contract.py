@@ -100,7 +100,7 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
             "private fun CatalogInteractionHints(",
         )
         live_bar = self.section(
-            "private fun ReorderableLiveCategoryBar(",
+            "private fun LiveCategoryBar(",
             "private fun LiveCategoryChip(",
         )
         for block in (catalog_bar, live_bar):

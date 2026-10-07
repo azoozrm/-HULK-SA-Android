@@ -120,20 +120,22 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
 
     def test_live_movies_series_restore_selected_category_by_current_id_after_reorder(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
-        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        live = self.section("private fun LiveCategoryBar(", "private fun LiveCategoryChip(")
         for block in (catalog, live):
             self.assertIn("selectedCategoryFocusIndex(", block)
             self.assertIn("selectedId = selectedId", block)
-            self.assertIn("orderedIds = ordered.map(Category::id)", block)
             self.assertIn("focusRestoreController.resolveTarget = { selectedFocusTarget() }", block)
             self.assertIn("restoreSelectedCategoryFocus(", block)
             self.assertIn("cancelDefaultEntry = { cancelFocusChange() }", block)
             self.assertIn("CategoryFocusTarget(selectedId, targetIndex, requester)", block)
-            self.assertIn("orderedIds = ordered.map(Category::id)", block)
+        self.assertIn("orderedIds = ordered.map(Category::id)", catalog)
+        # The Live selector derives its ids from the committed order exposed by the manager.
+        self.assertIn("val orderedIds = remember(serverCategories) { serverCategories.map(Category::id) }", live)
+        self.assertIn("orderedIds = orderedIds", live)
 
     def test_special_categories_and_selected_only_entry_gate_remain_supported(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
-        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        live = self.section("private fun LiveCategoryBar(", "private fun LiveCategoryChip(")
         controller = self.section(
             "internal class CategoryFocusRestoreController",
             "internal fun canCategoryChipReceiveFocus(",
@@ -152,13 +154,28 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
 
     def test_category_underlap_and_reorder_contracts_remain_intact(self) -> None:
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
-        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        live = self.section("private fun LiveCategoryBar(", "private fun LiveCategoryChip(")
         for block in (catalog, live):
             self.assertIn("rememberCategorySidebarUnderlap", block)
             self.assertIn("extendCategoryViewportTowardStart", block)
             self.assertIn("categoryChipFocus", block)
-            self.assertIn("fun move(id: String, direction: Int)", block)
-            self.assertIn("prefs.edit().putString", block)
+        # Catalog strips keep their reorder owner.
+        self.assertIn("fun move(id: String, direction: Int)", catalog)
+        self.assertIn("prefs.edit().putString", catalog)
+        # The owner-approved Live redesign moved all Live server-category reordering into the
+        # manager: the strip only selects and must not touch an order preference.
+        self.assertNotIn("fun move(", live)
+        self.assertNotIn("prefs.edit()", live)
+        live_items = live[
+            live.index("items(serverCategories, key = Category::id)"):live.index("/**")
+        ]
+        self.assertNotIn("onLongClick", live_items)
+        self.assertNotIn("onMoveLeft", live_items)
+        self.assertNotIn("onMoveRight", live_items)
+        self.assertNotIn("moving =", live_items)
+        manager = self.section("private fun CategoryManagerDialog(", "private fun LiveCategoryManagerRow(")
+        self.assertIn("LiveCategoryOrderDraft", manager)
+        self.assertIn("onCommitOrder", manager)
         target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
         self.assertIn("bringIntoViewRequester(bringIntoViewRequester)", target)
         self.assertIn("bringIntoViewRequester.bringIntoView()", target)
@@ -183,13 +200,15 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
     def test_tv_restore_has_one_scroll_owner_and_manual_navigation_keeps_bring_into_view(self) -> None:
         helper = self.section("internal fun restoreSelectedCategoryFocus(", "private fun launchGrowthUrl(")
         catalog = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
-        live = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        live = self.section("private fun LiveCategoryBar(", "private fun LiveCategoryChip(")
         target = self.section("internal fun Modifier.categoryFocusTarget(", "@Composable\nprivate fun Modifier.categoryChipFocus(")
 
         self.assertEqual(helper.count("listState.scrollToItem("), 1)
         for block in (catalog, live):
-            self.assertIn("LaunchedEffect(isTv, selectedId, ordered)", block)
             self.assertIn("if (isTv) return@LaunchedEffect", block)
+        self.assertIn("LaunchedEffect(isTv, selectedId, ordered)", catalog)
+        # The Live selector scrolls with the committed server order ids.
+        self.assertIn("LaunchedEffect(isTv, selectedId, orderedIds)", live)
         self.assertIn("armBringIntoViewSuppression", target)
         self.assertIn("!controller.consumeBringIntoViewSuppression(categoryId)", target)
         self.assertLess(
@@ -203,7 +222,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
         live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
         catalog_bar = self.section("private fun ReorderableCatalogCategoryBar(", "private fun CatalogInteractionHints(")
-        live_bar = self.section("private fun ReorderableLiveCategoryBar(", "private fun LiveCategoryChip(")
+        live_bar = self.section("private fun LiveCategoryBar(", "private fun LiveCategoryChip(")
         header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")
 
         self.assertIn("val tvCatalogAllFocusRequesters = remember", shell)

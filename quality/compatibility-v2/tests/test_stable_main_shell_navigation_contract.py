@@ -59,7 +59,7 @@ class StableMainShellNavigationContractTest(unittest.TestCase):
             "private fun ReorderableCatalogCategoryBar(",
             "private fun CatalogInteractionHints(",
         )
-        live = source[source.index("private fun ReorderableLiveCategoryBar(") :]
+        live = source[source.index("private fun LiveCategoryBar(") :]
 
         self.assertIn("Row(Modifier.fillMaxSize())", shell)
         self.assertIn("Modifier.weight(1f).fillMaxHeight()", shell)

@@ -90,11 +90,15 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
         self.assertIn("browserVisible || activePanel != null", player_text)
         self.assertIn("browserVisible = childLiveBrowserVisible", pro_text)
         self.assertIn("cancelPendingLiveZap()", pro_text)
-        self.assertIn("dismissLiveZapIndicator()", pro_text)
+        # The accepted Live zap rework replaced the transient overlay indicator with the bounded
+        # dispatcher; browser/panel/error layers still gate input and drop queued switching.
+        self.assertIn("liveZapDispatchBlocked(", pro_text)
+        self.assertIn("playerLiveProLayerOwnsInput(", pro_text)
+        self.assertIn("pendingLiveChannelId = null", pro_text)
 
     def test_live_category_strip_routes_entry_directly_to_selected_focus(self) -> None:
         text = self.read(MAIN_SHELL)
-        start = text.index("private fun ReorderableLiveCategoryBar(")
+        start = text.index("private fun LiveCategoryBar(")
         end = text.index("private fun LiveCategoryChip(", start)
         block = text[start:end]
         self.assertIn("selectedCategoryFocusIndex(", block)
@@ -160,7 +164,7 @@ class LiveTvRemoteFocusQualificationTest(unittest.TestCase):
     def test_player_browser_dpad_left_repeat_is_one_shot(self) -> None:
         text = self.read(LIVE_TV_BROWSER)
         row_start = text.index("fun BrowserChannelRow(")
-        row_end = text.index("fun ReorderableCategoryRow(", row_start)
+        row_end = text.index("fun BrowserServerCategoryRow(", row_start)
         row = text[row_start:row_end]
         self.assertIn("event.nativeKeyEvent.repeatCount == 0", row)
         self.assertIn("onReturnToCategory()", row)
