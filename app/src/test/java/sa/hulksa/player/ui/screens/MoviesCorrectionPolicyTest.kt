@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sa.hulksa.player.model.ContentType
 import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.tvPremiumWindowPolicy
@@ -167,6 +168,20 @@ class MoviesCorrectionPolicyTest {
             assertFalse(label.contains('إ'))
             assertFalse(label.contains('آ'))
         }
+    }
+
+    @Test
+    fun moviesCountUnitUsesOwnerApprovedWording() {
+        assertEquals("فلم", catalogCountUnit(ContentType.MOVIE))
+        assertEquals("عنصر", catalogCountUnit(ContentType.SERIES))
+        assertEquals("عنصر", catalogCountUnit(ContentType.LIVE))
+    }
+
+    @Test
+    fun movieDetailsTabUpHandsOffToWatchActionOnlyForTheNamedTabs() {
+        assertTrue(movieDetailsTabUpHandsOffToWatchAction(MovieDetailsTab.INFORMATION))
+        assertTrue(movieDetailsTabUpHandsOffToWatchAction(MovieDetailsTab.RELATED))
+        assertFalse(movieDetailsTabUpHandsOffToWatchAction(MovieDetailsTab.STORY))
     }
 
     @Test

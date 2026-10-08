@@ -214,8 +214,8 @@ import java.util.Date
 import java.util.Locale
 import androidx.compose.foundation.layout.navigationBarsPadding
 
-private const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
-private const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
+internal const val FAVORITES_CATEGORY_ID = "__hulk_favorites__"
+internal const val CONTINUE_CATEGORY_ID = "__hulk_continue__"
 private const val TV_CATEGORY_PARENT_HORIZONTAL_INSET_DP = 14f
 private val TV_PAGE_GUTTER = 8.dp
 private val TV_LIVE_ACTION_INSET = 8.dp
@@ -2171,9 +2171,20 @@ private fun PosterCatalogScreen(
     val colors = LocalHulkColors.current
     val context = LocalContext.current
     val movieCategoryManagement = destination == MainDestination.MOVIES
-    var hiddenCategoryIds by remember(movieCategoryManagement) {
+    val catalog = state.catalogs[type]
+    // One committed Movies order + hidden owner per account/profile for the selector and the
+    // manager. The manager interaction scope is captured when it opens so a later profile change
+    // cannot redirect an in-flight write to a newer scope.
+    val movieStateScope = context.movieCategoryStateScope()
+    var hiddenCategoryIds by remember(movieStateScope, catalog) {
         mutableStateOf(if (movieCategoryManagement) context.movieHiddenCategoryIds() else emptySet())
     }
+    var committedOrderIds by remember(movieStateScope, catalog) {
+        mutableStateOf(
+            if (movieCategoryManagement) context.movieCommittedCategoryOrderIds() else emptyList(),
+        )
+    }
+    var managerScope by remember { mutableStateOf<AccountProfileStateScope?>(null) }
     var showCategoryManager by remember { mutableStateOf(false) }
     var restoreManagerEntryFocus by remember { mutableStateOf(false) }
     val manageCategoriesRequester = remember { FocusRequester() }
@@ -2185,10 +2196,32 @@ private fun PosterCatalogScreen(
                 hiddenCategoryIds + categoryId
             }
             hiddenCategoryIds = updated
-            context.saveMovieHiddenCategoryIds(updated)
+            context.saveMovieHiddenCategoryIds(updated, managerScope)
         }
     }
-    val catalog = state.catalogs[type]
+    val serverCategories = remember(catalog?.categories, committedOrderIds, movieCategoryManagement) {
+        if (movieCategoryManagement) {
+            orderedMovieServerCategories(catalog?.categories.orEmpty(), committedOrderIds)
+        } else {
+            emptyList()
+        }
+    }
+    val visibleServerCategories = remember(serverCategories, hiddenCategoryIds) {
+        serverCategories.filterNot { it.id in hiddenCategoryIds }
+    }
+    LaunchedEffect(movieStateScope, catalog) {
+        if (movieCategoryManagement) {
+            context.adoptMovieCommittedCategoryOrderOnce()
+            committedOrderIds = context.movieCommittedCategoryOrderIds()
+        }
+    }
+    // An account/profile switch invalidates an open manager session before any stale draft can act.
+    LaunchedEffect(movieStateScope) {
+        if (showCategoryManager) {
+            showCategoryManager = false
+            managerScope = null
+        }
+    }
     val modelInput = CatalogScreenModelInput(
         catalog = catalog,
         history = state.history,
@@ -2330,9 +2363,10 @@ private fun PosterCatalogScreen(
                 onRefresh = onRefresh,
                 isTv = isTv,
                 onMoveToCategories = categoryFocusRestoreController::requestFromSource,
-                countUnit = if (type == ContentType.MOVIE) "فيلم" else "عنصر",
+                countUnit = catalogCountUnit(type),
                 onManageCategories = if (movieCategoryManagement) {
                     {
+                        managerScope = context.movieCategoryStateScope()
                         restoreManagerEntryFocus = true
                         showCategoryManager = true
                     }
@@ -2363,19 +2397,34 @@ private fun PosterCatalogScreen(
                 ErrorNotice(catalogErrorMessage)
             }
             Spacer(Modifier.height(11.dp))
-            ReorderableCatalogCategoryBar(
-                type = type,
-                categories = catalog?.categories.orEmpty(),
-                selectedId = state.selectedCategoryId,
-                onSelect = selectCategoryAndEnterContent,
-                isTv = isTv,
-                focusRestoreController = categoryFocusRestoreController,
-                initialAllFocusRequester = initialAllFocusRequester,
-                initialAllFocusPending = initialAllFocusPending,
-                hiddenCategoryIds = hiddenCategoryIds,
-                noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
-            )
-            CatalogInteractionHints(isTv)
+            if (movieCategoryManagement) {
+                MovieCategoryBar(
+                    serverCategories = visibleServerCategories,
+                    selectedId = state.selectedCategoryId,
+                    onSelect = selectCategoryAndEnterContent,
+                    isTv = isTv,
+                    focusRestoreController = categoryFocusRestoreController,
+                    initialAllFocusRequester = initialAllFocusRequester,
+                    initialAllFocusPending = initialAllFocusPending,
+                    noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
+                )
+            } else {
+                ReorderableCatalogCategoryBar(
+                    type = type,
+                    categories = catalog?.categories.orEmpty(),
+                    selectedId = state.selectedCategoryId,
+                    onSelect = selectCategoryAndEnterContent,
+                    isTv = isTv,
+                    focusRestoreController = categoryFocusRestoreController,
+                    initialAllFocusRequester = initialAllFocusRequester,
+                    initialAllFocusPending = initialAllFocusPending,
+                    hiddenCategoryIds = hiddenCategoryIds,
+                    noticeRetryRequester = noticeRetryRequester.takeIf { moviesError && resultCount > 0 },
+                )
+            }
+            if (!movieCategoryManagement) {
+                CatalogInteractionHints(isTv)
+            }
             Spacer(Modifier.height(9.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -2476,13 +2525,21 @@ private fun PosterCatalogScreen(
         }
         if (movieCategoryManagement && showCategoryManager) {
             CategoryManagerDialog(
-                categories = catalog?.categories.orEmpty(),
+                categories = serverCategories,
                 hiddenIds = hiddenCategoryIds,
                 onToggle = toggleCategoryVisibility,
-                onDismiss = { showCategoryManager = false },
+                onDismiss = {
+                    showCategoryManager = false
+                    managerScope = null
+                },
                 title = "ادارة الفئات",
-                scopeText = "اخفاء الفئة يخفيها من شريط الافلام فقط",
+                scopeText = "الترتيب والاخفاء يطبقان على فئات الافلام",
                 emptyText = "لا توجد فئات",
+                liveStyle = true,
+                onCommitOrder = { ids ->
+                    committedOrderIds = ids
+                    context.saveMovieCommittedCategoryOrderIds(managerScope, ids)
+                },
             )
         }
     }
@@ -5351,8 +5408,6 @@ private fun ReorderableCatalogCategoryBar(
     hiddenCategoryIds: Set<String> = emptySet(),
     noticeRetryRequester: FocusRequester? = null,
 ) {
-    val approvedMovieChips = type == ContentType.MOVIE
-    val movieStripMetrics = rememberLiveCategoryStripMetrics()
     val context = LocalContext.current
     val prefs = remember(type) { context.getSharedPreferences("catalog_category_order_${type.name}", android.content.Context.MODE_PRIVATE) }
     var ids by remember(categories, type) {
@@ -5481,126 +5536,60 @@ private fun ReorderableCatalogCategoryBar(
         ),
     ) {
         item {
-            if (approvedMovieChips) {
-                MovieCategoryChip(
-                    label = "الكل",
-                    selected = selectedId == null,
-                    metrics = movieStripMetrics,
-                    onClick = { onSelect(null) },
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, null, selectedId, categoryBarHasFocus,
-                            allFocusRequester, focusRestoreController,
-                            allowInitialEntry = initialAllFocusPending,
-                        ),
-                )
-            } else {
-                FocusButton(
-                    "الكل",
-                    { onSelect(null) },
-                    primary = selectedId == null,
-                    compact = true,
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, null, selectedId, categoryBarHasFocus,
-                            allFocusRequester, focusRestoreController,
-                            allowInitialEntry = initialAllFocusPending,
-                        ),
-                )
-            }
+            FocusButton(
+                "الكل",
+                { onSelect(null) },
+                primary = selectedId == null,
+                compact = true,
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, null, selectedId, categoryBarHasFocus,
+                        allFocusRequester, focusRestoreController,
+                        allowInitialEntry = initialAllFocusPending,
+                    ),
+            )
         }
         item {
-            if (approvedMovieChips) {
-                MovieCategoryChip(
-                    label = "المفضلة",
-                    selected = selectedId == FAVORITES_CATEGORY_ID,
-                    metrics = movieStripMetrics,
-                    simpleIcon = Icons.Rounded.Star,
-                    simpleIconGap = 6.dp,
-                    onClick = { onSelect(FAVORITES_CATEGORY_ID) },
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                            favoritesFocusRequester, focusRestoreController,
-                        ),
-                )
-            } else {
-                FocusButton(
-                    text = "★ المفضلة",
-                    onClick = { onSelect(FAVORITES_CATEGORY_ID) },
-                    primary = selectedId == FAVORITES_CATEGORY_ID,
-                    compact = true,
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                            favoritesFocusRequester, focusRestoreController,
-                        ),
-                )
-            }
+            FocusButton(
+                text = "★ المفضلة",
+                onClick = { onSelect(FAVORITES_CATEGORY_ID) },
+                primary = selectedId == FAVORITES_CATEGORY_ID,
+                compact = true,
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        favoritesFocusRequester, focusRestoreController,
+                    ),
+            )
         }
         item {
-            if (approvedMovieChips) {
-                MovieCategoryChip(
-                    label = "اخر مشاهدة",
-                    selected = selectedId == CONTINUE_CATEGORY_ID,
-                    metrics = movieStripMetrics,
-                    simpleIcon = Icons.Outlined.Schedule,
-                    simpleIconGap = 6.dp,
-                    onClick = { onSelect(CONTINUE_CATEGORY_ID) },
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                            continueFocusRequester, focusRestoreController,
-                        ),
-                )
-            } else {
-                FocusButton(
-                    text = "▶ استكمال اخر مشاهدة",
-                    onClick = { onSelect(CONTINUE_CATEGORY_ID) },
-                    primary = selectedId == CONTINUE_CATEGORY_ID,
-                    compact = true,
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
-                            continueFocusRequester, focusRestoreController,
-                        ),
-                )
-            }
+            FocusButton(
+                text = "▶ استكمال اخر مشاهدة",
+                onClick = { onSelect(CONTINUE_CATEGORY_ID) },
+                primary = selectedId == CONTINUE_CATEGORY_ID,
+                compact = true,
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        continueFocusRequester, focusRestoreController,
+                    ),
+            )
         }
         items(ordered, key = Category::id) { category ->
-            if (approvedMovieChips) {
-                MovieCategoryChip(
-                    label = category.name,
-                    selected = selectedId == category.id,
-                    metrics = movieStripMetrics,
-                    framedBrandBadge = true,
-                    moving = moving == category.id,
-                    onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
-                    onLongClick = { moving = category.id },
-                    onMoveLeft = { move(category.id, 1) },
-                    onMoveRight = { move(category.id, -1) },
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, category.id, selectedId, categoryBarHasFocus,
-                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
-                        ),
-                )
-            } else {
-                LiveCategoryChip(
-                    category = category,
-                    selected = selectedId == category.id,
-                    moving = moving == category.id,
-                    onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
-                    onLongClick = { moving = category.id },
-                    onMoveLeft = { move(category.id, 1) },
-                    onMoveRight = { move(category.id, -1) },
-                    modifier = Modifier
-                        .categoryChipFocus(
-                            isTv, category.id, selectedId, categoryBarHasFocus,
-                            categoryFocusRequesters.getValue(category.id), focusRestoreController,
-                        ),
-                )
-            }
+            LiveCategoryChip(
+                category = category,
+                selected = selectedId == category.id,
+                moving = moving == category.id,
+                onClick = { if (moving == category.id) moving = null else onSelect(category.id) },
+                onLongClick = { moving = category.id },
+                onMoveLeft = { move(category.id, 1) },
+                onMoveRight = { move(category.id, -1) },
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, category.id, selectedId, categoryBarHasFocus,
+                        categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                    ),
+            )
         }
     }
 }
@@ -5653,6 +5642,196 @@ private fun rememberLiveCategoryStripMetrics(): LiveCategoryStripMetrics {
         iconGap = 7.dp,
         cornerRadius = 13.dp,
     )
+}
+
+/**
+ * Movies category selector, adopting the accepted Live strip appearance.
+ *
+ * Selection only: All, Favorites and Recent are fixed semantic rows and the real server categories
+ * follow in the single committed order shared with the Movies manager. Long-press reorder no longer
+ * exists on this surface; a held activation can never reorder or hide.
+ */
+@Composable
+private fun MovieCategoryBar(
+    serverCategories: List<Category>,
+    selectedId: String?,
+    onSelect: (String?) -> Unit,
+    isTv: Boolean,
+    focusRestoreController: CategoryFocusRestoreController,
+    initialAllFocusRequester: FocusRequester? = null,
+    initialAllFocusPending: Boolean = false,
+    noticeRetryRequester: FocusRequester? = null,
+) {
+    val colors = LocalHulkColors.current
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val ownedAllFocusRequester = remember { FocusRequester() }
+    val allFocusRequester = initialAllFocusRequester ?: ownedAllFocusRequester
+    val favoritesFocusRequester = remember { FocusRequester() }
+    val recentFocusRequester = remember { FocusRequester() }
+    val stableCategoryIds = remember(serverCategories) { serverCategories.map(Category::id) }
+    val categoryFocusRequesters = remember(stableCategoryIds) {
+        stableCategoryIds.associateWith { FocusRequester() }
+    }
+    var categoryBarHasFocus by remember { mutableStateOf(false) }
+    val orderedIds = remember(serverCategories) { serverCategories.map(Category::id) }
+    val itemMetrics = rememberLiveCategoryStripMetrics()
+    val leadingIds = remember { listOf<String?>(null, FAVORITES_CATEGORY_ID, CONTINUE_CATEGORY_ID) }
+    val baseContentPadding = 8.dp
+    val sidebarUnderlap = rememberCategorySidebarUnderlap(isTv, baseContentPadding)
+
+    fun selectedFocusTarget(): CategoryFocusTarget? {
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedId,
+            leadingIds = leadingIds,
+            orderedIds = orderedIds,
+        ) ?: return null
+        val requester = when (selectedId) {
+            null -> allFocusRequester
+            FAVORITES_CATEGORY_ID -> favoritesFocusRequester
+            CONTINUE_CATEGORY_ID -> recentFocusRequester
+            else -> selectedId?.let(categoryFocusRequesters::get)
+        } ?: return null
+        return CategoryFocusTarget(selectedId, targetIndex, requester)
+    }
+    focusRestoreController.resolveTarget = { selectedFocusTarget() }
+    focusRestoreController.restore = { cancelDefaultEntry ->
+        restoreSelectedCategoryFocus(
+            listState = listState,
+            scope = scope,
+            controller = focusRestoreController,
+            cancelDefaultEntry = cancelDefaultEntry,
+        )
+    }
+    DisposableEffect(focusRestoreController) {
+        onDispose {
+            focusRestoreController.restore = null
+            focusRestoreController.resolveTarget = null
+            focusRestoreController.cancel()
+        }
+    }
+
+    LaunchedEffect(isTv, selectedId, orderedIds) {
+        if (isTv) return@LaunchedEffect
+        val targetIndex = selectedCategoryFocusIndex(
+            selectedId = selectedId,
+            leadingIds = leadingIds,
+            orderedIds = orderedIds,
+        )
+        if (targetIndex != null) {
+            val anchorIndex = (targetIndex - 1).coerceAtLeast(0)
+            listState.scrollToItem(anchorIndex)
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        modifier = Modifier
+            .focusProperties {
+                onEnter = {
+                    if (isTv) {
+                        restoreSelectedCategoryFocus(
+                            listState = listState,
+                            scope = scope,
+                            controller = focusRestoreController,
+                            cancelDefaultEntry = { cancelFocusChange() },
+                        )
+                    }
+                }
+            }
+            .focusGroup()
+            .onFocusChanged { focusState -> categoryBarHasFocus = focusState.hasFocus }
+            .then(
+                // With a visible notice, UP from any category chip returns to its Retry; without
+                // one the accepted spatial route is untouched.
+                if (noticeRetryRequester != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        event.type == KeyEventType.KeyDown &&
+                            event.key == Key.DirectionUp &&
+                            runCatching { noticeRetryRequester.requestFocus() }.getOrDefault(false)
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .extendCategoryViewportTowardStart(sidebarUnderlap.viewportExtraDp.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        contentPadding = PaddingValues(
+            start = sidebarUnderlap.startContentPaddingDp.dp,
+            top = 8.dp,
+            end = baseContentPadding,
+            bottom = 8.dp,
+        ),
+    ) {
+        item {
+            FocusButton(
+                "الكل",
+                { onSelect(null) },
+                primary = selectedId == null,
+                compact = true,
+                scaleOnFocus = false,
+                textSizeSp = itemMetrics.textSizeSp,
+                textLineHeightSp = 15,
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, null, selectedId, categoryBarHasFocus,
+                        allFocusRequester, focusRestoreController,
+                        allowInitialEntry = initialAllFocusPending,
+                    )
+                    .then(itemMetrics.compactHeightModifier),
+            )
+        }
+        item {
+            FocusButton(
+                "المفضلة",
+                { onSelect(FAVORITES_CATEGORY_ID) },
+                primary = selectedId == FAVORITES_CATEGORY_ID,
+                compact = true,
+                scaleOnFocus = false,
+                textSizeSp = itemMetrics.textSizeSp,
+                trailingIcon = Icons.Outlined.StarBorder,
+                trailingIconTint = if (selectedId == FAVORITES_CATEGORY_ID) Color.Black else colors.gold,
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, FAVORITES_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        favoritesFocusRequester, focusRestoreController,
+                    )
+                    .then(itemMetrics.compactHeightModifier),
+            )
+        }
+        item {
+            FocusButton(
+                "اخر مشاهدة",
+                { onSelect(CONTINUE_CATEGORY_ID) },
+                primary = selectedId == CONTINUE_CATEGORY_ID,
+                compact = true,
+                scaleOnFocus = false,
+                textSizeSp = itemMetrics.textSizeSp,
+                trailingIcon = Icons.Outlined.Schedule,
+                trailingIconTint = if (selectedId == CONTINUE_CATEGORY_ID) Color.Black else colors.gold,
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, CONTINUE_CATEGORY_ID, selectedId, categoryBarHasFocus,
+                        recentFocusRequester, focusRestoreController,
+                    )
+                    .then(itemMetrics.compactHeightModifier),
+            )
+        }
+        items(serverCategories, key = Category::id) { category ->
+            LiveCategoryChip(
+                category = category,
+                selected = selectedId == category.id,
+                onClick = { onSelect(category.id) },
+                modifier = Modifier
+                    .categoryChipFocus(
+                        isTv, category.id, selectedId, categoryBarHasFocus,
+                        categoryFocusRequesters.getValue(category.id), focusRestoreController,
+                    ),
+                metrics = itemMetrics,
+                framedBrandBadge = true,
+            )
+        }
+    }
 }
 
 /**
@@ -5849,162 +6028,6 @@ private fun LiveCategoryBar(
                 metrics = itemMetrics,
                 framedBrandBadge = true,
             )
-        }
-    }
-}
-
-/**
- * Movie-only category chip.
- *
- * Every open/selected category type gets the warm yellow-gold fill with black label and simple
- * icons; every unselected category stays dark with warm-gold simple icons. Selection comes from
- * the authoritative selectedId (never from focus), so the fill persists while focus moves and the
- * previous category returns to its dark state on a new selection. The framed original HS badge
- * keeps a dark inset inside a selected server chip so the gold logo remains legible.
- */
-@Composable
-private fun MovieCategoryChip(
-    label: String,
-    selected: Boolean,
-    metrics: LiveCategoryStripMetrics,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    simpleIcon: ImageVector? = null,
-    simpleIconGap: Dp? = null,
-    framedBrandBadge: Boolean = false,
-    moving: Boolean = false,
-    onLongClick: (() -> Unit)? = null,
-    onMoveLeft: (() -> Unit)? = null,
-    onMoveRight: (() -> Unit)? = null,
-) {
-    val colors = LocalHulkColors.current
-    // Movie-only narrow wording-to-glyph gap: the simple glyph fills its box so the row gap is the
-    // whole visual space. Server-badge chips and Live keep the shared 7dp metric untouched.
-    val rowGap = simpleIconGap ?: metrics.iconGap
-    var focused by remember { mutableStateOf(false) }
-    var remoteLongPressHandled by remember { mutableStateOf(false) }
-    var selectPressed by remember { mutableStateOf(false) }
-    var dragAccumulator by remember { mutableFloatStateOf(0f) }
-    val reorderable = onLongClick != null
-    LaunchedEffect(selectPressed) {
-        if (selectPressed && reorderable) {
-            delay(650L)
-            if (selectPressed && !remoteLongPressHandled) {
-                remoteLongPressHandled = true
-                onLongClick?.invoke()
-            }
-        }
-    }
-    val shape = RoundedCornerShape(metrics.cornerRadius)
-    Row(
-        modifier = modifier
-            .then(metrics.compactHeightModifier)
-            .clip(shape)
-            .background(
-                when {
-                    selected -> colors.gold
-                    moving -> colors.gold.copy(alpha = .30f)
-                    else -> Color(0xFF111108)
-                },
-            )
-            .goldFocusEdge(shape = shape, visible = focused)
-            .border(
-                width = if (focused || moving) 2.dp else 1.dp,
-                color = when {
-                    focused || moving -> colors.goldBright
-                    selected -> Color.Transparent
-                    else -> colors.gold.copy(alpha = .55f)
-                },
-                shape = shape,
-            )
-            .pointerInput(label, moving) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onLongPress = onLongClick?.let { longPress -> { longPress() } },
-                )
-            }
-            .pointerInput(label, moving) {
-                if (moving && onMoveLeft != null && onMoveRight != null) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { dragAccumulator = 0f },
-                        onDragCancel = { dragAccumulator = 0f },
-                        onDragEnd = {
-                            when {
-                                dragAccumulator >= 48f -> onMoveRight?.invoke()
-                                dragAccumulator <= -48f -> onMoveLeft?.invoke()
-                            }
-                            dragAccumulator = 0f
-                        },
-                    ) { change, dragAmount ->
-                        change.consume()
-                        dragAccumulator += dragAmount
-                    }
-                }
-            }
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { event ->
-                val selectKey = event.key == Key.Enter || event.key == Key.DirectionCenter
-                when {
-                    selectKey && event.type == KeyEventType.KeyDown && reorderable -> {
-                        selectPressed = true
-                        true
-                    }
-                    selectKey && event.type == KeyEventType.KeyUp && reorderable -> {
-                        selectPressed = false
-                        if (!remoteLongPressHandled) onClick()
-                        remoteLongPressHandled = false
-                        true
-                    }
-                    moving && event.type == KeyEventType.KeyUp && event.key == Key.DirectionLeft -> {
-                        onMoveLeft?.invoke(); true
-                    }
-                    moving && event.type == KeyEventType.KeyUp && event.key == Key.DirectionRight -> {
-                        onMoveRight?.invoke(); true
-                    }
-                    moving && event.type == KeyEventType.KeyDown &&
-                        (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) -> true
-                    else -> false
-                }
-            }
-            .clickable(onClick = onClick, role = Role.Button)
-            .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(rowGap, Alignment.CenterHorizontally),
-    ) {
-        if (framedBrandBadge) {
-            val badgeShape = RoundedCornerShape(7.dp)
-            Box(
-                modifier = Modifier
-                    .size(metrics.iconSize)
-                    .clip(badgeShape)
-                    .background(Color(0xFF10110D))
-                    .border(1.dp, colors.gold.copy(alpha = .70f), badgeShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                BrandLogo(Modifier.fillMaxSize().padding(3.dp))
-            }
-        }
-        Text(
-            text = if (moving) "↔ $label" else label,
-            color = if (selected) Color(0xFF030402) else colors.text,
-            fontSize = metrics.textSizeSp.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        if (simpleIcon != null) {
-            // The Box matches the glyph so centering cannot add hidden icon-box spacing next to
-            // the wording; the glyph size itself is unchanged.
-            Box(
-                modifier = Modifier.size(metrics.iconSize - 4.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = simpleIcon,
-                    contentDescription = null,
-                    tint = if (selected) Color(0xFF030402) else colors.gold,
-                    modifier = Modifier.size(metrics.iconSize - 4.dp),
-                )
-            }
         }
     }
 }
@@ -6316,6 +6339,27 @@ private fun CategoryManagerDialog(
                     color = colors.textMuted,
                     fontSize = 11.sp,
                 )
+                if (reorderEnabled) {
+                    Spacer(Modifier.height(4.dp))
+                    if (adaptiveUi.isTelevision) {
+                        Text(
+                            "لترتيب الفئات اضغط مطولا OK ، حرك بالسهمين لاعلى ولاسفل ، ثم اضغط OK للحفظ",
+                            color = colors.textMuted,
+                            fontSize = 9.sp,
+                        )
+                        Text(
+                            "للالغاء اضغط BACK",
+                            color = colors.textMuted,
+                            fontSize = 9.sp,
+                        )
+                    } else {
+                        Text(
+                            "لترتيب الفئات اضغط مطولا على الفئة ، اسحبها الى مكانها ، ثم افلتها للحفظ",
+                            color = colors.textMuted,
+                            fontSize = 9.sp,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 if (categories.isEmpty()) {
                     Text(emptyText, color = colors.textMuted, fontSize = 12.sp)
@@ -6773,6 +6817,10 @@ internal fun isHiddenServerCategorySelection(
     selectedId != FAVORITES_CATEGORY_ID &&
     selectedId != CONTINUE_CATEGORY_ID &&
     selectedId in hiddenIds
+
+/** Owner-approved catalog count unit: Movies counts films, every other catalog counts items. */
+internal fun catalogCountUnit(type: ContentType): String =
+    if (type == ContentType.MOVIE) "فلم" else "عنصر"
 
 private data class DestinationEntry(val destination: MainDestination, val icon: ImageVector, val label: String)
 

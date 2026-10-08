@@ -340,16 +340,38 @@ private fun MovieDetailsProTvPolished(
                     }
                 }
                 Key.DirectionUp -> {
-                    val atPageTop = pageListState.firstVisibleItemIndex == 0 &&
-                        pageListState.firstVisibleItemScrollOffset == 0
-                    if (atPageTop) {
-                        false
-                    } else {
+                    if (
+                        errorMessage == null &&
+                        movieDetailsTabUpHandsOffToWatchAction(selectedTab)
+                    ) {
+                        // One reveal/focus transition: the two informational tabs hand the first
+                        // UP to the primary watch action. The existing parent scroll owner reveals
+                        // the hero item first, obsolete reveal work is cancelled and focus is
+                        // requested only once the watch target is laid out.
                         pageScrollJob?.cancel()
                         pageScrollJob = pageScrollScope.launch {
-                            pageListState.scrollBy(-step.toFloat())
+                            if (pageListState.layoutInfo.visibleItemsInfo.none { it.index == 0 }) {
+                                pageListState.scrollToItem(0)
+                                snapshotFlow {
+                                    pageListState.layoutInfo.visibleItemsInfo.any { it.index == 0 }
+                                }.first { it }
+                                withFrameNanos { }
+                            }
+                            runCatching { playRequester.requestFocus() }
                         }
                         true
+                    } else {
+                        val atPageTop = pageListState.firstVisibleItemIndex == 0 &&
+                            pageListState.firstVisibleItemScrollOffset == 0
+                        if (atPageTop) {
+                            false
+                        } else {
+                            pageScrollJob?.cancel()
+                            pageScrollJob = pageScrollScope.launch {
+                                pageListState.scrollBy(-step.toFloat())
+                            }
+                            true
+                        }
                     }
                 }
                 else -> false
