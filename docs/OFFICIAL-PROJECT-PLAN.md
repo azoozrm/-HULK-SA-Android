@@ -2,23 +2,28 @@
 
 This file preserves product direction and historical engineering handoffs. Current owner instructions and live repository contracts govern each development session.
 
-## Execution-scope clarification — 2026-10-02
+## Execution-scope clarification — aligned 2026-10-08
 
 This plan preserves product direction and historical phase records. Current owner instructions,
 root `AGENTS.md`, applicable overrides and live subsystem/physical contracts govern execution.
 Old versions, pending-PR labels and next-stage lists below are checkpoint history, not live facts
 or instructions to repeat completed work; verify the current source and GitHub state.
 
-OpenCode / DeepSeek is the normal executor. An owner-authorized Implementation/Correction round
-follows the standing root AGENTS workflow through bounded source edits, relevant checks, applicable
-build/state-preserving device refresh, coherent commit, normal push, one PR and final CI results,
-unless the owner explicitly narrows it. Read-only tasks have no mutation authority; work involving
-documentation only requires no Android build/install. Merge, signing, tags, release and deployment
-remain separate protected decisions. Versioned delivery/tag requirements below concern separately
-approved releases, not every engineering correction.
+OpenCode / DeepSeek is the normal executor. LOCAL_ROUND is the default: the same task/worktree,
+bounded edits and focused checks, frozen attributable candidate, applicable authorized build/
+state-preserving refresh, bounded verification, durable evidence and owner review. There is no
+automatic commit, push, PR or CI per correction. SECTION_PUBLISH follows exact-section acceptance/
+completion and current publication authority, or an explicitly requested standalone documentation
+task: final applicable gates, source/artifact binding, coherent publication, normal push, one PR and
+actual final configured CI. Read-only work has no mutation authority; docs-only work needs no
+Android build/install. Path-filtered CI is NOT RUN, never PASS. Merge, signing, tags, release and
+deployment remain separate protected decisions. Historical delivery/tag requirements below concern
+separately approved releases; they do not override a later owner-authorized bounded change.
 
 Explicitly read `docs/android-engineering-lab/DEEPSEEK-PROMPT-CONTRACT.md` for the adopted English
-packet method and `TASK-EXECUTION-CONTRACT.md` in the same directory for execution. Captures,
+packet method, `TASK-EXECUTION-CONTRACT.md` and `DEEPSEEK-EVIDENCE-CONTRACT.md` in the same directory
+for execution/evidence. For UI also read `docs/design/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md`
+and its actual accepted source. Captures,
 recordings, screenshot comparison and visual journeys are OFF without current task authorization.
 Full visual/device/release qualification gates remain unproven until their actual authorized
 evidence exists; they are not permission to start a routine capture journey. Technical completion
