@@ -36,7 +36,7 @@ optimization contract:
 | `isProfileable` | `true` (manifest `<profileable android:shell="true" />`) |
 | `signingConfig` | `debug` signing config (stable lab signer; see note below) |
 | `applicationId` | `sa.hulksa.player.benchmark` (isolated measurement identity/data) |
-| `versionName` | shipping version name + `.benchmark` suffix |
+| `versionName` | resolved base version name + `.benchmark`; persistent refresh uses the qualification override from the physical-instance contract |
 
 The shipping Release identity is unchanged: `applicationId = sa.hulksa.player`,
 shipping version code/name, endpoints, ABI set and brand are not modified, and the
@@ -55,10 +55,16 @@ The `debug` build type is intentionally **not** used as the measurement target.
 
 ## 3. Commands (Contabo lab)
 
-Build the measurement APKs:
+These are infrastructure examples, not execution or device authority. For a persistent engineering
+instance, verify live package/signer/state and resolve the owner-approved version overrides from
+`PHYSICAL-ENGINEERING-INSTANCES.md`; do not install the shipping source-baseline version by default.
+The values below mirror that contract at this documentation revision, not a live installed-state claim.
+
+Build the measurement APKs with the persistent qualification overrides:
 
 ```sh
 hulk-build-run ./gradlew --no-daemon --console=plain --max-workers=2 \
+  -PHULK_QUALIFICATION_VERSION_CODE=67 -PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23 \
   :app:assembleBenchmark \
   :macrobenchmark:assembleBenchmark
 ```
@@ -68,13 +74,21 @@ packages `assets/dexopt/baseline.prof` / `baseline.profm`):
 
 ```sh
 hulk-build-run ./gradlew --no-daemon --console=plain \
+  -PHULK_QUALIFICATION_VERSION_CODE=67 -PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23 \
   :app:verifyBenchmarkBaselineProfilePackaging
 ```
 
-Run the benchmarks against the connected physical device:
+Before any connected instrumentation, prove that the exact invocation preserves persistent target
+data and cannot uninstall, clear, downgrade or reset authentication. Otherwise report that path
+BLOCKED and use only a separately authorized isolated fixture/surface; never make persistent owner
+state disposable for measurement. Required state-preserving refresh still follows the physical
+contract, including both packages when applicable; these Benchmark commands do not replace it.
+
+Run the benchmarks only against the authorized, verified physical surface:
 
 ```sh
 hulk-build-run ./gradlew --no-daemon --console=plain --max-workers=2 \
+  -PHULK_QUALIFICATION_VERSION_CODE=67 -PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23 \
   :macrobenchmark:connectedBenchmarkAndroidTest \
   "-Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.macrobenchmark.StartupBenchmarks,sa.hulksa.player.macrobenchmark.FirstEntryNavigationBenchmarks"
 ```
@@ -90,6 +104,7 @@ Generation and packaging are separate and neither is auto-adopted:
 
    ```sh
    hulk-build-run ./gradlew --no-daemon --console=plain --max-workers=2 \
+     -PHULK_QUALIFICATION_VERSION_CODE=67 -PHULK_QUALIFICATION_VERSION_NAME=0.9.3.23 \
      :macrobenchmark:connectedBenchmarkAndroidTest \
      "-Pandroid.testInstrumentationRunnerArguments.class=sa.hulksa.player.macrobenchmark.BaselineProfileGenerator"
    ```

@@ -1,5 +1,22 @@
 # HULK SA Android — Current v1.0 Execution Plan
 
+## Historical checkpoint scope — clarified 2026-10-08
+
+The original body below records its 2026-08-08 checkpoint and is retained unchanged as history.
+Its "current", "authoritative", NEXT/PASS, version/SHA, per-defect branch/PR and immediate-sequence
+wording applies to that checkpoint; it is not live execution authority or current qualification.
+Verify relevant GitHub/source/device evidence before later work. Current owner scope, root AGENTS,
+applicable live contracts and accepted source supersede conflicting historical wording.
+
+Read `docs/android-engineering-lab/TASK-EXECUTION-CONTRACT.md`, `DEEPSEEK-PROMPT-CONTRACT.md` and
+`DEEPSEEK-EVIDENCE-CONTRACT.md` in that directory; for UI read
+`docs/design/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md`. LOCAL_ROUND keeps the same task/worktree
+without automatic per-correction Git publication; SECTION_PUBLISH is a separately bounded phase.
+Captures remain OFF without current-task authority. Preserve historical release-gate obligations
+for authorized qualification; this checkpoint alone does not activate them or reopen completed work.
+
+## Preserved original 2026-08-08 checkpoint
+
 **Checkpoint date:** 2026-08-08  
 **Purpose:** authoritative current execution checkpoint after completion of the adaptive/responsive qualification phase.  
 **Repository:** `azoozrm/-HULK-SA-Android`  
