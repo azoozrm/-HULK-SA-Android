@@ -166,9 +166,7 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         # manager: the strip only selects and must not touch an order preference.
         self.assertNotIn("fun move(", live)
         self.assertNotIn("prefs.edit()", live)
-        live_items = live[
-            live.index("items(serverCategories, key = Category::id)"):live.index("/**")
-        ]
+        live_items = live[live.index("items(serverCategories, key = Category::id)"):]
         self.assertNotIn("onLongClick", live_items)
         self.assertNotIn("onMoveLeft", live_items)
         self.assertNotIn("onMoveRight", live_items)
@@ -180,6 +178,48 @@ class TvCategoryFocusTransitionContractTest(unittest.TestCase):
         self.assertIn("bringIntoViewRequester(bringIntoViewRequester)", target)
         self.assertIn("bringIntoViewRequester.bringIntoView()", target)
         self.assertIn("consumeBringIntoViewSuppression", target)
+
+    def test_movies_strip_uses_the_selection_only_live_appearance(self) -> None:
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        movies = self.section("private fun MovieCategoryBar(", "private fun LiveCategoryBar(")
+
+        # One profile-scoped Movies order/hidden owner feeds the selector and the reorder-enabled
+        # manager; the strip itself is selection-only with the accepted Live appearance.
+        self.assertIn("orderedMovieServerCategories(", poster)
+        self.assertIn("context.adoptMovieCommittedCategoryOrderOnce()", poster)
+        self.assertIn("context.saveMovieCommittedCategoryOrderIds(managerScope, ids)", poster)
+        self.assertIn("liveStyle = true", poster)
+        self.assertIn("MovieCategoryBar(", poster)
+        self.assertIn("rememberLiveCategoryStripMetrics()", movies)
+        self.assertIn("textSizeSp = itemMetrics.textSizeSp", movies)
+        self.assertIn("trailingIcon = Icons.Outlined.StarBorder", movies)
+        self.assertIn("trailingIcon = Icons.Outlined.Schedule", movies)
+        self.assertIn('"اخر مشاهدة"', movies)
+        self.assertIn("framedBrandBadge = true", movies)
+        self.assertNotIn("fun move(", movies)
+        self.assertNotIn("prefs.edit()", movies)
+        self.assertNotIn("onLongClick", movies)
+        self.assertNotIn("onMoveLeft", movies)
+        self.assertNotIn("onMoveRight", movies)
+
+    def test_main_pages_show_no_strip_guidance_and_manager_owns_reorder_guidance(self) -> None:
+        poster = self.section("private fun PosterCatalogScreen(", "internal fun resolveLivePreview(")
+        live = self.section("private fun LiveCatalogScreen(", "private fun LivePreviewStage(")
+        manager = self.section("private fun CategoryManagerDialog(", "private fun LiveCategoryManagerRow(")
+
+        # Movies and Live have no instruction text below the strip; Series keeps its accepted
+        # ordering + favorites guidance.
+        self.assertIn("if (!movieCategoryManagement) {", poster)
+        self.assertIn("CatalogInteractionHints(isTv)", poster)
+        self.assertNotIn("favoritesTarget", poster)
+        self.assertNotIn("showCategoryOrdering", poster)
+        self.assertNotIn("CatalogInteractionHints", live)
+        # Reorder guidance lives inside the manager for both sections, with no focus stops.
+        self.assertIn("if (reorderEnabled) {", manager)
+        self.assertIn("لترتيب الفئات اضغط مطولا OK ، حرك بالسهمين لاعلى ولاسفل ، ثم اضغط OK للحفظ", manager)
+        self.assertIn("للالغاء اضغط BACK", manager)
+        self.assertIn("لترتيب الفئات اضغط مطولا على الفئة ، اسحبها الى مكانها ، ثم افلتها للحفظ", manager)
+        self.assertNotIn("focusRequester", manager[manager.index("if (reorderEnabled) {"):manager.index("Spacer(Modifier.height(10.dp))")])
 
     def test_source_owned_handoffs_cover_search_live_and_catalog_content(self) -> None:
         header = self.section("private fun CatalogHeader(", "@Composable\nprivate fun CategoryBar(")

@@ -495,6 +495,14 @@ internal fun movieDetailsPanelNeedsMoreScroll(
     viewportEnd: Int,
 ): Boolean = !sectionPresent || sectionBottom > viewportEnd
 
+/**
+ * True when the focused selected Movie Details tab hands its first UP press to the primary watch
+ * action in one reveal/focus transition instead of the read-scroll route. The two informational
+ * tabs use it; Story keeps its existing read-scroll behavior.
+ */
+internal fun movieDetailsTabUpHandsOffToWatchAction(tab: MovieDetailsTab): Boolean =
+    tab == MovieDetailsTab.INFORMATION || tab == MovieDetailsTab.RELATED
+
 internal fun movieFormatPosition(ms: Long): String {
     val totalSeconds = ms.coerceAtLeast(0L) / 1_000L
     val hours = totalSeconds / 3_600L
