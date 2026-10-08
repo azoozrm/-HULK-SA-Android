@@ -1,9 +1,11 @@
 # HULK SA Android — Shared UI Design Contract
 
-Version 3 · consolidated after Movies acceptance on 2026-10-06.
+Version 4 · Movies foundation retained; Live categories adopted by the owner on 2026-10-08.
 
 This is the single shared UI specification for future section work. It preserves the accepted
 Movies result; Series and Live inherit its visual language while keeping their real functions.
+Category selectors and Category Management use the later Live reference in section 4;
+that scoped supersession does not replace the accepted Movies cards, Details or player.
 It consolidates Shared UI Version 2, the approved player reference and the subsequent owner
 decisions. Its adoption is documentation work, not permission to redesign another section.
 
@@ -23,7 +25,24 @@ The preserved Movies implementation is PR [#335](https://github.com/azoozrm/-HUL
 
 These revisions are historical baseline identities, not instructions to reset newer source or
 install old APKs. Re-query the live source before work. Movies is closed as an accepted UI section;
-its acceptance does not certify every device/window or production release.
+the owner's later category-only alignment is an explicit exception, not a whole-section restart.
+Its acceptance does not certify every device/window or production release.
+
+The category reference is the merged Live work in PR
+[#337](https://github.com/azoozrm/-HULK-SA-Android/pull/337):
+
+- Reviewed source: `dfe18e8985b30fc10a710951814c6689d583097c` (R9).
+- Merge: `19f857534323e6a6688daa27f33d2a15d684883c`.
+- Owner direction on 2026-10-08: adopt Live Category Management for ordering/hiding and
+  the Live category-strip appearance when returning to Movies, then Series.
+- The reference is `LiveCategoryBar`, `rememberLiveCategoryStripMetrics`, `LiveCategoryChip`
+  and the reorder-enabled, `liveStyle = true` `CategoryManagerDialog` / `LiveCategoryManagerRow`
+  in `MainShellScreen.kt`, with the committed state in `LiveCategoryVisibilityStore.kt`.
+- Technical source/artifact/CI review and bounded Mi Box 4 / Galaxy A06 evidence do not
+  establish universal window coverage or complete migration of every Live player surface.
+
+These are immutable reference identities. Resolve the active caller at the task's verified
+live revision; do not reset source or install a historical reference APK.
 
 Use this file as the canonical contract after repository adoption. The former VPS reference at
 `/srv/hulk-android/references/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md` is a historical copy
@@ -71,6 +90,8 @@ These are scoped roles, not authorization to recolor all callers.
 | Disabled compact transport | textMuted at accepted 45% alpha; ineligible input |
 | Resume decision | Accepted dark card, pale-gold history/title/progress accents, real title and muted saved-time wording |
 | Movie blocking error | Same bounded dark-card family; warm-gold status glyph, ivory title/body, muted context |
+| Category manager hidden row | Dark surface, muted label/VisibilityOff; remains manageable and reorderable |
+| Category manager moving row | Restrained gold backing/drag indication; draft movement is separate from focus and visibility |
 
 Normal, focus, selection, favorite, disabled and loading are separate states. Focus never commits
 an option or changes playback. Preserve `goldFocusEdge` inside existing bounds: 2dp goldBright
@@ -122,18 +143,120 @@ Download glyphs follow `movieDownloadControlIcon` and the actual status, not a f
 
 Back navigation chevrons face physically right; child-opening chevrons at the left edge face left.
 Do not duplicate glyphs in both columns. The accepted Favorites/Recent simple-icon gap is 6dp;
-do not add hidden icon-box spacing or apply it to every unrelated component.
+do not add hidden icon-box spacing or apply it to every unrelated component. Live fixed category
+buttons retain that 6dp internal gap; server chips and spacing between chips use their own
+accepted expressions in section 4.1.
 
 ## 4. Catalog, categories and cards
 
-Use the accepted Movies toolbar/category hierarchy: real section title/count, Search, Refresh and
-Category Management; same heights, type, shapes and content gutters. Category width follows real
-wording. Physical RTL order is All, Favorites, Recent, then actual ordered server categories.
+Keep the accepted toolbar hierarchy: real section title/count, Search, Refresh and Category
+Management, with its existing type, shapes and content gutters. Category appearance and
+management follow the later Live reference below. Category width follows real wording.
+Physical RTL order is All, Favorites, Recent, then actual ordered server categories.
 Movies labels include `الافلام`, `الكل`, `المفضلة`, `اخر مشاهدة` and `ادارة الفئات`.
 
-Preserve category selection separately from focus, profile-scoped hide/show/reorder, stable server
-identity, long press, search, restoration and management-trigger return. Notices stay within the
-content gutter and do not cover the navigation rail.
+Preserve category selection separately from focus, account/profile-scoped state, stable server
+identity, search, restoration and management-trigger return. Selectors are selection-only;
+long-press reorder belongs exclusively to Category Management. Notices stay within the content
+gutter and do not cover the navigation rail.
+
+### 4.1 Category strip and selector appearance — Live reference
+
+Use the accepted Live strip on phone and TV: `LiveCategoryBar`, its fixed-category `FocusButton`
+call sites and its actual `rememberLiveCategoryStripMetrics` / `LiveCategoryChip` expressions.
+Match each component's compact height, padding, corner radius and text/icon roles; real server
+chips use the framed original HS badge. All, Favorites, Recent and server chips keep compatible
+outer heights for the same window; focus/selection never enlarges or shifts a chip. Replace the
+competing Movies-only category skin. Other Movies components retain their accepted appearance.
+
+| Accepted Live spacing | Source expression |
+| --- | --- |
+| Fixed button label to its simple icon | `FocusButton`: 6dp |
+| Server chip label to its framed HS badge | `LiveCategoryChip`: 7dp |
+| Between category chips | `LiveCategoryBar`: 7dp |
+
+These are separate roles, not one global gap. Preserve the respective source expressions and
+adaptive outer-height calculation; do not substitute photo measurements or resize other controls.
+
+| Category state | Appearance/input |
+| --- | --- |
+| Unselected | Accepted Live dark surface, ivory label; semantic star/clock and HS badge in their accepted gold roles |
+| Selected | Persistent gold fill and dark label/simple icon; HS badge keeps its legible dark inset |
+| Focused | Accepted pale edge inside existing bounds; no scale and no implicit selection |
+| Hidden server category | Absent from selectors; still present in Category Management |
+
+Keep complete server wording and distinguishing suffixes. Use content-dependent chip widths and
+the existing scrolling/adaptive viewport; do not force equal widths, shrink text or add ellipsis
+to fit an invented fixed width. Preserve physical RTL anatomy: simple caption RIGHT with its single
+glyph LEFT, server HS badge RIGHT with its caption following LEFT. Keep each section's real fixed
+shortcuts and their route semantics; reuse appearance, not Live category IDs or channel callbacks.
+
+The Live main strip and channel browser read the same committed order/hidden set. A vertical
+browser retains its functional list geometry while sharing category anatomy/state; this does not
+turn it into a horizontal strip. No selector or browser may enter reorder mode, mutate order or
+show reorder instructions after a long press. Channel/media-item long-press favorites remain
+separate existing behavior.
+
+### 4.2 Category Management — sole ordering and hide/show surface
+
+Use the accepted Live manager composition: centered bounded dark dialog, fixed title/scope line,
+one scrolling category list and the fixed centered `تم` footer. Adapt within actual safe window
+constraints; keep header/footer and all controls reachable at relevant font scales and sizes.
+Scope wording describes the actual affected section/consumers; do not copy channel-specific text
+into Movies or Series.
+
+Each real server category has one row: full name at physical RIGHT, visibility glyph and drag handle
+at physical LEFT. Preserve the Live row's dark/gold/ivory treatment and in-bounds focus edge.
+Hidden rows use muted wording and VisibilityOff; visible rows use Visibility. Keep `مخفية` /
+`ظاهرة` state semantics and meaningful hide/show activation. Do not add separate focus stops for
+the eye and handle or competing pointer/click handlers. Names may wrap in the manager; do not
+silently truncate them. All/Favorites/Recent and other synthetic fixed shortcuts stay outside
+server-category ordering/hiding.
+
+| Input/state | Required behavior |
+| --- | --- |
+| TV short OK / phone ordinary tap | Toggle hide/show once through the section's existing state owner |
+| TV long OK | Enter a draft move for that stable category; its held/release sequence does not also hide/show or save |
+| TV moving UP/DOWN | Move the draft within the list bounds and keep that same category revealed/focused |
+| TV subsequent OK | Commit the order once and leave move mode; no extra visibility toggle |
+| TV BACK while moving | Cancel the draft, keep the manager open and consume that whole BACK sequence; a later ordinary BACK closes |
+| Phone long press then continuous drag | Move the draft under the finger; bounded edge scrolling follows current laid-out row geometry |
+| Phone valid unconsumed drop | Commit once; consume completion so a tap/hide action cannot follow |
+| Pointer cancellation/consumed release, disposal or obsolete scope/catalog | Discard the draft; no order save from that cancelled move |
+
+An ordinary swipe before long-press belongs to list scrolling. Focus never toggles visibility.
+Hide/show commits independently of order drafting: cancelling a later reorder does not undo an
+earlier intentional visibility toggle. Closing/`تم` must not implicitly save an unfinished move.
+Modal input remains exclusive and ordinary closure restores the management trigger/context.
+
+### 4.3 State ownership, adoption and regression boundary
+
+Keep one committed order/hidden-state owner per section and account/profile scope; every selector
+in that section consumes it. Movies, Series and Live retain independent category namespaces,
+catalog IDs, favorites/history and business callbacks. Sharing a visual component is not sharing
+their persisted data or copying Live preferences into another section.
+
+Persist stable real category IDs, not positions or names. Hidden categories remain in management
+and keep their order; show restores their committed position. Unknown/unavailable IDs cannot
+produce phantom rows, duplicates or resets; genuinely new categories append in catalog order.
+If a selected category becomes hidden/unavailable, use the existing deterministic selection/focus
+fallback. Hiding a category does not delete media, favorites or history.
+
+Bind manager writes to the scope it opened for; stale callbacks may not write into a different
+account/profile. Preserve existing customization and verified legacy adoption/migration rules.
+Resolve each destination's live persistence owners before a bounded implementation; do not reset
+data, introduce a second mutable order or perform a cross-section migration to match appearance.
+
+This contract update changes documentation only. At the reference revision Movies still has its
+earlier strip reorder and visibility-only manager; Series also needs a separately authorized
+alignment. The owner-directed next work is Movies categories, then Series Category Management,
+without reopening their unrelated accepted layout or player work.
+
+Applicable later regression evidence covers normal hide/show, hidden-row reorder, commit versus
+cancel, consumed-release cancellation, scrolling versus dragging, close/reopen persistence,
+selected-category fallback, focus/trigger restoration, refresh/new categories and account/profile
+isolation. Verify main-selector/browser agreement where both exist, and no reorder mutation from
+any selector. Technical checks and owner visual acceptance retain their distinct evidence scopes.
 
 Movies catalog and Recent use accepted compact square artwork plus fixed footer slots. Neighboring
 cards reserve the same two title lines and metadata area even when data is missing or arrives later.
@@ -279,17 +402,19 @@ confirm commits once. BACK restores the Go-to-time More row.
 | --- | --- | --- |
 | Movies | Accepted catalog, Details, player, Resume, error and download baseline | Film identity, film progress/favorite/end behavior |
 | Series | Same palette/type/icons/state language, catalog family and five VOD slots | Actual seasons/episodes, episode progress, authoritative neighbors and existing countdown/cancel/autoplay |
-| Live | Same visual identity, row anatomy, error/focus language | Actual channel next/previous/last/list and mute/reload/source/live recovery |
+| Live | Category-strip/manager reference in section 4; same shared visual identity and error/focus language | Actual channel next/previous/last/list and mute/reload/source/live recovery |
 
 Series previous/next may be direct More actions only when authoritative neighbors/callbacks
 exist. Do not restore Version 2's seven-tool Series strip. Preserve stable season/episode identity,
 selected season, resume per episode, series favorite identity and once-only transitions.
 No episode changes behind Resume/error/panels/lock/end decisions or duplicate UI countdown.
 
-Live retains existing channel-control order and callbacks until its later authorized alignment.
+Live retains its existing channel-control order and callbacks outside the exact adopted scope.
 Show Source only when real alternatives exist. Non-seekable Live does not gain VOD duration,
 Resume, Go to time or a fabricated timeline. Current legacy Live appearance is not proof of
-completed migration. Future adoption order is Series then Live, under separate task scope.
+completed migration of every Live player surface. PR #337 supplies the bounded Live reference;
+the latest owner-directed category alignment order is Movies then Series. Further player/section
+work follows its own current task scope, not an automatic sequence imposed by this document.
 
 ## 10. Component reuse and change control
 
@@ -305,7 +430,9 @@ contract/acceptance record; do not silently revise Movies to accommodate Series.
 Protected regression conditions include complete captions, fixed card/footer geometry, smooth
 R10 navigation, category selection, one compact download control, centered dialogs, exclusive
 foreground/input, first-press Back, saved history on cancelled Resume, stable mobile tools,
-no preview/bubble and keyboard-free time entry.
+no preview/bubble and keyboard-free time entry. Categories additionally preserve manager-only
+reorder, cancellation without order save, hide/show independence, stable scoped IDs, selector
+agreement and management-trigger restoration.
 
 ## 11. Evidence and source map
 
@@ -321,6 +448,8 @@ Primary source owners, relative to repository:
 - `app/src/main/java/sa/hulksa/player/ui/components/HulkComponents.kt`
 - `app/src/main/java/sa/hulksa/player/ui/screens/MainShellScreen.kt` and `TvCatalogGrid.kt`
 - `MoviesApprovedUi.kt`, `DetailsProScreens.kt` and `DetailsProTvPolishScreens.kt` in that screens directory
+- `LiveCategoryVisibilityStore.kt`, `MovieCategoryVisibilityStore.kt` and `LiveChannelBrowser.kt`
+  for category state/consumers; section 4's named `MainShellScreen.kt` components own the reference
 - `PlayerScreen.kt`, `VodPlayerControlsPolicy.kt` and `MovieTransportIcons.kt`
 - `PlayerProEpisodeNavigation.kt` and `LivePlayerControlsPolicy.kt` for specific owners
 

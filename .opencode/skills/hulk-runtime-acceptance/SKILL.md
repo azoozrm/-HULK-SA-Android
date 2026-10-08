@@ -7,10 +7,13 @@ description: Use during HULK SA Android visual implementation and before claimin
 
 This skill grants no authority. Read the applicable live AGENTS.md,
 AGENTS.override.md, engineering-lab README, physical-instance contract,
-TASK-EXECUTION-CONTRACT.md, DEEPSEEK-PROMPT-CONTRACT.md, subsystem contracts,
+TASK-EXECUTION-CONTRACT.md, DEEPSEEK-PROMPT-CONTRACT.md,
+DEEPSEEK-EVIDENCE-CONTRACT.md, subsystem contracts,
 and the current task packet. Read referenced contracts explicitly from
 `docs/android-engineering-lab/`; a filename does not load its contents.
-They govern execution.
+They govern execution. For UI, explicitly read
+`docs/design/shared-ui/HULK-SHARED-UI-DESIGN-CONTRACT.md` and its active source reference.
+Read the declared LOCAL_ROUND or SECTION_PUBLISH phase; this aid cannot activate publication.
 
 ## Start
 1. Verify all task live fields, task worktree, branch, base HEAD, overlapping
@@ -33,10 +36,13 @@ Do not run data-clearing instrumentation against persistent owner packages.
 Do not change baseline images without explicit baseline approval.
 
 ## Bind source to runtime
-Record source SHA and dirty state, build command, APK hash, package, version,
+Record candidate ID, base HEAD, clean/dirty state, source-manifest/diff hashes,
+build command, material inputs/options, APK hash, package, version,
 signer verification, device identity, and installation result.
 A dirty iteration build is not an exact-HEAD build.
-Final evidence must use the immutable final source revision.
+Bind final evidence to the immutable frozen candidate; an uncommitted LOCAL_ROUND is valid.
+At publication prove material input/option equality to the committed tree and retain the original
+dirty-build attribution, or rebuild affected outputs. A later commit does not relabel an old build.
 Follow the live physical-instance contract; never improvise package refresh.
 
 ## Inspect
@@ -94,9 +100,13 @@ Report PASS only when all mandatory technical criteria pass; PASS is technical
 completion, not owner visual acceptance or universal device coverage.
 Otherwise report FAIL, BLOCKED, or STOP with the exact reason.
 Never declare merge, release, or production readiness from this skill.
-For an authorized implementation round, complete the standing root AGENTS.md
-workflow through the coherent commit, normal push, same PR and final configured
-CI results unless the current owner scope narrows those actions. A push or
-pending/failed CI is not technical completion. Diagnose and fix an in-scope
-failure without bypassing checks or expanding scope; honor real blockers and
-STOP conditions. Report owner visual acceptance separately.
+Complete the declared phase under TASK-EXECUTION-CONTRACT:
+- LOCAL_ROUND (default): finish relevant correction/check/build/approved refresh,
+  bounded verification and durable evidence for owner review in the same task/worktree.
+  Preserve successful work; no automatic commit, push, PR create/update or CI per correction.
+- SECTION_PUBLISH: only with current publication authority after exact-section acceptance/
+  completion, or an explicitly requested standalone publication. Run final applicable gates,
+  freeze/bind source, make one coherent commit/normal push/one PR and follow configured CI
+  to final. Path-filtered CI is NOT RUN; docs-only work needs no Android build/install.
+Diagnose and fix only in-scope failures without bypassing checks or expanding scope;
+honor real blockers and STOP conditions. Report owner visual acceptance separately.
