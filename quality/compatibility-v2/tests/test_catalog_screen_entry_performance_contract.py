@@ -46,7 +46,7 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         content_grid = self.section(
             source,
             "private fun ContentGrid(",
-            "private fun HistoryGrid(",
+            "private fun BoxedHistoryGrid(",
         )
         self.assertIn("preparedContentKeys", content_grid)
         self.assertIn("contentKeyIndex[remembered.itemKey]", content_grid)
@@ -185,8 +185,8 @@ class CatalogScreenEntryPerformanceContractTest(unittest.TestCase):
         source = self.read(MAIN_SHELL)
         category_bar = self.section(
             source,
-            "private fun ReorderableCatalogCategoryBar(",
-            "private fun CatalogInteractionHints(",
+            "private fun CatalogCategoryBar(",
+            "private fun LiveCategoryBar(",
         )
 
         self.assertNotIn("artworkByCategory", category_bar)

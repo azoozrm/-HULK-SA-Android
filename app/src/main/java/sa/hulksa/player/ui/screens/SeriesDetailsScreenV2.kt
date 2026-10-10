@@ -602,7 +602,7 @@ private fun SeriesHeroV2(
                         compact = true,
                         scaleOnFocus = false,
                         accent = notificationsEnabled,
-                        leadingIcon = Icons.Rounded.Notifications,
+                        trailingIcon = Icons.Rounded.Notifications,
                         textMaxLines = 2,
                         textSizeSp = seriesNotificationButtonTextSizeSp(isTv),
                         modifier = Modifier
@@ -1039,8 +1039,7 @@ private fun compactSeriesRatingV2(raw: String?): String? {
     return String.format(Locale.US, "%.1f", value)
 }
 
-private fun seriesSeasonText(count: Int): String =
-    if (count == 1) "${latinSeriesInt(count)} موسم" else "${latinSeriesInt(count)} مواسم"
+private fun seriesSeasonText(count: Int): String = "${latinSeriesInt(count)} موسم"
 
 private fun latinSeriesInt(value: Int): String = String.format(Locale.US, "%d", value)
 

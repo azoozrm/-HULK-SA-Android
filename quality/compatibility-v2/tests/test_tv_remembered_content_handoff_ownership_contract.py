@@ -96,8 +96,8 @@ class TvRememberedContentHandoffOwnershipContractTest(unittest.TestCase):
         self.assertIn("initialAllFocusRequester = tvCatalogAllFocusRequesters[state.destination]", shell)
         self.assertIn("initialAllFocusPending = currentTvCatalogInitialFocusPending", shell)
         catalog_bar = self.section(
-            "private fun ReorderableCatalogCategoryBar(",
-            "private fun CatalogInteractionHints(",
+            "private fun CatalogCategoryBar(",
+            "private fun LiveCategoryBar(",
         )
         live_bar = self.section(
             "private fun LiveCategoryBar(",

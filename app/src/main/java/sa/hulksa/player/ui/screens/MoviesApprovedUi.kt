@@ -104,6 +104,8 @@ import sa.hulksa.player.model.OfflineDownload
 import sa.hulksa.player.model.OfflineStatus
 import sa.hulksa.player.ui.adaptive.LocalAdaptiveUi
 import sa.hulksa.player.ui.components.FocusButton
+import sa.hulksa.player.ui.components.SeriesEpisodeCountInline
+import sa.hulksa.player.ui.components.SeriesSeasonCountInline
 import sa.hulksa.player.ui.components.goldFocusEdge
 import sa.hulksa.player.ui.theme.LocalHulkColors
 import java.util.Locale
@@ -148,64 +150,17 @@ internal fun MovieDetailsTabRow(
     modifier: Modifier = Modifier,
     onSelectedTabScrollKey: ((KeyEvent) -> Boolean)? = null,
 ) {
-    val colors = LocalHulkColors.current
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MovieDetailsTab.entries.forEach { tab ->
-            var focused by remember(tab) { mutableStateOf(false) }
-            val isSelected = tab == selected
-            Column(
-                modifier = Modifier
-                    .padding(horizontal = 2.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .goldFocusEdge(shape = RoundedCornerShape(10.dp), visible = focused)
-                    .background(if (focused) colors.gold.copy(alpha = .10f) else Color.Transparent)
-                    .then(
-                        requesters[tab]?.let { requester ->
-                            Modifier
-                                .focusRequester(requester)
-                                .focusProperties {
-                                    up = upTarget ?: FocusRequester.Cancel
-                                    down = downTargets[tab] ?: FocusRequester.Cancel
-                                }
-                        } ?: Modifier,
-                    )
-                    .onFocusChanged { focused = it.isFocused }
-                    .then(
-                        // Only the selected tab can drive the parent page read-scroll. Moving
-                        // focus across tabs alone neither activates nor scrolls anything.
-                        if (isSelected && onSelectedTabScrollKey != null) {
-                            Modifier.onPreviewKeyEvent(onSelectedTabScrollKey)
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .clickable(role = Role.Tab, onClick = { onSelect(tab) })
-                    .padding(horizontal = if (isTv) 20.dp else 13.dp, vertical = if (isTv) 11.dp else 9.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = tab.label,
-                    // Round 3 owner override: all three tab labels are ivory, selected or not.
-                    // Selection is shown by the heavier weight and the ivory underline below.
-                    color = colors.text,
-                    fontSize = if (isTv) 16.sp else 13.sp,
-                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
-                    maxLines = 1,
-                )
-                Spacer(Modifier.height(5.dp))
-                Box(
-                    Modifier
-                        .width(if (isTv) 58.dp else 44.dp)
-                        .height(2.dp)
-                        .background(if (isSelected) colors.text else Color.Transparent),
-                )
-            }
-        }
-    }
+    HulkDetailsTabRow(
+        labels = MovieDetailsTab.entries.map(MovieDetailsTab::label),
+        selectedIndex = selected.ordinal,
+        onSelectIndex = { onSelect(MovieDetailsTab.entries[it]) },
+        requesters = MovieDetailsTab.entries.map { requesters[it] },
+        upTarget = upTarget,
+        downTargets = MovieDetailsTab.entries.map { downTargets[it] },
+        isTv = isTv,
+        modifier = modifier,
+        onSelectedTabScrollKey = onSelectedTabScrollKey,
+    )
 }
 
 @Composable
@@ -214,10 +169,11 @@ internal fun MovieDetailsStoryContent(
     isTv: Boolean,
     horizontalPaddingDp: Int,
     modifier: Modifier = Modifier,
+    emptyMessage: String = "لا يوجد وصف متاح لهذا الفلم",
 ) {
     val colors = LocalHulkColors.current
     if (plot.isNullOrBlank()) {
-        MovieDetailsEmptyTabMessage("لا يوجد وصف متاح لهذا الفلم", isTv, modifier)
+        MovieDetailsEmptyTabMessage(emptyMessage, isTv, modifier)
         return
     }
     Text(
@@ -247,38 +203,28 @@ internal fun MovieDetailsEmptyTabMessage(
     }
 }
 
-private data class MovieInfoCell(val label: String, val value: String)
+internal data class DetailsInfoCell(
+    val label: String,
+    val value: String = "",
+    val seasonCount: Int? = null,
+    val episodeCount: Int? = null,
+)
 
 /**
- * Truthful information table built only from available movie fields. Missing fields are omitted
- * rather than invented; the layout uses the existing details model.
+ * Truthful information table built only from available fields. Missing fields are omitted rather
+ * than invented; the layout is shared by the accepted Movie and Series information tabs.
  */
 @Composable
-internal fun MovieDetailsInfoGrid(
-    item: ContentItem,
-    details: ContentDetails?,
-    durationLabel: String?,
-    qualityLabel: String?,
-    ratingLabel: String?,
-    releaseYearLabel: String?,
+internal fun DetailsInfoGrid(
+    cells: List<DetailsInfoCell>,
+    emptyMessage: String,
     horizontalPaddingDp: Int,
     isTv: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val year = item.year?.trim()?.takeIf(String::isNotBlank) ?: releaseYearLabel?.trim()?.takeIf(String::isNotBlank)
-    val cells = listOfNotNull(
-        item.name.trim().takeIf(String::isNotBlank)?.let { MovieInfoCell("اسم الفلم", it) },
-        (details?.genre ?: item.genre)?.trim()?.takeIf(String::isNotBlank)?.let { MovieInfoCell("التصنيف", it) },
-        durationLabel?.trim()?.takeIf(String::isNotBlank)?.let { MovieInfoCell("المدة", it) },
-        qualityLabel?.trim()?.takeIf(String::isNotBlank)?.let { MovieInfoCell("الجودة", it) },
-        ratingLabel?.trim()?.takeIf(String::isNotBlank)?.let { MovieInfoCell("التقييم", it) },
-        year?.let { MovieInfoCell("سنة العرض", it) },
-        details?.director?.trim()?.takeIf(String::isNotBlank)?.let { MovieInfoCell("الاخراج", it) },
-        details?.cast?.trim()?.takeIf(String::isNotBlank)?.let { MovieInfoCell("البطولة", it) },
-    )
     if (cells.isEmpty()) {
-        MovieDetailsEmptyTabMessage("لا توجد معلومات متاحة لهذا الفلم", isTv, modifier)
+        MovieDetailsEmptyTabMessage(emptyMessage, isTv, modifier)
         return
     }
     Column(
@@ -323,16 +269,35 @@ internal fun MovieDetailsInfoGrid(
                             maxLines = 1,
                         )
                         Spacer(Modifier.height(5.dp))
-                        Text(
-                            text = cell.value,
-                            color = colors.text,
-                            fontSize = if (isTv) 15.sp else 13.sp,
-                            lineHeight = if (isTv) 20.sp else 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        if (cell.seasonCount != null) {
+                            // Information tab shows the ordered season count as text only; the
+                            // previous Layers icon and its dedicated spacing were removed.
+                            SeriesEpisodeCountInline(
+                                count = cell.seasonCount,
+                                word = "موسم",
+                                fontSizeSp = if (isTv) 15 else 13,
+                                lineHeightSp = if (isTv) 20 else 18,
+                                textColor = colors.text,
+                            )
+                        } else if (cell.episodeCount != null) {
+                            SeriesEpisodeCountInline(
+                                count = cell.episodeCount,
+                                fontSizeSp = if (isTv) 15 else 13,
+                                lineHeightSp = if (isTv) 20 else 18,
+                                textColor = colors.text,
+                            )
+                        } else {
+                            Text(
+                                text = cell.value,
+                                color = colors.text,
+                                fontSize = if (isTv) 15.sp else 13.sp,
+                                lineHeight = if (isTv) 20.sp else 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
                 repeat(3 - row.size) {
@@ -343,35 +308,60 @@ internal fun MovieDetailsInfoGrid(
     }
 }
 
-private data class MovieHeroMetadata(
-    val text: String,
-    val quality: Boolean = false,
-    val rating: Boolean = false,
-    val clock: Boolean = false,
-)
-
-/**
- * Centered hero metadata line. Warm-gold star/clock icons sit physically LEFT of their ivory
- * values, the known quality value keeps its small framed chip, and only available fields render.
- */
 @Composable
-internal fun MovieDetailsHeroMetadataRow(
+internal fun MovieDetailsInfoGrid(
     item: ContentItem,
-    genre: String?,
+    details: ContentDetails?,
     durationLabel: String?,
     qualityLabel: String?,
     ratingLabel: String?,
+    releaseYearLabel: String?,
+    horizontalPaddingDp: Int,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val year = item.year?.trim()?.takeIf(String::isNotBlank) ?: releaseYearLabel?.trim()?.takeIf(String::isNotBlank)
+    val cells = listOfNotNull(
+        item.name.trim().takeIf(String::isNotBlank)?.let { DetailsInfoCell("اسم الفلم", it) },
+        (details?.genre ?: item.genre)?.trim()?.takeIf(String::isNotBlank)?.let { DetailsInfoCell("التصنيف", it) },
+        durationLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsInfoCell("المدة", it) },
+        qualityLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsInfoCell("الجودة", it) },
+        ratingLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsInfoCell("التقييم", it) },
+        year?.let { DetailsInfoCell("سنة العرض", it) },
+        details?.director?.trim()?.takeIf(String::isNotBlank)?.let { DetailsInfoCell("الاخراج", it) },
+        details?.cast?.trim()?.takeIf(String::isNotBlank)?.let { DetailsInfoCell("البطولة", it) },
+    )
+    DetailsInfoGrid(
+        cells = cells,
+        emptyMessage = "لا توجد معلومات متاحة لهذا الفلم",
+        horizontalPaddingDp = horizontalPaddingDp,
+        isTv = isTv,
+        modifier = modifier,
+    )
+}
+
+internal data class DetailsHeroMetadataEntry(
+    val text: String = "",
+    val quality: Boolean = false,
+    val rating: Boolean = false,
+    val clock: Boolean = false,
+    val seasonCount: Int? = null,
+    val seasonIcon: Boolean = true,
+    val episodeCount: Int? = null,
+)
+
+/**
+ * Centered hero metadata line shared by Movies and Series. Warm-gold star/clock icons sit
+ * physically LEFT of their ivory values, the known quality value keeps its small framed chip, and
+ * only available fields render.
+ */
+@Composable
+internal fun DetailsHeroMetadataRow(
+    entries: List<DetailsHeroMetadataEntry>,
     isTv: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHulkColors.current
-    val entries = listOfNotNull(
-        item.year?.trim()?.takeIf(String::isNotBlank)?.let { MovieHeroMetadata(it) },
-        genre?.trim()?.takeIf(String::isNotBlank)?.let { MovieHeroMetadata(it) },
-        durationLabel?.trim()?.takeIf(String::isNotBlank)?.let { MovieHeroMetadata(it, clock = true) },
-        qualityLabel?.trim()?.takeIf(String::isNotBlank)?.let { MovieHeroMetadata(it, quality = true) },
-        ratingLabel?.trim()?.takeIf(String::isNotBlank)?.let { MovieHeroMetadata(it, rating = true) },
-    )
     if (entries.isEmpty()) return
     Row(
         modifier = modifier,
@@ -388,6 +378,40 @@ internal fun MovieDetailsHeroMetadataRow(
                 )
             }
             when {
+                entry.seasonCount != null -> Box(
+                    modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (entry.seasonIcon) {
+                        SeriesSeasonCountInline(
+                            count = entry.seasonCount,
+                            iconSizeDp = if (isTv) 15 else 13,
+                            fontSizeSp = if (isTv) 14 else 12,
+                            lineHeightSp = if (isTv) 20 else 18,
+                            iconTint = colors.gold,
+                            textColor = colors.text,
+                        )
+                    } else {
+                        SeriesEpisodeCountInline(
+                            count = entry.seasonCount,
+                            word = "موسم",
+                            fontSizeSp = if (isTv) 14 else 12,
+                            lineHeightSp = if (isTv) 20 else 18,
+                            textColor = colors.text,
+                        )
+                    }
+                }
+                entry.episodeCount != null -> Box(
+                    modifier = Modifier.padding(horizontal = if (isTv) 10.dp else 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    SeriesEpisodeCountInline(
+                        count = entry.episodeCount,
+                        fontSizeSp = if (isTv) 14 else 12,
+                        lineHeightSp = if (isTv) 20 else 18,
+                        textColor = colors.text,
+                    )
+                }
                 entry.quality -> Box(
                     modifier = Modifier
                         .padding(horizontal = if (isTv) 10.dp else 8.dp)
@@ -437,6 +461,29 @@ internal fun MovieDetailsHeroMetadataRow(
             }
         }
     }
+}
+
+/**
+ * Movie hero metadata composition: year, genre, duration, quality and rating in the accepted order.
+ */
+@Composable
+internal fun MovieDetailsHeroMetadataRow(
+    item: ContentItem,
+    genre: String?,
+    durationLabel: String?,
+    qualityLabel: String?,
+    ratingLabel: String?,
+    isTv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val entries = listOfNotNull(
+        item.year?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it) },
+        genre?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it) },
+        durationLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it, clock = true) },
+        qualityLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it, quality = true) },
+        ratingLabel?.trim()?.takeIf(String::isNotBlank)?.let { DetailsHeroMetadataEntry(it, rating = true) },
+    )
+    DetailsHeroMetadataRow(entries = entries, isTv = isTv, modifier = modifier)
 }
 
 /**
@@ -640,16 +687,20 @@ internal fun moviesCatalogErrorCopy(offline: Boolean, serverMessage: String?): M
         )
     }
 
-/** Movie Details error copy with the same classification rules. */
-internal fun moviesDetailsErrorCopy(offline: Boolean, serverMessage: String?): MoviesErrorCopy =
+/** Details error copy with the same classification rules; `mediaLabel` names the real media. */
+internal fun moviesDetailsErrorCopy(
+    offline: Boolean,
+    serverMessage: String?,
+    mediaLabel: String = "الفلم",
+): MoviesErrorCopy =
     if (offline) {
         MoviesErrorCopy(
             title = "لا يوجد اتصال بالانترنت",
-            body = "تعذر تحميل بيانات الفلم ، تحقق من الاتصال وحاول مرة اخرى",
+            body = "تعذر تحميل بيانات $mediaLabel ، تحقق من الاتصال وحاول مرة اخرى",
         )
     } else {
         MoviesErrorCopy(
-            title = "تعذر تحميل بيانات الفلم",
+            title = "تعذر تحميل بيانات $mediaLabel",
             body = serverMessage?.trim()?.takeIf { it.isNotEmpty() } ?: "حاول مرة اخرى",
         )
     }

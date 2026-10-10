@@ -101,6 +101,59 @@ internal fun playerProEpisodeNeighbors(
 internal fun playerProEpisodeLabel(episode: Episode): String =
     "الموسم ${episode.season} • الحلقة ${episode.episodeNumber} • ${episode.title}"
 
+/**
+ * Series parent MEDIA_PREVIOUS/MEDIA_NEXT episode shortcuts are eligible only while no foreground
+ * decision surface (Resume, error card, unlock, next-episode countdown, panel) owns input.
+ */
+internal fun playerProEpisodeShortcutEligible(
+    foregroundModalActive: Boolean,
+    panelActive: Boolean,
+    errorModalActive: Boolean,
+): Boolean = !foregroundModalActive && !panelActive && !errorModalActive
+
+/**
+ * Authoritative non-live foreground eligibility signal for the Pro episode shortcuts: the actual
+ * locked-controls state owns input exactly like Resume, the error card, the unlock overlay and the
+ * next-episode countdown, even while the unlock overlay is not currently visible. Live keeps its
+ * own foreground owners.
+ */
+internal fun playerVodForegroundDecisionActive(
+    isLive: Boolean,
+    resumePromptVisible: Boolean,
+    errorModalActive: Boolean,
+    unlockVisible: Boolean,
+    nextCountdownActive: Boolean,
+    controlsLocked: Boolean,
+): Boolean = !isLive &&
+    (resumePromptVisible || errorModalActive || unlockVisible || nextCountdownActive || controlsLocked)
+
+/** Pure outcome of one already-KeyDown Series media shortcut event. */
+internal enum class PlayerProEpisodeShortcutDisposition { Ignore, Consume, PlayPrevious, PlayNext }
+
+/**
+ * Decides one Series MEDIA_PREVIOUS/MEDIA_NEXT event without dispatching anything. An ineligible
+ * surface or a held repeat consumes the key so no episode callback can run behind Resume/error/
+ * panels/countdown/lock; an initial eligible press dispatches only when the authoritative neighbor
+ * and its callback exist.
+ */
+internal fun playerProEpisodeShortcutDisposition(
+    eligible: Boolean,
+    isMediaPrevious: Boolean,
+    isMediaNext: Boolean,
+    repeatCount: Int,
+    previousAvailable: Boolean,
+    nextAvailable: Boolean,
+): PlayerProEpisodeShortcutDisposition {
+    if (!isMediaPrevious && !isMediaNext) return PlayerProEpisodeShortcutDisposition.Ignore
+    if (!eligible) return PlayerProEpisodeShortcutDisposition.Consume
+    if (repeatCount > 0) return PlayerProEpisodeShortcutDisposition.Consume
+    return when {
+        isMediaPrevious && previousAvailable -> PlayerProEpisodeShortcutDisposition.PlayPrevious
+        isMediaNext && nextAvailable -> PlayerProEpisodeShortcutDisposition.PlayNext
+        else -> PlayerProEpisodeShortcutDisposition.Ignore
+    }
+}
+
 internal fun playerProLiveNavigationSequence(
     channels: List<ContentItem>,
     currentStreamId: Int,
@@ -178,6 +231,8 @@ fun PlayerProScreen(
     var childErrorModalInputActive by remember(request.historyKey) { mutableStateOf(false) }
     var childLiveBrowserVisible by remember(request.historyKey) { mutableStateOf(false) }
     var childPanelInputActive by remember(request.historyKey) { mutableStateOf(false) }
+    // Resume/error/unlock/countdown foreground decision surfaces reported by the VOD player core.
+    var childVodForegroundModalActive by remember(request.historyKey) { mutableStateOf(false) }
 
     LaunchedEffect(request.isLive, request.streamId, liveCatalog, liveProfileScope) {
         if (request.isLive && liveChannels.any { it.id == request.streamId }) {
@@ -553,26 +608,36 @@ fun PlayerProScreen(
                     return@onPreviewKeyEvent false
                 }
 
-                when (keyCode) {
-                    AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                        if (previousEpisode != null && onPlayPreviousEpisode != null) {
-                            onPlayPreviousEpisode()
-                            true
-                        } else {
-                            false
-                        }
+                // A foreground Resume/error/panel/lock/countdown surface owns input: the parent
+                // episode shortcuts must not change the episode behind it, and held repeats of an
+                // eligible press dispatch only once.
+                when (
+                    playerProEpisodeShortcutDisposition(
+                        eligible = playerProEpisodeShortcutEligible(
+                            foregroundModalActive = childVodForegroundModalActive,
+                            panelActive = childPanelInputActive,
+                            errorModalActive = childErrorModalInputActive,
+                        ),
+                        isMediaPrevious = keyCode == AndroidKeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                        isMediaNext = keyCode == AndroidKeyEvent.KEYCODE_MEDIA_NEXT,
+                        repeatCount = event.nativeKeyEvent.repeatCount,
+                        previousAvailable = previousEpisode != null && onPlayPreviousEpisode != null,
+                        nextAvailable = nextEpisode != null && onPlayNextEpisode != null,
+                    )
+                ) {
+                    PlayerProEpisodeShortcutDisposition.PlayPrevious -> {
+                        onPlayPreviousEpisode?.invoke()
+                        return@onPreviewKeyEvent true
                     }
 
-                    AndroidKeyEvent.KEYCODE_MEDIA_NEXT -> {
-                        if (nextEpisode != null && onPlayNextEpisode != null) {
-                            onPlayNextEpisode()
-                            true
-                        } else {
-                            false
-                        }
+                    PlayerProEpisodeShortcutDisposition.PlayNext -> {
+                        onPlayNextEpisode?.invoke()
+                        return@onPreviewKeyEvent true
                     }
 
-                    else -> false
+                    PlayerProEpisodeShortcutDisposition.Consume -> return@onPreviewKeyEvent true
+
+                    PlayerProEpisodeShortcutDisposition.Ignore -> return@onPreviewKeyEvent false
                 }
             },
     ) {
@@ -597,6 +662,8 @@ fun PlayerProScreen(
             },
             onBack = onBack,
             onProgress = onProgress,
+            previousEpisodeTitle = previousEpisode?.let(::playerProEpisodeLabel),
+            onPlayPreviousEpisode = onPlayPreviousEpisode,
             nextEpisodeTitle = nextEpisode?.let(::playerProEpisodeLabel),
             onPlayNextEpisode = onPlayNextEpisode,
             liveControlsRevealRequested = liveControlsInteraction.revealRequested,
@@ -626,6 +693,7 @@ fun PlayerProScreen(
             onErrorModalActiveChanged = { childErrorModalInputActive = it },
             onBrowserVisibilityChanged = { childLiveBrowserVisible = it },
             onPanelActiveChanged = { childPanelInputActive = it },
+            onVodForegroundModalActiveChanged = { childVodForegroundModalActive = it },
         )
     }
 }

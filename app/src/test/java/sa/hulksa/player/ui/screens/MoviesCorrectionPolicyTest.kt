@@ -60,14 +60,14 @@ class MoviesCorrectionPolicyTest {
 
     @Test
     fun movieGridYieldsFiveWideColumnsOnObservedTvAndFewerNarrow() {
-        val wide = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, movieCards = true)
+        val wide = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, boxedCards = true)
         val available = 960f - wide.horizontalContentPaddingDp - wide.endContentPaddingDp
         assertEquals(
             5,
             movieCatalogColumnCount(available, wide.horizontalSpacingDp, wide.minCellWidthDp),
         )
 
-        val compact = tvCatalogMetrics(screenWidthDp = 540, screenHeightDp = 540, movieCards = true)
+        val compact = tvCatalogMetrics(screenWidthDp = 540, screenHeightDp = 540, boxedCards = true)
         val compactAvailable = 540f - compact.horizontalContentPaddingDp - compact.endContentPaddingDp
         assertTrue(
             movieCatalogColumnCount(
@@ -77,7 +77,7 @@ class MoviesCorrectionPolicyTest {
             ) <= 3,
         )
 
-        val medium = tvCatalogMetrics(screenWidthDp = 720, screenHeightDp = 540, movieCards = true)
+        val medium = tvCatalogMetrics(screenWidthDp = 720, screenHeightDp = 540, boxedCards = true)
         val mediumAvailable = 720f - medium.horizontalContentPaddingDp - medium.endContentPaddingDp
         assertTrue(
             movieCatalogColumnCount(
@@ -95,13 +95,15 @@ class MoviesCorrectionPolicyTest {
     }
 
     @Test
-    fun movieGridKeepsSafePhysicalLeftPaddingWhileSeriesKeepsLegacyPadding() {
-        val movie = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, movieCards = true)
-        val series = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, movieCards = false)
+    fun boxedGridKeepsSafePhysicalLeftPaddingForMoviesAndSeries() {
+        val movie = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, boxedCards = true)
+        val series = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, boxedCards = true)
+        val legacy = tvCatalogMetrics(screenWidthDp = 960, screenHeightDp = 540, boxedCards = false)
         val premium = tvPremiumWindowPolicy(960, 540)
 
         assertTrue(movie.endContentPaddingDp >= premium.horizontalSafeInsetDp)
-        assertEquals(6f, series.endContentPaddingDp, 0.001f)
+        assertTrue(series.endContentPaddingDp >= premium.horizontalSafeInsetDp)
+        assertEquals(6f, legacy.endContentPaddingDp, 0.001f)
     }
 
     @Test
@@ -173,7 +175,7 @@ class MoviesCorrectionPolicyTest {
     @Test
     fun moviesCountUnitUsesOwnerApprovedWording() {
         assertEquals("فلم", catalogCountUnit(ContentType.MOVIE))
-        assertEquals("عنصر", catalogCountUnit(ContentType.SERIES))
+        assertEquals("مسلسل", catalogCountUnit(ContentType.SERIES))
         assertEquals("عنصر", catalogCountUnit(ContentType.LIVE))
     }
 

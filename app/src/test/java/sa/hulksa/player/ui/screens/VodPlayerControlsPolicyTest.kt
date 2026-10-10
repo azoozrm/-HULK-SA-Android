@@ -123,13 +123,6 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun previewFallbackWidthFollowsItsContentAndStaysBounded() {
-        assertEquals(120, vodPreviewFallbackWidthPx(textWidthPx = 88, horizontalPaddingPx = 16, availableWidthPx = 1_000))
-        assertEquals(240, vodPreviewFallbackWidthPx(textWidthPx = 400, horizontalPaddingPx = 16, availableWidthPx = 240))
-        assertEquals(32, vodPreviewFallbackWidthPx(textWidthPx = 0, horizontalPaddingPx = 16, availableWidthPx = 0))
-    }
-
-    @Test
     fun moviePanelVerticalFocusCycleWrapsAndStaysClosed() {
         // Node 0 is the header; nodes 1..5 are the five More rows.
         assertEquals(1, vodPanelVerticalNeighbor(0, 6, 1))
@@ -139,83 +132,6 @@ class VodPlayerControlsPolicyTest {
         assertEquals(4, vodPanelVerticalNeighbor(5, 6, -1))
         assertEquals(3, vodPanelVerticalNeighbor(3, 6, 0))
         assertEquals(0, vodPanelVerticalNeighbor(99, 0, 1))
-    }
-
-    @Test
-    fun previewPointerStaysUnderTheThumbAndClampsAtEdges() {
-        assertEquals(
-            0f,
-            vodPreviewPointerOffsetPx(thumbXpx = 10f, cardLeftPx = 100f, cardWidthPx = 200f, pointerWidthPx = 14f),
-            0.001f,
-        )
-        assertEquals(
-            43f,
-            vodPreviewPointerOffsetPx(thumbXpx = 150f, cardLeftPx = 100f, cardWidthPx = 200f, pointerWidthPx = 14f),
-            0.001f,
-        )
-        assertEquals(
-            186f,
-            vodPreviewPointerOffsetPx(thumbXpx = 900f, cardLeftPx = 0f, cardWidthPx = 200f, pointerWidthPx = 14f),
-            0.001f,
-        )
-    }
-
-    @Test
-    fun previewOverlayNeverChangesTheControlStripHeight() {
-        // Appearing/disappearing preview must not alter the transport allocation: the placement
-        // always reports zero height contribution, and the bubble only grows upward.
-        val framePlacement = vodPreviewOverlayPlacement(
-            thumbXpx = 500f,
-            timelineWidthPx = 1_000f,
-            timelineHeightPx = 40f,
-            cardWidthPx = 300f,
-            cardHeightPx = 300f,
-            pointerWidthPx = 28f,
-            pointerHeightPx = 14f,
-            topGapPx = 8f,
-        )
-        val fallbackPlacement = vodPreviewOverlayPlacement(
-            thumbXpx = 500f,
-            timelineWidthPx = 1_000f,
-            timelineHeightPx = 40f,
-            cardWidthPx = 300f,
-            cardHeightPx = 120f,
-            pointerWidthPx = 28f,
-            pointerHeightPx = 14f,
-            topGapPx = 8f,
-        )
-        assertEquals(0, framePlacement.heightContributionPx)
-        assertEquals(0, fallbackPlacement.heightContributionPx)
-        assertTrue(framePlacement.topOffsetPx < fallbackPlacement.topOffsetPx)
-        // The pointer stays on the real thumb coordinate inside the bubble.
-        assertEquals(500f - framePlacement.cardLeftPx - 14f, framePlacement.pointerOffsetPx, 0.001f)
-
-        // Edge clamping keeps the bubble inside the timeline while the pointer follows the thumb.
-        assertEquals(0f, vodPreviewCardLeftPx(thumbXpx = 10f, cardWidthPx = 300f, timelineWidthPx = 1_000f), 0.001f)
-        assertEquals(350f, vodPreviewCardLeftPx(thumbXpx = 500f, cardWidthPx = 300f, timelineWidthPx = 1_000f), 0.001f)
-        assertEquals(700f, vodPreviewCardLeftPx(thumbXpx = 995f, cardWidthPx = 300f, timelineWidthPx = 1_000f), 0.001f)
-        val leftEdge = vodPreviewOverlayPlacement(
-            thumbXpx = 10f,
-            timelineWidthPx = 1_000f,
-            timelineHeightPx = 40f,
-            cardWidthPx = 300f,
-            cardHeightPx = 169f,
-            pointerWidthPx = 28f,
-            pointerHeightPx = 14f,
-            topGapPx = 8f,
-        )
-        assertEquals(0f, leftEdge.pointerOffsetPx, 0.001f)
-        val rightEdge = vodPreviewOverlayPlacement(
-            thumbXpx = 995f,
-            timelineWidthPx = 1_000f,
-            timelineHeightPx = 40f,
-            cardWidthPx = 300f,
-            cardHeightPx = 169f,
-            pointerWidthPx = 28f,
-            pointerHeightPx = 14f,
-            topGapPx = 8f,
-        )
-        assertEquals(272f, rightEdge.pointerOffsetPx, 0.001f)
     }
 
     @Test
@@ -324,29 +240,6 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun previewDecodingAcceptsDirectMediaAndRejectsPlaylists() {
-        assertTrue(vodPreviewDecodableCandidate("https://host/movie/user/pass/7.mp4"))
-        assertTrue(vodPreviewDecodableCandidate("file:///data/user/0/app/files/movie.mkv"))
-        assertTrue(vodPreviewDecodableCandidate("content://media/movie/7"))
-        assertTrue(vodPreviewDecodableCandidate("/storage/emulated/0/movie.avi"))
-        assertFalse(vodPreviewDecodableCandidate("https://host/live/user/pass/7.m3u8"))
-        assertFalse(vodPreviewDecodableCandidate("https://host/list.m3u"))
-        assertFalse(vodPreviewDecodableCandidate(""))
-        assertFalse(vodPreviewDecodableCandidate(null))
-    }
-
-    @Test
-    fun previewBucketAndFractionStayInRange() {
-        assertEquals(0L, vodPreviewBucketMs(4_999L))
-        assertEquals(5_000L, vodPreviewBucketMs(5_000L))
-        assertEquals(10_000L, vodPreviewBucketMs(12_001L))
-        assertEquals(0f, vodPreviewCardFraction(-1L, 60_000L), 0.001f)
-        assertEquals(0.5f, vodPreviewCardFraction(30_000L, 60_000L), 0.001f)
-        assertEquals(1f, vodPreviewCardFraction(90_000L, 60_000L), 0.001f)
-        assertEquals(0f, vodPreviewCardFraction(30_000L, 0L), 0.001f)
-    }
-
-    @Test
     fun seekFractionIsDirectForForwardReverseAndEndpoints() {
         // The same helper feeds the Movies fill/knob and the preview pointer with no positional
         // easing, so reverse movement and endpoints map immediately to the current target.
@@ -358,200 +251,87 @@ class VodPlayerControlsPolicyTest {
     }
 
     @Test
-    fun movieTvPreviewWindowIsOptInForMoviesWithRemoteInput() {
-        // Timeline focused on TV keeps the window open.
-        assertTrue(
-            vodPreviewWindowActive(
-                isMovie = true, isLive = false, remoteInput = true, controlsVisible = true,
-                timelineFocused = true, directSeekActive = false,
-            ),
-        )
-        // Remote direct-seek from the surface keeps it open too.
-        assertTrue(
-            vodPreviewWindowActive(
-                isMovie = true, isLive = false, remoteInput = true, controlsVisible = true,
-                timelineFocused = false, directSeekActive = true,
-            ),
-        )
-        // Touch drag (no timeline focus, no direct-seek mode) is not a persistent window.
-        assertFalse(
-            vodPreviewWindowActive(
-                isMovie = true, isLive = false, remoteInput = true, controlsVisible = true,
-                timelineFocused = false, directSeekActive = false,
-            ),
-        )
-        // Hidden controls (Back/modal/lock/error/disposal) suppress the window.
-        assertFalse(
-            vodPreviewWindowActive(
-                isMovie = true, isLive = false, remoteInput = true, controlsVisible = false,
-                timelineFocused = true, directSeekActive = true,
-            ),
-        )
-        // Touch input never owns the persistent Movies window even with focus flags settled.
-        assertFalse(
-            vodPreviewWindowActive(
-                isMovie = true, isLive = false, remoteInput = false, controlsVisible = true,
-                timelineFocused = true, directSeekActive = true,
-            ),
-        )
-        // Series and Live are unaffected.
-        assertFalse(
-            vodPreviewWindowActive(
-                isMovie = false, isLive = false, remoteInput = true, controlsVisible = true,
-                timelineFocused = true, directSeekActive = true,
-            ),
-        )
-        assertFalse(
-            vodPreviewWindowActive(
-                isMovie = true, isLive = true, remoteInput = true, controlsVisible = true,
-                timelineFocused = true, directSeekActive = true,
-            ),
-        )
-    }
-
-    @Test
-    fun movieTvPreviewTargetHoldsWhileActiveAndCannotReopenAfterExit() {
-        // Focus entry or drag: the explicit scrub target always wins.
-        assertEquals(15_000L, vodEffectivePreviewTargetMs(scrubTargetMs = 15_000L, holdTargetMs = null, windowActive = true))
-        // After key release/commit the hold keeps the window open through settlement and idle.
-        assertEquals(15_000L, vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 15_000L, windowActive = true))
-        // Exit (timeline->tools, first DOWN from direct seek, Back): the hold must not show.
-        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 15_000L, windowActive = false))
-        // A late frame cannot reopen a closed window.
-        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = null, windowActive = false))
-        // Phone drag semantics: the explicit target shows during the drag; after drag end the
-        // window is inactive, so the committed hold is dismissed as before.
-        assertEquals(20_000L, vodEffectivePreviewTargetMs(scrubTargetMs = 20_000L, holdTargetMs = null, windowActive = false))
-        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = 20_000L, windowActive = false))
-        // No target keeps the compact honest time-only fallback.
-        assertNull(vodEffectivePreviewTargetMs(scrubTargetMs = null, holdTargetMs = null, windowActive = true))
-    }
-
-    @Test
-    fun nonOptInCallersKeepTheLegacyTransientDirectSeekTarget() {
-        // Pre-R22 shared behavior: Series/Live surface direct seeking shows the transient manual
-        // target while the interaction is active; the persistent hold is never used.
-        assertEquals(
-            30_000L,
-            vodEffectivePreviewTargetMs(
-                scrubTargetMs = null,
-                holdTargetMs = 30_000L,
-                windowActive = false,
-                legacyFallbackTargetMs = 30_000L,
-            ),
-        )
-        // Settlement/exit clears the transient target; a late frame cannot reopen it.
-        assertNull(
-            vodEffectivePreviewTargetMs(
-                scrubTargetMs = null,
-                holdTargetMs = 30_000L,
-                windowActive = false,
-                legacyFallbackTargetMs = null,
-            ),
-        )
-        // An explicit scrub target still wins for non-opt-in touch dragging.
-        assertEquals(
-            12_000L,
-            vodEffectivePreviewTargetMs(
-                scrubTargetMs = 12_000L,
-                holdTargetMs = null,
-                windowActive = false,
-                legacyFallbackTargetMs = 30_000L,
-            ),
-        )
-        // Inside the opt-in window the persistent hold owns the target over any stale legacy value.
-        assertEquals(
-            15_000L,
-            vodEffectivePreviewTargetMs(
-                scrubTargetMs = null,
-                holdTargetMs = 15_000L,
-                windowActive = true,
-                legacyFallbackTargetMs = 30_000L,
-            ),
-        )
-    }
-
-    @Test
-    fun activeSeekHoldsControlsOnlyForMoviesWithRemoteInput() {
-        // Movies TV timeline focus or direct seeking keeps the tools usable.
+    fun activeSeekHoldsControlsOnlyForVodWithRemoteInput() {
+        // VOD TV timeline focus or direct seeking keeps the tools usable.
         assertTrue(
             vodActiveSeekHoldsControls(
-                isMovie = true, remoteInput = true, timelineFocused = true, directSeekActive = false,
+                isVod = true, remoteInput = true, timelineFocused = true, directSeekActive = false,
             ),
         )
         assertTrue(
             vodActiveSeekHoldsControls(
-                isMovie = true, remoteInput = true, timelineFocused = false, directSeekActive = true,
+                isVod = true, remoteInput = true, timelineFocused = false, directSeekActive = true,
             ),
         )
         // Leaving the interaction restores ordinary auto-hide.
         assertFalse(
             vodActiveSeekHoldsControls(
-                isMovie = true, remoteInput = true, timelineFocused = false, directSeekActive = false,
+                isVod = true, remoteInput = true, timelineFocused = false, directSeekActive = false,
             ),
         )
-        // Phone touch and Series/Live callers keep their existing behavior.
+        // Phone touch and Live callers keep their existing behavior.
         assertFalse(
             vodActiveSeekHoldsControls(
-                isMovie = true, remoteInput = false, timelineFocused = true, directSeekActive = true,
+                isVod = true, remoteInput = false, timelineFocused = true, directSeekActive = true,
             ),
         )
         assertFalse(
             vodActiveSeekHoldsControls(
-                isMovie = false, remoteInput = true, timelineFocused = true, directSeekActive = true,
+                isVod = false, remoteInput = true, timelineFocused = true, directSeekActive = true,
             ),
         )
     }
 
     @Test
-    fun movieProgressPersistenceStaysBlockedUntilTheResumeDecisionIsAccepted() {
-        // A Movie with a saved position and resume enabled: preparation/cancellation cannot save.
+    fun vodProgressPersistenceStaysBlockedUntilTheResumeDecisionIsAccepted() {
+        // A Movie or Series episode with a saved position and resume enabled: preparation and
+        // cancellation cannot overwrite the authoritative progress while the decision is pending.
         assertTrue(
-            movieProgressPersistenceBlockedInitially(
-                isMovie = true,
+            vodProgressPersistenceBlockedInitially(
+                isVod = true,
                 resumePlaybackEnabled = true,
                 resumePositionMs = 1_200_000L,
             ),
         )
         // No pending decision keeps normal saving.
         assertFalse(
-            movieProgressPersistenceBlockedInitially(
-                isMovie = true,
+            vodProgressPersistenceBlockedInitially(
+                isVod = true,
                 resumePlaybackEnabled = true,
                 resumePositionMs = 0L,
             ),
         )
         assertFalse(
-            movieProgressPersistenceBlockedInitially(
-                isMovie = true,
+            vodProgressPersistenceBlockedInitially(
+                isVod = true,
                 resumePlaybackEnabled = false,
                 resumePositionMs = 1_200_000L,
             ),
         )
-        // Non-Movies (Series/Live) keep their existing behavior.
+        // Live has no saved-position Resume decision and keeps normal behavior.
         assertFalse(
-            movieProgressPersistenceBlockedInitially(
-                isMovie = false,
+            vodProgressPersistenceBlockedInitially(
+                isVod = false,
                 resumePlaybackEnabled = true,
                 resumePositionMs = 1_200_000L,
             ),
         )
         // Cancellation (no acceptance) keeps the block through lifecycle/disposal/late callbacks.
         assertTrue(
-            movieProgressPersistenceBlockedAfterDecision(
-                blocked = movieProgressPersistenceBlockedInitially(true, true, 1_200_000L),
+            vodProgressPersistenceBlockedAfterDecision(
+                blocked = vodProgressPersistenceBlockedInitially(true, true, 1_200_000L),
                 decisionAccepted = false,
             ),
         )
         // One explicit Resume/Restart clears it; later ticks save normally.
         assertFalse(
-            movieProgressPersistenceBlockedAfterDecision(
-                blocked = movieProgressPersistenceBlockedInitially(true, true, 1_200_000L),
+            vodProgressPersistenceBlockedAfterDecision(
+                blocked = vodProgressPersistenceBlockedInitially(true, true, 1_200_000L),
                 decisionAccepted = true,
             ),
         )
-        assertFalse(movieProgressPersistenceBlockedAfterDecision(blocked = false, decisionAccepted = false))
-        assertFalse(movieProgressPersistenceBlockedAfterDecision(blocked = false, decisionAccepted = true))
+        assertFalse(vodProgressPersistenceBlockedAfterDecision(blocked = false, decisionAccepted = false))
+        assertFalse(vodProgressPersistenceBlockedAfterDecision(blocked = false, decisionAccepted = true))
     }
 
     @Test
@@ -607,16 +387,7 @@ class VodPlayerControlsPolicyTest {
         )
 
         // Cancelling through Back never enables progress persistence (R27 protection).
-        assertTrue(movieProgressPersistenceBlockedAfterDecision(blocked = true, decisionAccepted = false))
-    }
-
-    @Test
-    fun warmUpBucketsReuseTheFiveSecondBucketWithBoundedLookahead() {
-        assertEquals(listOf(0L, 5_000L, 10_000L, 15_000L), vodPreviewWarmUpBuckets(-1L))
-        assertEquals(listOf(10_000L, 15_000L, 20_000L, 25_000L), vodPreviewWarmUpBuckets(12_400L))
-        assertEquals(listOf(10_000L, 15_000L), vodPreviewWarmUpBuckets(10_000L, count = 2))
-        assertTrue(vodPreviewWarmUpBuckets(10_000L).size <= VOD_PREVIEW_WARM_UP_BUCKETS)
-        assertTrue(vodPreviewWarmUpBuckets(0L, count = 0).isEmpty())
+        assertTrue(vodProgressPersistenceBlockedAfterDecision(blocked = true, decisionAccepted = false))
     }
 
     @Test
